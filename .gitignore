@@ -7,3 +7,7 @@ Thumbs.db
 # Local server/log files
 *.log
 .env
+.venv/
+data/
+__pycache__/
+.pytest_cache/
