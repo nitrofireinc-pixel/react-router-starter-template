@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "test:worker": "node --test tests/test_worker_backend.mjs",
+    "sync:worker-assets": "python3 worker/scripts/sync-public.py",
+    "deploy:worker": "npm run sync:worker-assets && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.115.0"
+  }
+}

@@ -58,10 +58,38 @@ export EFBAND_DATA_DIR="/path/to/persistent/data"
 ## Static-only fallback
 You can still open `index.html` directly or run `python3 -m http.server 8080`, but the editable content, login, and uploads require the backend command above.
 
+## Cloudflare Worker backend
+
+The repo also includes a Cloudflare-native Worker backend in `worker/src/worker.mjs`. It mirrors the local FastAPI backend with:
+
+- `/health`
+- `/admin/login`
+- `/admin`
+- `/api/site`
+- `/api/events`
+- `/api/photos`
+- protected admin CRUD routes
+
+Cloudflare setup uses D1 for site text, events, password hash, and uploaded photo data. R2 can be added later for larger photo storage.
+
+Deploy commands:
+
+```bash
+npm run test:worker
+npm run sync:worker-assets
+wrangler deploy
+```
+
+Configured D1 database:
+
+- Name: `efhsband-db`
+- Binding: `DB`
+
 ## Tests
 
 ```bash
 uv run pytest -q
+npm run test:worker
 ```
 
 ## Brand references

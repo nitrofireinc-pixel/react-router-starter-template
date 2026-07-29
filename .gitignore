@@ -8,6 +8,8 @@ Thumbs.db
 *.log
 .env
 .venv/
+.wrangler/
 data/
+worker/public/
 __pycache__/
 .pytest_cache/
