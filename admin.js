@@ -7,6 +7,7 @@ function escapeHtml(value) {
 async function jsonFetch(url, options = {}) {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    cache: 'no-store',
     ...options,
   });
   if (!response.ok) throw new Error(await response.text());
@@ -110,10 +111,24 @@ document.querySelector('#new-event').addEventListener('click', () => document.qu
 document.querySelector('#photo-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await fetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
-  if (!response.ok) throw new Error(await response.text());
-  form.reset();
-  await loadPhotos();
+  let status = document.querySelector('#photo-status');
+  if (!status) {
+    status = document.createElement('p');
+    status.id = 'photo-status';
+    status.className = 'status';
+    form.appendChild(status);
+  }
+  status.textContent = 'Uploading...';
+  try {
+    const response = await fetch('/api/admin/photos', { method: 'POST', body: new FormData(form), cache: 'no-store' });
+    if (!response.ok) throw new Error(await response.text());
+    form.reset();
+    await loadPhotos();
+    status.textContent = 'Photo uploaded. Refresh the public homepage to see it.';
+  } catch (error) {
+    status.textContent = 'Photo upload failed. Try a JPG, PNG, WEBP, or GIF under 1 MB.';
+    console.error(error);
+  }
 });
 
 loadSite();

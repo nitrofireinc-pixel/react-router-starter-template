@@ -6,9 +6,9 @@ function escapeHtml(value) {
 
 async function loadPublicContent() {
   const [site, events, photos] = await Promise.all([
-    fetch('/api/site').then(r => r.json()).catch(() => null),
-    fetch('/api/events').then(r => r.json()).catch(() => []),
-    fetch('/api/photos').then(r => r.json()).catch(() => []),
+    fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+    fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
   ]);
 
   if (site) {
