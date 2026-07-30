@@ -100,7 +100,8 @@ function initialAdminPassword(env) {
 }
 
 async function hashPassword(password, salt = crypto.randomUUID().replaceAll('-', '')) {
-  const iterations = 260000;
+  // Cloudflare Workers/Pages Web Crypto currently caps PBKDF2 at 100,000 iterations.
+  const iterations = 100000;
   const key = await crypto.subtle.importKey('raw', TEXT.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: TEXT.encode(salt), iterations }, key, 256);
   return `pbkdf2_sha256$${iterations}$${salt}$${base64Url(bits)}`;
@@ -288,6 +289,9 @@ function logout() {
 }
 
 async function serveStatic(request, env, url) {
+  // Pages assets redirect /index.html back to /. Let ASSETS handle / directly
+  // so the homepage returns 200 instead of a redirect loop.
+  if (url.pathname === '/') return env.ASSETS.fetch(request);
   const path = normalizeStaticPath(url.pathname);
   const assetUrl = new URL(request.url);
   assetUrl.pathname = path;
