@@ -40,6 +40,51 @@ function formPayload(form) {
   return payload;
 }
 
+function textFromHtml(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html || '';
+  return template.content.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function paragraphsFromNode(node) {
+  if (!node) return '';
+  const paragraphs = [...node.querySelectorAll('p')].map(p => p.textContent.trim()).filter(Boolean);
+  return paragraphs.length ? paragraphs.join('\n\n') : node.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function structuredPageFields(page) {
+  const template = document.createElement('template');
+  template.innerHTML = page.body_html || '';
+  const root = template.content;
+  const layout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : 'standard');
+  const pageTitle = root.querySelector('.page-title');
+  const bodyNode = root.querySelector('[data-cms-field="body_text"]') || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
+  const callout = root.querySelector('[data-cms-block="callout"], .notice');
+  return {
+    layout,
+    kicker: root.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim() || '',
+    heading: root.querySelector('[data-cms-field="heading"], h1')?.textContent.trim() || page.title || '',
+    intro: pageTitle?.querySelector('[data-cms-field="intro"], p')?.textContent.trim() || '',
+    body_text: paragraphsFromNode(bodyNode) || (page.slug === 'calendar' ? 'Add calendar events from the Calendar tab. They will appear here automatically.' : textFromHtml(page.body_html)),
+    callout_title: callout?.querySelector('[data-cms-field="callout_title"], h3')?.textContent.trim() || '',
+    callout_text: paragraphsFromNode(callout?.querySelector('[data-cms-field="callout_text"]') || callout),
+  };
+}
+
+function pagePayload(form) {
+  const payload = formPayload(form);
+  payload.nav_order = Number(payload.nav_order || 99);
+  return payload;
+}
+
+function setSelectValue(select, value) {
+  if (!select) return;
+  if (value && ![...select.options].some(option => option.value === value)) {
+    select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`);
+  }
+  select.value = value || select.value;
+}
+
 function showAllowedPanels() {
   document.querySelector('#current-user').textContent = `${state.me.user.display_name || state.me.user.username} (${state.me.user.role})`;
   const panels = {
@@ -97,8 +142,12 @@ function renderPages() {
   `).join('');
   list.querySelectorAll('[data-edit-page]').forEach(button => button.addEventListener('click', () => {
     const page = state.pages.find(item => item.slug === button.dataset.editPage);
-    fillForm(document.querySelector('#page-form'), { ...page, original_slug: page.slug });
-    document.querySelector('#page-form [name="active"]').checked = Boolean(page.active);
+    const form = document.querySelector('#page-form');
+    fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+    form.querySelector('[data-page-editor-title]').textContent = `Editing ${page.title}`;
+    form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
+    form.querySelector('[data-home-hint]').hidden = !page.is_home;
+    form.elements.active.checked = Boolean(page.active);
     activateTab('pages');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }));
@@ -151,7 +200,11 @@ async function loadEvents() {
     </article>
   `).join('');
   list.querySelectorAll('[data-edit-event]').forEach(button => button.addEventListener('click', () => {
-    fillForm(document.querySelector('#event-form'), state.events.find(item => item.id === Number(button.dataset.editEvent)));
+    const event = state.events.find(item => item.id === Number(button.dataset.editEvent));
+    const form = document.querySelector('#event-form');
+    fillForm(form, event);
+    setSelectValue(form.elements.date_label, event.date_label);
+    setSelectValue(form.elements.date_detail, event.date_detail);
     activateTab('events');
   }));
   list.querySelectorAll('[data-delete-event]').forEach(button => button.addEventListener('click', async () => {
@@ -205,12 +258,11 @@ document.querySelector('#logo-form').addEventListener('submit', async event => {
 document.querySelector('#page-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const payload = formPayload(form);
-  payload.nav_order = Number(payload.nav_order || 99);
+  const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
   await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-  document.querySelector('#page-status').textContent = 'Page saved.';
+  document.querySelector('#page-status').textContent = 'Page saved from text fields. No HTML editing needed.';
   await refreshAll();
 });
 
@@ -218,8 +270,17 @@ document.querySelector('#new-page').addEventListener('click', () => {
   const form = document.querySelector('#page-form');
   form.reset();
   form.elements.original_slug.value = '';
-  form.elements.body_html.value = '<section><div class="wrap"><h1>New Page</h1><p>Edit this content.</p></div></section>';
+  form.elements.layout.value = 'standard';
+  form.elements.kicker.value = 'New page';
+  form.elements.heading.value = 'New Page';
+  form.elements.intro.value = 'Short introduction for this page.';
+  form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
+  form.elements.callout_title.value = '';
+  form.elements.callout_text.value = '';
   form.elements.active.checked = true;
+  form.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
+  form.querySelector('[data-calendar-hint]').hidden = true;
+  form.querySelector('[data-home-hint]').hidden = true;
 });
 
 document.querySelector('#user-form').addEventListener('submit', async event => {
@@ -255,7 +316,12 @@ document.querySelector('#event-form').addEventListener('submit', async event => 
   await loadEvents();
 });
 
-document.querySelector('#new-event').addEventListener('click', () => document.querySelector('#event-form').reset());
+document.querySelector('#new-event').addEventListener('click', () => {
+  const form = document.querySelector('#event-form');
+  form.reset();
+  form.elements.date_label.value = 'Aug';
+  form.elements.date_detail.value = '01';
+});
 
 document.querySelector('#photo-form').addEventListener('submit', async event => {
   event.preventDefault();

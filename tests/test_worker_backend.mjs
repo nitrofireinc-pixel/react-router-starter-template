@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { escapeHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeStaticPath, parsePermissions } from '../worker/src/worker.mjs';
+import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeStaticPath, parsePermissions, serializePagePayload } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -36,4 +36,42 @@ test('permission checks support admin all-access and page-specific scopes', () =
   assert.equal(hasPermission(limited, 'page:home'), false);
   assert.deepEqual(parsePermissions('["events","page:boosters"]'), ['events', 'page:boosters']);
   assert.deepEqual(parsePermissions('not-json'), []);
+});
+
+test('generateStructuredPageHtml builds safe page sections from text fields instead of raw HTML', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'info-cards',
+    kicker: 'Families',
+    heading: 'Band <Boosters>',
+    intro: 'Help students & volunteer.',
+    body_text: 'First paragraph.\n\nSecond paragraph.',
+    callout_title: 'Need forms?',
+    callout_text: 'Email <script>alert(1)</script>',
+  });
+
+  assert.match(html, /<section class="page-hero"/);
+  assert.match(html, /Band &lt;Boosters&gt;/);
+  assert.match(html, /Help students &amp; volunteer\./);
+  assert.match(html, /First paragraph\./);
+  assert.match(html, /Second paragraph\./);
+  assert.match(html, /Need forms\?/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test('serializePagePayload turns structured CMS fields into generated HTML', () => {
+  const page = serializePagePayload({
+    title: 'Calendar',
+    slug: 'calendar',
+    layout: 'calendar',
+    kicker: 'Schedule',
+    heading: 'Calendar',
+    intro: 'Rehearsals and performances',
+    body_text: 'Use the Calendar tab to add events with month and day dropdowns.',
+  });
+
+  assert.equal(page.slug, 'calendar');
+  assert.equal(page.path, '/calendar.html');
+  assert.match(page.body_html, /data-events/);
+  assert.match(page.body_html, /Use the Calendar tab/);
+  assert.doesNotMatch(page.body_html, /<textarea/);
 });
