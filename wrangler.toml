@@ -5,7 +5,7 @@ account_id = "d4e69b2379a7e3c86020154cf70a1d07"
 workers_dev = true
 
 [assets]
-directory = "assets"
+directory = "./assets"
 binding = "ASSETS"
 
 [vars]
