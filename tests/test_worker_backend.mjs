@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -145,6 +145,17 @@ test('normalizeEventPayload stores year for ordering and ignores sort_order', ()
   assert.equal(event.sort_order, 0);
   assert.equal(event.date_label, 'Jan');
   assert.equal(event.date_detail, '12');
+});
+
+test('isUpcomingEvent hides past dates and keeps today and future dates public', () => {
+  const now = new Date('2026-08-01T15:00:00Z'); // afternoon UTC = still Aug 1 in Eastern
+  assert.equal(isUpcomingEvent({ date_label: 'Jul', date_detail: '31', event_year: 2026 }, now), false);
+  assert.equal(isUpcomingEvent({ date_label: 'Aug', date_detail: '01', event_year: 2026 }, now), true);
+  assert.equal(isUpcomingEvent({ date_label: 'Aug', date_detail: '02', event_year: 2026 }, now), true);
+  assert.equal(isUpcomingEvent({ date_label: 'Aug', date_detail: 'TBD', event_year: 2026 }, now), true);
+  assert.equal(isUpcomingEvent({ date_label: 'Jul', date_detail: 'TBD', event_year: 2026 }, now), false);
+  assert.equal(isUpcomingEvent({ date_label: 'Dec', date_detail: '20', event_year: 2025 }, now), false);
+  assert.equal(isUpcomingEvent({ date_label: 'Jan', date_detail: '05', event_year: 2027 }, now), true);
 });
 
 test('sponsors layout keeps directory placeholder and page copy editable', () => {

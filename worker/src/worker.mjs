@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260801-27';
+const ASSET_VERSION = 'admin-cms-20260801-28';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -325,6 +325,45 @@ export function compareEventsByDate(a, b) {
   return 0;
 }
 
+export function daysInMonth(year, month) {
+  return new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+}
+
+export function getZonedYmd(date = new Date(), timeZone = 'America/New_York') {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(date);
+  const read = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return { year: read('year'), month: read('month'), day: read('day') };
+}
+
+/** Resolve an event to a calendar end date used for public visibility. */
+export function eventComparableDate(event) {
+  const year = eventYearValue(event);
+  let month = monthRank(event?.date_label);
+  if (!month || month > 12) month = 12;
+  const detail = String(event?.date_detail || '').trim();
+  let day;
+  if (/^\d{1,2}$/.test(detail)) {
+    day = Math.min(Number(detail), daysInMonth(year, month));
+  } else {
+    // TBD / weekday labels stay visible through the end of that month.
+    day = daysInMonth(year, month);
+  }
+  return { year, month, day };
+}
+
+export function isUpcomingEvent(event, now = new Date(), timeZone = 'America/New_York') {
+  const today = getZonedYmd(now, timeZone);
+  const eventDate = eventComparableDate(event);
+  if (eventDate.year !== today.year) return eventDate.year > today.year;
+  if (eventDate.month !== today.month) return eventDate.month > today.month;
+  return eventDate.day >= today.day;
+}
+
 export function normalizeEventPayload(payload = {}, existing = null) {
   const date_label = String(payload.date_label ?? existing?.date_label ?? '').trim();
   const date_detail = String(payload.date_detail ?? existing?.date_detail ?? '').trim();
@@ -343,11 +382,13 @@ export function normalizeEventPayload(payload = {}, existing = null) {
   };
 }
 
-async function getEvents(env) {
+async function getEvents(env, { upcomingOnly = false, now = new Date() } = {}) {
   const rows = await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events').all();
-  return (rows.results || [])
+  const events = (rows.results || [])
     .map((row) => ({ ...row, event_year: eventYearValue(row) }))
     .sort(compareEventsByDate);
+  if (!upcomingOnly) return events;
+  return events.filter((event) => isUpcomingEvent(event, now));
 }
 
 
@@ -951,7 +992,9 @@ async function handleApi(request, env, url) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
-  if (url.pathname === '/api/events' && request.method === 'GET') return jsonResponse(await getEvents(env));
+  if (url.pathname === '/api/events' && request.method === 'GET') {
+    return jsonResponse(await getEvents(env, { upcomingOnly: true }));
+  }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/contact/topics' && request.method === 'GET') {
@@ -1259,6 +1302,14 @@ async function handleApi(request, env, url) {
     return jsonResponse(rows.results || []);
   }
 
+  if (url.pathname === '/api/admin/events' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'events') && !canEditPage(auth.user, 'calendar')) {
+      return jsonResponse({ detail: 'Permission required: events' }, 403);
+    }
+    return jsonResponse(await getEvents(env, { upcomingOnly: false }));
+  }
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'events');
     if (auth.response) return auth.response;
@@ -1455,6 +1506,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
-<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. The public Calendar page shows up to 5 at a time and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
+<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;

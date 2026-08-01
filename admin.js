@@ -857,19 +857,32 @@ function defaultEventYear() {
   return new Date().getFullYear();
 }
 
+function isPastEventLocal(event) {
+  const year = Number(event.event_year) || new Date().getFullYear();
+  const months = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12, Spring: 3, Summer: 6, Fall: 9, Autumn: 9, Winter: 12 };
+  const month = months[event.date_label] || 12;
+  const detail = String(event.date_detail || '').trim();
+  const day = /^\d{1,2}$/.test(detail) ? Number(detail) : new Date(year, month, 0).getDate();
+  const end = new Date(year, month - 1, day, 23, 59, 59);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return end < today;
+}
+
 async function loadEvents() {
   if (!hasPermission('events') && !canEditPage('calendar')) return;
-  state.events = await jsonFetch('/api/events');
+  state.events = await jsonFetch('/api/admin/events');
   const list = document.querySelector('#events-list');
   const count = document.querySelector('#events-count');
   if (!list) return;
   // API already returns events ordered by year → month → day.
   const ordered = [...state.events];
-  if (count) count.textContent = `${ordered.length} total`;
+  const pastCount = ordered.filter(isPastEventLocal).length;
+  if (count) count.textContent = pastCount ? `${ordered.length} total · ${pastCount} past (hidden publicly)` : `${ordered.length} total`;
   list.innerHTML = ordered.length
     ? ordered.map(event => `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
       <div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>
     </article>
   `).join('')
