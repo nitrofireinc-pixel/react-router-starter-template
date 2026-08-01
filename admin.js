@@ -15,7 +15,6 @@ async function jsonFetch(url, options = {}) {
 }
 
 const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], site: null };
-const PAGE_ORDER = ['home', 'ensembles', 'directors', 'calendar', 'sponsors', 'fundraising', 'resources', 'boosters', 'contact'];
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -125,13 +124,15 @@ function showAllowedPanels() {
   document.querySelectorAll('[data-tab]').forEach(button => {
     const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
     button.hidden = !allowed;
-    button.addEventListener('click', () => activateTab(button.dataset.tab));
+    button.onclick = () => activateTab(button.dataset.tab);
   });
   document.querySelectorAll('[data-edit-shortcut]').forEach(button => {
     const slug = button.dataset.editShortcut;
     button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
-    button.addEventListener('click', () => editPage(slug));
+    button.onclick = () => editPage(slug);
   });
+  const newPageButton = document.querySelector('#new-page');
+  if (newPageButton) newPageButton.hidden = true;
   Object.entries(panels).forEach(([name, allowed]) => {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
@@ -156,41 +157,32 @@ async function loadSite() {
 async function loadPages() {
   if (!state.pages.some(canEditPage)) return;
   state.pages = await jsonFetch('/api/admin/pages');
-  renderPages();
+  document.querySelectorAll('[data-edit-shortcut]').forEach(button => {
+    const slug = button.dataset.editShortcut;
+    button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
+  });
   renderPagePermissionBoxes();
 }
 
 function renderDashboard() {
   const dashboard = document.querySelector('#dashboard-cards');
   if (!dashboard) return;
-  const cards = [
-    ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
-    ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
-    ['Home', 'Edit the public homepage headline and body content.', 'page:home', 'Website'],
-    ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
-  ];
-  dashboard.innerHTML = cards.map(([title, text, target, kicker]) => `<button class="dash-card" type="button" data-dash-target="${target}"><span>${kicker}</span><b>${title}</b><small>${text}</small></button>`).join('');
-  dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
-    const target = button.dataset.dashTarget;
-    if (target.startsWith('page:')) editPage(target.split(':')[1]);
-    else activateTab(target);
-  }));
-}
+  const displayName = state.me.user.display_name || state.me.user.username;
+  const welcome = document.querySelector('#dashboard-welcome');
+  if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-function renderPages() {
-  const list = document.querySelector('#pages-list');
-  const ordered = [...state.pages].sort((a, b) => PAGE_ORDER.indexOf(a.slug) - PAGE_ORDER.indexOf(b.slug) || a.nav_order - b.nav_order);
-  list.innerHTML = ordered.map(page => `
-    <article class="admin-row">
-      <div><b>${escapeHtml(page.title)}</b><span>${escapeHtml(page.path)} · permission: page:${escapeHtml(page.slug)}</span><small>${page.active ? 'Active' : 'Hidden'} · nav order ${page.nav_order}</small></div>
-      <div class="row-actions"><button data-edit-page="${page.slug}">Edit</button>${hasPermission('pages') && !page.is_home ? `<button data-delete-page="${page.slug}">Delete</button>` : ''}</div>
-    </article>
-  `).join('');
-  list.querySelectorAll('[data-edit-page]').forEach(button => button.addEventListener('click', () => editPage(button.dataset.editPage)));
-  list.querySelectorAll('[data-delete-page]').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Delete this page?')) return;
-    await jsonFetch(`/api/admin/pages/${button.dataset.deletePage}`, { method: 'DELETE' });
-    await refreshAll();
+  // Page edit shortcuts live in the left nav, so omit page cards here. Remaining cards respect assigned permissions.
+  const cards = [
+    canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
+    hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
+    hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
+  ].filter(Boolean);
+
+  dashboard.innerHTML = cards.length
+    ? cards.map(([title, text, target, kicker]) => `<button class="dash-card" type="button" data-dash-target="${target}"><span>${kicker}</span><b>${title}</b><small>${text}</small></button>`).join('')
+    : '<p class="draft">No dashboard tools are available for your account. Use the page shortcuts in the left navigation.</p>';
+  dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
+    activateTab(button.dataset.dashTarget);
   }));
 }
 
@@ -410,6 +402,11 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const payload = formPayload(form);
+    payload.display_name = String(payload.display_name || '').trim();
+    if (!payload.display_name) {
+      document.querySelector('#user-status').textContent = 'Display name is required.';
+      return;
+    }
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
     const id = payload.id;
     delete payload.id;
