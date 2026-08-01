@@ -51,3 +51,5 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 .image-admin-shell .form-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));}
 .image-admin-shell .form-grid .full{grid-column:1/-1;}
 @media(max-width:1280px){.image-admin-shell{grid-template-columns:250px minmax(0,1fr)}.admin-workspace{padding:24px}.sponsor-admin-row{grid-template-columns:22px 48px minmax(0,1fr)}.sponsor-admin-row .row-actions{grid-column:1/-1;justify-content:flex-end}}
+
+.image-admin-shell .row-actions button:disabled{opacity:.45!important;cursor:not-allowed!important;color:#94a3b8!important;border-color:#e2e8f0!important;background:#f8fafc!important;}

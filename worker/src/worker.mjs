@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-3';
+const ASSET_VERSION = 'admin-cms-20260801-4';
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
