@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -112,6 +112,39 @@ test('serializePagePayload turns structured CMS fields into generated HTML', () 
   assert.match(page.body_html, /data-events/);
   assert.match(page.body_html, /Use the Calendar tab/);
   assert.doesNotMatch(page.body_html, /<textarea/);
+});
+
+test('events sort by year, month, and day instead of editor sort_order', () => {
+  const events = [
+    { id: 1, date_label: 'Jan', date_detail: '05', event_year: 2027, title: 'Next year', sort_order: 1 },
+    { id: 2, date_label: 'Dec', date_detail: '20', event_year: 2026, title: 'December', sort_order: 2 },
+    { id: 3, date_label: 'Aug', date_detail: '01', event_year: 2026, title: 'August first', sort_order: 99 },
+    { id: 4, date_label: 'Aug', date_detail: 'TBD', event_year: 2026, title: 'August TBD', sort_order: 0 },
+    { id: 5, date_label: 'Aug', date_detail: 'FRI', event_year: 2026, title: 'August Friday', sort_order: 3 },
+  ];
+  const ordered = [...events].sort(compareEventsByDate).map((event) => event.title);
+  assert.deepEqual(ordered, [
+    'August first',
+    'August Friday',
+    'August TBD',
+    'December',
+    'Next year',
+  ]);
+});
+
+test('normalizeEventPayload stores year for ordering and ignores sort_order', () => {
+  const event = normalizeEventPayload({
+    date_label: 'Jan',
+    date_detail: '12',
+    event_year: '2027',
+    title: 'Winter Concert',
+    description: 'Evening performance',
+    sort_order: 42,
+  });
+  assert.equal(event.event_year, 2027);
+  assert.equal(event.sort_order, 0);
+  assert.equal(event.date_label, 'Jan');
+  assert.equal(event.date_detail, '12');
 });
 
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {

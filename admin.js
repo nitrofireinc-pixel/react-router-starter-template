@@ -779,18 +779,23 @@ async function loadUsers() {
   }));
 }
 
+function defaultEventYear() {
+  return new Date().getFullYear();
+}
+
 async function loadEvents() {
   if (!hasPermission('events') && !canEditPage('calendar')) return;
   state.events = await jsonFetch('/api/events');
   const list = document.querySelector('#events-list');
   const count = document.querySelector('#events-count');
   if (!list) return;
-  const ordered = [...state.events].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  // API already returns events ordered by year → month → day.
+  const ordered = [...state.events];
   if (count) count.textContent = `${ordered.length} total`;
   list.innerHTML = ordered.length
     ? ordered.map(event => `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)} · order ${event.sort_order}</small></div>
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
       <div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>
     </article>
   `).join('')
@@ -805,13 +810,14 @@ async function loadEvents() {
       event_id: event.id,
       date_label: event.date_label,
       date_detail: event.date_detail,
+      event_year: event.event_year || defaultEventYear(),
       title: event.title,
       description: event.description,
-      sort_order: event.sort_order,
     });
     formControl(form, 'event_id').value = String(event.id);
     setSelectValue(formControl(form, 'date_label'), event.date_label);
     setSelectValue(formControl(form, 'date_detail'), event.date_detail);
+    formControl(form, 'event_year').value = String(event.event_year || defaultEventYear());
     if (status) status.textContent = `Editing “${event.title}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     formControl(form, 'title')?.focus();
@@ -1035,12 +1041,17 @@ function bindForms() {
     if (status) status.textContent = 'Saving…';
     try {
       const payload = formPayload(form);
-      payload.sort_order = Number(payload.sort_order || 0);
+      payload.event_year = Number(payload.event_year || defaultEventYear());
       const id = String(payload.event_id || payload.id || '').trim();
       delete payload.event_id;
       delete payload.id;
+      delete payload.sort_order;
       if (!payload.title?.trim() || !payload.description?.trim()) {
         if (status) status.textContent = 'Title and description are required.';
+        return;
+      }
+      if (!Number.isFinite(payload.event_year) || payload.event_year < 2000 || payload.event_year > 2100) {
+        if (status) status.textContent = 'Enter a valid year (2000–2100).';
         return;
       }
       await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -1049,7 +1060,7 @@ function bindForms() {
       formControl(form, 'event_id').value = '';
       formControl(form, 'date_label').value = 'Aug';
       formControl(form, 'date_detail').value = '01';
-      formControl(form, 'sort_order').value = '0';
+      formControl(form, 'event_year').value = String(defaultEventYear());
       await loadEvents();
     } catch (error) {
       if (status) status.textContent = `Could not save event: ${error.message}`;
@@ -1062,7 +1073,7 @@ function bindForms() {
     formControl(form, 'event_id').value = '';
     formControl(form, 'date_label').value = 'Aug';
     formControl(form, 'date_detail').value = '01';
-    formControl(form, 'sort_order').value = '0';
+    formControl(form, 'event_year').value = String(defaultEventYear());
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
     formControl(form, 'title')?.focus();
@@ -1092,4 +1103,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* calendar-events-limit: 20260801-20 */
+/* calendar-event-year-order: 20260801-21 */

@@ -9,10 +9,10 @@ export const DEFAULT_SITE = {
 };
 
 export const DEFAULT_EVENTS = [
-  ['Aug', '01', 'Band Camp / Preseason Prep', 'Placeholder: add official summer band camp dates, times, and location.', 1],
-  ['Aug', 'TBD', 'Parent Preview Night', 'Placeholder: add location and what families should bring.', 2],
-  ['Sep', 'FRI', 'Football Game Performance', 'Placeholder: add football schedule and call times when available.', 3],
-  ['Oct', 'TBD', 'Marching Competition', 'Placeholder: add itinerary, address, ticket info, and volunteer needs.', 4],
+  { date_label: 'Aug', date_detail: '01', event_year: 2026, title: 'Band Camp / Preseason Prep', description: 'Placeholder: add official summer band camp dates, times, and location.', sort_order: 1 },
+  { date_label: 'Aug', date_detail: 'TBD', event_year: 2026, title: 'Parent Preview Night', description: 'Placeholder: add location and what families should bring.', sort_order: 2 },
+  { date_label: 'Sep', date_detail: 'FRI', event_year: 2026, title: 'Football Game Performance', description: 'Placeholder: add football schedule and call times when available.', sort_order: 3 },
+  { date_label: 'Oct', date_detail: 'TBD', event_year: 2026, title: 'Marching Competition', description: 'Placeholder: add itinerary, address, ticket info, and volunteer needs.', sort_order: 4 },
 ];
 
 export const DEFAULT_SPONSORS = [
@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-20';
+const ASSET_VERSION = 'admin-cms-20260801-21';
 
 export const DEFAULT_STAFF = [
   { name: 'Name TBD', role: 'Band Director', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 1, active: 1 },
@@ -169,7 +169,7 @@ async function verifyPassword(password, stored) {
 async function initDb(env) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -177,6 +177,12 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN event_year INTEGER NOT NULL DEFAULT 2026').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  await env.DB.prepare('UPDATE events SET event_year = 2026 WHERE event_year IS NULL OR event_year = 0').run();
   const siteRows = await env.DB.prepare('SELECT key FROM site_content').all();
   const existingKeys = new Set((siteRows.results || []).map((row) => row.key));
   for (const [key, value] of Object.entries(DEFAULT_SITE)) {
@@ -184,7 +190,7 @@ async function initDb(env) {
   }
   const eventCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first();
   if (!eventCount?.count) {
-    await env.DB.batch(DEFAULT_EVENTS.map((event) => env.DB.prepare('INSERT INTO events (date_label, date_detail, title, description, sort_order) VALUES (?, ?, ?, ?, ?)').bind(...event)));
+    await env.DB.batch(DEFAULT_EVENTS.map((event) => env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)').bind(event.date_label, event.date_detail, event.event_year, event.title, event.description, event.sort_order)));
   }
   const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
   if (!sponsorCount?.count) {
@@ -214,9 +220,92 @@ async function getSite(env) {
   return payload;
 }
 
+
+const MONTH_RANK = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+  spring: 3,
+  summer: 6,
+  fall: 9, autumn: 9,
+  winter: 12,
+  tbd: 99,
+};
+
+export function monthRank(label) {
+  const key = String(label || '').trim().toLowerCase();
+  if (!key) return 99;
+  if (MONTH_RANK[key] != null) return MONTH_RANK[key];
+  const prefix = key.slice(0, 3);
+  if (MONTH_RANK[prefix] != null) return MONTH_RANK[prefix];
+  return 99;
+}
+
+export function dayRank(detail) {
+  const raw = String(detail || '').trim();
+  if (!raw || /^tbd$/i.test(raw)) return 99;
+  if (/^\d{1,2}$/.test(raw)) return Number(raw);
+  // Weekday-only labels sort after numbered days in the same month.
+  return 50;
+}
+
+export function eventYearValue(event) {
+  const year = Number(event?.event_year);
+  if (Number.isFinite(year) && year >= 2000 && year <= 2100) return year;
+  return new Date().getFullYear();
+}
+
+export function eventSortKey(event) {
+  return [
+    eventYearValue(event),
+    monthRank(event?.date_label),
+    dayRank(event?.date_detail),
+    Number(event?.id) || 0,
+  ];
+}
+
+export function compareEventsByDate(a, b) {
+  const ka = eventSortKey(a);
+  const kb = eventSortKey(b);
+  for (let i = 0; i < ka.length; i += 1) {
+    if (ka[i] < kb[i]) return -1;
+    if (ka[i] > kb[i]) return 1;
+  }
+  return 0;
+}
+
+export function normalizeEventPayload(payload = {}, existing = null) {
+  const date_label = String(payload.date_label ?? existing?.date_label ?? '').trim();
+  const date_detail = String(payload.date_detail ?? existing?.date_detail ?? '').trim();
+  const title = String(payload.title ?? existing?.title ?? '').trim();
+  const description = String(payload.description ?? existing?.description ?? '').trim();
+  const event_year = eventYearValue({
+    event_year: payload.event_year ?? existing?.event_year ?? new Date().getFullYear(),
+  });
+  return {
+    date_label,
+    date_detail,
+    event_year,
+    title,
+    description,
+    sort_order: 0,
+  };
+}
+
 async function getEvents(env) {
-  const rows = await env.DB.prepare('SELECT id, date_label, date_detail, title, description, sort_order FROM events ORDER BY sort_order, id').all();
-  return rows.results || [];
+  const rows = await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events').all();
+  return (rows.results || [])
+    .map((row) => ({ ...row, event_year: eventYearValue(row) }))
+    .sort(compareEventsByDate);
 }
 
 async function getSponsors(env, includeInactive = false) {
@@ -740,9 +829,12 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'events');
     if (auth.response) return auth.response;
-    const p = await request.json();
-    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, title, description, sort_order) VALUES (?, ?, ?, ?, ?)').bind(p.date_label, p.date_detail, p.title, p.description, Number(p.sort_order || 0)).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, title, description, sort_order FROM events WHERE id = ?').bind(result.meta.last_row_id).first());
+    const p = normalizeEventPayload(await request.json());
+    if (!p.date_label || !p.date_detail || !p.title || !p.description) {
+      return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
+    }
+    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events WHERE id = ?').bind(result.meta.last_row_id).first());
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -753,9 +845,14 @@ async function handleApi(request, env, url) {
       return jsonResponse({ ok: true });
     }
     const id = Number(eventMatch[1]);
-    const p = await request.json();
-    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, title = ?, description = ?, sort_order = ? WHERE id = ?').bind(p.date_label, p.date_detail, p.title, p.description, Number(p.sort_order || 0), id).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, title, description, sort_order FROM events WHERE id = ?').bind(id).first());
+    const existing = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Event not found' }, 404);
+    const p = normalizeEventPayload(await request.json(), existing);
+    if (!p.date_label || !p.date_detail || !p.title || !p.description) {
+      return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
+    }
+    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?, sort_order = ? WHERE id = ?').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, id).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events WHERE id = ?').bind(id).first());
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
@@ -907,6 +1004,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Address<input name="address" placeholder="Kernersville, NC"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
-<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Every saved event appears below. The public Calendar page shows up to 5 at a time.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
+<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. The public Calendar page shows up to 5 at a time and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
