@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-17';
+const ASSET_VERSION = 'admin-cms-20260801-18';
 
 export const DEFAULT_STAFF = [
   { name: 'Name TBD', role: 'Band Director', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 1, active: 1 },
