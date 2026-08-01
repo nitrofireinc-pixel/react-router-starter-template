@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeStaticPath, parsePermissions, serializePagePayload } from '../worker/src/worker.mjs';
+import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, serializePagePayload } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -74,4 +74,22 @@ test('serializePagePayload turns structured CMS fields into generated HTML', () 
   assert.match(page.body_html, /data-events/);
   assert.match(page.body_html, /Use the Calendar tab/);
   assert.doesNotMatch(page.body_html, /<textarea/);
+});
+
+test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {
+  const sponsor = normalizeSponsorPayload({
+    name: 'Kernersville <Music>',
+    address: 'Kernersville & NC',
+    level: 'Gold Sponsor',
+    sort_order: '2',
+    active: true,
+  });
+
+  assert.equal(sponsor.mark_text, 'KM');
+  assert.equal(sponsor.sort_order, 2);
+  const html = renderSponsorsDirectory([sponsor]);
+  assert.match(html, /sponsor-card sponsor-featured/);
+  assert.match(html, /Kernersville &lt;Music&gt;/);
+  assert.match(html, /Kernersville &amp; NC/);
+  assert.doesNotMatch(html, /<Music>/);
 });

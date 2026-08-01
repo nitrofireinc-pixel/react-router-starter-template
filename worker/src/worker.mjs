@@ -15,10 +15,16 @@ export const DEFAULT_EVENTS = [
   ['Oct', 'TBD', 'Marching Competition', 'Placeholder: add itinerary, address, ticket info, and volunteer needs.', 4],
 ];
 
+export const DEFAULT_SPONSORS = [
+  { name: 'ABC Company', address: '123 Main Street, Kernersville, NC', logo_url: '', level: 'Community Sponsor', mark_text: 'ABC', sort_order: 1, active: 1 },
+  { name: 'Kernersville Music & Arts', address: 'Kernersville, NC', logo_url: '', level: 'Gold Sponsor', mark_text: 'KMA', sort_order: 2, active: 1 },
+  { name: 'Eagle Financial Partners', address: 'Kernersville, NC', logo_url: '', level: 'Navy Sponsor', mark_text: 'EFP', sort_order: 3, active: 1 },
+];
+
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'users', 'events', 'photos'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'users', 'events', 'photos'];
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -157,6 +163,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -169,6 +176,10 @@ async function initDb(env) {
   const eventCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first();
   if (!eventCount?.count) {
     await env.DB.batch(DEFAULT_EVENTS.map((event) => env.DB.prepare('INSERT INTO events (date_label, date_detail, title, description, sort_order) VALUES (?, ?, ?, ?, ?)').bind(...event)));
+  }
+  const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
+  if (!sponsorCount?.count) {
+    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, logo_url, level, mark_text, sort_order, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active)));
   }
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
@@ -193,6 +204,55 @@ async function getSite(env) {
 async function getEvents(env) {
   const rows = await env.DB.prepare('SELECT id, date_label, date_detail, title, description, sort_order FROM events ORDER BY sort_order, id').all();
   return rows.results || [];
+}
+
+async function getSponsors(env, includeInactive = false) {
+  const where = includeInactive ? '' : 'WHERE active = 1';
+  const rows = await env.DB.prepare(`SELECT id, name, address, logo_url, level, mark_text, sort_order, active FROM sponsors ${where} ORDER BY sort_order, id`).all();
+  return rows.results || [];
+}
+
+export function normalizeSponsorPayload(payload = {}, existing = null) {
+  const name = String(payload.name || existing?.name || '').trim();
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word.match(/[a-z0-9]/i)?.[0]?.toUpperCase()).filter(Boolean).join('') || '★';
+  return {
+    name,
+    address: String(payload.address ?? existing?.address ?? '').trim(),
+    logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
+    level: String(payload.level ?? existing?.level ?? 'Sponsor').trim() || 'Sponsor',
+    mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
+    sort_order: Number(payload.sort_order ?? existing?.sort_order ?? 0),
+    active: payload.active === false || payload.active === 0 ? 0 : 1,
+  };
+}
+
+export function renderSponsorsDirectory(sponsors = []) {
+  if (!sponsors.length) {
+    return '<div class="sponsor-empty"><h3>Sponsor spots are available.</h3><p>Use the admin Sponsors page to add businesses, logos, and addresses.</p></div>';
+  }
+  return sponsors.map((sponsor, index) => {
+    const featured = index === 0 ? ' sponsor-featured' : '';
+    const logo = sponsor.logo_url
+      ? `<span class="sponsor-logo"><img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name)} logo"></span>`
+      : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
+    return `<article class="sponsor-card${featured}" data-sponsor-id="${escapeAttr(sponsor.id || '')}">${logo}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3>${sponsor.address ? `<p>${escapeHtml(sponsor.address)}</p>` : ''}</div></article>`;
+  }).join('');
+}
+
+function renderSponsorPageBody(page, sponsors) {
+  const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
+  const html = page.body_html || '';
+  if (html.includes('data-sponsors')) {
+    return html.replace(/<div class=\"sponsor-directory\" data-sponsors>[\s\S]*?<\/div>/, directory);
+  }
+  if (html.includes('class="sponsor-directory"')) {
+    return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
+  }
+  return `<section class="page-hero sponsor-hero"><div class="page-title"><div class="kicker">Community Partners</div><h1>${escapeHtml(page.title || 'Sponsors')}</h1><p>Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="contact.html">Become a sponsor</a></div>${directory}<aside class="sponsor-cta"><div><span class="sponsor-level">Sponsor opportunities</span><h2>Put your support in the spotlight.</h2><p>Ask us about sponsor levels, benefits, artwork requirements, payment instructions, and how your business can support the band.</p></div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside></div></section>`;
+}
+
+function renderPageBody(page, sponsors = []) {
+  return page.slug === 'sponsors' ? renderSponsorPageBody(page, sponsors) : page.body_html;
 }
 
 async function getPhotos(env) {
@@ -335,6 +395,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/events' && request.method === 'GET') return jsonResponse(await getEvents(env));
+  if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
   if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
@@ -454,6 +515,40 @@ async function handleApi(request, env, url) {
     return jsonResponse({ ok: true });
   }
 
+
+  if (url.pathname === '/api/admin/sponsors' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    return jsonResponse(await getSponsors(env, true));
+  }
+  if (url.pathname === '/api/admin/sponsors' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    const sponsor = normalizeSponsorPayload(await request.json());
+    if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
+    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, logo_url, level, mark_text, sort_order, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, name, address, logo_url, level, mark_text, sort_order, active FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first());
+  }
+  const sponsorMatch = url.pathname.match(/^\/api\/admin\/sponsors\/(\d+)$/);
+  if (sponsorMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    const id = Number(sponsorMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM sponsors WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM sponsors WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Sponsor not found' }, 404);
+    const sponsor = normalizeSponsorPayload(await request.json(), existing);
+    if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
+    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, id).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, name, address, logo_url, level, mark_text, sort_order, active FROM sponsors WHERE id = ?').bind(id).first());
+  }
+
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'events');
     if (auth.response) return auth.response;
@@ -535,8 +630,9 @@ function renderNav(pages) {
   return pages.map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
 }
 
-function renderCmsPage(page, site, pages) {
+function renderCmsPage(page, site, pages, sponsors = []) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
+  const bodyHtml = renderPageBody(page, sponsors);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -554,7 +650,7 @@ function renderCmsPage(page, site, pages) {
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap"><a href="/calendar.html">Upcoming Events</a><a href="/resources.html">Student Resources</a><a href="/contact.html">Contact</a></div></div>
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></div></header>
-<main id="main">${page.body_html}</main>
+<main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div><h3 data-site-field="title">${escapeHtml(site.title)}</h3><p data-site-field="footer_note">${escapeHtml(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js"></script><script src="/site-content.js"></script>
 </body></html>`;
@@ -565,7 +661,7 @@ async function serveStaticOrCms(request, env, url) {
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
-    if (page) return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env)));
+    if (page) return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env), page.slug === 'sponsors' ? await getSponsors(env) : []));
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
   const assetUrl = new URL(request.url);
@@ -587,11 +683,14 @@ export default {
 
 const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"></head><body class="admin-body"><main class="admin-shell small"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="btn primary" type="submit">Log in</button></form></main></body></html>`;
 
-const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CMS Admin | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"></head><body class="admin-body"><main class="admin-shell cms-shell"><div class="admin-top"><div><p class="kicker">Full CMS</p><h1>Website Admin</h1><p>Edit pages, users, calendar, photos, logo, and site settings based on your permissions.</p><p id="current-user" class="status"></p></div><form method="post" action="/admin/logout"><button class="btn secondary">Log out</button></form></div>
-<nav class="admin-tabs"><button data-tab="pages">Pages</button><button data-tab="site">Site settings</button><button data-tab="users">Users & permissions</button><button data-tab="events">Calendar</button><button data-tab="photos">Photos</button></nav>
-<section id="tab-pages" class="admin-card cms-panel"><h2>Editable pages</h2><p>Pages now use plain text fields and layout drop-downs. The site builds the HTML for you; do not paste HTML here.</p><div class="grid two"><form id="page-form" class="stack"><h3 data-page-editor-title>Select a page to edit</h3><p class="notice" data-calendar-hint hidden>The public calendar event list is controlled from the Calendar tab below. Edit this page text for the calendar page header/instructions only.</p><p class="notice" data-home-hint hidden>The homepage hero text is controlled from Site settings. Use these page fields for the rest of the homepage content.</p><input type="hidden" name="original_slug"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label>Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active / visible</label><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" placeholder="Band Boosters" required></label><label>Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label>Main page text<textarea name="body_text" rows="9" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label>Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label><button class="btn primary">Save page</button><button class="btn outline" type="button" id="new-page">New page</button><p class="status" id="page-status"></p></form><div id="pages-list" class="admin-list"></div></div></section>
-<section id="tab-site" class="admin-card cms-panel"><h2>Home, title, logo, footer</h2><form id="site-form" class="stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="stack"><h3>Upload new logo</h3><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></section>
-<section id="tab-users" class="admin-card cms-panel"><h2>Users and permissions</h2><div class="grid two"><form id="user-form" class="stack"><input type="hidden" name="id"><label>Username<input name="username" required></label><label>Display name<input name="display_name"></label><label>Password <small>required for new users, optional when editing</small><input name="password" type="password"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Save user</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div id="users-list" class="admin-list"></div></div></section>
-<section id="tab-events" class="admin-card cms-panel"><h2>Calendar events</h2><p>Add calendar items with dropdowns for month and day. These show on the main page and the Calendar page automatically.</p><form id="event-form" class="stack"><input type="hidden" name="id"><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Event title<input name="title" placeholder="Band Camp / Preseason Prep" required></label><label>Description<textarea name="description" rows="4" placeholder="Enter normal text about location, report time, what to bring, etc." required></textarea></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Save event</button><button class="btn outline" type="button" id="new-event">New event</button></form><div id="events-list" class="admin-list"></div></section>
-<section id="tab-photos" class="admin-card cms-panel"><h2>Photo gallery</h2><form id="photo-form" class="stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
-</main><script src="/admin.js"></script></body></html>`;
+const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
+<aside class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-edit-shortcut="directors">Directors & Staff</button><button type="button" data-edit-shortcut="calendar">Calendar</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-edit-shortcut="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<section class="admin-workspace">
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>Welcome back, Trevor Olsen</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
+<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Use clean fields like the reference CMS. Save changes to update the public page.</p></div><button class="btn outline" type="button" id="new-page">Add Page</button></div><div class="editor-layout"><form id="page-form" class="admin-card stack"><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar card.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label>Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active / visible</label><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" placeholder="Sound. Spirit. Eagle Pride." required></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="11" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div><button class="btn primary">Save Changes</button><p class="status" id="page-status"></p></form><div class="admin-card"><h2>Pages</h2><div id="pages-list" class="admin-list"></div></div></div></section>
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Address<input name="address" placeholder="Kernersville, NC"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
+<section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="email" required placeholder="editor@example.com"></label><label>Display name<input name="display_name" placeholder="Editor Name"></label><label>Temporary password <small>required for new users, optional when editing</small><input name="password" type="password"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
+<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar</h1><p>Add calendar items with dropdowns for month and day.</p></div><button class="btn outline" type="button" id="new-event">New event</button></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="id"><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Save event</button></form><div id="events-list" class="admin-list"></div></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+</section></main><script src="/admin.js"></script></body></html>`;

@@ -14,7 +14,8 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], events: [], photos: [] };
+const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], site: null };
+const PAGE_ORDER = ['home', 'ensembles', 'directors', 'calendar', 'sponsors', 'fundraising', 'resources', 'boosters', 'contact'];
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -22,11 +23,17 @@ function hasPermission(scope) {
   return state.me.user.permissions.includes(scope) || state.me.user.permissions.includes('all');
 }
 
-function canEditPage(page) {
-  return hasPermission('pages') || hasPermission(`page:${page.slug}`);
+function canEditPage(pageOrSlug) {
+  const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
+  return hasPermission('pages') || hasPermission(`page:${slug}`);
+}
+
+function canEditSponsors() {
+  return hasPermission('sponsors') || canEditPage('sponsors');
 }
 
 function fillForm(form, data) {
+  if (!form) return;
   for (const [key, value] of Object.entries(data || {})) {
     if (!form.elements[key]) continue;
     if (form.elements[key].type === 'checkbox') form.elements[key].checked = Boolean(value);
@@ -56,12 +63,11 @@ function structuredPageFields(page) {
   const template = document.createElement('template');
   template.innerHTML = page.body_html || '';
   const root = template.content;
-  const layout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : 'standard');
   const pageTitle = root.querySelector('.page-title');
   const bodyNode = root.querySelector('[data-cms-field="body_text"]') || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
   const callout = root.querySelector('[data-cms-block="callout"], .notice');
   return {
-    layout,
+    layout: root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : 'standard'),
     kicker: root.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim() || '',
     heading: root.querySelector('[data-cms-field="heading"], h1')?.textContent.trim() || page.title || '',
     intro: pageTitle?.querySelector('[data-cms-field="intro"], p')?.textContent.trim() || '',
@@ -85,31 +91,45 @@ function setSelectValue(select, value) {
   select.value = value || select.value;
 }
 
+function activateTab(name) {
+  document.querySelectorAll('.cms-panel').forEach(panel => panel.hidden = true);
+  document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
+  document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === name));
+}
+
+function pageLabel(slug) {
+  return ({ home: 'Home', directors: 'Directors & Staff', resources: 'Student Resources' }[slug]) || slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function showAllowedPanels() {
-  document.querySelector('#current-user').textContent = `${state.me.user.display_name || state.me.user.username} (${state.me.user.role})`;
+  const displayName = state.me.user.display_name || state.me.user.username;
+  document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${state.me.user.role === 'admin' ? 'Super Admin' : 'Editor'}</span>`;
+
   const panels = {
+    dashboard: true,
     pages: state.pages.some(canEditPage),
+    sponsors: canEditSponsors(),
     site: hasPermission('site'),
     users: hasPermission('users'),
     events: hasPermission('events'),
     photos: hasPermission('photos'),
   };
   document.querySelectorAll('[data-tab]').forEach(button => {
-    const allowed = panels[button.dataset.tab];
+    const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
     button.hidden = !allowed;
     button.addEventListener('click', () => activateTab(button.dataset.tab));
+  });
+  document.querySelectorAll('[data-edit-shortcut]').forEach(button => {
+    const slug = button.dataset.editShortcut;
+    button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
+    button.addEventListener('click', () => editPage(slug));
   });
   Object.entries(panels).forEach(([name, allowed]) => {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
-  activateTab(Object.keys(panels).find(key => panels[key]) || 'pages');
-}
-
-function activateTab(name) {
-  document.querySelectorAll('.cms-panel').forEach(panel => panel.hidden = true);
-  document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
-  document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === name));
+  renderDashboard();
+  activateTab('dashboard');
 }
 
 async function loadMe() {
@@ -121,8 +141,8 @@ async function loadMe() {
 
 async function loadSite() {
   if (!hasPermission('site')) return;
-  const data = await jsonFetch('/api/site');
-  fillForm(document.querySelector('#site-form'), data);
+  state.site = await jsonFetch('/api/site');
+  fillForm(document.querySelector('#site-form'), state.site);
 }
 
 async function loadPages() {
@@ -132,25 +152,33 @@ async function loadPages() {
   renderPagePermissionBoxes();
 }
 
+function renderDashboard() {
+  const dashboard = document.querySelector('#dashboard-cards');
+  if (!dashboard) return;
+  const cards = [
+    ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
+    ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
+    ['Home', 'Edit the public homepage headline and body content.', 'page:home', 'Website'],
+    ['Calendar', 'Manage event text and date blocks.', 'events', 'Program'],
+  ];
+  dashboard.innerHTML = cards.map(([title, text, target, kicker]) => `<button class="dash-card" type="button" data-dash-target="${target}"><span>${kicker}</span><b>${title}</b><small>${text}</small></button>`).join('');
+  dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
+    const target = button.dataset.dashTarget;
+    if (target.startsWith('page:')) editPage(target.split(':')[1]);
+    else activateTab(target);
+  }));
+}
+
 function renderPages() {
   const list = document.querySelector('#pages-list');
-  list.innerHTML = state.pages.map(page => `
+  const ordered = [...state.pages].sort((a, b) => PAGE_ORDER.indexOf(a.slug) - PAGE_ORDER.indexOf(b.slug) || a.nav_order - b.nav_order);
+  list.innerHTML = ordered.map(page => `
     <article class="admin-row">
       <div><b>${escapeHtml(page.title)}</b><span>${escapeHtml(page.path)} · permission: page:${escapeHtml(page.slug)}</span><small>${page.active ? 'Active' : 'Hidden'} · nav order ${page.nav_order}</small></div>
       <div class="row-actions"><button data-edit-page="${page.slug}">Edit</button>${hasPermission('pages') && !page.is_home ? `<button data-delete-page="${page.slug}">Delete</button>` : ''}</div>
     </article>
   `).join('');
-  list.querySelectorAll('[data-edit-page]').forEach(button => button.addEventListener('click', () => {
-    const page = state.pages.find(item => item.slug === button.dataset.editPage);
-    const form = document.querySelector('#page-form');
-    fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
-    form.querySelector('[data-page-editor-title]').textContent = `Editing ${page.title}`;
-    form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
-    form.querySelector('[data-home-hint]').hidden = !page.is_home;
-    form.elements.active.checked = Boolean(page.active);
-    activateTab('pages');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }));
+  list.querySelectorAll('[data-edit-page]').forEach(button => button.addEventListener('click', () => editPage(button.dataset.editPage)));
   list.querySelectorAll('[data-delete-page]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this page?')) return;
     await jsonFetch(`/api/admin/pages/${button.dataset.deletePage}`, { method: 'DELETE' });
@@ -158,10 +186,73 @@ function renderPages() {
   }));
 }
 
+function editPage(slug) {
+  const page = state.pages.find(item => item.slug === slug);
+  if (!page) return;
+  const form = document.querySelector('#page-form');
+  fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+  form.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
+  form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
+  form.querySelector('[data-home-hint]').hidden = !page.is_home;
+  form.elements.active.checked = Boolean(page.active);
+  activateTab('pages');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  box.innerHTML = state.pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)} (${escapeHtml(page.slug)})</label>`).join('');
+  box.innerHTML = state.pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+}
+
+async function loadSponsors() {
+  if (!canEditSponsors()) return;
+  state.sponsors = await jsonFetch('/api/admin/sponsors');
+  renderSponsors();
+}
+
+function sponsorPreviewCard(sponsor, index = 0) {
+  const featured = index === 0 ? ' sponsor-featured' : '';
+  const mark = sponsor.logo_url ? `<span class="sponsor-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>` : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
+  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3><p>${escapeHtml(sponsor.address || '')}</p></div></article>`;
+}
+
+function renderSponsors() {
+  const list = document.querySelector('#sponsors-list');
+  const ordered = [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  list.innerHTML = ordered.map((sponsor, index) => `
+    <article class="admin-row sponsor-admin-row">
+      <span class="drag-handle">☰</span>
+      <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
+      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(sponsor.address || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}</small></div>
+      <div class="row-actions"><button data-move-sponsor="${sponsor.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-sponsor="${sponsor.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-sponsor="${sponsor.id}">Edit</button><button data-delete-sponsor="${sponsor.id}">Delete</button></div>
+    </article>
+  `).join('');
+  document.querySelector('#sponsor-preview').innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
+  list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
+    const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
+    const form = document.querySelector('#sponsor-form');
+    fillForm(form, sponsor);
+    form.elements.active.checked = Boolean(sponsor.active);
+  }));
+  list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Delete this sponsor?')) return;
+    await jsonFetch(`/api/admin/sponsors/${button.dataset.deleteSponsor}`, { method: 'DELETE' });
+    await loadSponsors();
+  }));
+  list.querySelectorAll('[data-move-sponsor]').forEach(button => button.addEventListener('click', async () => moveSponsor(Number(button.dataset.moveSponsor), button.dataset.direction)));
+}
+
+async function moveSponsor(id, direction) {
+  const ordered = [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  const index = ordered.findIndex(sponsor => sponsor.id === id);
+  const swapIndex = direction === 'up' ? index - 1 : index + 1;
+  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) return;
+  const current = ordered[index];
+  const swap = ordered[swapIndex];
+  await jsonFetch(`/api/admin/sponsors/${current.id}`, { method: 'PUT', body: JSON.stringify({ ...current, sort_order: swap.sort_order }) });
+  await jsonFetch(`/api/admin/sponsors/${swap.id}`, { method: 'PUT', body: JSON.stringify({ ...swap, sort_order: current.sort_order }) });
+  await loadSponsors();
 }
 
 async function loadUsers() {
@@ -170,7 +261,7 @@ async function loadUsers() {
   const list = document.querySelector('#users-list');
   list.innerHTML = state.users.map(user => `
     <article class="admin-row">
-      <div><b>${escapeHtml(user.username)}</b><span>${escapeHtml(user.display_name || '')} · ${escapeHtml(user.role)}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml(user.permissions.join(', ') || 'no permissions')}</small></div>
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${user.role === 'admin' ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml(user.permissions.join(', ') || 'no permissions')}</small></div>
       <div class="row-actions"><button data-edit-user="${user.id}">Edit</button>${user.id !== state.me.user.id ? `<button data-delete-user="${user.id}">Delete</button>` : ''}</div>
     </article>
   `).join('');
@@ -180,7 +271,6 @@ async function loadUsers() {
     fillForm(form, { ...user, password: '' });
     form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = user.permissions.includes(input.value));
     form.elements.active.checked = Boolean(user.active);
-    activateTab('users');
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this user?')) return;
@@ -205,7 +295,6 @@ async function loadEvents() {
     fillForm(form, event);
     setSelectValue(form.elements.date_label, event.date_label);
     setSelectValue(form.elements.date_detail, event.date_detail);
-    activateTab('events');
   }));
   list.querySelectorAll('[data-delete-event]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this event?')) return;
@@ -234,111 +323,132 @@ async function loadPhotos() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadUsers(), loadEvents(), loadPhotos()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadUsers(), loadEvents(), loadPhotos()]);
 }
 
-document.querySelector('#site-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
-  document.querySelector('#site-status').textContent = 'Saved. Refresh the public site to see changes.';
-});
+function bindForms() {
+  document.querySelector('#site-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
+    document.querySelector('#site-status').textContent = 'Saved. Refresh the public site to see changes.';
+  });
 
-document.querySelector('#logo-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const status = document.querySelector('#logo-status');
-  status.textContent = 'Uploading...';
-  const result = await jsonFetch('/api/admin/logo', { method: 'POST', body: new FormData(form) });
-  form.reset();
-  fillForm(document.querySelector('#site-form'), result.site);
-  status.textContent = 'Logo uploaded and saved.';
-});
-
-document.querySelector('#page-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const payload = pagePayload(form);
-  const original = payload.original_slug;
-  delete payload.original_slug;
-  await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-  document.querySelector('#page-status').textContent = 'Page saved from text fields. No HTML editing needed.';
-  await refreshAll();
-});
-
-document.querySelector('#new-page').addEventListener('click', () => {
-  const form = document.querySelector('#page-form');
-  form.reset();
-  form.elements.original_slug.value = '';
-  form.elements.layout.value = 'standard';
-  form.elements.kicker.value = 'New page';
-  form.elements.heading.value = 'New Page';
-  form.elements.intro.value = 'Short introduction for this page.';
-  form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
-  form.elements.callout_title.value = '';
-  form.elements.callout_text.value = '';
-  form.elements.active.checked = true;
-  form.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
-  form.querySelector('[data-calendar-hint]').hidden = true;
-  form.querySelector('[data-home-hint]').hidden = true;
-});
-
-document.querySelector('#user-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const payload = formPayload(form);
-  payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
-  const id = payload.id;
-  delete payload.id;
-  await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-  document.querySelector('#user-status').textContent = 'User saved.';
-  form.reset();
-  form.elements.active.checked = true;
-  await loadUsers();
-});
-
-document.querySelector('#new-user').addEventListener('click', () => {
-  const form = document.querySelector('#user-form');
-  form.reset();
-  form.elements.active.checked = true;
-  form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
-});
-
-document.querySelector('#event-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const payload = formPayload(form);
-  payload.sort_order = Number(payload.sort_order || 0);
-  const id = payload.id;
-  delete payload.id;
-  await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-  form.reset();
-  await loadEvents();
-});
-
-document.querySelector('#new-event').addEventListener('click', () => {
-  const form = document.querySelector('#event-form');
-  form.reset();
-  form.elements.date_label.value = 'Aug';
-  form.elements.date_detail.value = '01';
-});
-
-document.querySelector('#photo-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const status = document.querySelector('#photo-status');
-  status.textContent = 'Uploading...';
-  try {
-    await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+  document.querySelector('#logo-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#logo-status');
+    status.textContent = 'Uploading...';
+    const result = await jsonFetch('/api/admin/logo', { method: 'POST', body: new FormData(form) });
     form.reset();
-    await loadPhotos();
-    status.textContent = 'Photo uploaded. Refresh the public homepage to see it.';
-  } catch (error) {
-    status.textContent = 'Photo upload failed. Try a JPG, PNG, WEBP, or GIF under 1.5 MB.';
-    console.error(error);
-  }
-});
+    fillForm(document.querySelector('#site-form'), result.site);
+    status.textContent = 'Logo uploaded and saved.';
+  });
 
+  document.querySelector('#page-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = pagePayload(form);
+    const original = payload.original_slug;
+    delete payload.original_slug;
+    await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    document.querySelector('#page-status').textContent = 'Page saved.';
+    await refreshAll();
+  });
+
+  document.querySelector('#new-page')?.addEventListener('click', () => {
+    const form = document.querySelector('#page-form');
+    form.reset();
+    form.elements.original_slug.value = '';
+    form.elements.layout.value = 'standard';
+    form.elements.kicker.value = 'New page';
+    form.elements.heading.value = 'New Page';
+    form.elements.intro.value = 'Short introduction for this page.';
+    form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
+    form.elements.active.checked = true;
+    form.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
+  });
+
+  document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = formPayload(form);
+    payload.sort_order = Number(payload.sort_order || state.sponsors.length + 1);
+    const id = payload.id;
+    delete payload.id;
+    await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    document.querySelector('#sponsor-status').textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+    form.reset();
+    form.elements.active.checked = true;
+    await loadSponsors();
+  });
+
+  document.querySelector('#new-sponsor')?.addEventListener('click', () => {
+    const form = document.querySelector('#sponsor-form');
+    form.reset();
+    form.elements.active.checked = true;
+    form.elements.level.value = 'Community Sponsor';
+    form.elements.sort_order.value = state.sponsors.length + 1;
+  });
+
+  document.querySelector('#user-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = formPayload(form);
+    payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
+    const id = payload.id;
+    delete payload.id;
+    await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    document.querySelector('#user-status').textContent = 'User saved.';
+    form.reset();
+    form.elements.active.checked = true;
+    await loadUsers();
+  });
+
+  document.querySelector('#new-user')?.addEventListener('click', () => {
+    const form = document.querySelector('#user-form');
+    form.reset();
+    form.elements.active.checked = true;
+    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+  });
+
+  document.querySelector('#event-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = formPayload(form);
+    payload.sort_order = Number(payload.sort_order || 0);
+    const id = payload.id;
+    delete payload.id;
+    await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    form.reset();
+    await loadEvents();
+  });
+
+  document.querySelector('#new-event')?.addEventListener('click', () => {
+    const form = document.querySelector('#event-form');
+    form.reset();
+    form.elements.date_label.value = 'Aug';
+    form.elements.date_detail.value = '01';
+  });
+
+  document.querySelector('#photo-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#photo-status');
+    status.textContent = 'Uploading...';
+    try {
+      await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      form.reset();
+      await loadPhotos();
+      status.textContent = 'Photo uploaded.';
+    } catch (error) {
+      status.textContent = 'Photo upload failed. Try a JPG, PNG, WEBP, or GIF under 1.5 MB.';
+      console.error(error);
+    }
+  });
+}
+
+bindForms();
 refreshAll().catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
