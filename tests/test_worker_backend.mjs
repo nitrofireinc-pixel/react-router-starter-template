@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, serializePagePayload } from '../worker/src/worker.mjs';
+import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -56,6 +56,44 @@ test('generateStructuredPageHtml builds safe page sections from text fields inst
   assert.match(html, /Second paragraph\./);
   assert.match(html, /Need forms\?/);
   assert.doesNotMatch(html, /<script>/);
+});
+
+test('sanitizeRichHtml keeps bold/color/size markup and strips unsafe tags', () => {
+  const html = sanitizeRichHtml('<p>Hello <strong>band</strong> <span style="color: #E71321; font-size: 22px">family</span><script>alert(1)</script></p>');
+  assert.match(html, /<strong>band<\/strong>/);
+  assert.match(html, /style="color: #E71321; font-size: 22px"/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /alert\(1\)/);
+});
+
+test('generateStructuredPageHtml preserves sanitized rich body html', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'standard',
+    kicker: 'Program',
+    heading: 'Ensembles',
+    intro: 'Welcome',
+    body_text: '<p>Join the <strong>marching band</strong> this <span style="color: #014990">fall</span>.</p>',
+  });
+  assert.match(html, /<strong>marching band<\/strong>/);
+  assert.match(html, /style="color: #014990"/);
+});
+
+test('staff helpers normalize rows and render photo + name cards safely', () => {
+  const member = normalizeStaffPayload({
+    name: 'Jordan <Smith>',
+    role: 'Band Director',
+    bio: 'Email & office hours TBD',
+    photo_url: '/uploads/jordan.jpg',
+    sort_order: '1',
+    active: true,
+  });
+  assert.equal(member.sort_order, 1);
+  const html = renderStaffDirectory([member]);
+  assert.match(html, /class="person"/);
+  assert.match(html, /Jordan &lt;Smith&gt;/);
+  assert.match(html, /Email &amp; office hours TBD/);
+  assert.match(html, /src="\/uploads\/jordan\.jpg"/);
+  assert.doesNotMatch(html, /<Smith>/);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {

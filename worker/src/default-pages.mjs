@@ -66,7 +66,7 @@ export const DEFAULT_CMS_PAGES = [
     "slug": "directors",
     "path": "/directors.html",
     "title": "Directors & Staff",
-    "body_html": "<section class=\"page-hero\"><div class=\"page-title\"><div class=\"kicker\">People</div><h1>Directors & Staff</h1><p>Add official director bios, staff roles, emails, and preferred communication paths.</p></div></section><section class=\"content\"><div class=\"wrap\"><p class=\"notice\">Placeholder content: replace with approved names, photos, titles, and bios before publishing publicly.</p><div class=\"directory\" style=\"margin-top:22px\"><article class=\"person\"><div class=\"avatar\"></div><h3>Band Director</h3><p>Name and email TBD</p></article><article class=\"person\"><div class=\"avatar\"></div><h3>Assistant Director</h3><p>Name and email TBD</p></article><article class=\"person\"><div class=\"avatar\"></div><h3>Color Guard Staff</h3><p>Name and email TBD</p></article><article class=\"person\"><div class=\"avatar\"></div><h3>Percussion Staff</h3><p>Name and email TBD</p></article></div></div></section>",
+    "body_html": "<section class=\"page-hero\" data-cms-layout=\"directory\"><div class=\"page-title\"><div class=\"kicker\" data-cms-field=\"kicker\">People</div><h1 data-cms-field=\"heading\">Directors & Staff</h1><p data-cms-field=\"intro\">Meet the directors and staff who lead the East Forsyth Band program.</p></div></section><section class=\"content\"><div class=\"wrap\"><div class=\"card\" data-cms-field=\"body_text\"><p>Add a short welcome note for families here. Staff photos and roles are managed in the Directors &amp; Staff admin tab.</p></div><div class=\"directory\" data-staff></div></div></section>",
     "nav_order": 7,
     "is_home": 0,
     "active": 1

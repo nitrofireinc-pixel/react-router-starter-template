@@ -14,7 +14,7 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], site: null };
+const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], staff: [], site: null };
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -29,6 +29,10 @@ function canEditPage(pageOrSlug) {
 
 function canEditSponsors() {
   return hasPermission('sponsors') || canEditPage('sponsors');
+}
+
+function canEditStaff() {
+  return hasPermission('staff') || canEditPage('directors');
 }
 
 function fillForm(form, data) {
@@ -58,6 +62,62 @@ function paragraphsFromNode(node) {
   return paragraphs.length ? paragraphs.join('\n\n') : node.textContent.replace(/\s+/g, ' ').trim();
 }
 
+function looksLikeHtml(value) {
+  return /<\/?[a-z][^>]*>/i.test(String(value || ''));
+}
+
+function sanitizeStyleAttribute(attrs) {
+  const match = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  if (!match) return '';
+  const parts = [];
+  for (const declaration of String(match[1] || match[2] || '').split(';')) {
+    const [rawProp, ...rest] = declaration.split(':');
+    if (!rawProp || !rest.length) continue;
+    const prop = rawProp.trim().toLowerCase();
+    const value = rest.join(':').trim();
+    if (prop === 'color' && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i.test(value)) parts.push(`color: ${value}`);
+    if (prop === 'font-size' && /^[\d.]+\s*(px|em|rem|%)$/i.test(value)) parts.push(`font-size: ${value}`);
+  }
+  return parts.join('; ');
+}
+
+function sanitizeRichHtml(dirty) {
+  let html = String(dirty || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '');
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'br') return '<br>';
+    if (tag === 'span') {
+      const style = sanitizeStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
+  if (!html) return '';
+  if (!/<p[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  return html;
+}
+
+function formatRichText(value, fallback = '') {
+  const raw = String(value ?? '');
+  const source = raw.trim() ? raw : String(fallback || '');
+  if (!source.trim()) return '';
+  return looksLikeHtml(source) ? sanitizeRichHtml(source) : paragraphsFromText(source);
+}
+
+function richHtmlFromNode(node) {
+  if (!node) return '';
+  const field = node.matches?.('[data-cms-field]') ? node : node.querySelector?.('[data-cms-field="body_text"], [data-cms-field="callout_text"]') || node;
+  return sanitizeRichHtml(field.innerHTML || '');
+}
+
 function structuredPageFields(page) {
   const template = document.createElement('template');
   template.innerHTML = page.body_html || '';
@@ -65,14 +125,15 @@ function structuredPageFields(page) {
   const pageTitle = root.querySelector('.page-title');
   const bodyNode = root.querySelector('[data-cms-field="body_text"]') || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
   const callout = root.querySelector('[data-cms-block="callout"], .notice');
+  const calloutTextNode = callout?.querySelector('[data-cms-field="callout_text"]') || null;
   return {
-    layout: root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : 'standard'),
+    layout: root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : page.slug === 'directors' ? 'directory' : 'standard'),
     kicker: root.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim() || '',
     heading: root.querySelector('[data-cms-field="heading"], h1')?.textContent.trim() || page.title || '',
     intro: pageTitle?.querySelector('[data-cms-field="intro"], p')?.textContent.trim() || '',
-    body_text: paragraphsFromNode(bodyNode) || (page.slug === 'calendar' ? 'Add calendar events from the Calendar tab. They will appear here automatically.' : textFromHtml(page.body_html)),
+    body_text: richHtmlFromNode(bodyNode) || (page.slug === 'calendar' ? 'Add calendar events from the Calendar tab. They will appear here automatically.' : textFromHtml(page.body_html)),
     callout_title: callout?.querySelector('[data-cms-field="callout_title"], h3')?.textContent.trim() || '',
-    callout_text: paragraphsFromNode(callout?.querySelector('[data-cms-field="callout_text"]') || callout),
+    callout_text: calloutTextNode ? richHtmlFromNode(calloutTextNode) : paragraphsFromNode(callout),
   };
 }
 
@@ -100,6 +161,7 @@ function layoutChipLabel(layout) {
     standard: 'Standard layout',
     calendar: 'Calendar layout',
     contact: 'Contact layout',
+    directory: 'Staff directory layout',
   })[layout] || 'Standard layout';
 }
 
@@ -120,7 +182,7 @@ function editableField(name, tag, value, placeholder = '', extraClass = '') {
 }
 
 function editableRichField(name, value, placeholder = '') {
-  const html = paragraphsFromText(value) || '<p></p>';
+  const html = formatRichText(value) || '<p></p>';
   const label = PAGE_FIELD_LABELS[name] || name;
   return `<div class="cms-edit-field cms-edit-rich" data-cms-field="${escapeAttr(name)}" data-edit-label="${escapeAttr(label)}" contenteditable="true" role="textbox" spellcheck="true" aria-label="${escapeAttr(label)}" data-placeholder="${escapeAttr(placeholder)}">${html}</div>`;
 }
@@ -148,6 +210,9 @@ function buildEditablePagePreview(payload = {}) {
   if (layout === 'contact') {
     return `${hero}<section class="content"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || 'Add contact details here.', 'Main contact content')}</article>${showCallout ? callout : '<article class="card accent-card cms-edit-block"><div class="cms-edit-block-bar"><span>Accent card</span><button type="button" class="cms-edit-remove" data-add-callout>Replace with callout</button></div><h3>Contact details</h3><p>Add a callout to customize this side panel.</p></article>'}</div></section>`;
   }
+  if (layout === 'directory') {
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
+  }
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
 
@@ -166,9 +231,46 @@ function syncFieldFromPreview(field) {
   const control = form.elements[name];
   if (!control) return;
   const value = field.classList.contains('cms-edit-rich')
-    ? paragraphsFromNode(field)
+    ? sanitizeRichHtml(field.innerHTML)
     : field.textContent.replace(/\s+/g, ' ').trim();
   if (control.value !== value) control.value = value;
+}
+
+function setRichToolbarVisible(visible, anchor = null) {
+  const toolbar = document.querySelector('#rich-text-toolbar');
+  if (!toolbar) return;
+  toolbar.hidden = !visible;
+  toolbar.classList.toggle('is-active', Boolean(visible));
+  if (visible && anchor) {
+    const shell = document.querySelector('.page-canvas-shell');
+    const shellRect = shell?.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    if (shellRect) {
+      toolbar.style.top = `${Math.max(8, anchorRect.top - shellRect.top - 48)}px`;
+      toolbar.style.left = `${Math.max(12, anchorRect.left - shellRect.left)}px`;
+    }
+  }
+}
+
+function applyRichStyle(styleMap = {}) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || selection.isCollapsed) return;
+  document.execCommand('styleWithCSS', false, true);
+  const range = selection.getRangeAt(0);
+  const span = document.createElement('span');
+  Object.assign(span.style, styleMap);
+  try {
+    range.surroundContents(span);
+  } catch {
+    const fragment = range.extractContents();
+    span.appendChild(fragment);
+    range.insertNode(span);
+  }
+  selection.removeAllRanges();
+  const next = document.createRange();
+  next.selectNodeContents(span);
+  next.collapse(false);
+  selection.addRange(next);
 }
 
 function syncPreviewFromForm() {
@@ -243,7 +345,7 @@ function bindPageVisualEditor() {
         return;
       }
       if (field.classList.contains('cms-edit-rich')) {
-        field.innerHTML = paragraphsFromText(event.target.value) || '<p></p>';
+        field.innerHTML = formatRichText(event.target.value) || '<p></p>';
       } else {
         field.textContent = event.target.value;
       }
@@ -254,16 +356,59 @@ function bindPageVisualEditor() {
     if (event.target?.name === 'layout') syncPreviewFromForm();
   });
 
+  preview.addEventListener('focusin', event => {
+    const field = event.target.closest?.('.cms-edit-rich');
+    setRichToolbarVisible(Boolean(field), field);
+  });
+  preview.addEventListener('focusout', event => {
+    const next = event.relatedTarget;
+    if (next?.closest?.('#rich-text-toolbar')) return;
+    setTimeout(() => {
+      if (!preview.contains(document.activeElement) && !document.activeElement?.closest?.('#rich-text-toolbar')) {
+        setRichToolbarVisible(false);
+      }
+    }, 0);
+  });
+
   preview.addEventListener('paste', event => {
     const field = event.target.closest?.('[data-cms-field]');
     if (!field) return;
     event.preventDefault();
-    const text = event.clipboardData?.getData('text/plain') || '';
     if (field.classList.contains('cms-edit-rich')) {
-      document.execCommand('insertText', false, text);
+      const html = event.clipboardData?.getData('text/html');
+      const text = event.clipboardData?.getData('text/plain') || '';
+      const clean = html ? sanitizeRichHtml(html) : formatRichText(text);
+      document.execCommand('insertHTML', false, clean || escapeHtml(text));
+      syncFieldFromPreview(field);
     } else {
+      const text = event.clipboardData?.getData('text/plain') || '';
       document.execCommand('insertText', false, text.replace(/\s+/g, ' '));
     }
+  });
+
+  const toolbar = document.querySelector('#rich-text-toolbar');
+  toolbar?.querySelectorAll('[data-rich]').forEach(button => {
+    button.addEventListener('mousedown', event => event.preventDefault());
+    button.addEventListener('click', () => {
+      const command = button.dataset.rich;
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand(command, false, null);
+      const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
+      if (field) syncFieldFromPreview(field);
+    });
+  });
+  document.querySelector('#rich-text-color')?.addEventListener('input', event => {
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, event.target.value);
+    const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
+    if (field) syncFieldFromPreview(field);
+  });
+  document.querySelector('#rich-text-size')?.addEventListener('change', event => {
+    if (!event.target.value) return;
+    applyRichStyle({ fontSize: event.target.value });
+    const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
+    if (field) syncFieldFromPreview(field);
+    event.target.value = '';
   });
 
   document.querySelector('#add-page-callout')?.addEventListener('click', () => {
@@ -347,6 +492,7 @@ function showAllowedPanels() {
     dashboard: true,
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
+    staff: canEditStaff(),
     site: hasPermission('site'),
     users: hasPermission('users'),
     events: hasPermission('events') || canEditPage('calendar'),
@@ -368,6 +514,11 @@ function showAllowedPanels() {
   if (editCalendarPage) {
     editCalendarPage.hidden = !canEditPage('calendar');
     editCalendarPage.onclick = () => editPage('calendar');
+  }
+  const editDirectorsPage = document.querySelector('#edit-directors-page');
+  if (editDirectorsPage) {
+    editDirectorsPage.hidden = !canEditPage('directors');
+    editDirectorsPage.onclick = () => editPage('directors');
   }
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
@@ -435,6 +586,7 @@ function renderDashboard() {
 
   // Page edit shortcuts live in the left nav, so omit page cards here. Remaining cards respect assigned permissions.
   const cards = [
+    canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People'],
     canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
     hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
@@ -481,6 +633,59 @@ async function loadSponsors() {
   if (!canEditSponsors()) return;
   state.sponsors = await jsonFetch('/api/admin/sponsors');
   renderSponsors();
+}
+
+async function loadStaff() {
+  if (!canEditStaff()) return;
+  state.staff = await jsonFetch('/api/admin/staff');
+  renderStaff();
+}
+
+function staffPreviewCard(member) {
+  const photo = member.photo_url
+    ? `<div class="avatar"><img src="${escapeHtml(member.photo_url)}" alt="${escapeHtml(member.name)}"></div>`
+    : '<div class="avatar" aria-hidden="true"></div>';
+  return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${member.role ? `<p class="person-role">${escapeHtml(member.role)}</p>` : ''}${member.bio ? `<p>${escapeHtml(member.bio)}</p>` : ''}</div></article>`;
+}
+
+function renderStaff() {
+  const list = document.querySelector('#staff-list');
+  const preview = document.querySelector('#staff-preview');
+  if (!list || !preview) return;
+  const ordered = [...state.staff].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  list.innerHTML = ordered.map((member, index) => `
+    <article class="admin-row staff-admin-row">
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
+      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.role || 'Staff')}</span><small>${escapeHtml(member.bio || 'No description')} · order ${member.sort_order} · ${member.active ? 'Active' : 'Hidden'}</small></div>
+      <div class="row-actions"><button data-move-staff="${member.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-staff="${member.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-staff="${member.id}">Edit</button><button data-delete-staff="${member.id}">Delete</button></div>
+    </article>
+  `).join('') || '<p class="draft">No staff members yet.</p>';
+  preview.innerHTML = ordered.filter(member => member.active).map(staffPreviewCard).join('') || '<p class="draft">No active staff yet.</p>';
+  list.querySelectorAll('[data-edit-staff]').forEach(button => button.addEventListener('click', () => {
+    const member = state.staff.find(item => item.id === Number(button.dataset.editStaff));
+    const form = document.querySelector('#staff-form');
+    fillForm(form, member);
+    form.elements.active.checked = Boolean(member.active);
+    form.elements.photo_file.value = '';
+  }));
+  list.querySelectorAll('[data-delete-staff]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Delete this staff member?')) return;
+    await jsonFetch(`/api/admin/staff/${button.dataset.deleteStaff}`, { method: 'DELETE' });
+    await loadStaff();
+  }));
+  list.querySelectorAll('[data-move-staff]').forEach(button => button.addEventListener('click', async () => moveStaff(Number(button.dataset.moveStaff), button.dataset.direction)));
+}
+
+async function moveStaff(id, direction) {
+  const ordered = [...state.staff].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  const index = ordered.findIndex(member => member.id === id);
+  const swapIndex = direction === 'up' ? index - 1 : index + 1;
+  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) return;
+  const current = ordered[index];
+  const swap = ordered[swapIndex];
+  await jsonFetch(`/api/admin/staff/${current.id}`, { method: 'PUT', body: JSON.stringify({ ...current, sort_order: swap.sort_order }) });
+  await jsonFetch(`/api/admin/staff/${swap.id}`, { method: 'PUT', body: JSON.stringify({ ...swap, sort_order: current.sort_order }) });
+  await loadStaff();
 }
 
 function sponsorPreviewCard(sponsor, index = 0) {
@@ -595,7 +800,7 @@ async function loadPhotos() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadUsers(), loadEvents(), loadPhotos()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadEvents(), loadPhotos()]);
 }
 
 function bindForms() {
@@ -652,6 +857,47 @@ function bindForms() {
     showPageEditorChrome(true);
     syncPreviewFromForm();
     activateTab('pages');
+  });
+
+  document.querySelector('#staff-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#staff-status');
+    status.textContent = 'Saving…';
+    try {
+      const payload = formPayload(form);
+      const id = payload.id;
+      delete payload.id;
+      delete payload.photo_file;
+      const file = form.elements.photo_file?.files?.[0];
+      if (file) {
+        const upload = new FormData();
+        upload.set('file', file);
+        upload.set('alt_text', payload.name || 'Staff photo');
+        upload.set('caption', payload.role || 'Directors & Staff');
+        upload.set('sort_order', String(payload.sort_order || 0));
+        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        payload.photo_url = stored.url;
+        form.elements.photo_url.value = stored.url;
+      }
+      payload.sort_order = Number(payload.sort_order || 0);
+      await jsonFetch(id ? `/api/admin/staff/${id}` : '/api/admin/staff', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      status.textContent = 'Staff member saved.';
+      form.reset();
+      form.elements.active.checked = true;
+      form.elements.sort_order.value = String((state.staff?.length || 0) + 1);
+      await loadStaff();
+    } catch (error) {
+      status.textContent = `Could not save staff member: ${error.message}`;
+    }
+  });
+
+  document.querySelector('#new-staff')?.addEventListener('click', () => {
+    const form = document.querySelector('#staff-form');
+    form.reset();
+    form.elements.active.checked = true;
+    form.elements.sort_order.value = String((state.staff?.length || 0) + 1);
+    document.querySelector('#staff-status').textContent = '';
   });
 
   document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
@@ -774,4 +1020,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* page-visual-editor: 20260801-16 */
+/* rich-text-staff: 20260801-17 */
