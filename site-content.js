@@ -193,7 +193,76 @@ async function loadPublicContent() {
   });
 
   bindSponsorMapCards();
-  await maybeShowHomepageSponsorAd();
+  await Promise.all([maybeShowHomepageSponsorAd(), loadContactForms()]);
+}
+
+function buildContactFormHtml(topics = []) {
+  const options = topics.length
+    ? topics.map((topic) => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.label)}</option>`).join('')
+    : '<option value="" disabled selected>Contact topics coming soon</option>';
+  const disabled = topics.length ? '' : ' disabled';
+  return `
+    <span class="tag">Contact</span>
+    <h3>Send a message</h3>
+    <p class="contact-form-intro">Choose a topic and we will route your message to the right person.</p>
+    <div class="form-grid">
+      <label>Name<input name="name" required autocomplete="name" placeholder="Your name"${disabled}></label>
+      <label>Email<input name="email" type="email" required autocomplete="email" placeholder="you@example.com"${disabled}></label>
+      <label class="full">Topic<select name="topic_id" required${disabled}>${options}</select></label>
+      <label class="full">Message<textarea name="message" rows="5" required placeholder="How can we help?"${disabled}></textarea></label>
+      <label class="contact-honeypot" aria-hidden="true">Company<input name="company" tabindex="-1" autocomplete="off"></label>
+    </div>
+    <p style="margin-top:16px"><button class="btn primary" type="submit"${disabled}>Send message</button></p>
+    <p class="status" data-contact-status></p>
+  `;
+}
+
+function bindContactForm(form) {
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-contact-status]');
+    const payload = Object.fromEntries(new FormData(form).entries());
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not send message');
+      form.reset();
+      if (status) status.textContent = result.detail || 'Message sent. Thank you!';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not send message.';
+    }
+  });
+}
+
+async function loadContactForms() {
+  const slots = [...document.querySelectorAll('[data-contact-form-slot], form[data-contact-form]')];
+  if (!slots.length) return;
+  const topics = await fetch('/api/contact/topics', { cache: 'no-store' })
+    .then((response) => (response.ok ? response.json() : []))
+    .catch(() => []);
+
+  slots.forEach((slot) => {
+    let form = slot;
+    if (slot.matches('[data-contact-form-slot]')) {
+      form = document.createElement('form');
+      form.className = 'card contact-form';
+      form.dataset.contactForm = '';
+      form.noValidate = true;
+      form.innerHTML = buildContactFormHtml(topics);
+      slot.replaceWith(form);
+    } else {
+      form.classList.add('card', 'contact-form');
+      form.innerHTML = buildContactFormHtml(topics);
+    }
+    bindContactForm(form);
+  });
 }
 
 loadPublicContent();

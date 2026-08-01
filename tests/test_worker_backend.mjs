@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, jsonResponse, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -207,6 +207,37 @@ test('formatSponsorAddress capitalizes parts and uses proper commas', () => {
   const maps = sponsorMapsUrls('123 Main Street, Kernersville, NC');
   assert.match(maps.directionsUrl, /google\.com\/maps\/dir/);
   assert.match(maps.embedUrl, /output=embed/);
+});
+
+test('contact topics require labels and valid delivery emails', () => {
+  const topic = normalizeContactTopicPayload({
+    label: ' Sponsor inquiry ',
+    email: 'Boosters@Example.com',
+    sort_order: '3',
+    active: true,
+  });
+  assert.equal(topic.label, 'Sponsor inquiry');
+  assert.equal(topic.email, 'boosters@example.com');
+  assert.equal(topic.sort_order, 3);
+  assert.equal(isValidEmail(topic.email), true);
+  assert.equal(isValidEmail('not-an-email'), false);
+  const html = renderContactForm([{ id: 9, label: 'General question' }]);
+  assert.match(html, /data-contact-form/);
+  assert.match(html, /value="9"/);
+  assert.match(html, /General question/);
+});
+
+test('contact layout keeps a form slot beside page copy', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'contact',
+    kicker: 'Connect',
+    heading: 'Contact',
+    intro: 'Reach the band office.',
+    body_text: 'Add office hours here.',
+  });
+  assert.match(html, /data-cms-layout="contact"/);
+  assert.match(html, /data-contact-form-slot/);
+  assert.match(html, /Add office hours here/);
 });
 
 test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {

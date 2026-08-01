@@ -14,7 +14,7 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], staff: [], site: null };
+const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null };
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -33,6 +33,10 @@ function canEditSponsors() {
 
 function canEditStaff() {
   return hasPermission('staff') || canEditPage('directors');
+}
+
+function canEditContact() {
+  return hasPermission('contact') || canEditPage('contact');
 }
 
 function formControl(form, name) {
@@ -239,7 +243,7 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
   }
   if (layout === 'contact') {
-    return `${hero}<section class="content"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || 'Add contact details here.', 'Main contact content')}</article>${showCallout ? callout : '<article class="card accent-card cms-edit-block"><div class="cms-edit-block-bar"><span>Accent card</span><button type="button" class="cms-edit-remove" data-add-callout>Replace with callout</button></div><h3>Contact details</h3><p>Add a callout to customize this side panel.</p></article>'}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || 'Add contact details here.', 'Main contact content')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab.</p></div>${showCallout ? callout : ''}</div></section>`;
   }
   if (layout === 'directory') {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
@@ -527,6 +531,7 @@ function showAllowedPanels() {
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
+    contact: canEditContact(),
     site: hasPermission('site'),
     users: hasPermission('users'),
     events: hasPermission('events') || canEditPage('calendar'),
@@ -558,6 +563,11 @@ function showAllowedPanels() {
   if (editSponsorsPage) {
     editSponsorsPage.hidden = !canEditPage('sponsors');
     editSponsorsPage.onclick = () => editPage('sponsors');
+  }
+  const editContactPage = document.querySelector('#edit-contact-page');
+  if (editContactPage) {
+    editContactPage.hidden = !canEditPage('contact');
+    editContactPage.onclick = () => editPage('contact');
   }
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
@@ -627,6 +637,7 @@ function renderDashboard() {
   const cards = [
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People'],
     canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
+    canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
     hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
   ].filter(Boolean);
@@ -650,6 +661,8 @@ function editPage(slug) {
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
     const sponsorsHint = form.querySelector('[data-sponsors-hint]');
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
+    const contactHint = form.querySelector('[data-contact-hint]');
+    if (contactHint) contactHint.hidden = page.slug !== 'contact';
     form.querySelector('[data-home-hint]').hidden = !page.is_home;
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
@@ -908,9 +921,62 @@ async function loadPhotos() {
   }));
 }
 
+function renderContactTopics() {
+  const list = document.querySelector('#contact-topics-list');
+  if (!list) return;
+  const ordered = [...state.contactTopics].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  list.innerHTML = ordered.length
+    ? ordered.map((topic) => `
+    <article class="admin-row">
+      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>order ${topic.sort_order} · ${topic.active ? 'Active' : 'Hidden'}</small></div>
+      <div class="row-actions"><button type="button" data-edit-contact-topic="${topic.id}">Edit</button><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
+    </article>
+  `).join('')
+    : '<p class="draft">No contact topics yet. Add one to enable the public form.</p>';
+
+  list.querySelectorAll('[data-edit-contact-topic]').forEach((button) => button.addEventListener('click', () => {
+    const topic = state.contactTopics.find((item) => item.id === Number(button.dataset.editContactTopic));
+    if (!topic) return;
+    const form = document.querySelector('#contact-topic-form');
+    fillForm(form, topic);
+    form.elements.active.checked = Boolean(Number(topic.active));
+    document.querySelector('#contact-topic-status').textContent = `Editing “${topic.label}”. Save to update.`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  list.querySelectorAll('[data-delete-contact-topic]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm('Delete this contact topic?')) return;
+    await jsonFetch(`/api/admin/contact/topics/${button.dataset.deleteContactTopic}`, { method: 'DELETE' });
+    await loadContactTopics();
+  }));
+}
+
+function renderContactMessages() {
+  const list = document.querySelector('#contact-messages-list');
+  if (!list) return;
+  list.innerHTML = state.contactMessages.length
+    ? state.contactMessages.map((item) => `
+    <article class="admin-row">
+      <div>
+        <b>${escapeHtml(item.topic_label || 'Topic')} → ${escapeHtml(item.to_email || 'unassigned')}</b>
+        <span>${escapeHtml(item.name)} &lt;${escapeHtml(item.email)}&gt;</span>
+        <small>${escapeHtml(item.message)} · ${item.delivered ? 'Delivered' : `Not delivered${item.delivery_error ? `: ${item.delivery_error}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
+      </div>
+    </article>
+  `).join('')
+    : '<p class="draft">No contact messages yet.</p>';
+}
+
+async function loadContactTopics() {
+  if (!canEditContact()) return;
+  state.contactTopics = await jsonFetch('/api/admin/contact/topics');
+  state.contactMessages = await jsonFetch('/api/admin/contact/messages').catch(() => []);
+  renderContactTopics();
+  renderContactMessages();
+}
+
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadEvents(), loadPhotos()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadEvents(), loadPhotos(), loadContactTopics()]);
 }
 
 function bindForms() {
@@ -1040,6 +1106,49 @@ function bindForms() {
     formControl(document.querySelector('#sponsor-form'), 'name')?.focus();
   });
 
+  document.querySelector('#contact-topic-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#contact-topic-status');
+    const payload = formPayload(form);
+    payload.sort_order = Number(payload.sort_order || (state.contactTopics.length + 1));
+    payload.active = Boolean(form.elements.active?.checked);
+    const id = String(payload.id || '').trim();
+    delete payload.id;
+    if (!payload.label?.trim()) {
+      if (status) status.textContent = 'Topic label is required.';
+      return;
+    }
+    if (!payload.email?.trim()) {
+      if (status) status.textContent = 'Delivery email is required.';
+      return;
+    }
+    try {
+      await jsonFetch(id ? `/api/admin/contact/topics/${id}` : '/api/admin/contact/topics', {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (status) status.textContent = id ? 'Topic updated.' : 'Topic created.';
+      form.reset();
+      formControl(form, 'id').value = '';
+      form.elements.active.checked = true;
+      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
+      await loadContactTopics();
+    } catch (error) {
+      if (status) status.textContent = `Could not save topic: ${error.message}`;
+    }
+  });
+
+  document.querySelector('#new-contact-topic')?.addEventListener('click', () => {
+    const form = document.querySelector('#contact-topic-form');
+    form.reset();
+    formControl(form, 'id').value = '';
+    form.elements.active.checked = true;
+    formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
+    document.querySelector('#contact-topic-status').textContent = 'Creating a new contact topic.';
+    formControl(form, 'label')?.focus();
+  });
+
   document.querySelector('#user-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1164,4 +1273,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* sponsor-address-map: 20260801-25 */
+/* contact-form-topics: 20260801-27 */
