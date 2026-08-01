@@ -1273,4 +1273,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* contact-form-topics: 20260801-26 */
+/* contact-form-topics: 20260801-27 */
