@@ -76,6 +76,7 @@ Deploy commands:
 
 ```bash
 npm run test:worker
+npm run test:pages-build
 npm run build:pages
 ```
 
@@ -83,14 +84,20 @@ npm run build:pages
 
 The admin routes need an Advanced Mode Pages Worker. In the Cloudflare Pages project's **Build configuration**, set:
 
-- Build command: `npm run build:pages`
+- Build command: `npm run build` (or `npm run build:pages`)
 - Build output directory: `dist`
 
-The build copies the static site into `dist/` and adds `dist/_worker.js` plus its `default-pages.mjs` runtime module. Deploying the repository root or only static files will serve the public site but makes `/admin` fall back to the homepage.
+The build is Node-only: it copies the static site into `dist/` and adds `dist/_worker.js` plus its `default-pages.mjs` runtime module. Deploying the repository root or only static files will serve the public site but makes `/admin` fall back to the homepage.
 
 Also retain the project-level D1 binding named `DB` and the production environment variables/secrets used by the CMS. After deploying, verify `https://efhsband.pages.dev/admin` redirects to `/admin/login` instead of rendering the homepage.
 
-For a direct Wrangler deployment, run `npm run build:pages` and deploy the `dist/` directory with Cloudflare Pages (not `wrangler deploy`, which targets standalone Workers).
+For a direct Wrangler Pages deployment (requires `CLOUDFLARE_API_TOKEN`):
+
+```bash
+npm run deploy:pages
+```
+
+Do not use `npm run deploy:worker` for the public site — that targets a standalone Worker, not the Cloudflare Pages project.
 
 Configured D1 database:
 
