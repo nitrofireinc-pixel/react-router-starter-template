@@ -47,8 +47,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .brand{flex:1 1 100%;min-width:0;max-width:100%}
   .brand span{font-size:.95rem;min-width:0;overflow-wrap:anywhere}
   .menu-button{display:inline-flex;margin:0;align-self:flex-start}
-  nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:60}
-  nav.open{display:flex!important;flex-direction:column}
+  header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:60}
+  header.site-header nav.open{display:flex!important;flex-direction:column}
 }
 @media(max-width:900px){.sponsor-directory{grid-template-columns:1fr}.sponsor-intro,.sponsor-cta{align-items:flex-start;flex-direction:column}.cms-shell{display:block;padding:20px}.cms-shell .admin-top{border-radius:18px 18px 0 0}.cms-shell .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));border-radius:0 0 18px 18px}.cms-shell .cms-panel{margin:20px 0}.hero .wrap{grid-template-columns:1fr;padding-top:56px}.cards,.two,.directory,.footer .wrap,.gallery,.admin-grid{grid-template-columns:1fr}.admin-grid .admin-card:first-child{grid-column:auto}.section-head{display:block}.admin-top{display:block}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr}.hero:before{background:linear-gradient(90deg,rgba(0,33,66,.62),rgba(0,33,66,.92)),url('assets/efhs-photo-2.png') center/cover no-repeat}}
 
@@ -126,4 +126,4 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 
 .image-admin-shell .row-actions button:disabled{opacity:.45!important;cursor:not-allowed!important;color:#94a3b8!important;border-color:#e2e8f0!important;background:#f8fafc!important;}
 
-/* admin-mobile-dropdown: 20260801-12 */
+/* admin-mobile-dropdown: 20260801-13 */
