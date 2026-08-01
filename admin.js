@@ -35,18 +35,25 @@ function canEditStaff() {
   return hasPermission('staff') || canEditPage('directors');
 }
 
+function formControl(form, name) {
+  if (!form || !name) return null;
+  return form.querySelector(`[name="${CSS.escape(name)}"]`) || form.elements.namedItem?.(name) || null;
+}
+
 function fillForm(form, data) {
   if (!form) return;
   for (const [key, value] of Object.entries(data || {})) {
-    if (!form.elements[key]) continue;
-    if (form.elements[key].type === 'checkbox') form.elements[key].checked = Boolean(value);
-    else form.elements[key].value = value ?? '';
+    const control = formControl(form, key);
+    if (!control || control.type === 'file') continue;
+    if (control.type === 'checkbox') control.checked = Boolean(Number(value) || value === true);
+    else control.value = value ?? '';
   }
 }
 
 function formPayload(form) {
   const payload = Object.fromEntries(new FormData(form).entries());
-  payload.active = Boolean(form.elements.active?.checked);
+  const active = formControl(form, 'active');
+  payload.active = Boolean(active?.checked);
   return payload;
 }
 
@@ -657,16 +664,32 @@ function renderStaff() {
     <article class="admin-row staff-admin-row">
       <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
       <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.role || 'Staff')}</span><small>${escapeHtml(member.bio || 'No description')} · order ${member.sort_order} · ${member.active ? 'Active' : 'Hidden'}</small></div>
-      <div class="row-actions"><button data-move-staff="${member.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-staff="${member.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-staff="${member.id}">Edit</button><button data-delete-staff="${member.id}">Delete</button></div>
+      <div class="row-actions"><button type="button" data-move-staff="${member.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move-staff="${member.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
     </article>
   `).join('') || '<p class="draft">No staff members yet.</p>';
   preview.innerHTML = ordered.filter(member => member.active).map(staffPreviewCard).join('') || '<p class="draft">No active staff yet.</p>';
   list.querySelectorAll('[data-edit-staff]').forEach(button => button.addEventListener('click', () => {
     const member = state.staff.find(item => item.id === Number(button.dataset.editStaff));
+    if (!member) return;
     const form = document.querySelector('#staff-form');
-    fillForm(form, member);
-    form.elements.active.checked = Boolean(member.active);
-    form.elements.photo_file.value = '';
+    const status = document.querySelector('#staff-status');
+    form.reset();
+    fillForm(form, {
+      staff_id: member.id,
+      name: member.name,
+      role: member.role,
+      bio: member.bio,
+      photo_url: member.photo_url,
+      sort_order: member.sort_order,
+      active: member.active,
+    });
+    formControl(form, 'staff_id').value = String(member.id);
+    formControl(form, 'active').checked = Boolean(Number(member.active));
+    const photoFile = formControl(form, 'photo_file');
+    if (photoFile) photoFile.value = '';
+    if (status) status.textContent = `Editing ${member.name || 'staff member'}. Save to update.`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    formControl(form, 'name')?.focus();
   }));
   list.querySelectorAll('[data-delete-staff]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this staff member?')) return;
@@ -866,10 +889,11 @@ function bindForms() {
     status.textContent = 'Saving…';
     try {
       const payload = formPayload(form);
-      const id = payload.id;
+      const id = String(payload.staff_id || payload.id || '').trim();
+      delete payload.staff_id;
       delete payload.id;
       delete payload.photo_file;
-      const file = form.elements.photo_file?.files?.[0];
+      const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
         const upload = new FormData();
         upload.set('file', file);
@@ -878,14 +902,19 @@ function bindForms() {
         upload.set('sort_order', String(payload.sort_order || 0));
         const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
         payload.photo_url = stored.url;
-        form.elements.photo_url.value = stored.url;
+        formControl(form, 'photo_url').value = stored.url;
       }
       payload.sort_order = Number(payload.sort_order || 0);
+      if (!payload.name?.trim()) {
+        status.textContent = 'Name is required.';
+        return;
+      }
       await jsonFetch(id ? `/api/admin/staff/${id}` : '/api/admin/staff', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      status.textContent = 'Staff member saved.';
+      status.textContent = id ? 'Staff member updated.' : 'Staff member created.';
       form.reset();
-      form.elements.active.checked = true;
-      form.elements.sort_order.value = String((state.staff?.length || 0) + 1);
+      formControl(form, 'staff_id').value = '';
+      formControl(form, 'active').checked = true;
+      formControl(form, 'sort_order').value = String((state.staff?.length || 0) + 1);
       await loadStaff();
     } catch (error) {
       status.textContent = `Could not save staff member: ${error.message}`;
@@ -895,9 +924,11 @@ function bindForms() {
   document.querySelector('#new-staff')?.addEventListener('click', () => {
     const form = document.querySelector('#staff-form');
     form.reset();
-    form.elements.active.checked = true;
-    form.elements.sort_order.value = String((state.staff?.length || 0) + 1);
-    document.querySelector('#staff-status').textContent = '';
+    formControl(form, 'staff_id').value = '';
+    formControl(form, 'active').checked = true;
+    formControl(form, 'sort_order').value = String((state.staff?.length || 0) + 1);
+    document.querySelector('#staff-status').textContent = 'Creating a new staff member.';
+    formControl(form, 'name')?.focus();
   });
 
   document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
@@ -1020,4 +1051,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* rich-text-staff: 20260801-17 */
+/* staff-edit-fix: 20260801-19 */
