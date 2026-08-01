@@ -94,7 +94,15 @@ function setSelectValue(select, value) {
 function activateTab(name) {
   document.querySelectorAll('.cms-panel').forEach(panel => panel.hidden = true);
   document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
-  document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === name));
+  document.querySelectorAll('.admin-menu button').forEach(button => button.classList.toggle('active', button.dataset.tab === name));
+}
+
+function activatePageShortcut(slug) {
+  document.querySelectorAll('.admin-menu button').forEach(button => button.classList.toggle('active', button.dataset.editShortcut === slug));
+}
+
+async function ensureFullPagesLoaded() {
+  if (!state.pages.some(page => page.body_html !== undefined)) await loadPages();
 }
 
 function pageLabel(slug) {
@@ -187,16 +195,23 @@ function renderPages() {
 }
 
 function editPage(slug) {
-  const page = state.pages.find(item => item.slug === slug);
-  if (!page) return;
-  const form = document.querySelector('#page-form');
-  fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
-  form.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
-  form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
-  form.querySelector('[data-home-hint]').hidden = !page.is_home;
-  form.elements.active.checked = Boolean(page.active);
-  activateTab('pages');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  return (async () => {
+    await ensureFullPagesLoaded();
+    const page = state.pages.find(item => item.slug === slug);
+    if (!page) return;
+    const form = document.querySelector('#page-form');
+    fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+    document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
+    form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
+    form.querySelector('[data-home-hint]').hidden = !page.is_home;
+    form.elements.active.checked = Boolean(page.active);
+    activateTab('pages');
+    activatePageShortcut(slug);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  })().catch(error => {
+    console.error(error);
+    document.querySelector('#page-status').textContent = `Could not open ${pageLabel(slug)}: ${error.message}`;
+  });
 }
 
 function renderPagePermissionBoxes() {
@@ -366,7 +381,7 @@ function bindForms() {
     form.elements.intro.value = 'Short introduction for this page.';
     form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
     form.elements.active.checked = true;
-    form.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
+    document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
   });
 
   document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
