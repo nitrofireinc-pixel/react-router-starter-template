@@ -244,6 +244,30 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   background:rgba(255,255,255,.08);
   transform:translateY(-1px);
 }
+.cms-edit-field[data-edit-label]:hover:after,
+.cms-edit-field[data-edit-label]:focus:after,
+.cms-edit-field[data-edit-label].is-focused:after{
+  content:attr(data-edit-label);
+  position:absolute;
+  top:-0.85rem;
+  left:0;
+  z-index:2;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#014990;
+  color:#fff;
+  font-size:.65rem;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  pointer-events:none;
+  animation:pageFieldLabelIn .18s ease both;
+}
+@keyframes pageFieldLabelIn{
+  from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:none}
+}
 .page-preview .content .cms-edit-field:focus,
 .page-preview .content .cms-edit-field.is-focused{
   background:rgba(1,73,144,.04);

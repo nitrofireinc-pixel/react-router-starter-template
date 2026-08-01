@@ -103,15 +103,26 @@ function layoutChipLabel(layout) {
   })[layout] || 'Standard layout';
 }
 
+const PAGE_FIELD_LABELS = {
+  kicker: 'Small label',
+  heading: 'Heading',
+  intro: 'Intro',
+  body_text: 'Body content',
+  callout_title: 'Callout title',
+  callout_text: 'Callout text',
+};
+
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
   const classes = ['cms-edit-field', extraClass].filter(Boolean).join(' ');
   const content = escapeHtml(value || '');
-  return `<${tag} class="${classes}" data-cms-field="${escapeAttr(name)}" contenteditable="true" role="textbox" spellcheck="true" data-placeholder="${escapeAttr(placeholder)}">${content}</${tag}>`;
+  const label = PAGE_FIELD_LABELS[name] || name;
+  return `<${tag} class="${classes}" data-cms-field="${escapeAttr(name)}" data-edit-label="${escapeAttr(label)}" contenteditable="true" role="textbox" spellcheck="true" aria-label="${escapeAttr(label)}" data-placeholder="${escapeAttr(placeholder)}">${content}</${tag}>`;
 }
 
 function editableRichField(name, value, placeholder = '') {
   const html = paragraphsFromText(value) || '<p></p>';
-  return `<div class="cms-edit-field cms-edit-rich" data-cms-field="${escapeAttr(name)}" contenteditable="true" role="textbox" spellcheck="true" data-placeholder="${escapeAttr(placeholder)}">${html}</div>`;
+  const label = PAGE_FIELD_LABELS[name] || name;
+  return `<div class="cms-edit-field cms-edit-rich" data-cms-field="${escapeAttr(name)}" data-edit-label="${escapeAttr(label)}" contenteditable="true" role="textbox" spellcheck="true" aria-label="${escapeAttr(label)}" data-placeholder="${escapeAttr(placeholder)}">${html}</div>`;
 }
 
 function buildEditablePagePreview(payload = {}) {
@@ -763,4 +774,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* page-visual-editor: 20260801-15 */
+/* page-visual-editor: 20260801-16 */
