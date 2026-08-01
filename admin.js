@@ -167,7 +167,7 @@ function renderDashboard() {
     ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
     ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
     ['Home', 'Edit the public homepage headline and body content.', 'page:home', 'Website'],
-    ['Calendar', 'Manage event text and date blocks.', 'events', 'Program'],
+    ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
   ];
   dashboard.innerHTML = cards.map(([title, text, target, kicker]) => `<button class="dash-card" type="button" data-dash-target="${target}"><span>${kicker}</span><b>${title}</b><small>${text}</small></button>`).join('');
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
