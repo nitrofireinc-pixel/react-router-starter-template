@@ -177,9 +177,23 @@ test('sponsor helpers normalize editable rows and render safe sponsor cards', ()
 
   assert.equal(sponsor.mark_text, 'KM');
   assert.equal(sponsor.sort_order, 2);
+  assert.equal(sponsor.homepage_ad, 0);
   const html = renderSponsorsDirectory([sponsor]);
   assert.match(html, /sponsor-card sponsor-featured/);
   assert.match(html, /Kernersville &lt;Music&gt;/);
   assert.match(html, /Kernersville &amp; NC/);
   assert.doesNotMatch(html, /<Music>/);
+});
+
+test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
+  const enabled = normalizeSponsorPayload({
+    name: 'Eagle Financial Partners',
+    homepage_ad: true,
+    active: true,
+  });
+  assert.equal(enabled.homepage_ad, 1);
+  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1 });
+  assert.equal(preserved.homepage_ad, 1);
+  const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
+  assert.equal(disabled.homepage_ad, 0);
 });
