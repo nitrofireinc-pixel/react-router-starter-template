@@ -82,6 +82,189 @@ function pagePayload(form) {
   return payload;
 }
 
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+function paragraphsFromText(value) {
+  return String(value || '')
+    .split(/\n\s*\n/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+function layoutChipLabel(layout) {
+  return ({
+    standard: 'Standard layout',
+    calendar: 'Calendar layout',
+    contact: 'Contact layout',
+  })[layout] || 'Standard layout';
+}
+
+function editableField(name, tag, value, placeholder = '', extraClass = '') {
+  const classes = ['cms-edit-field', extraClass].filter(Boolean).join(' ');
+  const content = escapeHtml(value || '');
+  return `<${tag} class="${classes}" data-cms-field="${escapeAttr(name)}" contenteditable="true" role="textbox" spellcheck="true" data-placeholder="${escapeAttr(placeholder)}">${content}</${tag}>`;
+}
+
+function editableRichField(name, value, placeholder = '') {
+  const html = paragraphsFromText(value) || '<p></p>';
+  return `<div class="cms-edit-field cms-edit-rich" data-cms-field="${escapeAttr(name)}" contenteditable="true" role="textbox" spellcheck="true" data-placeholder="${escapeAttr(placeholder)}">${html}</div>`;
+}
+
+function buildEditablePagePreview(payload = {}) {
+  const layout = String(payload.layout || 'standard');
+  const kicker = String(payload.kicker || 'Page');
+  const heading = String(payload.heading || payload.title || 'Untitled Page');
+  const intro = String(payload.intro || '');
+  const body = String(payload.body_text || '');
+  const calloutTitle = String(payload.callout_title || '').trim();
+  const calloutText = String(payload.callout_text || '').trim();
+  const showCallout = Boolean(calloutTitle || calloutText);
+  const callout = showCallout
+    ? `<aside class="notice cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div>${editableField('callout_title', 'h3', calloutTitle || 'Note', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</aside>`
+    : `<button type="button" class="cms-add-callout" data-add-callout>+ Add callout block</button>`;
+  const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
+  const eventsPlaceholder = layout === 'calendar'
+    ? '<div class="timeline cms-events-placeholder" data-events><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    : '';
+
+  if (layout === 'calendar') {
+    return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
+  }
+  if (layout === 'contact') {
+    return `${hero}<section class="content"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || 'Add contact details here.', 'Main contact content')}</article>${showCallout ? callout : '<article class="card accent-card cms-edit-block"><div class="cms-edit-block-bar"><span>Accent card</span><button type="button" class="cms-edit-remove" data-add-callout>Replace with callout</button></div><h3>Contact details</h3><p>Add a callout to customize this side panel.</p></article>'}</div></section>`;
+  }
+  return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
+}
+
+const pageEditor = { rebuilding: false, bound: false };
+
+function showPageEditorChrome(active) {
+  document.querySelector('#page-form')?.toggleAttribute('hidden', !active);
+  document.querySelector('#page-preview')?.toggleAttribute('hidden', !active);
+  document.querySelector('[data-page-preview-empty]')?.toggleAttribute('hidden', active);
+}
+
+function syncFieldFromPreview(field) {
+  const form = document.querySelector('#page-form');
+  if (!form || !field?.dataset.cmsField) return;
+  const name = field.dataset.cmsField;
+  const control = form.elements[name];
+  if (!control) return;
+  const value = field.classList.contains('cms-edit-rich')
+    ? paragraphsFromNode(field)
+    : field.textContent.replace(/\s+/g, ' ').trim();
+  if (control.value !== value) control.value = value;
+}
+
+function syncPreviewFromForm() {
+  if (pageEditor.rebuilding) return;
+  const form = document.querySelector('#page-form');
+  const preview = document.querySelector('#page-preview');
+  if (!form || !preview || form.hidden) return;
+  pageEditor.rebuilding = true;
+  try {
+    const payload = pagePayload(form);
+    preview.innerHTML = buildEditablePagePreview(payload);
+    const chip = document.querySelector('[data-page-layout-chip]');
+    if (chip) chip.textContent = layoutChipLabel(payload.layout);
+    bindPagePreviewInteractions(preview);
+  } finally {
+    pageEditor.rebuilding = false;
+  }
+}
+
+function bindPagePreviewInteractions(preview) {
+  preview.querySelectorAll('[data-cms-field]').forEach(field => {
+    field.addEventListener('input', () => syncFieldFromPreview(field));
+    field.addEventListener('blur', () => syncFieldFromPreview(field));
+    field.addEventListener('focus', () => {
+      preview.querySelectorAll('.cms-edit-field.is-focused').forEach(node => node.classList.remove('is-focused'));
+      field.classList.add('is-focused');
+    });
+    field.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || field.classList.contains('cms-edit-rich')) return;
+      event.preventDefault();
+      field.blur();
+    });
+  });
+  preview.querySelectorAll('[data-add-callout]').forEach(button => {
+    button.addEventListener('click', () => {
+      const form = document.querySelector('#page-form');
+      if (!form.elements.callout_title.value) form.elements.callout_title.value = 'Note';
+      if (!form.elements.callout_text.value) form.elements.callout_text.value = 'Add an important note for families here.';
+      syncPreviewFromForm();
+      preview.querySelector('[data-cms-field="callout_title"]')?.focus();
+    });
+  });
+  preview.querySelectorAll('[data-remove-callout]').forEach(button => {
+    button.addEventListener('click', () => {
+      const form = document.querySelector('#page-form');
+      form.elements.callout_title.value = '';
+      form.elements.callout_text.value = '';
+      syncPreviewFromForm();
+    });
+  });
+}
+
+function bindPageVisualEditor() {
+  if (pageEditor.bound) return;
+  const form = document.querySelector('#page-form');
+  const preview = document.querySelector('#page-preview');
+  if (!form || !preview) return;
+  pageEditor.bound = true;
+
+  form.addEventListener('input', event => {
+    if (pageEditor.rebuilding) return;
+    const name = event.target?.name;
+    if (!name) return;
+    if (['layout', 'title'].includes(name)) {
+      syncPreviewFromForm();
+      return;
+    }
+    if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text'].includes(name)) {
+      const field = preview.querySelector(`[data-cms-field="${name}"]`);
+      if (!field) {
+        syncPreviewFromForm();
+        return;
+      }
+      if (field.classList.contains('cms-edit-rich')) {
+        field.innerHTML = paragraphsFromText(event.target.value) || '<p></p>';
+      } else {
+        field.textContent = event.target.value;
+      }
+    }
+  });
+
+  form.addEventListener('change', event => {
+    if (event.target?.name === 'layout') syncPreviewFromForm();
+  });
+
+  preview.addEventListener('paste', event => {
+    const field = event.target.closest?.('[data-cms-field]');
+    if (!field) return;
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text/plain') || '';
+    if (field.classList.contains('cms-edit-rich')) {
+      document.execCommand('insertText', false, text);
+    } else {
+      document.execCommand('insertText', false, text.replace(/\s+/g, ' '));
+    }
+  });
+
+  document.querySelector('#add-page-callout')?.addEventListener('click', () => {
+    const title = form.elements.callout_title;
+    const text = form.elements.callout_text;
+    if (!title.value) title.value = 'Note';
+    if (!text.value) text.value = 'Add an important note for families here.';
+    syncPreviewFromForm();
+    preview.querySelector('[data-cms-field="callout_title"]')?.focus();
+  });
+}
+
 function setSelectValue(select, value) {
   if (!select) return;
   if (value && ![...select.options].some(option => option.value === value)) {
@@ -265,11 +448,14 @@ function editPage(slug) {
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
     form.querySelector('[data-home-hint]').hidden = !page.is_home;
     form.elements.active.checked = Boolean(page.active);
+    showPageEditorChrome(true);
+    syncPreviewFromForm();
     activateTab('pages');
     activatePageShortcut(slug);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   })().catch(error => {
     console.error(error);
+    showPageEditorChrome(true);
     document.querySelector('#page-status').textContent = `Could not open ${pageLabel(slug)}: ${error.message}`;
   });
 }
@@ -423,12 +609,20 @@ function bindForms() {
   document.querySelector('#page-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
+    document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
     const payload = pagePayload(form);
     const original = payload.original_slug;
+    const status = document.querySelector('#page-status');
     delete payload.original_slug;
-    await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    document.querySelector('#page-status').textContent = 'Page saved.';
-    await refreshAll();
+    status.textContent = 'Saving…';
+    try {
+      await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      status.textContent = 'Page saved. Public site updated.';
+      await refreshAll();
+      if (payload.slug) await editPage(payload.slug);
+    } catch (error) {
+      status.textContent = `Could not save page: ${error.message}`;
+    }
   });
 
   document.querySelector('#new-page')?.addEventListener('click', () => {
@@ -440,8 +634,13 @@ function bindForms() {
     form.elements.heading.value = 'New Page';
     form.elements.intro.value = 'Short introduction for this page.';
     form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
+    form.elements.callout_title.value = '';
+    form.elements.callout_text.value = '';
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
+    showPageEditorChrome(true);
+    syncPreviewFromForm();
+    activateTab('pages');
   });
 
   document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
@@ -557,12 +756,11 @@ function bindForms() {
   });
 }
 
+bindPageVisualEditor();
 bindForms();
 refreshAll().catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* cms-deploy: 20260801-7 */
-
-/* admin-mobile-dropdown: 20260801-12 */
+/* page-visual-editor: 20260801-15 */
