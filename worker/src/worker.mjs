@@ -24,8 +24,16 @@ export const DEFAULT_SPONSORS = [
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-25';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
+const ASSET_VERSION = 'admin-cms-20260801-26';
+
+
+export const DEFAULT_CONTACT_TOPICS = [
+  { label: 'General question', email: '', sort_order: 1, active: 1 },
+  { label: 'Sponsor inquiry', email: '', sort_order: 2, active: 1 },
+  { label: 'Volunteer interest', email: '', sort_order: 3, active: 1 },
+  { label: 'Student resource question', email: '', sort_order: 4, active: 1 },
+];
 
 export const DEFAULT_STAFF = [
   { name: 'Name TBD', role: 'Band Director', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 1, active: 1 },
@@ -173,6 +181,8 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -226,6 +236,11 @@ async function initDb(env) {
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
     await env.DB.batch(DEFAULT_STAFF.map((member) => env.DB.prepare('INSERT INTO staff_members (name, role, bio, photo_url, sort_order, active) VALUES (?, ?, ?, ?, ?, ?)').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active)));
+  }
+  const topicCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM contact_topics').first();
+  if (!topicCount?.count) {
+    const fallbackEmail = String(env.CONTACT_DEFAULT_EMAIL || '').trim();
+    await env.DB.batch(DEFAULT_CONTACT_TOPICS.map((topic) => env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email || fallbackEmail, topic.sort_order, topic.active)));
   }
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
@@ -616,9 +631,117 @@ function renderDirectorsPageBody(page, staff) {
   return `<section class="page-hero" data-cms-layout="directory"><div class="page-title"><div class="kicker" data-cms-field="kicker">People</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Directors & Staff')}</h1><p data-cms-field="intro">Meet the directors and staff who lead the East Forsyth Band program.</p></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Add a short welcome note for families here.</p></div>${directory}</div></section>`;
 }
 
+
+export function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+export function normalizeContactTopicPayload(payload = {}, existing = null) {
+  const label = String(payload.label ?? existing?.label ?? '').trim();
+  const email = String(payload.email ?? existing?.email ?? '').trim().toLowerCase();
+  return {
+    label,
+    email,
+    sort_order: Number(payload.sort_order ?? existing?.sort_order ?? 0),
+    active: payload.active === false || payload.active === 0 ? 0 : 1,
+  };
+}
+
+async function getContactTopics(env, includeInactive = false) {
+  const where = includeInactive ? '' : 'WHERE active = 1';
+  const rows = await env.DB.prepare(`SELECT id, label, email, sort_order, active FROM contact_topics ${where} ORDER BY sort_order, id`).all();
+  return rows.results || [];
+}
+
+export function renderContactForm(topics = []) {
+  const options = topics.length
+    ? topics.map((topic) => `<option value="${escapeAttr(topic.id)}">${escapeHtml(topic.label)}</option>`).join('')
+    : '<option value="" disabled selected>Contact topics coming soon</option>';
+  const disabled = topics.length ? '' : ' disabled';
+  return `<form class="card contact-form" data-contact-form novalidate>
+  <span class="tag">Contact</span>
+  <h3>Send a message</h3>
+  <p class="contact-form-intro">Choose a topic and we will route your message to the right person.</p>
+  <div class="form-grid">
+    <label>Name<input name="name" required autocomplete="name" placeholder="Your name"${disabled}></label>
+    <label>Email<input name="email" type="email" required autocomplete="email" placeholder="you@example.com"${disabled}></label>
+    <label class="full">Topic<select name="topic_id" required${disabled}>${options}</select></label>
+    <label class="full">Message<textarea name="message" rows="5" required placeholder="How can we help?"${disabled}></textarea></label>
+    <label class="contact-honeypot" aria-hidden="true">Company<input name="company" tabindex="-1" autocomplete="off"></label>
+  </div>
+  <p style="margin-top:16px"><button class="btn primary" type="submit"${disabled}>Send message</button></p>
+  <p class="status" data-contact-status></p>
+</form>`;
+}
+
+function renderContactPageBody(page) {
+  const form = '<div data-contact-form-slot></div>';
+  const html = page.body_html || '';
+  if (!html.trim()) {
+    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>Contact details</h3><p>Add official phone, email, mailing address, social links, and response expectations here.</p></article>${form}</div></section>`;
+  }
+  let next = html;
+  if (next.includes('data-contact-form-slot')) {
+    next = next.replace(/<div[^>]*data-contact-form-slot[^>]*>[\s\S]*?<\/div>/i, form);
+  } else if (/data-contact-form/.test(next)) {
+    next = next.replace(/<form[^>]*data-contact-form[^>]*>[\s\S]*?<\/form>/i, form)
+      .replace(/<div[^>]*data-contact-form[^>]*>[\s\S]*?<\/div>/i, form);
+  } else if (/<form[\s\S]*?<\/form>/i.test(next)) {
+    next = next.replace(/<form[\s\S]*?<\/form>/i, form);
+  } else if (next.includes('grid two')) {
+    next = next.replace(/(<div class="wrap grid two">)([\s\S]*?)(<\/div>\s*<\/section>)/i, `$1$2${form}$3`);
+  } else {
+    next = `${next}${form}`;
+  }
+  return next;
+}
+
+async function sendContactEmail(env, { to, replyTo, subject, text }) {
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.pages.dev').trim();
+  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  if (!isValidEmail(to)) throw new Error('Topic email is invalid');
+  if (!isValidEmail(fromEmail)) throw new Error('Sender email is not configured');
+
+  if (env.RESEND_API_KEY) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: `${fromName} <${fromEmail}>`,
+        to: [to],
+        reply_to: replyTo || undefined,
+        subject,
+        text,
+      }),
+    });
+    if (!response.ok) throw new Error(`Resend error: ${await response.text()}`);
+    return { provider: 'resend' };
+  }
+
+  const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      personalizations: [{
+        to: [{ email: to }],
+        ...(replyTo ? { reply_to: [{ email: replyTo }] } : {}),
+      }],
+      from: { email: fromEmail, name: fromName },
+      subject,
+      content: [{ type: 'text/plain', value: text }],
+    }),
+  });
+  if (!response.ok) throw new Error(`Mailchannels error: ${await response.text()}`);
+  return { provider: 'mailchannels' };
+}
+
 function renderPageBody(page, sponsors = [], staff = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
+  if (page.slug === 'contact') return renderContactPageBody(page);
   return page.body_html;
 }
 
@@ -792,7 +915,7 @@ export function generateStructuredPageHtml(payload = {}) {
   }
 
   if (layout === 'contact') {
-    return `${hero}<section class="content"><div class="wrap grid two"><article class="card" data-cms-field="body_text">${body}</article>${callout || '<article class="card accent-card"><h3>Contact details</h3><p>Add email, phone, office hours, or form instructions here.</p></article>'}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text">${body}</article><div data-contact-form-slot></div>${callout}</div></section>`;
   }
 
   if (layout === 'directory') {
@@ -831,6 +954,55 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/events' && request.method === 'GET') return jsonResponse(await getEvents(env));
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
+  if (url.pathname === '/api/contact/topics' && request.method === 'GET') {
+    const topics = (await getContactTopics(env)).filter((topic) => isValidEmail(topic.email));
+    return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
+  }
+  if (url.pathname === '/api/contact' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    if (String(payload.company || '').trim()) {
+      return jsonResponse({ ok: true }); // honeypot
+    }
+    const name = String(payload.name || '').trim();
+    const email = String(payload.email || '').trim().toLowerCase();
+    const message = String(payload.message || '').trim();
+    const topicId = Number(payload.topic_id);
+    if (!name || !isValidEmail(email) || !message || !topicId) {
+      return jsonResponse({ detail: 'Name, valid email, topic, and message are required' }, 422);
+    }
+    if (name.length > 120 || message.length > 5000) {
+      return jsonResponse({ detail: 'Message is too long' }, 422);
+    }
+    const topic = await env.DB.prepare('SELECT id, label, email, active FROM contact_topics WHERE id = ?').bind(topicId).first();
+    if (!topic || !topic.active) return jsonResponse({ detail: 'Selected topic is unavailable' }, 422);
+    if (!isValidEmail(topic.email)) {
+      return jsonResponse({ detail: 'This topic is not configured for delivery yet. Please try another topic or email the band office directly.' }, 503);
+    }
+    const subject = `EFHS Band contact: ${topic.label}`;
+    const text = [
+      `Topic: ${topic.label}`,
+      `From: ${name} <${email}>`,
+      '',
+      message,
+      '',
+      '— Sent from the East Forsyth Band website contact form',
+    ].join('\n');
+    let delivered = 0;
+    let deliveryError = '';
+    try {
+      await sendContactEmail(env, { to: topic.email, replyTo: email, subject, text });
+      delivered = 1;
+    } catch (error) {
+      deliveryError = String(error?.message || error || 'Delivery failed');
+    }
+    await env.DB.prepare(
+      'INSERT INTO contact_messages (topic_id, topic_label, to_email, name, email, message, delivered, delivery_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(topic.id, topic.label, topic.email, name, email, message, delivered, deliveryError).run();
+    if (!delivered) {
+      return jsonResponse({ detail: 'Your message was saved, but email delivery is not configured yet. Please try again later or contact the band office directly.' }, 502);
+    }
+    return jsonResponse({ ok: true, detail: 'Message sent. Thank you!' });
+  }
   if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
   if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
@@ -1031,6 +1203,56 @@ async function handleApi(request, env, url) {
     if (!member.name) return jsonResponse({ detail: 'Staff name is required' }, 422);
     await env.DB.prepare('UPDATE staff_members SET name = ?, role = ?, bio = ?, photo_url = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active, id).run();
     return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM staff_members WHERE id = ?').bind(id).first());
+  }
+
+  if (url.pathname === '/api/admin/contact/topics' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'contact') && !canEditPage(auth.user, 'contact')) {
+      return jsonResponse({ detail: 'Permission required: contact' }, 403);
+    }
+    return jsonResponse(await getContactTopics(env, true));
+  }
+  if (url.pathname === '/api/admin/contact/topics' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'contact') && !canEditPage(auth.user, 'contact')) {
+      return jsonResponse({ detail: 'Permission required: contact' }, 403);
+    }
+    const topic = normalizeContactTopicPayload(await request.json());
+    if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
+    if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
+    const result = await env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email, topic.sort_order, topic.active).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(result.meta.last_row_id).first());
+  }
+  const contactTopicMatch = url.pathname.match(/^\/api\/admin\/contact\/topics\/(\d+)$/);
+  if (contactTopicMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'contact') && !canEditPage(auth.user, 'contact')) {
+      return jsonResponse({ detail: 'Permission required: contact' }, 403);
+    }
+    const id = Number(contactTopicMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM contact_topics WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM contact_topics WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Topic not found' }, 404);
+    const topic = normalizeContactTopicPayload(await request.json(), existing);
+    if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
+    if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
+    await env.DB.prepare('UPDATE contact_topics SET label = ?, email = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(topic.label, topic.email, topic.sort_order, topic.active, id).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(id).first());
+  }
+  if (url.pathname === '/api/admin/contact/messages' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'contact') && !canEditPage(auth.user, 'contact')) {
+      return jsonResponse({ detail: 'Permission required: contact' }, 403);
+    }
+    const rows = await env.DB.prepare('SELECT id, topic_id, topic_label, to_email, name, email, message, delivered, delivery_error, created_at FROM contact_messages ORDER BY id DESC LIMIT 50').all();
+    return jsonResponse(rows.results || []);
   }
 
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {

@@ -717,3 +717,15 @@ body.sponsor-map-open{overflow:hidden}
   .sponsor-map-backdrop,
   .sponsor-map-panel{transition:none}
 }
+
+/* Contact form */
+.contact-form .contact-form-intro{margin:0 0 14px;color:var(--muted)}
+.contact-form .status{min-height:1.2em;margin:10px 0 0}
+.contact-honeypot{
+  position:absolute!important;
+  left:-9999px!important;
+  width:1px!important;
+  height:1px!important;
+  overflow:hidden!important;
+}
+.cms-contact-placeholder{opacity:.92}
