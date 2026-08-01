@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-11';
+const ASSET_VERSION = 'admin-cms-20260801-12';
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -689,8 +689,10 @@ export default {
 const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="btn primary" type="submit">Log in</button></form></main></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
-<button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar">Menu</button>
-<div class="admin-nav-backdrop" hidden></div>
+<div class="admin-mobile-bar">
+<button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-mobile-menu">Menu</button>
+<nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
+</div>
 <aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-edit-shortcut="directors">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-edit-shortcut="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>

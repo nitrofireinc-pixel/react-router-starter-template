@@ -91,17 +91,36 @@ function setSelectValue(select, value) {
 }
 
 function setAdminNavOpen(open) {
-  const shell = document.querySelector('.image-admin-shell');
   const toggle = document.querySelector('.admin-nav-toggle');
-  const backdrop = document.querySelector('.admin-nav-backdrop');
-  if (!shell || !toggle) return;
-  shell.classList.toggle('nav-open', open);
+  const menu = document.querySelector('#admin-mobile-menu');
+  if (!toggle || !menu) return;
   toggle.setAttribute('aria-expanded', String(open));
-  if (backdrop) backdrop.hidden = !open;
+  menu.hidden = !open;
+  document.querySelector('.admin-mobile-bar')?.classList.toggle('open', open);
 }
 
 function closeAdminNav() {
   setAdminNavOpen(false);
+}
+
+function renderMobileAdminMenu() {
+  const menu = document.querySelector('#admin-mobile-menu');
+  const sourceButtons = [...document.querySelectorAll('.admin-menu button')].filter(button => !button.hidden);
+  if (!menu) return;
+  menu.innerHTML = sourceButtons.map((button, index) => {
+    const label = button.textContent.trim();
+    const tab = button.dataset.tab || '';
+    const shortcut = button.dataset.editShortcut || '';
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}">${escapeHtml(label)}</button>`;
+  }).join('');
+  menu.querySelectorAll('button').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.mobileIndex);
+      const source = sourceButtons[index];
+      closeAdminNav();
+      source?.click();
+    });
+  });
 }
 
 function activateTab(name) {
@@ -166,6 +185,7 @@ function showAllowedPanels() {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
   activateTab('dashboard');
@@ -173,14 +193,19 @@ function showAllowedPanels() {
 
 function bindAdminNavToggle() {
   const toggle = document.querySelector('.admin-nav-toggle');
-  const backdrop = document.querySelector('.admin-nav-backdrop');
   if (!toggle || toggle.dataset.bound === '1') return;
   toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = !document.querySelector('.image-admin-shell')?.classList.contains('nav-open');
+  toggle.addEventListener('click', event => {
+    event.stopPropagation();
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    if (open) renderMobileAdminMenu();
     setAdminNavOpen(open);
   });
-  backdrop?.addEventListener('click', closeAdminNav);
+  document.addEventListener('click', event => {
+    const bar = document.querySelector('.admin-mobile-bar');
+    if (!bar || bar.hidden || !bar.classList.contains('open')) return;
+    if (!bar.contains(event.target)) closeAdminNav();
+  });
 }
 
 async function loadMe() {
@@ -203,6 +228,7 @@ async function loadPages() {
     const slug = button.dataset.editShortcut;
     button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
   });
+  renderMobileAdminMenu();
   renderPagePermissionBoxes();
 }
 
@@ -510,4 +536,4 @@ refreshAll().catch(error => {
 
 /* cms-deploy: 20260801-7 */
 
-/* admin-nav-drawer: 20260801-11 */
+/* admin-mobile-dropdown: 20260801-12 */
