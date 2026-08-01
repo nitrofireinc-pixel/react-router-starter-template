@@ -53,7 +53,9 @@ function fillForm(form, data) {
 function formPayload(form) {
   const payload = Object.fromEntries(new FormData(form).entries());
   const active = formControl(form, 'active');
-  payload.active = Boolean(active?.checked);
+  if (active) payload.active = Boolean(active.checked);
+  const homepageAd = formControl(form, 'homepage_ad');
+  if (homepageAd) payload.homepage_ad = Boolean(homepageAd.checked);
   return payload;
 }
 
@@ -756,7 +758,7 @@ function renderSponsors() {
     <article class="admin-row sponsor-admin-row">
       <span class="drag-handle">☰</span>
       <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
-      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(sponsor.address || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}</small></div>
+      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(sponsor.address || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
       <div class="row-actions"><button data-move-sponsor="${sponsor.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-sponsor="${sponsor.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-sponsor="${sponsor.id}">Edit</button><button data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
   `).join('');
@@ -765,7 +767,8 @@ function renderSponsors() {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
     fillForm(form, sponsor);
-    form.elements.active.checked = Boolean(sponsor.active);
+    form.elements.active.checked = Boolean(Number(sponsor.active));
+    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = Boolean(Number(sponsor.homepage_ad));
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this sponsor?')) return;
@@ -994,12 +997,14 @@ function bindForms() {
     const form = event.currentTarget;
     const payload = formPayload(form);
     payload.sort_order = Number(payload.sort_order || state.sponsors.length + 1);
+    payload.homepage_ad = Boolean(form.elements.homepage_ad?.checked);
     const id = payload.id;
     delete payload.id;
     await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
     document.querySelector('#sponsor-status').textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
     form.reset();
     form.elements.active.checked = true;
+    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
     await loadSponsors();
   });
 
@@ -1007,6 +1012,7 @@ function bindForms() {
     const form = document.querySelector('#sponsor-form');
     form.reset();
     form.elements.active.checked = true;
+    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
     form.elements.level.value = 'Community Sponsor';
     form.elements.sort_order.value = state.sponsors.length + 1;
   });
@@ -1135,4 +1141,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* sponsors-edit-page: 20260801-22 */
+/* homepage-sponsor-ad-center: 20260801-24 */
