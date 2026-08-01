@@ -16,16 +16,16 @@ export const DEFAULT_EVENTS = [
 ];
 
 export const DEFAULT_SPONSORS = [
-  { name: 'ABC Company', address: '123 Main Street, Kernersville, NC', logo_url: '', level: 'Community Sponsor', mark_text: 'ABC', sort_order: 1, active: 1, homepage_ad: 0 },
-  { name: 'Kernersville Music & Arts', address: 'Kernersville, NC', logo_url: '', level: 'Gold Sponsor', mark_text: 'KMA', sort_order: 2, active: 1, homepage_ad: 0 },
-  { name: 'Eagle Financial Partners', address: 'Kernersville, NC', logo_url: '', level: 'Navy Sponsor', mark_text: 'EFP', sort_order: 3, active: 1, homepage_ad: 0 },
+  { name: 'ABC Company', address: '123 Main Street', city: 'Kernersville', state: 'NC', logo_url: '', level: 'Community Sponsor', mark_text: 'ABC', sort_order: 1, active: 1, homepage_ad: 0 },
+  { name: 'Kernersville Music & Arts', address: '', city: 'Kernersville', state: 'NC', logo_url: '', level: 'Gold Sponsor', mark_text: 'KMA', sort_order: 2, active: 1, homepage_ad: 0 },
+  { name: 'Eagle Financial Partners', address: '', city: 'Kernersville', state: 'NC', logo_url: '', level: 'Navy Sponsor', mark_text: 'EFP', sort_order: 3, active: 1, homepage_ad: 0 },
 ];
 
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-24';
+const ASSET_VERSION = 'admin-cms-20260801-25';
 
 export const DEFAULT_STAFF = [
   { name: 'Name TBD', role: 'Band Director', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 1, active: 1 },
@@ -171,7 +171,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -188,6 +188,28 @@ async function initDb(env) {
   } catch {
     // Column already exists on upgraded databases.
   }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN city TEXT NOT NULL DEFAULT 'Kernersville'").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN state TEXT NOT NULL DEFAULT 'NC'").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
+  for (const row of legacySponsors.results || []) {
+    const rawAddress = String(row.address || '');
+    if (!rawAddress.includes(',')) continue;
+    const parts = rawAddress.split(',').map((part) => part.trim()).filter(Boolean);
+    const maybeState = normalizeStateCode(parts[parts.length - 1] || '', '');
+    if (!maybeState || !isUsStateCode(maybeState)) continue;
+    const parsed = parseLegacySponsorAddress(rawAddress);
+    await env.DB.prepare('UPDATE sponsors SET address = ?, city = ?, state = ? WHERE id = ?')
+      .bind(parsed.address, parsed.city, parsed.state, row.id)
+      .run();
+  }
   const siteRows = await env.DB.prepare('SELECT key FROM site_content').all();
   const existingKeys = new Set((siteRows.results || []).map((row) => row.key));
   for (const [key, value] of Object.entries(DEFAULT_SITE)) {
@@ -199,7 +221,7 @@ async function initDb(env) {
   }
   const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
   if (!sponsorCount?.count) {
-    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
+    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
   }
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
@@ -313,18 +335,184 @@ async function getEvents(env) {
     .sort(compareEventsByDate);
 }
 
+
+export const US_STATES = [
+  ['AL', 'Alabama'],
+  ['AK', 'Alaska'],
+  ['AZ', 'Arizona'],
+  ['AR', 'Arkansas'],
+  ['CA', 'California'],
+  ['CO', 'Colorado'],
+  ['CT', 'Connecticut'],
+  ['DE', 'Delaware'],
+  ['FL', 'Florida'],
+  ['GA', 'Georgia'],
+  ['HI', 'Hawaii'],
+  ['ID', 'Idaho'],
+  ['IL', 'Illinois'],
+  ['IN', 'Indiana'],
+  ['IA', 'Iowa'],
+  ['KS', 'Kansas'],
+  ['KY', 'Kentucky'],
+  ['LA', 'Louisiana'],
+  ['ME', 'Maine'],
+  ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'],
+  ['MI', 'Michigan'],
+  ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'],
+  ['MO', 'Missouri'],
+  ['MT', 'Montana'],
+  ['NE', 'Nebraska'],
+  ['NV', 'Nevada'],
+  ['NH', 'New Hampshire'],
+  ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'],
+  ['NY', 'New York'],
+  ['NC', 'North Carolina'],
+  ['ND', 'North Dakota'],
+  ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'],
+  ['OR', 'Oregon'],
+  ['PA', 'Pennsylvania'],
+  ['RI', 'Rhode Island'],
+  ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'],
+  ['TN', 'Tennessee'],
+  ['TX', 'Texas'],
+  ['UT', 'Utah'],
+  ['VT', 'Vermont'],
+  ['VA', 'Virginia'],
+  ['WA', 'Washington'],
+  ['WV', 'West Virginia'],
+  ['WI', 'Wisconsin'],
+  ['WY', 'Wyoming'],
+];
+
+const STATE_NAME_TO_CODE = Object.fromEntries(
+  US_STATES.flatMap(([code, name]) => [[code.toLowerCase(), code], [name.toLowerCase(), code]])
+);
+
+export function isUsStateCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  return US_STATES.some(([item]) => item === code);
+}
+
+export function normalizeStateCode(value, fallback = 'NC') {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  const mapped = STATE_NAME_TO_CODE[raw.toLowerCase()];
+  if (mapped) return mapped;
+  const upper = raw.toUpperCase();
+  return isUsStateCode(upper) ? upper : fallback;
+}
+
+export function titleCaseAddressPart(value) {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (/^\d/.test(word)) {
+        return word.replace(/[a-zA-Z]+/g, (part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+      }
+      if (word.includes('-')) {
+        return word.split('-').map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part)).join('-');
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+export function parseLegacySponsorAddress(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { address: '', city: 'Kernersville', state: 'NC' };
+  const parts = text.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const maybeState = normalizeStateCode(parts[parts.length - 1], '');
+    if (maybeState && isUsStateCode(maybeState)) {
+      if (parts.length >= 3) {
+        return {
+          address: parts.slice(0, -2).join(', '),
+          city: titleCaseAddressPart(parts[parts.length - 2]) || 'Kernersville',
+          state: maybeState,
+        };
+      }
+      return {
+        address: '',
+        city: titleCaseAddressPart(parts[0]) || 'Kernersville',
+        state: maybeState,
+      };
+    }
+  }
+  return {
+    address: text,
+    city: 'Kernersville',
+    state: 'NC',
+  };
+}
+
+export function formatSponsorAddress(sponsor = {}) {
+  const street = titleCaseAddressPart(sponsor.address || '');
+  const city = titleCaseAddressPart(sponsor.city || '');
+  const state = normalizeStateCode(sponsor.state || '', '');
+  const pieces = [];
+  if (street) pieces.push(street);
+  if (city) pieces.push(city);
+  if (state) pieces.push(state);
+  return pieces.join(', ');
+}
+
+export function sponsorMapsUrls(formattedAddress) {
+  const query = encodeURIComponent(String(formattedAddress || '').trim());
+  if (!query) {
+    return { embedUrl: '', directionsUrl: '', searchUrl: '' };
+  }
+  return {
+    embedUrl: `https://maps.google.com/maps?q=${query}&z=15&output=embed`,
+    directionsUrl: `https://www.google.com/maps/dir/?api=1&destination=${query}`,
+    searchUrl: `https://www.google.com/maps/search/?api=1&query=${query}`,
+  };
+}
+
+export function hydrateSponsor(sponsor) {
+  const source = sponsor || {};
+  const city = titleCaseAddressPart(source.city || 'Kernersville') || 'Kernersville';
+  const state = normalizeStateCode(source.state || 'NC');
+  const address = titleCaseAddressPart(source.address || '');
+  const formatted_address = formatSponsorAddress({ address, city, state });
+  const maps = sponsorMapsUrls(formatted_address);
+  return {
+    ...source,
+    address,
+    city,
+    state,
+    formatted_address,
+    maps_embed_url: maps.embedUrl,
+    maps_directions_url: maps.directionsUrl,
+  };
+}
+
 async function getSponsors(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, name, address, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
-  return rows.results || [];
+  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
+  return (rows.results || []).map((row) => hydrateSponsor(row));
 }
 
 export function normalizeSponsorPayload(payload = {}, existing = null) {
   const name = String(payload.name || existing?.name || '').trim();
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word.match(/[a-z0-9]/i)?.[0]?.toUpperCase()).filter(Boolean).join('') || '★';
+  const legacy = (!payload.city && !payload.state && payload.address && String(payload.address).includes(','))
+    ? parseLegacySponsorAddress(payload.address)
+    : null;
+  const address = titleCaseAddressPart(String(payload.address ?? legacy?.address ?? existing?.address ?? '').trim());
+  const city = titleCaseAddressPart(String(payload.city ?? legacy?.city ?? existing?.city ?? 'Kernersville').trim()) || 'Kernersville';
+  const state = normalizeStateCode(payload.state ?? legacy?.state ?? existing?.state ?? 'NC');
   return {
     name,
-    address: String(payload.address ?? existing?.address ?? '').trim(),
+    address,
+    city,
+    state,
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
     level: String(payload.level ?? existing?.level ?? 'Sponsor').trim() || 'Sponsor',
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
@@ -342,11 +530,14 @@ export function renderSponsorsDirectory(sponsors = []) {
     return '<div class="sponsor-empty"><h3>Sponsor spots are available.</h3><p>Use the admin Sponsors page to add businesses, logos, and addresses.</p></div>';
   }
   return sponsors.map((sponsor, index) => {
+    const item = hydrateSponsor(sponsor);
     const featured = index === 0 ? ' sponsor-featured' : '';
-    const logo = sponsor.logo_url
-      ? `<span class="sponsor-logo"><img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name)} logo"></span>`
-      : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<article class="sponsor-card${featured}" data-sponsor-id="${escapeAttr(sponsor.id || '')}">${logo}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3>${sponsor.address ? `<p>${escapeHtml(sponsor.address)}</p>` : ''}</div></article>`;
+    const logo = item.logo_url
+      ? `<span class="sponsor-logo"><img src="${escapeAttr(item.logo_url)}" alt="${escapeAttr(item.name)} logo"></span>`
+      : `<span class="sponsor-mark">${escapeHtml(item.mark_text || '★')}</span>`;
+    const formatted = item.formatted_address;
+    const hasMap = Boolean(formatted);
+    return `<article class="sponsor-card${featured}${hasMap ? ' sponsor-card-clickable' : ''}" data-sponsor-id="${escapeAttr(item.id || '')}"${hasMap ? ` data-sponsor-card data-sponsor-name="${escapeAttr(item.name)}" data-sponsor-address="${escapeAttr(formatted)}" data-sponsor-map-embed="${escapeAttr(item.maps_embed_url)}" data-sponsor-map-directions="${escapeAttr(item.maps_directions_url)}" role="button" tabindex="0"` : ''}>${logo}<div><span class="sponsor-level">${escapeHtml(item.level || 'Sponsor')}</span><h3>${escapeHtml(item.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}${hasMap ? '<span class="sponsor-map-hint">View map &amp; directions</span>' : ''}</div></article>`;
   }).join('');
 }
 
@@ -788,8 +979,8 @@ async function handleApi(request, env, url) {
     if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
     const sponsor = normalizeSponsorPayload(await request.json());
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
-    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, name, address, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first());
+    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
   }
   const sponsorMatch = url.pathname.match(/^\/api\/admin\/sponsors\/(\d+)$/);
   if (sponsorMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -805,8 +996,8 @@ async function handleApi(request, env, url) {
     if (!existing) return jsonResponse({ detail: 'Sponsor not found' }, 404);
     const sponsor = normalizeSponsorPayload(await request.json(), existing);
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
-    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, name, address, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first());
+    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
   }
 
   if (url.pathname === '/api/admin/staff' && request.method === 'GET') {
@@ -1017,7 +1208,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Click text in the live preview to edit it in place, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click a text block to edit · Tab between blocks · Save publishes to the site</small></div><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><details class="page-text-fields"><summary>Text fields (advanced)</summary><div class="form-grid"><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" required placeholder="Sound. Spirit. Eagle Pride."></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="8" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div></details><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list"></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
-<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Address<input name="address" placeholder="Kernersville, NC"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. The public Calendar page shows up to 5 at a time and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>

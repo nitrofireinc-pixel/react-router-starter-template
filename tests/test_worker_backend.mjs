@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, jsonResponse, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -169,7 +169,9 @@ test('sponsors layout keeps directory placeholder and page copy editable', () =>
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {
   const sponsor = normalizeSponsorPayload({
     name: 'Kernersville <Music>',
-    address: 'Kernersville & NC',
+    address: '123 main street',
+    city: 'kernersville',
+    state: 'nc',
     level: 'Gold Sponsor',
     sort_order: '2',
     active: true,
@@ -178,11 +180,33 @@ test('sponsor helpers normalize editable rows and render safe sponsor cards', ()
   assert.equal(sponsor.mark_text, 'KM');
   assert.equal(sponsor.sort_order, 2);
   assert.equal(sponsor.homepage_ad, 0);
+  assert.equal(sponsor.address, '123 Main Street');
+  assert.equal(sponsor.city, 'Kernersville');
+  assert.equal(sponsor.state, 'NC');
   const html = renderSponsorsDirectory([sponsor]);
   assert.match(html, /sponsor-card sponsor-featured/);
   assert.match(html, /Kernersville &lt;Music&gt;/);
-  assert.match(html, /Kernersville &amp; NC/);
+  assert.match(html, /123 Main Street, Kernersville, NC/);
+  assert.match(html, /data-sponsor-map-directions/);
   assert.doesNotMatch(html, /<Music>/);
+});
+
+test('formatSponsorAddress capitalizes parts and uses proper commas', () => {
+  assert.equal(
+    formatSponsorAddress({ address: '123 main street', city: 'kernersville', state: 'nc' }),
+    '123 Main Street, Kernersville, NC',
+  );
+  assert.equal(
+    formatSponsorAddress({ address: '', city: 'kernersville', state: 'NC' }),
+    'Kernersville, NC',
+  );
+  const parsed = parseLegacySponsorAddress('450 oak ave, winston-salem, north carolina');
+  assert.equal(parsed.state, 'NC');
+  assert.equal(parsed.city, 'Winston-Salem');
+  assert.equal(parsed.address, '450 oak ave');
+  const maps = sponsorMapsUrls('123 Main Street, Kernersville, NC');
+  assert.match(maps.directionsUrl, /google\.com\/maps\/dir/);
+  assert.match(maps.embedUrl, /output=embed/);
 });
 
 test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
@@ -192,8 +216,11 @@ test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
     active: true,
   });
   assert.equal(enabled.homepage_ad, 1);
-  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1 });
+  assert.equal(enabled.city, 'Kernersville');
+  assert.equal(enabled.state, 'NC');
+  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC' });
   assert.equal(preserved.homepage_ad, 1);
+  assert.equal(preserved.city, 'Greensboro');
   const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
   assert.equal(disabled.homepage_ad, 0);
 });

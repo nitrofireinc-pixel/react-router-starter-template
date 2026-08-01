@@ -82,6 +82,76 @@ async function maybeShowHomepageSponsorAd() {
   }
 }
 
+function closeSponsorMapModal() {
+  const modal = document.querySelector('.sponsor-map-modal');
+  if (!modal) return;
+  modal.classList.add('is-leaving');
+  document.body.classList.remove('sponsor-map-open');
+  window.setTimeout(() => modal.remove(), 280);
+}
+
+function openSponsorMapModal({ name, address, embedUrl, directionsUrl }) {
+  if (!address || !embedUrl || !directionsUrl) return;
+  closeSponsorMapModal();
+
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-map-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', `${name || 'Sponsor'} map`);
+  modal.innerHTML = `
+    <button type="button" class="sponsor-map-backdrop" aria-label="Close map"></button>
+    <div class="sponsor-map-panel">
+      <button type="button" class="sponsor-map-close" aria-label="Close map">×</button>
+      <div class="sponsor-map-copy">
+        <span class="sponsor-map-kicker">Sponsor location</span>
+        <h3>${escapeHtml(name || 'Sponsor')}</h3>
+        <p>${escapeHtml(address)}</p>
+      </div>
+      <a class="sponsor-map-shot" href="${escapeHtml(directionsUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open directions in maps">
+        <iframe
+          title="Map for ${escapeHtml(name || 'sponsor')}"
+          src="${escapeHtml(embedUrl)}"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          tabindex="-1"
+        ></iframe>
+        <span class="sponsor-map-overlay">
+          <strong>Open in Maps</strong>
+          <small>Get directions in Google, Apple, Bing, or your default maps app</small>
+        </span>
+      </a>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-map-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+
+  modal.querySelector('.sponsor-map-close')?.addEventListener('click', closeSponsorMapModal);
+  modal.querySelector('.sponsor-map-backdrop')?.addEventListener('click', closeSponsorMapModal);
+}
+
+function bindSponsorMapCards(root = document) {
+  root.querySelectorAll('[data-sponsor-card]').forEach((card) => {
+    if (card.dataset.mapBound === '1') return;
+    card.dataset.mapBound = '1';
+    const open = (event) => {
+      event.preventDefault();
+      openSponsorMapModal({
+        name: card.dataset.sponsorName || '',
+        address: card.dataset.sponsorAddress || '',
+        embedUrl: card.dataset.sponsorMapEmbed || '',
+        directionsUrl: card.dataset.sponsorMapDirections || '',
+      });
+    };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') open(event);
+    });
+  });
+}
+
 async function loadPublicContent() {
   const [site, events, photos] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
@@ -122,7 +192,11 @@ async function loadPublicContent() {
     `).join('');
   });
 
+  bindSponsorMapCards();
   await maybeShowHomepageSponsorAd();
 }
 
 loadPublicContent();
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeSponsorMapModal();
+});
