@@ -465,3 +465,5 @@ refreshAll().catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
+
+/* cms-deploy: 20260801-7 */
