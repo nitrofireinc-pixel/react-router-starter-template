@@ -469,20 +469,49 @@ function bindForms() {
   document.querySelector('#user-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
+    const status = document.querySelector('#user-status');
     const payload = formPayload(form);
+    payload.username = String(payload.username || '').trim();
     payload.display_name = String(payload.display_name || '').trim();
+    payload.password = String(payload.password || '');
+    if (!payload.username) {
+      status.textContent = 'Username is required.';
+      return;
+    }
     if (!payload.display_name) {
-      document.querySelector('#user-status').textContent = 'Display name is required.';
+      status.textContent = 'Display name is required.';
+      return;
+    }
+    const id = payload.id;
+    if (!id && !payload.password) {
+      status.textContent = 'Password is required for new users.';
+      return;
+    }
+    if (payload.password && payload.password.length < 8) {
+      status.textContent = 'Password must be at least 8 characters.';
       return;
     }
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
-    const id = payload.id;
     delete payload.id;
-    await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    document.querySelector('#user-status').textContent = 'User saved.';
-    form.reset();
-    form.elements.active.checked = true;
-    await loadUsers();
+    if (!payload.password) delete payload.password;
+    status.textContent = 'Saving…';
+    try {
+      await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      status.textContent = 'User saved.';
+      form.reset();
+      form.elements.active.checked = true;
+      form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
+      await loadUsers();
+    } catch (error) {
+      let message = 'Could not save user.';
+      try {
+        const parsed = JSON.parse(String(error.message || ''));
+        if (parsed?.detail) message = parsed.detail;
+      } catch {
+        if (error?.message) message = error.message;
+      }
+      status.textContent = message;
+    }
   });
 
   document.querySelector('#new-user')?.addEventListener('click', () => {

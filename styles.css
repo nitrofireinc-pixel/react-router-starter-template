@@ -84,7 +84,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     box-shadow:0 10px 24px rgba(15,34,58,.08);
   }
   .admin-mobile-menu{
-    display:grid;
+    display:grid!important;
     gap:4px;
     margin-top:10px;
     padding:10px;
