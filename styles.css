@@ -459,6 +459,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   overflow:hidden;
   font-size:1.2rem;
 }
+.events-list-card{min-width:0;max-width:100%}
+.events-list-card .admin-list{max-height:min(70vh,720px);overflow:auto;margin-top:0}
 .staff-live-preview .directory{grid-template-columns:1fr;gap:12px}
 .staff-live-preview .person{min-height:auto;box-shadow:none}
 .cms-staff-placeholder{pointer-events:none;opacity:.92;margin-top:18px}

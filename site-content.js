@@ -20,9 +20,15 @@ async function loadPublicContent() {
   }
 
   document.querySelectorAll('[data-events]').forEach(container => {
-    const limit = Number(container.dataset.limit || events.length || 0);
-    const visibleEvents = events.slice(0, limit);
-    if (!visibleEvents.length) return;
+    const rawLimit = container.dataset.limit;
+    const limit = rawLimit === undefined || rawLimit === ''
+      ? events.length
+      : Math.max(0, Number(rawLimit) || 0);
+    const visibleEvents = events.slice(0, limit || events.length);
+    if (!visibleEvents.length) {
+      container.innerHTML = '<p class="draft">No upcoming events have been published yet.</p>';
+      return;
+    }
     container.innerHTML = visibleEvents.map(event => `
       <article class="event">
         <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>

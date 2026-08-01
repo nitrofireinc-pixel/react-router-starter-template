@@ -208,7 +208,7 @@ function buildEditablePagePreview(payload = {}) {
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add callout block</button>`;
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="timeline cms-events-placeholder" data-events><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
     : '';
 
   if (layout === 'calendar') {
@@ -780,21 +780,41 @@ async function loadUsers() {
 }
 
 async function loadEvents() {
-  if (!hasPermission('events')) return;
+  if (!hasPermission('events') && !canEditPage('calendar')) return;
   state.events = await jsonFetch('/api/events');
   const list = document.querySelector('#events-list');
-  list.innerHTML = state.events.map(event => `
+  const count = document.querySelector('#events-count');
+  if (!list) return;
+  const ordered = [...state.events].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  if (count) count.textContent = `${ordered.length} total`;
+  list.innerHTML = ordered.length
+    ? ordered.map(event => `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
-      <div class="row-actions"><button data-edit-event="${event.id}">Edit</button><button data-delete-event="${event.id}">Delete</button></div>
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)} · order ${event.sort_order}</small></div>
+      <div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>
     </article>
-  `).join('');
+  `).join('')
+    : '<p class="draft">No calendar events yet. Use the form to add one.</p>';
   list.querySelectorAll('[data-edit-event]').forEach(button => button.addEventListener('click', () => {
     const event = state.events.find(item => item.id === Number(button.dataset.editEvent));
+    if (!event) return;
     const form = document.querySelector('#event-form');
-    fillForm(form, event);
-    setSelectValue(form.elements.date_label, event.date_label);
-    setSelectValue(form.elements.date_detail, event.date_detail);
+    const status = document.querySelector('#event-status');
+    form.reset();
+    fillForm(form, {
+      event_id: event.id,
+      date_label: event.date_label,
+      date_detail: event.date_detail,
+      title: event.title,
+      description: event.description,
+      sort_order: event.sort_order,
+    });
+    formControl(form, 'event_id').value = String(event.id);
+    setSelectValue(formControl(form, 'date_label'), event.date_label);
+    setSelectValue(formControl(form, 'date_detail'), event.date_detail);
+    if (status) status.textContent = `Editing “${event.title}”. Save to update.`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    formControl(form, 'title')?.focus();
   }));
   list.querySelectorAll('[data-delete-event]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this event?')) return;
@@ -1011,20 +1031,41 @@ function bindForms() {
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    const payload = formPayload(form);
-    payload.sort_order = Number(payload.sort_order || 0);
-    const id = payload.id;
-    delete payload.id;
-    await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    form.reset();
-    await loadEvents();
+    const status = document.querySelector('#event-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+      const payload = formPayload(form);
+      payload.sort_order = Number(payload.sort_order || 0);
+      const id = String(payload.event_id || payload.id || '').trim();
+      delete payload.event_id;
+      delete payload.id;
+      if (!payload.title?.trim() || !payload.description?.trim()) {
+        if (status) status.textContent = 'Title and description are required.';
+        return;
+      }
+      await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      if (status) status.textContent = id ? 'Event updated.' : 'Event created.';
+      form.reset();
+      formControl(form, 'event_id').value = '';
+      formControl(form, 'date_label').value = 'Aug';
+      formControl(form, 'date_detail').value = '01';
+      formControl(form, 'sort_order').value = '0';
+      await loadEvents();
+    } catch (error) {
+      if (status) status.textContent = `Could not save event: ${error.message}`;
+    }
   });
 
   document.querySelector('#new-event')?.addEventListener('click', () => {
     const form = document.querySelector('#event-form');
     form.reset();
-    form.elements.date_label.value = 'Aug';
-    form.elements.date_detail.value = '01';
+    formControl(form, 'event_id').value = '';
+    formControl(form, 'date_label').value = 'Aug';
+    formControl(form, 'date_detail').value = '01';
+    formControl(form, 'sort_order').value = '0';
+    const status = document.querySelector('#event-status');
+    if (status) status.textContent = 'Creating a new event.';
+    formControl(form, 'title')?.focus();
   });
 
   document.querySelector('#photo-form')?.addEventListener('submit', async event => {
@@ -1051,4 +1092,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* staff-edit-fix: 20260801-19 */
+/* calendar-events-limit: 20260801-20 */
