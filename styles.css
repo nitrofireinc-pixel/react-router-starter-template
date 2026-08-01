@@ -392,7 +392,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   to{opacity:1;transform:none}
 }
 @media(max-width:1100px){
-  .page-visual-layout{grid-template-columns:1fr}
+  .page-visual-layout{grid-template-columns:minmax(0,1fr)}
   .page-canvas-toolbar{align-items:flex-start;flex-direction:column}
 }
 
