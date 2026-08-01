@@ -90,14 +90,32 @@ function setSelectValue(select, value) {
   select.value = value || select.value;
 }
 
+function setAdminNavOpen(open) {
+  const shell = document.querySelector('.image-admin-shell');
+  const toggle = document.querySelector('.admin-nav-toggle');
+  const backdrop = document.querySelector('.admin-nav-backdrop');
+  if (!shell || !toggle) return;
+  shell.classList.toggle('nav-open', open);
+  toggle.setAttribute('aria-expanded', String(open));
+  if (backdrop) backdrop.hidden = !open;
+}
+
+function closeAdminNav() {
+  setAdminNavOpen(false);
+}
+
 function activateTab(name) {
   document.querySelectorAll('.cms-panel').forEach(panel => panel.hidden = true);
   document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
-  document.querySelectorAll('.admin-menu button').forEach(button => button.classList.toggle('active', button.dataset.tab === name));
+  document.querySelectorAll('.admin-menu button').forEach(button => {
+    button.classList.toggle('active', button.dataset.tab === name && !button.dataset.editShortcut);
+  });
+  closeAdminNav();
 }
 
 function activatePageShortcut(slug) {
   document.querySelectorAll('.admin-menu button').forEach(button => button.classList.toggle('active', button.dataset.editShortcut === slug));
+  closeAdminNav();
 }
 
 async function ensureFullPagesLoaded() {
@@ -118,10 +136,10 @@ function showAllowedPanels() {
     sponsors: canEditSponsors(),
     site: hasPermission('site'),
     users: hasPermission('users'),
-    events: hasPermission('events'),
+    events: hasPermission('events') || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
-  document.querySelectorAll('[data-tab]').forEach(button => {
+  document.querySelectorAll('.admin-menu > [data-tab]').forEach(button => {
     const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
@@ -133,12 +151,36 @@ function showAllowedPanels() {
   });
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = true;
+  const editCalendarPage = document.querySelector('#edit-calendar-page');
+  if (editCalendarPage) {
+    editCalendarPage.hidden = !canEditPage('calendar');
+    editCalendarPage.onclick = () => editPage('calendar');
+  }
+  const newEventButton = document.querySelector('#new-event');
+  const eventForm = document.querySelector('#event-form');
+  const eventsList = document.querySelector('#events-list');
+  if (newEventButton) newEventButton.hidden = !hasPermission('events');
+  if (eventForm) eventForm.hidden = !hasPermission('events');
+  if (eventsList) eventsList.hidden = !hasPermission('events');
   Object.entries(panels).forEach(([name, allowed]) => {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  bindAdminNavToggle();
   renderDashboard();
   activateTab('dashboard');
+}
+
+function bindAdminNavToggle() {
+  const toggle = document.querySelector('.admin-nav-toggle');
+  const backdrop = document.querySelector('.admin-nav-backdrop');
+  if (!toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = !document.querySelector('.image-admin-shell')?.classList.contains('nav-open');
+    setAdminNavOpen(open);
+  });
+  backdrop?.addEventListener('click', closeAdminNav);
 }
 
 async function loadMe() {
@@ -467,3 +509,5 @@ refreshAll().catch(error => {
 });
 
 /* cms-deploy: 20260801-7 */
+
+/* admin-nav-drawer: 20260801-11 */
