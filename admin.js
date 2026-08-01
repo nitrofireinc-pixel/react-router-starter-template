@@ -745,10 +745,31 @@ async function moveStaff(id, direction) {
   await loadStaff();
 }
 
+function formatAdminSponsorAddress(sponsor = {}) {
+  if (sponsor.formatted_address) return sponsor.formatted_address;
+  const street = String(sponsor.address || '').trim();
+  const city = String(sponsor.city || '').trim();
+  const state = String(sponsor.state || '').trim().toUpperCase();
+  return [street, city, state].filter(Boolean).join(', ');
+}
+
 function sponsorPreviewCard(sponsor, index = 0) {
   const featured = index === 0 ? ' sponsor-featured' : '';
   const mark = sponsor.logo_url ? `<span class="sponsor-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>` : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3><p>${escapeHtml(sponsor.address || '')}</p></div></article>`;
+  const formatted = formatAdminSponsorAddress(sponsor);
+  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}</div></article>`;
+}
+
+function resetSponsorForm(form) {
+  if (!form) return;
+  form.reset();
+  formControl(form, 'id').value = '';
+  formControl(form, 'city').value = 'Kernersville';
+  setSelectValue(formControl(form, 'state'), 'NC');
+  form.elements.active.checked = true;
+  if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
+  form.elements.level.value = 'Community Sponsor';
+  form.elements.sort_order.value = String((state.sponsors?.length || 0) + 1);
 }
 
 function renderSponsors() {
@@ -758,7 +779,7 @@ function renderSponsors() {
     <article class="admin-row sponsor-admin-row">
       <span class="drag-handle">☰</span>
       <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
-      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(sponsor.address || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
+      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
       <div class="row-actions"><button data-move-sponsor="${sponsor.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-sponsor="${sponsor.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-sponsor="${sponsor.id}">Edit</button><button data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
   `).join('');
@@ -766,7 +787,12 @@ function renderSponsors() {
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
-    fillForm(form, sponsor);
+    fillForm(form, {
+      ...sponsor,
+      city: sponsor.city || 'Kernersville',
+      state: sponsor.state || 'NC',
+    });
+    setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     form.elements.active.checked = Boolean(Number(sponsor.active));
     if (form.elements.homepage_ad) form.elements.homepage_ad.checked = Boolean(Number(sponsor.homepage_ad));
   }));
@@ -998,23 +1024,20 @@ function bindForms() {
     const payload = formPayload(form);
     payload.sort_order = Number(payload.sort_order || state.sponsors.length + 1);
     payload.homepage_ad = Boolean(form.elements.homepage_ad?.checked);
+    payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
+    payload.state = String(payload.state || 'NC').trim() || 'NC';
     const id = payload.id;
     delete payload.id;
     await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
     document.querySelector('#sponsor-status').textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
-    form.reset();
-    form.elements.active.checked = true;
-    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
+    resetSponsorForm(form);
     await loadSponsors();
   });
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
-    const form = document.querySelector('#sponsor-form');
-    form.reset();
-    form.elements.active.checked = true;
-    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
-    form.elements.level.value = 'Community Sponsor';
-    form.elements.sort_order.value = state.sponsors.length + 1;
+    resetSponsorForm(document.querySelector('#sponsor-form'));
+    document.querySelector('#sponsor-status').textContent = 'Creating a new sponsor.';
+    formControl(document.querySelector('#sponsor-form'), 'name')?.focus();
   });
 
   document.querySelector('#user-form')?.addEventListener('submit', async event => {
@@ -1141,4 +1164,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* homepage-sponsor-ad-center: 20260801-24 */
+/* sponsor-address-map: 20260801-25 */
