@@ -130,17 +130,34 @@ function structuredPageFields(page) {
   template.innerHTML = page.body_html || '';
   const root = template.content;
   const pageTitle = root.querySelector('.page-title');
-  const bodyNode = root.querySelector('[data-cms-field="body_text"]') || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
-  const callout = root.querySelector('[data-cms-block="callout"], .notice');
+  const bodyNode = root.querySelector('[data-cms-field="body_text"]')
+    || root.querySelector('.sponsor-intro > div')
+    || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
+  const callout = root.querySelector('[data-cms-block="callout"], .sponsor-cta, .notice');
   const calloutTextNode = callout?.querySelector('[data-cms-field="callout_text"]') || null;
+  const inferredLayout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout
+    || (page.slug === 'calendar' ? 'calendar'
+      : page.slug === 'contact' ? 'contact'
+        : page.slug === 'directors' ? 'directory'
+          : page.slug === 'sponsors' ? 'sponsors'
+            : 'standard');
   return {
-    layout: root.querySelector('[data-cms-layout]')?.dataset.cmsLayout || (page.slug === 'calendar' ? 'calendar' : page.slug === 'contact' ? 'contact' : page.slug === 'directors' ? 'directory' : 'standard'),
-    kicker: root.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim() || '',
-    heading: root.querySelector('[data-cms-field="heading"], h1')?.textContent.trim() || page.title || '',
+    layout: inferredLayout,
+    kicker: pageTitle?.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim()
+      || root.querySelector('[data-cms-field="kicker"], .page-title .kicker')?.textContent.trim()
+      || '',
+    heading: root.querySelector('[data-cms-field="heading"], .page-title h1')?.textContent.trim() || page.title || '',
     intro: pageTitle?.querySelector('[data-cms-field="intro"], p')?.textContent.trim() || '',
-    body_text: richHtmlFromNode(bodyNode) || (page.slug === 'calendar' ? 'Add calendar events from the Calendar tab. They will appear here automatically.' : textFromHtml(page.body_html)),
-    callout_title: callout?.querySelector('[data-cms-field="callout_title"], h3')?.textContent.trim() || '',
-    callout_text: calloutTextNode ? richHtmlFromNode(calloutTextNode) : paragraphsFromNode(callout),
+    body_text: richHtmlFromNode(bodyNode)
+      || (page.slug === 'calendar'
+        ? 'Add calendar events from the Calendar tab. They will appear here automatically.'
+        : page.slug === 'sponsors'
+          ? '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>'
+          : textFromHtml(page.body_html)),
+    callout_title: callout?.querySelector('[data-cms-field="callout_title"], h2, h3')?.textContent.trim() || '',
+    callout_text: calloutTextNode
+      ? richHtmlFromNode(calloutTextNode)
+      : (callout?.querySelector('p') ? `<p>${escapeHtml(callout.querySelector('p').textContent.trim())}</p>` : paragraphsFromNode(callout)),
   };
 }
 
@@ -169,6 +186,7 @@ function layoutChipLabel(layout) {
     calendar: 'Calendar layout',
     contact: 'Contact layout',
     directory: 'Staff directory layout',
+    sponsors: 'Sponsors layout',
   })[layout] || 'Standard layout';
 }
 
@@ -206,10 +224,14 @@ function buildEditablePagePreview(payload = {}) {
   const callout = showCallout
     ? `<aside class="notice cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div>${editableField('callout_title', 'h3', calloutTitle || 'Note', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add callout block</button>`;
-  const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
+  const heroClass = layout === 'sponsors' ? 'page-hero sponsor-hero' : 'page-hero';
+  const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
     ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
     : '';
+  const sponsorsCallout = showCallout
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside>`
+    : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
 
   if (layout === 'calendar') {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
@@ -219,6 +241,9 @@ function buildEditablePagePreview(payload = {}) {
   }
   if (layout === 'directory') {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
+  }
+  if (layout === 'sponsors') {
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="contact.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
@@ -527,6 +552,11 @@ function showAllowedPanels() {
     editDirectorsPage.hidden = !canEditPage('directors');
     editDirectorsPage.onclick = () => editPage('directors');
   }
+  const editSponsorsPage = document.querySelector('#edit-sponsors-page');
+  if (editSponsorsPage) {
+    editSponsorsPage.hidden = !canEditPage('sponsors');
+    editSponsorsPage.onclick = () => editPage('sponsors');
+  }
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
@@ -616,6 +646,8 @@ function editPage(slug) {
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
+    const sponsorsHint = form.querySelector('[data-sponsors-hint]');
+    if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
     form.querySelector('[data-home-hint]').hidden = !page.is_home;
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
@@ -1103,4 +1135,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* calendar-event-year-order: 20260801-21 */
+/* sponsors-edit-page: 20260801-22 */

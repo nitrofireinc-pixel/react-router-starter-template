@@ -147,6 +147,25 @@ test('normalizeEventPayload stores year for ordering and ignores sort_order', ()
   assert.equal(event.date_detail, '12');
 });
 
+test('sponsors layout keeps directory placeholder and page copy editable', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'sponsors',
+    kicker: 'Community Partners',
+    heading: 'Our <Sponsors>',
+    intro: 'Support the band.',
+    body_text: 'Thank you to our community partners.',
+    callout_title: 'Become a sponsor',
+    callout_text: 'Ask about levels & benefits.',
+  });
+  assert.match(html, /data-cms-layout="sponsors"/);
+  assert.match(html, /sponsor-hero/);
+  assert.match(html, /Our &lt;Sponsors&gt;/);
+  assert.match(html, /data-sponsors/);
+  assert.match(html, /sponsor-cta/);
+  assert.match(html, /Ask about levels &amp; benefits\./);
+  assert.doesNotMatch(html, /<Sponsors>/);
+});
+
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {
   const sponsor = normalizeSponsorPayload({
     name: 'Kernersville <Music>',
