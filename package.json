@@ -1,7 +1,9 @@
 {
   "scripts": {
     "test:worker": "node --test tests/test_worker_backend.mjs",
+    "test:pages-build": "uv run pytest -q tests/test_pages_build.py",
     "sync:worker-assets": "python3 worker/scripts/sync-public.py",
+    "build:pages": "npm run sync:worker-assets && python3 worker/scripts/build-pages.py",
     "deploy:worker": "npm run sync:worker-assets && wrangler deploy"
   },
   "devDependencies": {

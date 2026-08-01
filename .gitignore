@@ -11,5 +11,6 @@ Thumbs.db
 .wrangler/
 data/
 worker/public/
+dist/
 __pycache__/
 .pytest_cache/
