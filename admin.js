@@ -1141,4 +1141,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* homepage-sponsor-ad: 20260801-23 */
+/* homepage-sponsor-ad-center: 20260801-24 */

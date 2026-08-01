@@ -17,6 +17,8 @@ function pickRandomSponsor(sponsors) {
 function dismissSponsorAd(root) {
   if (!root) return;
   root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  document.body.classList.remove('sponsor-flyin-open');
   window.setTimeout(() => root.remove(), 420);
 }
 
@@ -30,27 +32,35 @@ function showHomepageSponsorAd(sponsor) {
   const root = document.createElement('aside');
   root.className = 'sponsor-flyin';
   root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
   root.innerHTML = `
-    <button type="button" class="sponsor-flyin-close" aria-label="Dismiss sponsor ad">×</button>
-    <a class="sponsor-flyin-card" href="/sponsors.html">
-      ${logo}
-      <div class="sponsor-flyin-copy">
-        <span class="sponsor-flyin-kicker">Community Partner</span>
-        <strong>${escapeHtml(sponsor.name)}</strong>
-        <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
-      </div>
-    </a>
+    <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
+    <div class="sponsor-flyin-panel">
+      <button type="button" class="sponsor-flyin-close" aria-label="Close sponsor ad">×</button>
+      <a class="sponsor-flyin-card" href="/sponsors.html">
+        ${logo}
+        <div class="sponsor-flyin-copy">
+          <span class="sponsor-flyin-kicker">Community Partner</span>
+          <strong>${escapeHtml(sponsor.name)}</strong>
+          <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
+          <em>View all sponsors</em>
+        </div>
+      </a>
+    </div>
   `;
 
   document.body.appendChild(root);
+  document.body.classList.add('sponsor-flyin-open');
   requestAnimationFrame(() => root.classList.add('is-visible'));
 
-  root.querySelector('.sponsor-flyin-close')?.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const close = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     dismissSponsorAd(root);
-  });
+  };
+  root.querySelector('.sponsor-flyin-close')?.addEventListener('click', close);
+  root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
 
   window.setTimeout(() => {
     if (document.body.contains(root)) dismissSponsorAd(root);
