@@ -903,6 +903,10 @@ function syncPreviewFromForm() {
   pageEditor.rebuilding = true;
   try {
     const payload = pagePayload(form);
+    const isHome = payload.layout === 'home' || payload.slug === 'home' || payload.original_slug === 'home';
+    if (isHome && preview.querySelector('[data-cms-home-field]')) {
+      state.homeBodyHtml = serializeHomePreviewHtml(preview);
+    }
     preview.innerHTML = buildEditablePagePreview(payload);
     const chip = document.querySelector('[data-page-layout-chip]');
     if (chip) chip.textContent = layoutChipLabel(payload.layout);
