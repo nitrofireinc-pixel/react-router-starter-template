@@ -1099,7 +1099,9 @@ function bindPageVisualEditor() {
 }
 
 async function submitAdminLogout() {
-  const logoutForm = document.querySelector('#admin-logout-form') || document.querySelector('form[action="/admin/logout"]');
+  const logoutForm = document.querySelector('#admin-mobile-logout-form:not([hidden])')
+    || document.querySelector('#admin-logout-form')
+    || document.querySelector('form[action="/admin/logout"]');
   if (!logoutForm) return;
   if (!(await confirmLeavePageEditor())) return;
   logoutForm.dataset.forceLogout = '1';

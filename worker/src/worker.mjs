@@ -34,7 +34,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-67';
+const ASSET_VERSION = 'admin-cms-20260802-68';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -2398,7 +2398,12 @@ const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">
+<div class="admin-mobile-bar-top">
 <button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-mobile-menu">Menu</button>
+<form id="admin-mobile-logout-form" class="admin-mobile-logout-form" method="post" action="/admin/logout">
+<button class="admin-mobile-logout-btn" type="submit">Log Out</button>
+</form>
+</div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
 <aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Staff Email</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>

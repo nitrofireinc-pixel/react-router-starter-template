@@ -84,6 +84,36 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     font-weight:900;
     box-shadow:0 10px 24px rgba(15,34,58,.08);
   }
+  .admin-mobile-bar-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .admin-mobile-logout-form{margin:0;flex:0 0 auto}
+  .admin-mobile-logout-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:42px;
+    padding:10px 14px;
+    border:1px solid #d5deea;
+    border-radius:12px;
+    background:#071b34;
+    color:#fff;
+    font-weight:900;
+    box-shadow:0 10px 24px rgba(15,34,58,.12);
+    cursor:pointer;
+  }
+  .admin-mobile-logout-btn:hover,
+  .admin-mobile-logout-btn:focus-visible{
+    background:#0d2b4d;
+    outline:none;
+  }
+  .admin-mobile-menu{
+    max-height:min(70vh,560px);
+    overflow:auto;
+  }
   .admin-mobile-menu{
     display:grid!important;
     gap:4px;
