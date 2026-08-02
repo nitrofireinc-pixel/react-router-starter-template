@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -278,9 +278,24 @@ test('sponsors layout keeps directory placeholder and page copy editable', () =>
   assert.match(html, /sponsor-hero/);
   assert.match(html, /Our &lt;Sponsors&gt;/);
   assert.match(html, /data-sponsors/);
+  assert.match(html, /data-sponsor-tiers/);
+  assert.match(html, /Gold Sponsor/);
+  assert.match(html, /Silver Sponsor/);
+  assert.match(html, /Bronze Sponsor/);
   assert.match(html, /sponsor-cta/);
   assert.match(html, /Ask about levels &amp; benefits\./);
   assert.doesNotMatch(html, /<Sponsors>/);
+});
+
+test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () => {
+  const tiers = renderSponsorTiersHtml();
+  assert.match(tiers, /home football games/);
+  assert.match(tiers, /Homepage fly-in advert/);
+  assert.match(tiers, /website sponsor marquee/);
+  const bare = '<div class="wrap"><div class="sponsor-intro"></div><div class="sponsor-directory" data-sponsors></div></div>';
+  const injected = ensureSponsorTiersSection(bare);
+  assert.match(injected, /data-sponsor-tiers/);
+  assert.equal(ensureSponsorTiersSection(injected), injected);
 });
 
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {

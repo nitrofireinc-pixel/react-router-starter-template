@@ -1616,7 +1616,7 @@ function resetSponsorForm(form) {
   setSelectValue(formControl(form, 'state'), 'NC');
   form.elements.active.checked = true;
   if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
-  form.elements.level.value = 'Community Sponsor';
+  form.elements.level.value = 'Bronze Sponsor';
   const file = formControl(form, 'logo_file');
   if (file) file.value = '';
   syncSponsorLogoPreview(form, '');
@@ -1645,6 +1645,17 @@ function renderSponsors() {
       state: sponsor.state || 'NC',
     });
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
+    const levelSelect = formControl(form, 'level');
+    if (levelSelect) {
+      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
+      if (![...levelSelect.options].some((option) => option.value === level)) {
+        const option = document.createElement('option');
+        option.value = level;
+        option.textContent = level;
+        levelSelect.appendChild(option);
+      }
+      setSelectValue(levelSelect, level);
+    }
     form.elements.active.checked = Boolean(Number(sponsor.active));
     if (form.elements.homepage_ad) form.elements.homepage_ad.checked = Boolean(Number(sponsor.homepage_ad));
     const file = formControl(form, 'logo_file');
