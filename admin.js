@@ -646,7 +646,7 @@ function renderDashboard() {
     canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
-    canSendMail() && ['Mail', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration'],
+    canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration'],
     hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
   ].filter(Boolean);
 
