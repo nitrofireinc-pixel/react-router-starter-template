@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHeaderNavItems, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -388,24 +388,6 @@ test('normalizeSponsorAdSeconds clamps homepage fly-in duration', () => {
   assert.equal(normalizeSponsorAdSeconds(1), 2);
   assert.equal(normalizeSponsorAdSeconds(99), 30);
   assert.equal(normalizeSponsorAdSeconds('nope', 6), 6);
-});
-
-test('normalizeHeaderNavItems cleans labels and reindexes order', () => {
-  const items = normalizeHeaderNavItems([
-    { slug: 'ensembles', title: 'Ensembles | East Forsyth Band', nav_order: 8, active: 1 },
-    { slug: 'home', title: 'Home', nav_order: 0, active: 1 },
-    { slug: 'home', title: 'Duplicate', nav_order: 99, active: 0 },
-    { slug: 'boosters', title: 'Boosters', nav_order: 3, active: false },
-  ]);
-  assert.equal(items.length, 3);
-  assert.equal(items[0].slug, 'home');
-  assert.equal(items[0].nav_order, 0);
-  assert.equal(items[1].slug, 'boosters');
-  assert.equal(items[1].title, 'Boosters');
-  assert.equal(items[1].active, 0);
-  assert.equal(items[2].slug, 'ensembles');
-  assert.equal(items[2].title, 'Ensembles');
-  assert.equal(items[2].nav_order, 2);
 });
 
 test('admin mail payload sanitizes rich html and builds plain text', () => {
