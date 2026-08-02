@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-46';
+const ASSET_VERSION = 'admin-cms-20260802-47';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -1100,8 +1100,24 @@ function renderPageBody(page, sponsors = [], staff = []) {
 }
 
 async function getPhotos(env) {
-  const rows = await env.DB.prepare('SELECT id, filename, original_name, alt_text, caption, sort_order FROM photos ORDER BY sort_order, id').all();
+  // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
+  const rows = await env.DB.prepare('SELECT id, filename, original_name, alt_text, caption, sort_order FROM photos WHERE sort_order >= 0 ORDER BY sort_order, id').all();
   return (rows.results || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+}
+
+async function photoUsageLabels(env, filename) {
+  const plain = `/uploads/${filename}`;
+  const encoded = `/uploads/${encodeURIComponent(filename)}`;
+  const [staff, sponsors, logo] = await Promise.all([
+    env.DB.prepare('SELECT name FROM staff_members WHERE photo_url = ? OR photo_url = ?').bind(plain, encoded).all(),
+    env.DB.prepare('SELECT name FROM sponsors WHERE logo_url = ? OR logo_url = ?').bind(plain, encoded).all(),
+    env.DB.prepare("SELECT value FROM site_content WHERE key = 'logo_url' AND (value = ? OR value = ?)").bind(plain, encoded).first(),
+  ]);
+  const labels = [];
+  for (const row of staff.results || []) labels.push(`staff photo for ${row.name}`);
+  for (const row of sponsors.results || []) labels.push(`sponsor logo for ${row.name}`);
+  if (logo) labels.push('the site logo');
+  return labels;
 }
 
 async function getPages(env, includeInactive = false) {
@@ -1794,6 +1810,12 @@ async function handleApi(request, env, url) {
   if (photoMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'photos');
     if (auth.response) return auth.response;
+    const photo = await env.DB.prepare('SELECT id, filename FROM photos WHERE id = ?').bind(Number(photoMatch[1])).first();
+    if (!photo) return jsonResponse({ detail: 'Photo not found' }, 404);
+    const usage = await photoUsageLabels(env, photo.filename);
+    if (usage.length) {
+      return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
+    }
     await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(Number(photoMatch[1])).run();
     return jsonResponse({ ok: true });
   }

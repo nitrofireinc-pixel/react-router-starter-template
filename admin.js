@@ -10,7 +10,16 @@ async function jsonFetch(url, options = {}) {
     cache: 'no-store',
     ...options,
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text);
+      throw new Error(data.detail || data.error || text);
+    } catch (error) {
+      if (error instanceof Error && error.message !== text && !error.message.startsWith('{')) throw error;
+      throw new Error(text || response.statusText || 'Request failed');
+    }
+  }
   return response.json();
 }
 
@@ -1301,8 +1310,12 @@ async function loadPhotos() {
   `).join('');
   list.querySelectorAll('[data-delete-photo]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this photo?')) return;
-    await jsonFetch(`/api/admin/photos/${button.dataset.deletePhoto}`, { method: 'DELETE' });
-    await loadPhotos();
+    try {
+      await jsonFetch(`/api/admin/photos/${button.dataset.deletePhoto}`, { method: 'DELETE' });
+      await loadPhotos();
+    } catch (error) {
+      alert(error.message || 'Could not delete photo.');
+    }
   }));
 }
 
@@ -1452,7 +1465,8 @@ function bindForms() {
         upload.set('file', file);
         upload.set('alt_text', payload.name || 'Staff photo');
         upload.set('caption', payload.role || 'Directors & Staff');
-        upload.set('sort_order', '0');
+        // Negative sort keeps staff photos out of the public Photo gallery listing.
+        upload.set('sort_order', '-500');
         const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
         payload.photo_url = stored.url;
         formControl(form, 'photo_url').value = stored.url;
