@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-32';
+const ASSET_VERSION = 'admin-cms-20260802-36';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -1576,6 +1576,24 @@ function renderMaintenancePage(site = {}) {
     <a class="btn outline" href="/contact.html">Contact</a>
   </div>
 </main>
+<script>
+(function () {
+  async function leaveIfLive() {
+    try {
+      const response = await fetch('/api/site', { cache: 'no-store' });
+      if (!response.ok) return;
+      const site = await response.json();
+      const enabled = site && (site.maintenance_mode === true || site.maintenance_mode === 1 || site.maintenance_mode === '1');
+      if (!enabled) window.location.replace('/');
+    } catch (_) {}
+  }
+  leaveIfLive();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') leaveIfLive();
+  });
+  setInterval(leaveIfLive, 15000);
+})();
+</script>
 </body>
 </html>`;
 }
