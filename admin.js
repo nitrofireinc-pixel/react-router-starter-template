@@ -710,16 +710,21 @@ function staffPreviewCard(member) {
   return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${member.role ? `<p class="person-role">${escapeHtml(member.role)}</p>` : ''}${member.bio ? `<p>${escapeHtml(member.bio)}</p>` : ''}</div></article>`;
 }
 
+function orderedStaff() {
+  return [...state.staff].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+}
+
 function renderStaff() {
   const list = document.querySelector('#staff-list');
   const preview = document.querySelector('#staff-preview');
   if (!list || !preview) return;
-  const ordered = [...state.staff].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  list.innerHTML = ordered.map((member, index) => `
-    <article class="admin-row staff-admin-row">
+  const ordered = orderedStaff();
+  list.innerHTML = ordered.map((member) => `
+    <article class="admin-row staff-admin-row" data-staff-id="${member.id}" draggable="true">
+      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'staff member')}" title="Drag to reorder">⋮⋮</button>
       <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
-      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.role || 'Staff')}</span><small>${escapeHtml(member.bio || 'No description')} · order ${member.sort_order} · ${member.active ? 'Active' : 'Hidden'}</small></div>
-      <div class="row-actions"><button type="button" data-move-staff="${member.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move-staff="${member.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
+      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.role || 'Staff')}</span><small>${escapeHtml(member.bio || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
+      <div class="row-actions"><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
     </article>
   `).join('') || '<p class="draft">No staff members yet.</p>';
   preview.innerHTML = ordered.filter(member => member.active).map(staffPreviewCard).join('') || '<p class="draft">No active staff yet.</p>';
@@ -735,7 +740,6 @@ function renderStaff() {
       role: member.role,
       bio: member.bio,
       photo_url: member.photo_url,
-      sort_order: member.sort_order,
       active: member.active,
     });
     formControl(form, 'staff_id').value = String(member.id);
@@ -751,19 +755,78 @@ function renderStaff() {
     await jsonFetch(`/api/admin/staff/${button.dataset.deleteStaff}`, { method: 'DELETE' });
     await loadStaff();
   }));
-  list.querySelectorAll('[data-move-staff]').forEach(button => button.addEventListener('click', async () => moveStaff(Number(button.dataset.moveStaff), button.dataset.direction)));
+  bindStaffDragAndDrop(list);
 }
 
-async function moveStaff(id, direction) {
-  const ordered = [...state.staff].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  const index = ordered.findIndex(member => member.id === id);
-  const swapIndex = direction === 'up' ? index - 1 : index + 1;
-  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) return;
-  const current = ordered[index];
-  const swap = ordered[swapIndex];
-  await jsonFetch(`/api/admin/staff/${current.id}`, { method: 'PUT', body: JSON.stringify({ ...current, sort_order: swap.sort_order }) });
-  await jsonFetch(`/api/admin/staff/${swap.id}`, { method: 'PUT', body: JSON.stringify({ ...swap, sort_order: current.sort_order }) });
-  await loadStaff();
+async function saveStaffOrder(ids) {
+  state.staff = await jsonFetch('/api/admin/staff/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  renderStaff();
+}
+
+function bindStaffDragAndDrop(list) {
+  if (!list) return;
+  let dragId = null;
+  let allowRowDrag = false;
+
+  list.querySelectorAll('[data-staff-id]').forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset.staffId);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset.staffId) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset.staffId);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = orderedStaff();
+      const fromIndex = ordered.findIndex((member) => member.id === fromId);
+      const toIndex = ordered.findIndex((member) => member.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((member) => member.id);
+      state.staff = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
+      renderStaff();
+      try {
+        await saveStaffOrder(ids);
+      } catch (error) {
+        console.error(error);
+        await loadStaff();
+        const status = document.querySelector('#staff-status');
+        if (status) status.textContent = 'Could not save the new staff order.';
+      }
+    });
+  });
 }
 
 function formatAdminSponsorAddress(sponsor = {}) {
@@ -1217,18 +1280,18 @@ function bindForms() {
       delete payload.staff_id;
       delete payload.id;
       delete payload.photo_file;
+      delete payload.sort_order;
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
         const upload = new FormData();
         upload.set('file', file);
         upload.set('alt_text', payload.name || 'Staff photo');
         upload.set('caption', payload.role || 'Directors & Staff');
-        upload.set('sort_order', String(payload.sort_order || 0));
+        upload.set('sort_order', '0');
         const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
         payload.photo_url = stored.url;
         formControl(form, 'photo_url').value = stored.url;
       }
-      payload.sort_order = Number(payload.sort_order || 0);
       if (!payload.name?.trim()) {
         status.textContent = 'Name is required.';
         return;
@@ -1238,7 +1301,6 @@ function bindForms() {
       form.reset();
       formControl(form, 'staff_id').value = '';
       formControl(form, 'active').checked = true;
-      formControl(form, 'sort_order').value = String((state.staff?.length || 0) + 1);
       await loadStaff();
     } catch (error) {
       status.textContent = `Could not save staff member: ${error.message}`;
@@ -1250,7 +1312,6 @@ function bindForms() {
     form.reset();
     formControl(form, 'staff_id').value = '';
     formControl(form, 'active').checked = true;
-    formControl(form, 'sort_order').value = String((state.staff?.length || 0) + 1);
     document.querySelector('#staff-status').textContent = 'Creating a new staff member.';
     formControl(form, 'name')?.focus();
   });
