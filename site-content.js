@@ -64,7 +64,7 @@ function showHomepageSponsorAd(sponsor) {
 
   window.setTimeout(() => {
     if (document.body.contains(root)) dismissSponsorAd(root);
-  }, 9000);
+  }, 6000);
 }
 
 async function maybeShowHomepageSponsorAd() {
