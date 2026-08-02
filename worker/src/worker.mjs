@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'users', 'events', 'photos'];
-const ASSET_VERSION = 'admin-cms-20260801-6';
+const ASSET_VERSION = 'admin-cms-20260802-1';
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -240,15 +240,34 @@ export function renderSponsorsDirectory(sponsors = []) {
   }).join('');
 }
 
-function renderSponsorPageBody(page, sponsors) {
-  const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
+export function replaceSponsorDirectory(html, directoryHtml) {
+  const openRe = /<div\b[^>]*(?:\bdata-sponsors\b|class="[^"]*\bsponsor-directory\b[^"]*")[^>]*>/i;
+  const match = openRe.exec(html || '');
+  if (!match) return null;
+  const start = match.index;
+  let index = start + match[0].length;
+  let depth = 1;
+  while (index < html.length && depth > 0) {
+    const nextOpen = html.indexOf('<div', index);
+    const nextClose = html.indexOf('</div>', index);
+    if (nextClose === -1) return null;
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth += 1;
+      index = nextOpen + 4;
+    } else {
+      depth -= 1;
+      index = nextClose + 6;
+    }
+  }
+  if (depth !== 0) return null;
+  return `${html.slice(0, start)}${directoryHtml}${html.slice(index)}`;
+}
+
+export function renderSponsorPageBody(page, sponsors) {
+  const directory = `<div class="sponsor-directory" data-sponsors aria-label="Sponsor recognition">${renderSponsorsDirectory(sponsors)}</div>`;
   const html = page.body_html || '';
-  if (html.includes('data-sponsors')) {
-    return html.replace(/<div class=\"sponsor-directory\" data-sponsors>[\s\S]*?<\/div>/, directory);
-  }
-  if (html.includes('class="sponsor-directory"')) {
-    return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
-  }
+  const replaced = replaceSponsorDirectory(html, directory);
+  if (replaced != null) return replaced;
   return `<section class="page-hero sponsor-hero"><div class="page-title"><div class="kicker">Community Partners</div><h1>${escapeHtml(page.title || 'Sponsors')}</h1><p>Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="contact.html">Become a sponsor</a></div>${directory}<aside class="sponsor-cta"><div><span class="sponsor-level">Sponsor opportunities</span><h2>Put your support in the spotlight.</h2><p>Ask us about sponsor levels, benefits, artwork requirements, payment instructions, and how your business can support the band.</p></div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside></div></section>`;
 }
 
@@ -369,6 +388,10 @@ export function generateStructuredPageHtml(payload = {}) {
     return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="timeline" data-events></div>${callout}</div></section>`;
   }
 
+  if (layout === 'sponsors') {
+    return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">${escapeHtml(kicker)}</div><h1 data-cms-field="heading">${escapeHtml(heading)}</h1>${intro ? `<p data-cms-field="intro">${escapeHtml(intro)}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div><a class="btn primary" href="contact.html">Become a sponsor</a></div><div class="sponsor-directory" data-sponsors aria-label="Sponsor recognition"></div>${callout || '<aside class="sponsor-cta"><div><span class="sponsor-level">Sponsor opportunities</span><h2>Put your support in the spotlight.</h2><p>Ask us about sponsor levels, benefits, artwork requirements, payment instructions, and how your business can support the band.</p></div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside>'}</div></section>`;
+  }
+
   if (layout === 'contact') {
     return `${hero}<section class="content"><div class="wrap grid two"><article class="card" data-cms-field="body_text">${body}</article>${callout || '<article class="card accent-card"><h3>Contact details</h3><p>Add email, phone, office hours, or form instructions here.</p></article>'}</div></section>`;
   }
@@ -380,11 +403,16 @@ export function serializePagePayload(payload, existing = null) {
   const slug = normalizePageSlug(payload.slug || payload.title || existing?.slug);
   const path = payload.path ? normalizeStaticPath(payload.path) : pagePathFromSlug(slug);
   const defaultHtml = '<section><div class="wrap"><h1>New Page</h1><p>Edit this page in the CMS.</p></div></section>';
+  const structuredPayload = {
+    title: payload.title || existing?.title,
+    ...payload,
+    layout: payload.layout || (slug === 'sponsors' ? 'sponsors' : undefined),
+  };
   return {
     slug,
     path: slug === 'home' ? '/' : path,
     title: String(payload.title || existing?.title || 'Untitled Page').trim(),
-    body_html: hasStructuredPageFields(payload) ? generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload }) : String(payload.body_html ?? existing?.body_html ?? defaultHtml),
+    body_html: hasStructuredPageFields(payload) ? generateStructuredPageHtml(structuredPayload) : String(payload.body_html ?? existing?.body_html ?? defaultHtml),
     nav_order: Number(payload.nav_order ?? existing?.nav_order ?? 99),
     is_home: slug === 'home' || payload.is_home ? 1 : 0,
     active: payload.active === false || payload.active === 0 ? 0 : 1,
@@ -688,7 +716,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <aside class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-edit-shortcut="directors">Directors & Staff</button><button type="button" data-edit-shortcut="calendar">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-edit-shortcut="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>Welcome back, Trevor Olsen</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
-<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Use clean fields like the reference CMS. Save changes to update the public page.</p></div><button class="btn outline" type="button" id="new-page">Add Page</button></div><div class="editor-layout"><form id="page-form" class="admin-card stack"><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar card.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label>Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active / visible</label><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" placeholder="Sound. Spirit. Eagle Pride." required></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="11" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div><button class="btn primary">Save Changes</button><p class="status" id="page-status"></p></form><div class="admin-card"><h2>Pages</h2><div id="pages-list" class="admin-list"></div></div></div></section>
+<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Use clean fields like the reference CMS. Save changes to update the public page.</p></div><button class="btn outline" type="button" id="new-page">Add Page</button></div><div class="editor-layout"><form id="page-form" class="admin-card stack"><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar card.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label>Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="sponsors">Sponsors page with directory</option><option value="contact">Contact/details page</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active / visible</label><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" placeholder="Sound. Spirit. Eagle Pride." required></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="11" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div><button class="btn primary">Save Changes</button><p class="status" id="page-status"></p></form><div class="admin-card"><h2>Pages</h2><div id="pages-list" class="admin-list"></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Address<input name="address" placeholder="Kernersville, NC"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="email" required placeholder="editor@example.com"></label><label>Display name<input name="display_name" placeholder="Editor Name"></label><label>Temporary password <small>required for new users, optional when editing</small><input name="password" type="password"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>

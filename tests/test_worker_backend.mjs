@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaticPath, parsePermissions, renderSponsorsDirectory, serializePagePayload } from '../worker/src/worker.mjs';
+import { escapeHtml, generateStructuredPageHtml, hasPermission, jsonResponse, normalizePageSlug, normalizeSponsorPayload, normalizeStaticPath, parsePermissions, renderSponsorPageBody, renderSponsorsDirectory, replaceSponsorDirectory, serializePagePayload } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -92,4 +92,42 @@ test('sponsor helpers normalize editable rows and render safe sponsor cards', ()
   assert.match(html, /Kernersville &lt;Music&gt;/);
   assert.match(html, /Kernersville &amp; NC/);
   assert.doesNotMatch(html, /<Music>/);
+});
+
+test('replaceSponsorDirectory swaps placeholder and nested directory blocks', () => {
+  const directory = '<div class="sponsor-directory" data-sponsors><article class="sponsor-card"><div><h3>Acme</h3></div></article></div>';
+  const withAttr = '<section><div class="sponsor-directory" aria-label="Sponsor recognition"><article class="sponsor-card"><div><h3>Your business here</h3><p>Placeholder</p></div></article></div><aside class="sponsor-cta">cta</aside></section>';
+  const replaced = replaceSponsorDirectory(withAttr, directory);
+  assert.match(replaced, /Acme/);
+  assert.doesNotMatch(replaced, /Your business here/);
+  assert.match(replaced, /sponsor-cta/);
+
+  const nested = '<div class="sponsor-directory" data-sponsors><article class="sponsor-card"><div><h3>Old</h3></div></article></div>';
+  assert.equal(replaceSponsorDirectory(nested, directory), directory);
+});
+
+test('renderSponsorPageBody injects CMS sponsors into the public page body', () => {
+  const body = renderSponsorPageBody(
+    {
+      title: 'Sponsors',
+      body_html: '<section class="content sponsor-content"><div class="wrap"><div class="sponsor-directory" aria-label="Sponsor recognition"><article class="sponsor-card"><div><h3>Your business here</h3></div></article></div><aside class="sponsor-cta">cta</aside></div></section>',
+    },
+    [{ id: 7, name: 'Eagle Financial Partners', address: 'Kernersville, NC', level: 'Navy Sponsor', mark_text: 'EFP', logo_url: '' }],
+  );
+  assert.match(body, /Eagle Financial Partners/);
+  assert.match(body, /data-sponsors/);
+  assert.doesNotMatch(body, /Your business here/);
+});
+
+test('serializePagePayload keeps a sponsors directory hook for the sponsors slug', () => {
+  const page = serializePagePayload({
+    title: 'Sponsors',
+    slug: 'sponsors',
+    kicker: 'Community Partners',
+    heading: 'Our Sponsors',
+    intro: 'Thank you to our partners.',
+    body_text: 'Community support takes center stage.',
+  });
+  assert.match(page.body_html, /data-sponsors/);
+  assert.match(page.body_html, /sponsor-directory/);
 });
