@@ -1087,14 +1087,23 @@ function bindPageVisualEditor() {
     event.returnValue = '';
   });
 
-  const logoutForm = document.querySelector('form[action="/admin/logout"]');
-  logoutForm?.addEventListener('submit', async event => {
-    if (logoutForm.dataset.forceLogout === '1') return;
-    event.preventDefault();
-    if (!(await confirmLeavePageEditor())) return;
-    logoutForm.dataset.forceLogout = '1';
-    logoutForm.submit();
+  document.querySelectorAll('form[action="/admin/logout"]').forEach((logoutForm) => {
+    logoutForm.addEventListener('submit', async (event) => {
+      if (logoutForm.dataset.forceLogout === '1') return;
+      event.preventDefault();
+      if (!(await confirmLeavePageEditor())) return;
+      logoutForm.dataset.forceLogout = '1';
+      logoutForm.submit();
+    });
   });
+}
+
+async function submitAdminLogout() {
+  const logoutForm = document.querySelector('#admin-logout-form') || document.querySelector('form[action="/admin/logout"]');
+  if (!logoutForm) return;
+  if (!(await confirmLeavePageEditor())) return;
+  logoutForm.dataset.forceLogout = '1';
+  logoutForm.submit();
 }
 
 function setSelectValue(select, value) {
@@ -1122,19 +1131,24 @@ function renderMobileAdminMenu() {
   const menu = document.querySelector('#admin-mobile-menu');
   const sourceButtons = [...document.querySelectorAll('.admin-menu button')].filter(button => !button.hidden);
   if (!menu) return;
-  menu.innerHTML = sourceButtons.map((button, index) => {
+  menu.innerHTML = `${sourceButtons.map((button, index) => {
     const label = button.textContent.trim();
     const tab = button.dataset.tab || '';
     const shortcut = button.dataset.editShortcut || '';
     return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}">${escapeHtml(label)}</button>`;
-  }).join('');
-  menu.querySelectorAll('button').forEach(button => {
+  }).join('')}
+  <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>`;
+  menu.querySelectorAll('button[data-mobile-index]').forEach(button => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
       const source = sourceButtons[index];
       closeAdminNav();
       source?.click();
     });
+  });
+  menu.querySelector('[data-mobile-logout]')?.addEventListener('click', async () => {
+    closeAdminNav();
+    await submitAdminLogout();
   });
 }
 
