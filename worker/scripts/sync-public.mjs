@@ -10,6 +10,7 @@ mkdirSync(PUBLIC, { recursive: true });
 
 for (const name of [
   'index.html',
+  'maintenance.html',
   'calendar.html',
   'contact.html',
   'boosters.html',

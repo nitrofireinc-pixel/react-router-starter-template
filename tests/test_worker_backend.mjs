@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -145,6 +145,15 @@ test('normalizeEventPayload stores year for ordering and ignores sort_order', ()
   assert.equal(event.sort_order, 0);
   assert.equal(event.date_label, 'Jan');
   assert.equal(event.date_detail, '12');
+});
+
+test('isMaintenanceMode treats common truthy site setting values as enabled', () => {
+  assert.equal(isMaintenanceMode({ maintenance_mode: 1 }), true);
+  assert.equal(isMaintenanceMode({ maintenance_mode: '1' }), true);
+  assert.equal(isMaintenanceMode({ maintenance_mode: true }), true);
+  assert.equal(isMaintenanceMode({ maintenance_mode: '0' }), false);
+  assert.equal(isMaintenanceMode({ maintenance_mode: 0 }), false);
+  assert.equal(isMaintenanceMode({}), false);
 });
 
 test('isUpcomingEvent hides past dates and keeps today and future dates public', () => {

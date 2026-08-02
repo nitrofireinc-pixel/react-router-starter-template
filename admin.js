@@ -60,6 +60,8 @@ function formPayload(form) {
   if (active) payload.active = Boolean(active.checked);
   const homepageAd = formControl(form, 'homepage_ad');
   if (homepageAd) payload.homepage_ad = Boolean(homepageAd.checked);
+  const maintenanceMode = formControl(form, 'maintenance_mode');
+  if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
   return payload;
 }
 
@@ -996,8 +998,17 @@ function bindForms() {
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
-    document.querySelector('#site-status').textContent = 'Saved. Refresh the public site to see changes.';
+    const status = document.querySelector('#site-status');
+    const payload = formPayload(form);
+    payload.maintenance_mode = Boolean(form.elements.maintenance_mode?.checked);
+    const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
+    state.site = saved;
+    fillForm(form, saved);
+    if (status) {
+      status.textContent = saved.maintenance_mode
+        ? 'Saved. Homepage visitors are now redirected to maintenance.html.'
+        : 'Saved. Homepage is live again.';
+    }
   });
 
   document.querySelector('#logo-form')?.addEventListener('submit', async event => {
