@@ -31,6 +31,30 @@ function hasPermission(scope) {
   return state.me.user.permissions.includes(scope) || state.me.user.permissions.includes('all');
 }
 
+function canManageAllEvents() {
+  return hasPermission('events:manage');
+}
+
+function canCreateEvents() {
+  return hasPermission('events') || canManageAllEvents();
+}
+
+function canMutateEvent(event) {
+  if (canManageAllEvents()) return true;
+  if (!hasPermission('events')) return false;
+  return Number(event?.created_by) === Number(state.me?.user?.id);
+}
+
+function eventCreatorLabel(event) {
+  if (!event) return '';
+  if (Number(event.created_by) === Number(state.me?.user?.id)) return 'You';
+  const name = String(event.created_by_name || '').trim();
+  if (name) return name;
+  const username = String(event.created_by_username || '').trim();
+  if (username) return username;
+  return event.created_by ? `User #${event.created_by}` : 'Unassigned';
+}
+
 function canEditPage(pageOrSlug) {
   const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
   return hasPermission('pages') || hasPermission(`page:${slug}`);
@@ -767,7 +791,7 @@ function showAllowedPanels() {
     site: hasPermission('site'),
     users: hasPermission('users'),
     mail: canSendMail(),
-    events: hasPermission('events') || canEditPage('calendar'),
+    events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
   document.querySelectorAll('.admin-menu > [data-tab]').forEach(button => {
@@ -805,9 +829,10 @@ function showAllowedPanels() {
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
-  if (newEventButton) newEventButton.hidden = !hasPermission('events');
-  if (eventForm) eventForm.hidden = !hasPermission('events');
-  if (eventsList) eventsList.hidden = !hasPermission('events');
+  const canUseEvents = canCreateEvents();
+  if (newEventButton) newEventButton.hidden = !canUseEvents;
+  if (eventForm) eventForm.hidden = !canUseEvents;
+  if (eventsList) eventsList.hidden = !canUseEvents && !canEditPage('calendar');
   Object.entries(panels).forEach(([name, allowed]) => {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
@@ -873,7 +898,7 @@ function renderDashboard() {
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
     canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration'],
-    hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
+    canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program'],
   ].filter(Boolean);
 
   dashboard.innerHTML = cards.length
@@ -1314,7 +1339,7 @@ function isPastEventLocal(event) {
 }
 
 async function loadEvents() {
-  if (!hasPermission('events') && !canEditPage('calendar')) return;
+  if (!canCreateEvents() && !canEditPage('calendar')) return;
   state.events = await jsonFetch('/api/admin/events');
   const list = document.querySelector('#events-list');
   const count = document.querySelector('#events-count');
@@ -1324,16 +1349,22 @@ async function loadEvents() {
   const pastCount = ordered.filter(isPastEventLocal).length;
   if (count) count.textContent = pastCount ? `${ordered.length} total · ${pastCount} past (hidden publicly)` : `${ordered.length} total`;
   list.innerHTML = ordered.length
-    ? ordered.map(event => `
+    ? ordered.map(event => {
+      const mutable = canMutateEvent(event);
+      const creator = eventCreatorLabel(event);
+      const actions = mutable
+        ? `<div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>`
+        : '<div class="row-actions"><span class="muted">View only</span></div>';
+      return `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
-      <div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>
-    </article>
-  `).join('')
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small><small>Created by ${escapeHtml(creator)}</small></div>
+      ${actions}
+    </article>`;
+    }).join('')
     : '<p class="draft">No calendar events yet. Use the form to add one.</p>';
   list.querySelectorAll('[data-edit-event]').forEach(button => button.addEventListener('click', () => {
     const event = state.events.find(item => item.id === Number(button.dataset.editEvent));
-    if (!event) return;
+    if (!event || !canMutateEvent(event)) return;
     const form = document.querySelector('#event-form');
     const status = document.querySelector('#event-status');
     form.reset();
@@ -1355,9 +1386,15 @@ async function loadEvents() {
     formControl(form, 'title')?.focus();
   }));
   list.querySelectorAll('[data-delete-event]').forEach(button => button.addEventListener('click', async () => {
+    const event = state.events.find(item => item.id === Number(button.dataset.deleteEvent));
+    if (!event || !canMutateEvent(event)) return;
     if (!confirm('Delete this event?')) return;
-    await jsonFetch(`/api/admin/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
-    await loadEvents();
+    try {
+      await jsonFetch(`/api/admin/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
+      await loadEvents();
+    } catch (error) {
+      alert(error.message || 'Could not delete event.');
+    }
   }));
 }
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -36,6 +36,28 @@ test('permission checks support admin all-access and page-specific scopes', () =
   assert.equal(hasPermission(limited, 'page:home'), false);
   assert.deepEqual(parsePermissions('["events","page:boosters"]'), ['events', 'page:boosters']);
   assert.deepEqual(parsePermissions('not-json'), []);
+});
+
+test('calendar event mutation respects ownership and elevated manage access', () => {
+  const owner = { id: 4, role: 'editor', permissions: ['events'] };
+  const other = { id: 9, role: 'editor', permissions: ['events'] };
+  const manager = { id: 11, role: 'editor', permissions: ['events:manage'] };
+  const admin = { id: 1, role: 'admin', permissions: [] };
+  const owned = { id: 20, created_by: 4 };
+  const orphan = { id: 21, created_by: null };
+
+  assert.equal(canCreateEvents(owner), true);
+  assert.equal(canCreateEvents(manager), true);
+  assert.equal(canManageAllEvents(manager), true);
+  assert.equal(canManageAllEvents(owner), false);
+
+  assert.equal(canMutateEvent(owner, owned), true);
+  assert.equal(canMutateEvent(other, owned), false);
+  assert.equal(canMutateEvent(manager, owned), true);
+  assert.equal(canMutateEvent(admin, owned), true);
+  assert.equal(canMutateEvent(owner, orphan), false);
+  assert.equal(canMutateEvent(manager, orphan), true);
+  assert.equal(canMutateEvent(admin, orphan), true);
 });
 
 test('generateStructuredPageHtml builds safe page sections from text fields instead of raw HTML', () => {
