@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -187,6 +187,17 @@ test('isMaintenanceMode treats common truthy site setting values as enabled', ()
   assert.equal(isMaintenanceMode({ maintenance_mode: '0' }), false);
   assert.equal(isMaintenanceMode({ maintenance_mode: 0 }), false);
   assert.equal(isMaintenanceMode({}), false);
+});
+
+test('maintenance mode redirects all public HTML pages except maintenance itself', () => {
+  const on = { maintenance_mode: 1 };
+  const off = { maintenance_mode: 0 };
+  assert.equal(shouldRedirectToMaintenance('/', on), true);
+  assert.equal(shouldRedirectToMaintenance('/contact.html', on), true);
+  assert.equal(shouldRedirectToMaintenance('/boosters.html', on), true);
+  assert.equal(shouldRedirectToMaintenance('/maintenance.html', on), false);
+  assert.equal(shouldRedirectToMaintenance('/styles.css', on), false);
+  assert.equal(shouldRedirectToMaintenance('/contact.html', off), false);
 });
 
 test('isUpcomingEvent hides past dates and keeps today and future dates public', () => {

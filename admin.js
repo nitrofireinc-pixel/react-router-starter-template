@@ -1216,8 +1216,8 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. Homepage visitors are now redirected to maintenance.html.'
-        : 'Saved. Homepage is live again.';
+        ? 'Saved. All public pages now redirect to maintenance.html.'
+        : 'Saved. The public site is live again.';
     }
   });
 
