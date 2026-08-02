@@ -375,9 +375,12 @@ test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
   assert.equal(enabled.homepage_ad, 1);
   assert.equal(enabled.city, 'Kernersville');
   assert.equal(enabled.state, 'NC');
-  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC' });
+  assert.equal(enabled._assign_sort_order, true);
+  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC', sort_order: 4 });
   assert.equal(preserved.homepage_ad, 1);
   assert.equal(preserved.city, 'Greensboro');
+  assert.equal(preserved.sort_order, 4);
+  assert.equal(preserved._assign_sort_order, false);
   const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
   assert.equal(disabled.homepage_ad, 0);
 });

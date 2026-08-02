@@ -868,6 +868,7 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
   const address = titleCaseAddressPart(String(payload.address ?? legacy?.address ?? existing?.address ?? '').trim());
   const city = titleCaseAddressPart(String(payload.city ?? legacy?.city ?? existing?.city ?? 'Kernersville').trim()) || 'Kernersville';
   const state = normalizeStateCode(payload.state ?? legacy?.state ?? existing?.state ?? 'NC');
+  const hasSortOrder = payload.sort_order !== undefined && payload.sort_order !== null && payload.sort_order !== '';
   return {
     name,
     address,
@@ -876,12 +877,13 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
     level: String(payload.level ?? existing?.level ?? 'Sponsor').trim() || 'Sponsor',
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
-    sort_order: Number(payload.sort_order ?? existing?.sort_order ?? 0),
+    sort_order: hasSortOrder ? Number(payload.sort_order) : Number(existing?.sort_order ?? 0),
     active: payload.active === false || payload.active === 0 ? 0 : 1,
     homepage_ad: (() => {
       const raw = payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad;
       return raw === true || raw === 1 || raw === '1' ? 1 : 0;
     })(),
+    _assign_sort_order: !hasSortOrder && !existing,
   };
 }
 
@@ -1865,8 +1867,29 @@ async function handleApi(request, env, url) {
     if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
     const sponsor = normalizeSponsorPayload(await request.json());
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
+    if (sponsor._assign_sort_order) {
+      const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
+      sponsor.sort_order = Number(max?.max_order || 0) + 1;
+    }
     const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
     return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
+  }
+  if (url.pathname === '/api/admin/sponsors/reorder' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    const ids = normalizeStaffReorderIds(await request.json());
+    if (!ids.length) return jsonResponse({ detail: 'Sponsor order is required' }, 422);
+    const existing = await getSponsors(env, true);
+    if (ids.length !== existing.length || ids.some((id) => !existing.some((sponsor) => sponsor.id === id))) {
+      return jsonResponse({ detail: 'Sponsor order must include every sponsor exactly once' }, 422);
+    }
+    await env.DB.batch(ids.map((id, index) => (
+      env.DB.prepare('UPDATE sponsors SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(index + 1, id)
+    )));
+    return jsonResponse(await getSponsors(env, true));
   }
   const sponsorMatch = url.pathname.match(/^\/api\/admin\/sponsors\/(\d+)$/);
   if (sponsorMatch && ['PUT', 'DELETE'].includes(request.method)) {

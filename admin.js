@@ -1537,6 +1537,10 @@ function syncSponsorLogoPreview(form, url = '') {
   preview.hidden = false;
 }
 
+function orderedSponsors() {
+  return [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+}
+
 function resetSponsorForm(form) {
   if (!form) return;
   form.reset();
@@ -1546,7 +1550,6 @@ function resetSponsorForm(form) {
   form.elements.active.checked = true;
   if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
   form.elements.level.value = 'Community Sponsor';
-  form.elements.sort_order.value = String((state.sponsors?.length || 0) + 1);
   const file = formControl(form, 'logo_file');
   if (file) file.value = '';
   syncSponsorLogoPreview(form, '');
@@ -1554,16 +1557,18 @@ function resetSponsorForm(form) {
 
 function renderSponsors() {
   const list = document.querySelector('#sponsors-list');
-  const ordered = [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  list.innerHTML = ordered.map((sponsor, index) => `
-    <article class="admin-row sponsor-admin-row">
-      <span class="drag-handle">☰</span>
+  if (!list) return;
+  const ordered = orderedSponsors();
+  list.innerHTML = ordered.map((sponsor) => `
+    <article class="admin-row sponsor-admin-row" data-sponsor-id="${sponsor.id}" draggable="true">
+      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(sponsor.name || 'sponsor')}" title="Drag to reorder">⋮⋮</button>
       <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
-      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · order ${sponsor.sort_order} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
-      <div class="row-actions"><button data-move-sponsor="${sponsor.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>↑</button><button data-move-sponsor="${sponsor.id}" data-direction="down" ${index === ordered.length - 1 ? 'disabled' : ''}>↓</button><button data-edit-sponsor="${sponsor.id}">Edit</button><button data-delete-sponsor="${sponsor.id}">Delete</button></div>
+      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
+      <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
-  `).join('');
-  document.querySelector('#sponsor-preview').innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
+  `).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
+  const preview = document.querySelector('#sponsor-preview');
+  if (preview) preview.innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
@@ -1585,19 +1590,78 @@ function renderSponsors() {
     await jsonFetch(`/api/admin/sponsors/${button.dataset.deleteSponsor}`, { method: 'DELETE' });
     await loadSponsors();
   }));
-  list.querySelectorAll('[data-move-sponsor]').forEach(button => button.addEventListener('click', async () => moveSponsor(Number(button.dataset.moveSponsor), button.dataset.direction)));
+  bindSponsorDragAndDrop(list);
 }
 
-async function moveSponsor(id, direction) {
-  const ordered = [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  const index = ordered.findIndex(sponsor => sponsor.id === id);
-  const swapIndex = direction === 'up' ? index - 1 : index + 1;
-  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) return;
-  const current = ordered[index];
-  const swap = ordered[swapIndex];
-  await jsonFetch(`/api/admin/sponsors/${current.id}`, { method: 'PUT', body: JSON.stringify({ ...current, sort_order: swap.sort_order }) });
-  await jsonFetch(`/api/admin/sponsors/${swap.id}`, { method: 'PUT', body: JSON.stringify({ ...swap, sort_order: current.sort_order }) });
-  await loadSponsors();
+async function saveSponsorOrder(ids) {
+  state.sponsors = await jsonFetch('/api/admin/sponsors/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  renderSponsors();
+}
+
+function bindSponsorDragAndDrop(list) {
+  if (!list) return;
+  let dragId = null;
+  let allowRowDrag = false;
+
+  list.querySelectorAll('[data-sponsor-id]').forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset.sponsorId);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset.sponsorId) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset.sponsorId);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = orderedSponsors();
+      const fromIndex = ordered.findIndex((sponsor) => sponsor.id === fromId);
+      const toIndex = ordered.findIndex((sponsor) => sponsor.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((sponsor) => sponsor.id);
+      state.sponsors = next.map((sponsor, index) => ({ ...sponsor, sort_order: index + 1 }));
+      renderSponsors();
+      try {
+        await saveSponsorOrder(ids);
+      } catch (error) {
+        console.error(error);
+        await loadSponsors();
+        const status = document.querySelector('#sponsor-status');
+        if (status) status.textContent = 'Could not save the new sponsor order.';
+      }
+    });
+  });
 }
 
 async function loadMailDeliveryStatus() {
@@ -2065,13 +2129,13 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#sponsor-status');
     const payload = formPayload(form);
-    payload.sort_order = Number(payload.sort_order || state.sponsors.length + 1);
     payload.homepage_ad = Boolean(form.elements.homepage_ad?.checked);
     payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
     payload.state = String(payload.state || 'NC').trim() || 'NC';
     const id = payload.id;
     delete payload.id;
     delete payload.logo_file;
+    delete payload.sort_order;
     if (status) status.textContent = 'Saving…';
     try {
       const file = formControl(form, 'logo_file')?.files?.[0];
