@@ -47,6 +47,27 @@ const DEFAULT_HOME_FEATURE_CARDS = {
 
 const HOME_FEATURE_CARD_KEYS = Object.keys(DEFAULT_HOME_FEATURE_CARDS);
 
+const DEFAULT_SPONSOR_TIER_FIELDS = {
+  tiers_kicker: 'Sponsor packages',
+  tiers_heading: 'Choose your level of support.',
+  tiers_intro: 'Three clear ways to back Eagle Pride — from a website marquee feature to full game-day recognition.',
+  bronze_label: 'Bronze',
+  bronze_title: 'Bronze Sponsor',
+  bronze_blurb: 'Put your brand in front of families online.',
+  bronze_benefits: '<ul><li>Logo featured on the website sponsor marquee</li></ul>',
+  silver_label: 'Silver',
+  silver_title: 'Silver Sponsor',
+  silver_blurb: 'Stand out across the site experience.',
+  silver_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul>',
+  gold_label: 'Gold',
+  gold_title: 'Gold Sponsor',
+  gold_blurb: 'Our top package for game-day and digital impact.',
+  gold_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul>',
+};
+
+const SPONSOR_TIER_FIELD_KEYS = Object.keys(DEFAULT_SPONSOR_TIER_FIELDS);
+const SPONSOR_TIER_BENEFIT_KEYS = ['bronze_benefits', 'silver_benefits', 'gold_benefits'];
+
 function hasPermission(scope) {
   if (!state.me?.user) return false;
   if (state.me.user.role === 'admin') return true;
@@ -285,6 +306,43 @@ function homeFeatureCardsFromForm(payload = {}) {
   return cards;
 }
 
+function extractSponsorTierFieldsFromHtml(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  const root = template.content;
+  const section = root.querySelector('[data-sponsor-tiers]') || root;
+  const head = section.querySelector('.sponsor-tiers-head');
+  const textOf = (node) => String(node?.innerHTML || '').trim();
+  const plainOf = (node) => String(node?.textContent || '').replace(/\s+/g, ' ').trim();
+  const card = (id) => section.querySelector(`[data-tier="${id}"]`);
+  const benefitsOf = (tierCard) => {
+    const field = tierCard?.querySelector('[data-cms-field$="_benefits"]');
+    if (field) return sanitizeRichHtml(field.innerHTML || '');
+    const list = tierCard?.querySelector('ul');
+    return list ? `<ul>${list.innerHTML}</ul>` : '';
+  };
+  const bronze = card('bronze');
+  const silver = card('silver');
+  const gold = card('gold');
+  return {
+    tiers_kicker: plainOf(head?.querySelector('[data-cms-field="tiers_kicker"], .kicker')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_kicker,
+    tiers_heading: textOf(head?.querySelector('[data-cms-field="tiers_heading"], h2')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_heading,
+    tiers_intro: textOf(head?.querySelector('[data-cms-field="tiers_intro"], h2 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_intro,
+    bronze_label: plainOf(bronze?.querySelector('[data-cms-field="bronze_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_label,
+    bronze_title: textOf(bronze?.querySelector('[data-cms-field="bronze_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_title,
+    bronze_blurb: textOf(bronze?.querySelector('[data-cms-field="bronze_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_blurb,
+    bronze_benefits: benefitsOf(bronze) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_benefits,
+    silver_label: plainOf(silver?.querySelector('[data-cms-field="silver_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_label,
+    silver_title: textOf(silver?.querySelector('[data-cms-field="silver_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_title,
+    silver_blurb: textOf(silver?.querySelector('[data-cms-field="silver_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_blurb,
+    silver_benefits: benefitsOf(silver) || DEFAULT_SPONSOR_TIER_FIELDS.silver_benefits,
+    gold_label: plainOf(gold?.querySelector('[data-cms-field="gold_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_label,
+    gold_title: textOf(gold?.querySelector('[data-cms-field="gold_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_title,
+    gold_blurb: textOf(gold?.querySelector('[data-cms-field="gold_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_blurb,
+    gold_benefits: benefitsOf(gold) || DEFAULT_SPONSOR_TIER_FIELDS.gold_benefits,
+  };
+}
+
 function structuredPageFields(page) {
   if (page?.slug === 'home' || page?.is_home) {
     return {
@@ -319,6 +377,9 @@ function structuredPageFields(page) {
           : page.slug === 'sponsors' ? 'sponsors'
             : (page.slug === 'become-a-sponsor' || page.slug === 'become-sponsor') ? 'become-sponsor'
               : 'standard');
+  const tierFields = (inferredLayout === 'become-sponsor' || page.slug === 'become-a-sponsor')
+    ? extractSponsorTierFieldsFromHtml(page.body_html || '')
+    : {};
   return {
     layout: inferredLayout,
     kicker: inlineHtmlFromNode(kickerNode) || '',
@@ -336,6 +397,7 @@ function structuredPageFields(page) {
     callout_text: calloutTextNode
       ? richHtmlFromNode(calloutTextNode)
       : (callout?.querySelector('p') ? `<p>${escapeHtml(callout.querySelector('p').textContent.trim())}</p>` : paragraphsFromNode(callout)),
+    ...tierFields,
   };
 }
 
@@ -387,6 +449,21 @@ const PAGE_FIELD_LABELS = {
   launch_heading: 'Launch heading',
   launch_body: 'Launch body',
   launch_footer: 'Launch footer note',
+  tiers_kicker: 'Packages label',
+  tiers_heading: 'Packages heading',
+  tiers_intro: 'Packages intro',
+  bronze_label: 'Bronze badge',
+  bronze_title: 'Bronze title',
+  bronze_blurb: 'Bronze description',
+  bronze_benefits: 'Bronze benefits',
+  silver_label: 'Silver badge',
+  silver_title: 'Silver title',
+  silver_blurb: 'Silver description',
+  silver_benefits: 'Silver benefits',
+  gold_label: 'Gold badge',
+  gold_title: 'Gold title',
+  gold_blurb: 'Gold description',
+  gold_benefits: 'Gold benefits',
 };
 
 function homeFieldLabel(el) {
@@ -540,7 +617,9 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages"><div class="sponsor-tiers-head"><span class="kicker">Sponsor packages</span><h2>Choose your level of support.</h2><p>Three clear ways to back Eagle Pride — from a website marquee feature to full game-day recognition.</p></div><div class="sponsor-tiers-grid"><article class="sponsor-tier sponsor-tier-bronze" data-tier="bronze"><span class="sponsor-tier-label">Bronze</span><h3>Bronze Sponsor</h3><p>Put your brand in front of families online.</p><ul><li>Logo featured on the website sponsor marquee</li></ul></article><article class="sponsor-tier sponsor-tier-silver" data-tier="silver"><span class="sponsor-tier-label">Silver</span><h3>Silver Sponsor</h3><p>Stand out across the site experience.</p><ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul></article><article class="sponsor-tier sponsor-tier-gold" data-tier="gold"><span class="sponsor-tier-label">Gold</span><h3>Gold Sponsor</h3><p>Our top package for game-day and digital impact.</p><ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul></article></div></section><div class="become-sponsor-panel grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p>', 'Sponsor inquiry intro')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab. Choose Sponsor inquiry when available.</p></div></div>${showCallout ? callout : ''}</div></section>`;
+    const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
+    const benefitsField = (key) => editableRichField(key, tier(key) || DEFAULT_SPONSOR_TIER_FIELDS[key], PAGE_FIELD_LABELS[key]);
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages"><div class="sponsor-tiers-head">${editableField('tiers_kicker', 'span', tier('tiers_kicker'), 'Packages label', 'kicker')}${editableField('tiers_heading', 'h2', tier('tiers_heading'), 'Packages heading')}${editableField('tiers_intro', 'p', tier('tiers_intro'), 'Packages intro')}</div><div class="sponsor-tiers-grid"><article class="sponsor-tier sponsor-tier-bronze" data-tier="bronze">${editableField('bronze_label', 'span', tier('bronze_label'), 'Bronze badge', 'sponsor-tier-label')}${editableField('bronze_title', 'h3', tier('bronze_title'), 'Bronze title')}${editableField('bronze_blurb', 'p', tier('bronze_blurb'), 'Bronze description')}${benefitsField('bronze_benefits')}</article><article class="sponsor-tier sponsor-tier-silver" data-tier="silver">${editableField('silver_label', 'span', tier('silver_label'), 'Silver badge', 'sponsor-tier-label')}${editableField('silver_title', 'h3', tier('silver_title'), 'Silver title')}${editableField('silver_blurb', 'p', tier('silver_blurb'), 'Silver description')}${benefitsField('silver_benefits')}</article><article class="sponsor-tier sponsor-tier-gold" data-tier="gold">${editableField('gold_label', 'span', tier('gold_label'), 'Gold badge', 'sponsor-tier-label')}${editableField('gold_title', 'h3', tier('gold_title'), 'Gold title')}${editableField('gold_blurb', 'p', tier('gold_blurb'), 'Gold description')}${benefitsField('gold_benefits')}</article></div></section><div class="become-sponsor-panel grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p>', 'Sponsor inquiry intro')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab. Choose Sponsor inquiry when available.</p></div></div>${showCallout ? callout : ''}</div></section>`;
   }
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
@@ -769,6 +848,7 @@ function pageSnapshotFromPayload(payload) {
     'original_slug', 'title', 'slug', 'path', 'nav_order', 'layout', 'active',
     'kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text',
     ...HOME_FEATURE_CARD_KEYS,
+    ...SPONSOR_TIER_FIELD_KEYS,
   ];
   const snap = {};
   for (const key of keys) {
@@ -1060,7 +1140,7 @@ function bindPageVisualEditor() {
       refreshPageDirtyState();
       return;
     }
-    if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text', ...HOME_FEATURE_CARD_KEYS].includes(name)) {
+    if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text', ...HOME_FEATURE_CARD_KEYS, ...SPONSOR_TIER_FIELD_KEYS].includes(name)) {
       if (name === 'boosters_href') {
         const hrefInput = preview.querySelector('[data-home-href-input]');
         if (hrefInput) hrefInput.value = event.target.value;
@@ -2321,6 +2401,9 @@ function bindForms() {
     form.elements.callout_text.value = '';
     for (const key of HOME_FEATURE_CARD_KEYS) {
       if (form.elements[key]) form.elements[key].value = '';
+    }
+    for (const key of SPONSOR_TIER_FIELD_KEYS) {
+      if (form.elements[key]) form.elements[key].value = DEFAULT_SPONSOR_TIER_FIELDS[key] || '';
     }
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';

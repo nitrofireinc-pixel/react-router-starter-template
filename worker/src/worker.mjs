@@ -82,11 +82,92 @@ export const SPONSOR_TIER_PACKAGES = [
   },
 ];
 
+export const SPONSOR_TIER_FIELD_DEFAULTS = {
+  tiers_kicker: 'Sponsor packages',
+  tiers_heading: 'Choose your level of support.',
+  tiers_intro: 'Three clear ways to back Eagle Pride — from a website marquee feature to full game-day recognition.',
+  bronze_label: 'Bronze',
+  bronze_title: 'Bronze Sponsor',
+  bronze_blurb: 'Put your brand in front of families online.',
+  bronze_benefits: '<ul><li>Logo featured on the website sponsor marquee</li></ul>',
+  silver_label: 'Silver',
+  silver_title: 'Silver Sponsor',
+  silver_blurb: 'Stand out across the site experience.',
+  silver_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul>',
+  gold_label: 'Gold',
+  gold_title: 'Gold Sponsor',
+  gold_blurb: 'Our top package for game-day and digital impact.',
+  gold_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul>',
+};
+
+export const SPONSOR_TIER_FIELD_KEYS = Object.keys(SPONSOR_TIER_FIELD_DEFAULTS);
+
+export function normalizeSponsorTierFields(payload = {}) {
+  const fields = {};
+  for (const key of SPONSOR_TIER_FIELD_KEYS) {
+    const raw = payload[key];
+    const value = raw == null ? '' : String(raw).trim();
+    fields[key] = value || SPONSOR_TIER_FIELD_DEFAULTS[key];
+  }
+  return fields;
+}
+
+function sponsorTierBenefitsHtml(value, fallbackHtml) {
+  const source = String(value || '').trim() || String(fallbackHtml || '').trim();
+  if (!source) return '<ul></ul>';
+  if (/<li[\s>]/i.test(source)) {
+    const cleaned = sanitizeRichHtml(source);
+    const listMatch = cleaned.match(/<ul[\s\S]*?<\/ul>/i);
+    if (listMatch) return listMatch[0];
+    const items = [...cleaned.matchAll(/<li[\s\S]*?<\/li>/gi)].map((match) => match[0]).join('');
+    return items ? `<ul>${items}</ul>` : `<ul><li>${htmlToPlainText(cleaned)}</li></ul>`;
+  }
+  const items = source
+    .split(/\n+/)
+    .map((item) => item.replace(/^[-*]\s*/, '').trim())
+    .filter(Boolean);
+  if (!items.length) return String(fallbackHtml || '<ul></ul>');
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+export function extractSponsorTierFields(html = '') {
+  const source = String(html || '');
+  const section = (source.match(/<section[^>]*data-sponsor-tiers[^>]*>([\s\S]*?)<\/section>/i) || [])[1] || source;
+  const head = (section.match(/<div[^>]*class="[^"]*sponsor-tiers-head[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
+  const card = (id) => (section.match(new RegExp(`<article[^>]*data-tier="${id}"[^>]*>([\\s\\S]*?)<\\/article>`, 'i')) || [])[1] || '';
+  const bronze = card('bronze');
+  const silver = card('silver');
+  const gold = card('gold');
+  const benefitsOf = (block) => {
+    const list = (block.match(/<ul[\s\S]*?<\/ul>/i) || [])[0] || '';
+    return list || undefined;
+  };
+  return normalizeSponsorTierFields({
+    tiers_kicker: matchInner(head, /<(?:span|p|div)[^>]*class="[^"]*\bkicker\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i)
+      || matchInner(head, /data-cms-field="tiers_kicker"[^>]*>([\s\S]*?)<\//i)
+      || undefined,
+    tiers_heading: matchInner(head, /<h2[^>]*>([\s\S]*?)<\/h2>/i) || undefined,
+    tiers_intro: matchInner(head, /<h2[^>]*>[\s\S]*?<\/h2>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    bronze_label: matchInner(bronze, /class="[^"]*sponsor-tier-label[^"]*"[^>]*>([\s\S]*?)<\//i) || undefined,
+    bronze_title: matchInner(bronze, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
+    bronze_blurb: matchInner(bronze, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    bronze_benefits: benefitsOf(bronze),
+    silver_label: matchInner(silver, /class="[^"]*sponsor-tier-label[^"]*"[^>]*>([\s\S]*?)<\//i) || undefined,
+    silver_title: matchInner(silver, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
+    silver_blurb: matchInner(silver, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    silver_benefits: benefitsOf(silver),
+    gold_label: matchInner(gold, /class="[^"]*sponsor-tier-label[^"]*"[^>]*>([\s\S]*?)<\//i) || undefined,
+    gold_title: matchInner(gold, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
+    gold_blurb: matchInner(gold, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    gold_benefits: benefitsOf(gold),
+  });
+}
+
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-03';
+const ASSET_VERSION = 'admin-cms-20260803-04';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -1070,25 +1151,28 @@ export function renderSponsorsDirectory(sponsors = []) {
   }).join('');
 }
 
-export function renderSponsorTiersHtml() {
-  const packages = SPONSOR_TIER_PACKAGES.map((tier) => {
-    const benefits = tier.benefits
-      .map((benefit) => `<li>${escapeHtml(benefit)}</li>`)
-      .join('');
-    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(tier.id)}" data-tier="${escapeAttr(tier.id)}">
-      <span class="sponsor-tier-label">${escapeHtml(tier.name)}</span>
-      <h3>${escapeHtml(tier.name)} Sponsor</h3>
-      <p>${escapeHtml(tier.blurb)}</p>
-      <ul>${benefits}</ul>
+export function renderSponsorTiersHtml(payload = {}) {
+  const fields = normalizeSponsorTierFields(payload);
+  const card = (id, labelKey, titleKey, blurbKey, benefitsKey) => {
+    const benefits = sponsorTierBenefitsHtml(fields[benefitsKey], SPONSOR_TIER_FIELD_DEFAULTS[benefitsKey]);
+    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}">
+      <span class="sponsor-tier-label" data-cms-field="${escapeAttr(labelKey)}">${formatInlineRichText(fields[labelKey])}</span>
+      <h3 data-cms-field="${escapeAttr(titleKey)}">${formatInlineRichText(fields[titleKey])}</h3>
+      <p data-cms-field="${escapeAttr(blurbKey)}">${formatInlineRichText(fields[blurbKey])}</p>
+      <div data-cms-field="${escapeAttr(benefitsKey)}">${benefits}</div>
     </article>`;
-  }).join('');
+  };
   return `<section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages">
     <div class="sponsor-tiers-head">
-      <span class="kicker">Sponsor packages</span>
-      <h2>Choose your level of support.</h2>
-      <p>Three clear ways to back Eagle Pride — from a website marquee feature to full game-day recognition.</p>
+      <span class="kicker" data-cms-field="tiers_kicker">${formatInlineRichText(fields.tiers_kicker)}</span>
+      <h2 data-cms-field="tiers_heading">${formatInlineRichText(fields.tiers_heading)}</h2>
+      <p data-cms-field="tiers_intro">${formatInlineRichText(fields.tiers_intro)}</p>
     </div>
-    <div class="sponsor-tiers-grid">${packages}</div>
+    <div class="sponsor-tiers-grid">
+      ${card('bronze', 'bronze_label', 'bronze_title', 'bronze_blurb', 'bronze_benefits')}
+      ${card('silver', 'silver_label', 'silver_title', 'silver_blurb', 'silver_benefits')}
+      ${card('gold', 'gold_label', 'gold_title', 'gold_blurb', 'gold_benefits')}
+    </div>
   </section>`;
 }
 
@@ -1787,7 +1871,7 @@ export function generateStructuredPageHtml(payload = {}) {
   }
 
   if (layout === 'become-sponsor') {
-    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap">${renderSponsorTiersHtml()}<div class="become-sponsor-panel grid two"><article class="card" data-cms-field="body_text">${body}</article><div data-contact-form-slot></div></div>${callout}</div></section>`;
+    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap">${renderSponsorTiersHtml(payload)}<div class="become-sponsor-panel grid two"><article class="card" data-cms-field="body_text">${body}</article><div data-contact-form-slot></div></div>${callout}</div></section>`;
   }
 
   return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div>${callout}</div></section>`;
@@ -2663,7 +2747,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use Formatting for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-become-sponsor-hint hidden>Package cards stay fixed. Edit the intro copy beside the inquiry form here. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, and benefits. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Assign each sponsor a Bronze, Silver, or Gold tier. Tier controls marquee, fly-in, and game-day announcements.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit Sponsors page</button><button class="btn outline" type="button" id="edit-become-sponsor-page">Edit Become a Sponsor</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack announcer-list-card">
   <h2>Game-day announcer list</h2>

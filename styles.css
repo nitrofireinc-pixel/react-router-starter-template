@@ -1329,6 +1329,9 @@ body.sponsor-map-open{overflow:hidden}
   color:var(--muted);
   line-height:1.45;
 }
+.sponsor-tier [data-cms-field$="_benefits"]{
+  margin:6px 0 0;
+}
 .sponsor-tier ul{
   margin:6px 0 0;
   padding:0;
@@ -1336,6 +1339,7 @@ body.sponsor-map-open{overflow:hidden}
   display:grid;
   gap:10px;
 }
+.sponsor-tier [data-cms-field$="_benefits"] ul{margin:0}
 .sponsor-tier li{
   position:relative;
   padding-left:26px;
