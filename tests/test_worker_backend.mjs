@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -227,6 +227,15 @@ test('formatSponsorAddress capitalizes parts and uses proper commas', () => {
   const maps = sponsorMapsUrls('123 Main Street, Kernersville, NC');
   assert.match(maps.directionsUrl, /google\.com\/maps\/dir/);
   assert.match(maps.embedUrl, /output=embed/);
+});
+
+test('contact email provider prefers Resend, then Mailchannels, then FormSubmit', () => {
+  assert.equal(resolveContactEmailProvider({ RESEND_API_KEY: 're_test' }), 'resend');
+  assert.equal(resolveContactEmailProvider({ MAILCHANNELS_API_KEY: 'mc_test' }), 'mailchannels');
+  assert.equal(resolveContactEmailProvider({}), 'formsubmit');
+  assert.equal(resolveContactEmailProvider({ CONTACT_EMAIL_PROVIDER: 'none' }), 'none');
+  assert.equal(describeContactEmailProvider('none').configured, false);
+  assert.equal(describeContactEmailProvider('formsubmit').configured, true);
 });
 
 test('contact topics require labels and valid delivery emails', () => {

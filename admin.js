@@ -981,12 +981,29 @@ function renderContactMessages() {
     : '<p class="draft">No contact messages yet.</p>';
 }
 
+async function loadContactDeliveryStatus() {
+  const status = document.querySelector('#contact-delivery-status');
+  if (!status || !canEditContact()) return;
+  try {
+    const info = await jsonFetch('/api/admin/contact/delivery');
+    state.contactDelivery = info;
+    status.textContent = info.configured
+      ? `Email delivery: ${info.detail}`
+      : `Email delivery offline: ${info.detail}`;
+    status.classList.toggle('error', !info.configured);
+  } catch (error) {
+    status.textContent = `Could not check email delivery: ${error.message}`;
+    status.classList.add('error');
+  }
+}
+
 async function loadContactTopics() {
   if (!canEditContact()) return;
   state.contactTopics = await jsonFetch('/api/admin/contact/topics');
   state.contactMessages = await jsonFetch('/api/admin/contact/messages').catch(() => []);
   renderContactTopics();
   renderContactMessages();
+  await loadContactDeliveryStatus();
 }
 
 async function refreshAll() {

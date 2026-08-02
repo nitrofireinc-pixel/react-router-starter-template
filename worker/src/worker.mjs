@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-31';
+const ASSET_VERSION = 'admin-cms-20260802-32';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -744,34 +744,58 @@ function renderContactPageBody(page) {
   return next;
 }
 
-async function sendContactEmail(env, { to, replyTo, subject, text }) {
-  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.pages.dev').trim();
-  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
-  if (!isValidEmail(to)) throw new Error('Topic email is invalid');
-  if (!isValidEmail(fromEmail)) throw new Error('Sender email is not configured');
+export function resolveContactEmailProvider(env = {}) {
+  if (env.RESEND_API_KEY) return 'resend';
+  if (env.MAILCHANNELS_API_KEY) return 'mailchannels';
+  const forced = String(env.CONTACT_EMAIL_PROVIDER || '').trim().toLowerCase();
+  if (forced === 'none') return 'none';
+  if (forced === 'formsubmit' || forced === '') return 'formsubmit';
+  return forced;
+}
 
-  if (env.RESEND_API_KEY) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: `${fromName} <${fromEmail}>`,
-        to: [to],
-        reply_to: replyTo || undefined,
-        subject,
-        text,
-      }),
-    });
-    if (!response.ok) throw new Error(`Resend error: ${await response.text()}`);
-    return { provider: 'resend' };
+export function describeContactEmailProvider(provider) {
+  if (provider === 'resend') return { provider, configured: true, detail: 'Delivering with Resend.' };
+  if (provider === 'mailchannels') return { provider, configured: true, detail: 'Delivering with Mailchannels.' };
+  if (provider === 'formsubmit') {
+    return {
+      provider,
+      configured: true,
+      detail: 'Delivering with FormSubmit. The first message to a new topic email may require one-time inbox activation.',
+    };
   }
+  return {
+    provider: provider || 'none',
+    configured: false,
+    detail: 'No email provider configured. Messages are saved in Recent Messages only. Add a RESEND_API_KEY Pages secret for reliable delivery.',
+  };
+}
 
+async function sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromName }) {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: `${fromName} <${fromEmail}>`,
+      to: [to],
+      reply_to: replyTo || undefined,
+      subject,
+      text,
+    }),
+  });
+  if (!response.ok) throw new Error(`Resend error: ${await response.text()}`);
+  return { provider: 'resend' };
+}
+
+async function sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName }) {
   const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'X-Api-Key': String(env.MAILCHANNELS_API_KEY),
+    },
     body: JSON.stringify({
       personalizations: [{
         to: [{ email: to }],
@@ -784,6 +808,55 @@ async function sendContactEmail(env, { to, replyTo, subject, text }) {
   });
   if (!response.ok) throw new Error(`Mailchannels error: ${await response.text()}`);
   return { provider: 'mailchannels' };
+}
+
+async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
+  const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(to)}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      name: name || 'Website visitor',
+      email: replyTo || 'noreply@efhsband.org',
+      _subject: subject,
+      message: text,
+      _template: 'table',
+      _captcha: 'false',
+    }),
+  });
+  const bodyText = await response.text();
+  let payload = {};
+  try { payload = JSON.parse(bodyText); } catch { payload = { message: bodyText }; }
+  if (!response.ok) {
+    throw new Error(`FormSubmit error: ${payload.message || bodyText || response.status}`);
+  }
+  const message = String(payload.message || bodyText || '');
+  if (/activate|confirm|check your email/i.test(message)) {
+    throw new Error(`FormSubmit activation required for ${to}. Check that inbox for a one-time activation link, then submit again.`);
+  }
+  return { provider: 'formsubmit', detail: message };
+}
+
+async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
+  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  if (!isValidEmail(to)) throw new Error('Topic email is invalid');
+
+  const provider = resolveContactEmailProvider(env);
+  if (provider === 'resend') {
+    if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+    return sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromName });
+  }
+  if (provider === 'mailchannels') {
+    if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address');
+    return sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName });
+  }
+  if (provider === 'formsubmit') {
+    return sendViaFormSubmit({ to, replyTo, subject, text, name });
+  }
+  throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
 }
 
 function renderPageBody(page, sponsors = [], staff = []) {
@@ -1040,7 +1113,7 @@ async function handleApi(request, env, url) {
     let delivered = 0;
     let deliveryError = '';
     try {
-      await sendContactEmail(env, { to: topic.email, replyTo: email, subject, text });
+      await sendContactEmail(env, { to: topic.email, replyTo: email, subject, text, name });
       delivered = 1;
     } catch (error) {
       deliveryError = String(error?.message || error || 'Delivery failed');
@@ -1303,6 +1376,19 @@ async function handleApi(request, env, url) {
     await env.DB.prepare('UPDATE contact_topics SET label = ?, email = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(topic.label, topic.email, topic.sort_order, topic.active, id).run();
     return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(id).first());
   }
+  if (url.pathname === '/api/admin/contact/delivery' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'contact') && !canEditPage(auth.user, 'contact')) {
+      return jsonResponse({ detail: 'Permission required: contact' }, 403);
+    }
+    const provider = resolveContactEmailProvider(env);
+    return jsonResponse({
+      ...describeContactEmailProvider(provider),
+      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
+      from_name: String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+    });
+  }
   if (url.pathname === '/api/admin/contact/messages' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -1541,7 +1627,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, homepage visitors are redirected to maintenance.html. Admin and other pages stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-contact" class="cms-panel">
-<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
+<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p><p class="notice" id="contact-delivery-status">Checking email delivery…</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
 <div class="editor-layout">
 <form id="contact-topic-form" class="admin-card stack">
 <input type="hidden" name="id">
