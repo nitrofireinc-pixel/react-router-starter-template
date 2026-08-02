@@ -25,7 +25,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260801-27';
+const ASSET_VERSION = 'admin-cms-20260802-01';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -1440,17 +1440,16 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
 <div class="editor-layout">
 <form id="contact-topic-form" class="admin-card stack">
-<input type="hidden" name="id">
 <div class="form-grid">
 <label>Topic label<input name="label" required maxlength="120" placeholder="General question"></label>
 <label>Send messages to<input name="email" type="email" required maxlength="200" placeholder="band@example.com"></label>
 <label>Sort order<input name="sort_order" type="number" value="1"></label>
 <label class="checkline"><input name="active" type="checkbox" checked> Active on contact form</label>
 </div>
-<button class="btn primary" type="submit">Save Topic</button>
+<button class="btn primary" type="submit">Add Topic</button>
 <p class="status" id="contact-topic-status"></p>
 </form>
-<div class="admin-card"><h2>Topics</h2><p class="muted">Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Topics</h2><p class="muted">New topics are appended to this list. Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>

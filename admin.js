@@ -929,20 +929,11 @@ function renderContactTopics() {
     ? ordered.map((topic) => `
     <article class="admin-row">
       <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>order ${topic.sort_order} · ${topic.active ? 'Active' : 'Hidden'}</small></div>
-      <div class="row-actions"><button type="button" data-edit-contact-topic="${topic.id}">Edit</button><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
+      <div class="row-actions"><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
     </article>
   `).join('')
     : '<p class="draft">No contact topics yet. Add one to enable the public form.</p>';
 
-  list.querySelectorAll('[data-edit-contact-topic]').forEach((button) => button.addEventListener('click', () => {
-    const topic = state.contactTopics.find((item) => item.id === Number(button.dataset.editContactTopic));
-    if (!topic) return;
-    const form = document.querySelector('#contact-topic-form');
-    fillForm(form, topic);
-    form.elements.active.checked = Boolean(Number(topic.active));
-    document.querySelector('#contact-topic-status').textContent = `Editing “${topic.label}”. Save to update.`;
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
   list.querySelectorAll('[data-delete-contact-topic]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Delete this contact topic?')) return;
     await jsonFetch(`/api/admin/contact/topics/${button.dataset.deleteContactTopic}`, { method: 'DELETE' });
@@ -1111,10 +1102,9 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#contact-topic-status');
     const payload = formPayload(form);
+    delete payload.id;
     payload.sort_order = Number(payload.sort_order || (state.contactTopics.length + 1));
     payload.active = Boolean(form.elements.active?.checked);
-    const id = String(payload.id || '').trim();
-    delete payload.id;
     if (!payload.label?.trim()) {
       if (status) status.textContent = 'Topic label is required.';
       return;
@@ -1124,16 +1114,15 @@ function bindForms() {
       return;
     }
     try {
-      await jsonFetch(id ? `/api/admin/contact/topics/${id}` : '/api/admin/contact/topics', {
-        method: id ? 'PUT' : 'POST',
+      await jsonFetch('/api/admin/contact/topics', {
+        method: 'POST',
         body: JSON.stringify(payload),
       });
-      if (status) status.textContent = id ? 'Topic updated.' : 'Topic created.';
+      if (status) status.textContent = 'Topic added.';
       form.reset();
-      formControl(form, 'id').value = '';
       form.elements.active.checked = true;
-      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
       await loadContactTopics();
+      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
     } catch (error) {
       if (status) status.textContent = `Could not save topic: ${error.message}`;
     }
@@ -1142,10 +1131,9 @@ function bindForms() {
   document.querySelector('#new-contact-topic')?.addEventListener('click', () => {
     const form = document.querySelector('#contact-topic-form');
     form.reset();
-    formControl(form, 'id').value = '';
     form.elements.active.checked = true;
     formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
-    document.querySelector('#contact-topic-status').textContent = 'Creating a new contact topic.';
+    document.querySelector('#contact-topic-status').textContent = 'Add a topic to append it to the list.';
     formControl(form, 'label')?.focus();
   });
 
