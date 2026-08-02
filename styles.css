@@ -182,9 +182,51 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 /* admin-mobile-dropdown: 20260801-13 */
 
 /* Visual page editor — editable live preview */
-.page-visual-layout{
-  grid-template-columns:minmax(0,2.2fr) minmax(260px,.55fr);
+.page-visual-layout,
+.image-admin-shell .editor-layout.page-visual-layout{
+  display:flex;
+  grid-template-columns:none;
+  gap:0;
   align-items:stretch;
+}
+.page-visual-layout > .page-canvas-shell{
+  flex:1 1 auto;
+  min-width:min(100%,320px);
+  width:auto;
+}
+.page-visual-layout > #page-form{
+  flex:0 0 var(--page-settings-width, 300px);
+  width:var(--page-settings-width, 300px);
+  max-width:min(420px, 42vw);
+  min-width:240px;
+}
+.page-editor-resizer{
+  flex:0 0 12px;
+  align-self:stretch;
+  margin:0 2px;
+  padding:0;
+  border:0;
+  border-radius:999px;
+  background:
+    linear-gradient(90deg,transparent 4px,#c5d0de 4px,#c5d0de 8px,transparent 8px);
+  cursor:col-resize;
+  touch-action:none;
+}
+.page-editor-resizer:hover,
+.page-editor-resizer:focus-visible,
+.page-visual-layout.is-resizing .page-editor-resizer{
+  background:
+    linear-gradient(90deg,transparent 4px,#014990 4px,#014990 8px,transparent 8px);
+  outline:none;
+}
+.page-editor-resizer[hidden]{display:none!important}
+.page-visual-layout.is-resizing{
+  user-select:none;
+  cursor:col-resize;
+}
+.page-visual-layout.is-resizing iframe,
+.page-visual-layout.is-resizing .page-preview{
+  pointer-events:none;
 }
 .page-canvas-shell{
   display:grid;
@@ -480,7 +522,17 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   to{opacity:1;transform:none}
 }
 @media(max-width:1100px){
-  .page-visual-layout{grid-template-columns:minmax(0,1fr)}
+  .page-visual-layout,
+  .image-admin-shell .editor-layout.page-visual-layout{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+  }
+  .page-visual-layout > #page-form{
+    flex:none;
+    width:auto;
+    max-width:none;
+  }
+  .page-editor-resizer{display:none!important}
   .page-canvas-toolbar{align-items:flex-start;flex-direction:column}
 }
 

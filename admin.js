@@ -456,10 +456,94 @@ function buildEditablePagePreview(payload = {}) {
 
 const pageEditor = { rebuilding: false, bound: false, baseline: '', dirty: false, capturing: false };
 
+const PAGE_SETTINGS_WIDTH_KEY = 'efband_page_settings_width';
+const PAGE_SETTINGS_WIDTH_DEFAULT = 300;
+const PAGE_SETTINGS_WIDTH_MIN = 240;
+const PAGE_SETTINGS_WIDTH_MAX = 480;
+
+function applyPageSettingsWidth(width) {
+  const layout = document.querySelector('.page-visual-layout');
+  if (!layout) return;
+  const clamped = Math.round(Math.min(PAGE_SETTINGS_WIDTH_MAX, Math.max(PAGE_SETTINGS_WIDTH_MIN, Number(width) || PAGE_SETTINGS_WIDTH_DEFAULT)));
+  layout.style.setProperty('--page-settings-width', `${clamped}px`);
+  return clamped;
+}
+
+function restorePageSettingsWidth() {
+  try {
+    const saved = Number(localStorage.getItem(PAGE_SETTINGS_WIDTH_KEY));
+    applyPageSettingsWidth(Number.isFinite(saved) ? saved : PAGE_SETTINGS_WIDTH_DEFAULT);
+  } catch {
+    applyPageSettingsWidth(PAGE_SETTINGS_WIDTH_DEFAULT);
+  }
+}
+
+function bindPageEditorResizer() {
+  const layout = document.querySelector('.page-visual-layout');
+  const resizer = document.querySelector('#page-editor-resizer');
+  const form = document.querySelector('#page-form');
+  if (!layout || !resizer || !form || resizer.dataset.bound) return;
+  resizer.dataset.bound = '1';
+  restorePageSettingsWidth();
+
+  const startDrag = (event) => {
+    if (form.hidden || window.matchMedia('(max-width:1100px)').matches) return;
+    event.preventDefault();
+    const startX = event.clientX ?? event.touches?.[0]?.clientX;
+    if (!Number.isFinite(startX)) return;
+    const rect = layout.getBoundingClientRect();
+    const startWidth = form.getBoundingClientRect().width || PAGE_SETTINGS_WIDTH_DEFAULT;
+    layout.classList.add('is-resizing');
+
+    const onMove = (moveEvent) => {
+      const clientX = moveEvent.clientX ?? moveEvent.touches?.[0]?.clientX;
+      if (!Number.isFinite(clientX)) return;
+      // Dragging left grows the preview; dragging right grows settings.
+      const next = startWidth - (clientX - startX);
+      const maxForLayout = Math.max(PAGE_SETTINGS_WIDTH_MIN, Math.min(PAGE_SETTINGS_WIDTH_MAX, rect.width - 340));
+      applyPageSettingsWidth(Math.min(maxForLayout, next));
+      moveEvent.preventDefault?.();
+    };
+    const onEnd = () => {
+      layout.classList.remove('is-resizing');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+      try {
+        const width = Number.parseFloat(getComputedStyle(layout).getPropertyValue('--page-settings-width'));
+        if (Number.isFinite(width)) localStorage.setItem(PAGE_SETTINGS_WIDTH_KEY, String(Math.round(width)));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onEnd);
+  };
+
+  resizer.addEventListener('pointerdown', startDrag);
+  resizer.addEventListener('keydown', (event) => {
+    if (form.hidden) return;
+    const current = Number.parseFloat(getComputedStyle(layout).getPropertyValue('--page-settings-width')) || PAGE_SETTINGS_WIDTH_DEFAULT;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      const width = applyPageSettingsWidth(current + 16);
+      try { localStorage.setItem(PAGE_SETTINGS_WIDTH_KEY, String(width)); } catch { /* ignore */ }
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      const width = applyPageSettingsWidth(current - 16);
+      try { localStorage.setItem(PAGE_SETTINGS_WIDTH_KEY, String(width)); } catch { /* ignore */ }
+    }
+  });
+}
+
 function showPageEditorChrome(active) {
   document.querySelector('#page-form')?.toggleAttribute('hidden', !active);
   document.querySelector('#page-preview')?.toggleAttribute('hidden', !active);
   document.querySelector('[data-page-preview-empty]')?.toggleAttribute('hidden', active);
+  document.querySelector('#page-editor-resizer')?.toggleAttribute('hidden', !active);
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
@@ -2074,6 +2158,7 @@ function bindForms() {
 }
 
 bindPageVisualEditor();
+bindPageEditorResizer();
 bindForms();
 bindMailComposer();
 refreshAll().catch(error => {
