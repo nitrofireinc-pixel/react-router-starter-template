@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -408,6 +408,28 @@ test('normalizeUtilityLinks cleans top-right utility bar links', () => {
   assert.equal(links[2].target, '_blank');
   assert.equal(normalizeUtilityLinks(null)[0].label, 'Upcoming Events');
   assert.equal(normalizeUtilityLinks(null)[0].target, '_self');
+});
+
+test('normalizeSocialLinks keeps platform order and cleans URLs', () => {
+  assert.equal(normalizeSocialHref('javascript:alert(1)'), '');
+  assert.equal(normalizeSocialHref('facebook.com/efhsband'), 'https://facebook.com/efhsband');
+  const links = normalizeSocialLinks(JSON.stringify([
+    { platform: 'instagram', href: 'https://instagram.com/efhsband' },
+    { platform: 'facebook', href: 'javascript:alert(1)' },
+    { platform: 'youtube', href: 'youtube.com/@efhsband' },
+  ]));
+  assert.equal(links.length, 5);
+  assert.equal(links[0].platform, 'facebook');
+  assert.equal(links[0].href, '');
+  assert.equal(links[1].platform, 'instagram');
+  assert.equal(links[1].href, 'https://instagram.com/efhsband');
+  assert.equal(links[2].href, 'https://youtube.com/@efhsband');
+  const html = renderSocialLinks({ social_links: links });
+  assert.match(html, /footer-social/);
+  assert.match(html, /instagram\.com\/efhsband/);
+  assert.match(html, /aria-label="Instagram"/);
+  assert.doesNotMatch(html, /javascript:/);
+  assert.equal(renderSocialLinks({ social_links: [] }), '');
 });
 
 test('home feature cards extract, normalize, and patch without wiping the page', () => {

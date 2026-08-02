@@ -23,7 +23,15 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], homeBodyHtml: '' };
+const SOCIAL_PLATFORMS = [
+  { id: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/…' },
+  { id: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/…' },
+  { id: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@…' },
+  { id: 'x', label: 'X', placeholder: 'https://x.com/…' },
+  { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
+];
+
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -687,6 +695,48 @@ function removeUtilityLink(index) {
   renderUtilityLinksEditor();
 }
 
+async function loadSocialLinksEditor() {
+  const form = document.querySelector('#social-links-form');
+  if (!form || !hasPermission('site')) return;
+  try {
+    const result = await jsonFetch('/api/admin/social-links');
+    state.socialLinks = Array.isArray(result.social_links) ? result.social_links : [];
+    renderSocialLinksEditor();
+  } catch (error) {
+    const status = document.querySelector('#social-links-status');
+    if (status) status.textContent = `Could not load social links: ${error.message}`;
+  }
+}
+
+function renderSocialLinksEditor() {
+  const list = document.querySelector('#social-links-list');
+  if (!list) return;
+  const byPlatform = new Map(
+    (Array.isArray(state.socialLinks) ? state.socialLinks : []).map((link) => [
+      String(link.platform || '').toLowerCase(),
+      String(link.href || ''),
+    ]),
+  );
+  list.innerHTML = SOCIAL_PLATFORMS.map((platform) => `
+    <article class="social-link-row" data-social-platform="${escapeHtml(platform.id)}">
+      <span class="social-link-label">${escapeHtml(platform.label)}</span>
+      <input name="social_href" type="text" inputmode="url" autocomplete="url" value="${escapeHtml(byPlatform.get(platform.id) || '')}" placeholder="${escapeHtml(platform.placeholder)}" aria-label="${escapeHtml(platform.label)} URL">
+    </article>
+  `).join('');
+}
+
+function readSocialLinksDraft() {
+  const list = document.querySelector('#social-links-list');
+  if (!list) return SOCIAL_PLATFORMS.map((platform) => ({ platform: platform.id, href: '' }));
+  return SOCIAL_PLATFORMS.map((platform) => {
+    const row = list.querySelector(`[data-social-platform="${platform.id}"]`);
+    return {
+      platform: platform.id,
+      href: String(row?.querySelector('input[name="social_href"]')?.value || '').trim(),
+    };
+  });
+}
+
 function pageSnapshotFromPayload(payload) {
   const keys = [
     'original_slug', 'title', 'slug', 'path', 'nav_order', 'layout', 'active',
@@ -1282,6 +1332,7 @@ async function loadSite() {
   state.site = await jsonFetch('/api/site');
   fillForm(document.querySelector('#site-form'), state.site);
   await loadUtilityLinksEditor();
+  await loadSocialLinksEditor();
 }
 
 async function loadPages() {
@@ -2062,6 +2113,24 @@ function bindForms() {
     }
     state.utilityLinks = [...draft, { label: 'New link', href: '/', target: '_self' }];
     renderUtilityLinksEditor();
+  });
+
+  document.querySelector('#social-links-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#social-links-status');
+    const links = readSocialLinksDraft();
+    if (status) status.textContent = 'Saving…';
+    try {
+      const saved = await jsonFetch('/api/admin/social-links', {
+        method: 'PUT',
+        body: JSON.stringify({ social_links: links }),
+      });
+      state.socialLinks = saved.social_links || links;
+      renderSocialLinksEditor();
+      if (status) status.textContent = 'Footer social links saved. Icons appear on every public page when a URL is set.';
+    } catch (error) {
+      if (status) status.textContent = `Could not save social links: ${error.message}`;
+    }
   });
 
   document.querySelector('#new-page')?.addEventListener('click', async () => {
