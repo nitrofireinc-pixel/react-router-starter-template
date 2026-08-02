@@ -275,6 +275,8 @@ function showPageEditorChrome(active) {
   document.querySelector('#page-form')?.toggleAttribute('hidden', !active);
   document.querySelector('#page-preview')?.toggleAttribute('hidden', !active);
   document.querySelector('[data-page-preview-empty]')?.toggleAttribute('hidden', active);
+  const toolbar = document.querySelector('#rich-text-toolbar');
+  if (toolbar) toolbar.hidden = !active;
   if (!active) {
     pageEditor.baseline = '';
     pageEditor.dirty = false;
@@ -378,6 +380,11 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
+  if (!String(payload.heading || '').trim()) {
+    if (status) status.textContent = 'Add a page heading in the live preview before saving.';
+    document.querySelector('#page-preview [data-cms-field="heading"]')?.focus();
+    return false;
+  }
   if (status) status.textContent = 'Saving…';
   try {
     await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
@@ -420,20 +427,11 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
-function setRichToolbarVisible(visible, anchor = null) {
+function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
-  toolbar.hidden = !visible;
-  toolbar.classList.toggle('is-active', Boolean(visible));
-  if (visible && anchor) {
-    const shell = document.querySelector('.page-canvas-shell');
-    const shellRect = shell?.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-    if (shellRect) {
-      toolbar.style.top = `${Math.max(8, anchorRect.top - shellRect.top - 48)}px`;
-      toolbar.style.left = `${Math.max(12, anchorRect.left - shellRect.left)}px`;
-    }
-  }
+  // Toolbar stays docked above the preview while editing; highlight when a rich field is active.
+  toolbar.classList.toggle('is-active', Boolean(activeField));
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -548,15 +546,14 @@ function bindPageVisualEditor() {
 
   preview.addEventListener('focusin', event => {
     const field = event.target.closest?.('.cms-edit-rich');
-    setRichToolbarVisible(Boolean(field), field);
+    setRichToolbarVisible(Boolean(field));
   });
   preview.addEventListener('focusout', event => {
     const next = event.relatedTarget;
     if (next?.closest?.('#rich-text-toolbar')) return;
     setTimeout(() => {
-      if (!preview.contains(document.activeElement) && !document.activeElement?.closest?.('#rich-text-toolbar')) {
-        setRichToolbarVisible(false);
-      }
+      const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
+      setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
     }, 0);
   });
 
