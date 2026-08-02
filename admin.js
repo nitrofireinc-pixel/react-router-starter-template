@@ -463,28 +463,23 @@ function showPageEditorChrome(active) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
-    showUtilityLinksEditor(false);
     pageEditor.baseline = '';
     pageEditor.dirty = false;
     updatePageDirtyUi();
   }
 }
 
-function showUtilityLinksEditor(visible) {
+async function loadUtilityLinksEditor() {
   const form = document.querySelector('#utility-links-form');
-  if (!form) return;
-  form.hidden = !visible;
-  if (visible) loadUtilityLinksEditor().catch((error) => {
+  if (!form || !hasPermission('site')) return;
+  try {
+    const result = await jsonFetch('/api/admin/utility-links');
+    state.utilityLinks = Array.isArray(result.utility_links) ? result.utility_links : [];
+    renderUtilityLinksEditor();
+  } catch (error) {
     const status = document.querySelector('#utility-links-status');
     if (status) status.textContent = `Could not load utility links: ${error.message}`;
-  });
-}
-
-async function loadUtilityLinksEditor() {
-  if (!(hasPermission('site') || hasPermission('pages') || canEditPage('home'))) return;
-  const result = await jsonFetch('/api/admin/utility-links');
-  state.utilityLinks = Array.isArray(result.utility_links) ? result.utility_links : [];
-  renderUtilityLinksEditor();
+  }
 }
 
 function renderUtilityLinksEditor() {
@@ -1099,6 +1094,7 @@ async function loadSite() {
   if (!hasPermission('site')) return;
   state.site = await jsonFetch('/api/site');
   fillForm(document.querySelector('#site-form'), state.site);
+  await loadUtilityLinksEditor();
 }
 
 async function loadPages() {
@@ -1170,7 +1166,6 @@ function editPage(slug, { skipGuard = false } = {}) {
       form.elements.layout.disabled = isHomePage;
     }
     showPageEditorChrome(true);
-    showUtilityLinksEditor(isHomePage);
     syncPreviewFromForm();
     await activateTab('pages');
     activatePageShortcut(slug);
@@ -1820,7 +1815,6 @@ function bindForms() {
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
     showPageEditorChrome(true);
-    showUtilityLinksEditor(false);
     syncPreviewFromForm();
     await activateTab('pages');
     capturePageBaseline();
