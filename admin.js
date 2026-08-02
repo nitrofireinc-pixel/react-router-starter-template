@@ -1138,17 +1138,15 @@ async function moveSponsor(id, direction) {
 }
 
 async function loadMailDeliveryStatus() {
-  const status = document.querySelector('#mail-delivery-status');
+  // Only surface a warning when delivery is not ready. Do not show a "Delivering with Resend" card.
+  const status = document.querySelector('#mail-status');
   if (!status || !canSendMail()) return;
   try {
     const delivery = await jsonFetch('/api/admin/mail/delivery');
-    status.textContent = delivery.configured
-      ? `${delivery.detail} From: ${delivery.from_name} <${delivery.from_email}>.`
-      : delivery.detail || 'Mail delivery is not configured.';
-    status.classList.toggle('error', !delivery.configured);
+    if (delivery.configured) return;
+    status.textContent = delivery.detail || 'Mail delivery is not configured.';
   } catch (error) {
     status.textContent = `Could not check mail delivery: ${error.message}`;
-    status.classList.add('error');
   }
 }
 

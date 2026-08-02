@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-49';
+const ASSET_VERSION = 'admin-cms-20260802-50';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -2100,7 +2100,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users.</p><p class="notice" id="mail-delivery-status">Checking email delivery…</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
