@@ -1549,18 +1549,44 @@ export function generateStructuredPageHtml(payload = {}) {
   return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div>${callout}</div></section>`;
 }
 
+export function sanitizeHomeBodyHtml(html = '') {
+  let source = String(html || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\scontenteditable\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:role|spellcheck|aria-label|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\sclass="([^"]*)"/gi, (_, classes) => {
+      const cleaned = String(classes || '')
+        .split(/\s+/)
+        .filter((name) => name && !['cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic'].includes(name))
+        .join(' ');
+      return cleaned ? ` class="${cleaned}"` : '';
+    })
+    .replace(/javascript:/gi, '');
+  source = source
+    .replace(/<div class="cms-home-preview-note"[\s\S]*?<\/div>/gi, '')
+    .replace(/<label class="cms-home-href-field"[\s\S]*?<\/label>/gi, '')
+    .replace(/<span class="cms-home-link-edit">([\s\S]*?)<\/span>/gi, '$1');
+  return source.trim();
+}
+
 export function serializePagePayload(payload, existing = null) {
   const slug = normalizePageSlug(payload.slug || payload.title || existing?.slug);
   const path = payload.path ? normalizeStaticPath(payload.path) : pagePathFromSlug(slug);
   const defaultHtml = '<section><div class="wrap"><h1>New Page</h1><p>Edit this page in the CMS.</p></div></section>';
   let body_html;
   if (slug === 'home') {
-    const baseHtml = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
-    const cards = normalizeHomeFeatureCards({
-      ...extractHomeFeatureCards(baseHtml),
-      ...payload,
-    });
-    body_html = applyHomeFeatureCards(baseHtml, cards);
+    if (payload.body_html != null && String(payload.body_html).trim()) {
+      body_html = sanitizeHomeBodyHtml(payload.body_html);
+    } else {
+      const baseHtml = String(existing?.body_html ?? defaultHtml);
+      const cards = normalizeHomeFeatureCards({
+        ...extractHomeFeatureCards(baseHtml),
+        ...payload,
+      });
+      body_html = applyHomeFeatureCards(baseHtml, cards);
+    }
   } else if (hasStructuredPageFields(payload)) {
     body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
   } else {

@@ -267,7 +267,6 @@ function structuredPageFields(page) {
       body_text: '',
       callout_title: '',
       callout_text: '',
-      ...extractHomeFeatureCardsFromHtml(page.body_html),
     };
   }
   const template = document.createElement('template');
@@ -358,48 +357,105 @@ const PAGE_FIELD_LABELS = {
   launch_footer: 'Launch footer note',
 };
 
-const HOME_FEATURE_SECTION_RE = /<section(?:\s+data-cms-home-cards)?[^>]*>\s*<div class="wrap grid two">\s*<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*(?:home-launch|class="card")[^>]*>[\s\S]*?<\/article>\s*<\/div>\s*<\/section>/i;
-
-function buildEditableHomeFeatureSection(cards = {}) {
-  const c = homeFeatureCardsFromForm(cards);
-  return `<section data-cms-home-cards>
-  <div class="wrap grid two">
-    <article class="card accent-card" data-cms-block="home-boosters">
-      ${editableField('boosters_tag', 'span', c.boosters_tag, 'Tag', 'tag')}
-      ${editableField('boosters_heading', 'h3', c.boosters_heading, 'Heading')}
-      ${editableField('boosters_body', 'p', c.boosters_body, 'Body text')}
-      <p style="margin-top:18px" class="cms-home-button-row">
-        <a class="btn secondary cms-edit-field cms-edit-rich cms-edit-inline" href="${escapeAttr(c.boosters_href)}" data-cms-field="boosters_button" data-edit-label="Boosters button" contenteditable="true" role="textbox" spellcheck="true" aria-label="Boosters button">${escapeHtml(c.boosters_button)}</a>
-      </p>
-      <label class="cms-home-href-field">Button link URL<input type="text" data-home-href-input value="${escapeAttr(c.boosters_href)}" placeholder="boosters.html"></label>
-    </article>
-    <article class="card" data-cms-block="home-launch">
-      ${editableField('launch_tag', 'span', c.launch_tag, 'Tag', 'tag')}
-      ${editableField('launch_heading', 'h3', c.launch_heading, 'Heading')}
-      ${editableField('launch_body', 'p', c.launch_body, 'Body text')}
-      ${editableField('launch_footer', 'p', c.launch_footer, 'Footer note', 'draft')}
-    </article>
-  </div>
-</section>`;
+function homeFieldLabel(el) {
+  if (el.matches?.('.eyebrow')) return 'Eyebrow';
+  if (el.matches?.('.kicker')) return 'Section label';
+  if (el.matches?.('.tag')) return 'Card tag';
+  if (el.matches?.('.draft')) return 'Footer note';
+  if (el.tagName === 'A') return 'Button label';
+  if (el.tagName === 'LI') return 'List item';
+  if (el.tagName === 'FIGCAPTION') return 'Caption';
+  return ({ H1: 'Heading', H2: 'Heading', H3: 'Heading', P: 'Paragraph' })[el.tagName] || 'Text';
 }
 
-function buildEditableHomePreview(payload = {}) {
-  const section = buildEditableHomeFeatureSection(payload);
+function markHomeHtmlEditable(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '').trim();
+  const root = template.content;
+  root.querySelectorAll('[data-events]').forEach((node) => {
+    node.classList.add('cms-home-dynamic');
+    node.setAttribute('data-cms-dynamic-label', 'Managed in Calendar Events');
+  });
+  root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
+    node.classList.add('cms-home-dynamic');
+    node.setAttribute('data-cms-dynamic-label', 'Managed in Photos');
+  });
+
+  const targets = root.querySelectorAll('.eyebrow, .kicker, .tag, h1, h2, h3, p, li, a.btn, figcaption');
+  let index = 0;
+  targets.forEach((el) => {
+    if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note')) return;
+    if (el.closest('.cms-edit-field')) return;
+    index += 1;
+    const label = homeFieldLabel(el);
+    el.classList.add('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline');
+    el.setAttribute('contenteditable', 'true');
+    el.setAttribute('role', 'textbox');
+    el.setAttribute('spellcheck', 'true');
+    el.setAttribute('aria-label', label);
+    el.dataset.editLabel = label;
+    el.dataset.cmsHomeField = String(index);
+    if (el.tagName === 'A') {
+      const href = el.getAttribute('href') || '';
+      el.dataset.cmsHref = href;
+      const hrefField = document.createElement('label');
+      hrefField.className = 'cms-home-href-field';
+      hrefField.innerHTML = `Link URL <input type="text" data-home-link-href value="${escapeAttr(href)}" placeholder="page.html or https://…">`;
+      el.insertAdjacentElement('afterend', hrefField);
+    }
+  });
+
+  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
+  return note + template.innerHTML;
+}
+
+function serializeHomePreviewHtml(preview) {
+  if (!preview) return String(state.homeBodyHtml || '');
+  preview.querySelectorAll('[data-home-link-href]').forEach((input) => {
+    const field = input.closest('.cms-home-href-field');
+    const link = field?.previousElementSibling?.tagName === 'A'
+      ? field.previousElementSibling
+      : field?.parentElement?.querySelector('a.btn');
+    if (link) {
+      const href = String(input.value || '').trim() || '#';
+      link.setAttribute('href', href);
+      link.dataset.cmsHref = href;
+    }
+  });
+  const clone = preview.cloneNode(true);
+  clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field').forEach((node) => node.remove());
+  clone.querySelectorAll('[contenteditable], [data-cms-home-field], .cms-edit-field').forEach((el) => {
+    el.removeAttribute('contenteditable');
+    el.removeAttribute('role');
+    el.removeAttribute('spellcheck');
+    el.removeAttribute('aria-label');
+    el.removeAttribute('data-placeholder');
+    el.removeAttribute('data-edit-label');
+    el.removeAttribute('data-cms-home-field');
+    el.removeAttribute('data-cms-field');
+    el.removeAttribute('data-cms-href');
+    el.removeAttribute('data-cms-dynamic-label');
+    el.classList.remove('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic');
+  });
+  return clone.innerHTML.trim();
+}
+
+function extractHomeSiteFields(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const textOf = (selector) => String(template.content.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
+  return {
+    hero_title: textOf('[data-site-field="hero_title"]'),
+    hero_subtitle: textOf('[data-site-field="hero_subtitle"]'),
+  };
+}
+
+function buildEditableHomePreview() {
   const base = String(state.homeBodyHtml || '').trim();
   if (!base) {
-    return `<div class="cms-home-preview-note"><p class="kicker">Home page</p><h2>Feature cards</h2><p>Edit the Boosters and Launch note cards below. Hero copy is managed in Site Settings.</p></div>${section}`;
+    return '<div class="cms-home-preview-note"><p class="kicker">Home page</p><p>Home page HTML is missing. Refresh or restore the Home page content.</p></div>';
   }
-  if (HOME_FEATURE_SECTION_RE.test(base)) return base.replace(HOME_FEATURE_SECTION_RE, section);
-  if (/accent-card|home-boosters/i.test(base)) {
-    return base.replace(
-      /<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*>[\s\S]*?<\/article>/i,
-      () => {
-        const inner = section.match(/<div class="wrap grid two">([\s\S]*?)<\/div>/i);
-        return inner ? inner[1].trim() : section;
-      }
-    );
-  }
-  return `${base}\n${section}`;
+  return markHomeHtmlEditable(base);
 }
 
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
@@ -654,7 +710,15 @@ function currentPageSnapshot() {
   pageEditor.capturing = true;
   try {
     document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
-    return pageSnapshotFromPayload(pagePayload(form));
+    const payload = pagePayload(form);
+    const base = pageSnapshotFromPayload(payload);
+    if (payload.layout === 'home' || payload.original_slug === 'home' || payload.slug === 'home') {
+      return JSON.stringify({
+        page: JSON.parse(base),
+        home_html: serializeHomePreviewHtml(document.querySelector('#page-preview')),
+      });
+    }
+    return base;
   } finally {
     pageEditor.capturing = false;
   }
@@ -727,10 +791,6 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const status = document.querySelector('#page-status');
   if (!form) return false;
   document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
-  const hrefInput = document.querySelector('#page-preview [data-home-href-input]');
-  if (hrefInput && form.elements.boosters_href) {
-    form.elements.boosters_href.value = hrefInput.value.trim();
-  }
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
@@ -740,13 +800,35 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
     document.querySelector('#page-preview [data-cms-field="heading"]')?.focus();
     return false;
   }
-  if (isHomeSave && !plainTextFromHtml(payload.heading)) payload.heading = 'Home';
+  if (isHomeSave) {
+    payload.heading = payload.heading || 'Home';
+    payload.title = payload.title || 'Home';
+    payload.slug = 'home';
+    payload.body_html = serializeHomePreviewHtml(document.querySelector('#page-preview'));
+    if (!payload.body_html) {
+      if (status) status.textContent = 'Home page content is empty. Refresh and try again.';
+      return false;
+    }
+  }
   if (status) status.textContent = 'Saving…';
   try {
     await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
       method: original ? 'PUT' : 'POST',
       body: JSON.stringify(payload),
     });
+    if (isHomeSave && hasPermission('site')) {
+      const siteFields = extractHomeSiteFields(payload.body_html);
+      if (siteFields.hero_title || siteFields.hero_subtitle) {
+        await jsonFetch('/api/admin/site', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...(state.site || {}),
+            hero_title: siteFields.hero_title || state.site?.hero_title,
+            hero_subtitle: siteFields.hero_subtitle || state.site?.hero_subtitle,
+          }),
+        }).catch(() => null);
+      }
+    }
     if (status) status.textContent = 'Page saved. Public site updated.';
     if (form.elements.original_slug) form.elements.original_slug.value = payload.slug || original || '';
     capturePageBaseline();
@@ -831,8 +913,11 @@ function syncPreviewFromForm() {
 }
 
 function bindPagePreviewInteractions(preview) {
-  preview.querySelectorAll('[data-cms-field]').forEach(field => {
-    field.addEventListener('input', () => syncFieldFromPreview(field));
+  preview.querySelectorAll('[data-cms-field], [data-cms-home-field]').forEach(field => {
+    field.addEventListener('input', () => {
+      syncFieldFromPreview(field);
+      if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
+    });
     field.addEventListener('blur', () => syncFieldFromPreview(field));
     field.addEventListener('focus', () => {
       preview.querySelectorAll('.cms-edit-field.is-focused').forEach(node => node.classList.remove('is-focused'));
@@ -849,16 +934,14 @@ function bindPagePreviewInteractions(preview) {
       field.addEventListener('click', (event) => event.preventDefault());
     }
   });
-  const hrefInput = preview.querySelector('[data-home-href-input]');
-  if (hrefInput) {
-    hrefInput.addEventListener('input', () => {
-      const form = document.querySelector('#page-form');
-      if (form?.elements?.boosters_href) form.elements.boosters_href.value = hrefInput.value.trim();
-      const button = preview.querySelector('[data-cms-field="boosters_button"]');
-      if (button) button.setAttribute('href', hrefInput.value.trim() || '#');
+  preview.querySelectorAll('[data-home-link-href]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const field = input.closest('.cms-home-href-field');
+      const link = field?.previousElementSibling?.tagName === 'A' ? field.previousElementSibling : null;
+      if (link) link.setAttribute('href', input.value.trim() || '#');
       refreshPageDirtyState();
     });
-  }
+  });
   preview.querySelectorAll('[data-add-callout]').forEach(button => {
     button.addEventListener('click', () => {
       const form = document.querySelector('#page-form');
