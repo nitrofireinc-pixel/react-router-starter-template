@@ -684,6 +684,32 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .staff-admin-row .row-actions{grid-column:1/-1;justify-content:flex-end}
 }
 
+.field-hint{
+  display:block;
+  margin-top:4px;
+  color:#5b6f88;
+  font-size:.78rem;
+  font-weight:650;
+  line-height:1.35;
+}
+.sponsor-logo-preview{
+  display:grid;
+  place-items:center;
+  width:96px;
+  height:96px;
+  margin-top:4px;
+  padding:10px;
+  border:1px solid #e1e8f1;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 8px 20px rgba(15,34,58,.06);
+}
+.sponsor-logo-preview[hidden]{display:none!important}
+.sponsor-logo-preview img{
+  max-width:100%;
+  max-height:100%;
+  object-fit:contain;
+}
 .sponsor-ad-settings-card .muted{
   margin:0;
   color:#5b6f88;
