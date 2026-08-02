@@ -825,3 +825,90 @@ body.sponsor-map-open{overflow:hidden}
   background:transparent;
 }
 .maintenance-shell .btn.outline:hover{background:rgba(255,255,255,.1)}
+
+/* Admin mail composer */
+.mail-compose{max-width:820px}
+.mail-recipients{display:grid;gap:10px}
+.mail-recipients-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mail-recipients-head h2{margin:0;font-size:1.05rem}
+.mail-recipients-list{
+  display:grid;
+  gap:8px;
+  max-height:220px;
+  overflow:auto;
+  padding:10px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#f8fafc;
+}
+.mail-recipient{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin:0;
+  padding:8px 10px;
+  border-radius:10px;
+  background:#fff;
+  border:1px solid #e3e9f1;
+}
+.mail-recipient span{display:grid;gap:2px;min-width:0}
+.mail-recipient b{color:#10233c}
+.mail-recipient small{color:#5b6f88;font-weight:700}
+.mail-editor-block{display:grid;gap:8px}
+.mail-editor-label{font-weight:850;color:#10233c}
+.mail-rich-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+  padding:8px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#fff;
+}
+.mail-rich-toolbar button,
+.mail-rich-toolbar label{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:34px;
+  padding:6px 10px;
+  border:1px solid #d5deea;
+  border-radius:10px;
+  background:#f8fafc;
+  color:#10233c;
+  font-weight:850;
+  cursor:pointer;
+}
+.mail-rich-toolbar button:hover,
+.mail-rich-toolbar label:hover{border-color:#014990;background:#fff}
+.mail-rich-toolbar input[type="color"]{
+  width:28px;
+  height:22px;
+  padding:0;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+}
+.mail-body-editor{
+  min-height:220px;
+  padding:14px 16px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#fff;
+  color:#10233c;
+  line-height:1.55;
+  outline:none;
+}
+.mail-body-editor:focus{border-color:#014990;box-shadow:0 0 0 3px rgba(1,73,144,.12)}
+.mail-body-editor:empty::before{
+  content:attr(data-placeholder);
+  color:#7b8da3;
+  pointer-events:none;
+}
+.mail-body-editor p{margin:0 0 .75em}
+.mail-body-editor p:last-child{margin-bottom:0}
+@media(max-width:720px){
+  .mail-recipients-list{max-height:180px}
+  .mail-body-editor{min-height:180px}
+}

@@ -25,8 +25,15 @@ export const DEFAULT_SPONSORS = [
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-37';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'photos', 'contact'];
+const ASSET_VERSION = 'admin-cms-20260802-38';
+const MAIL_ATTACHMENT_MAX_FILES = 5;
+const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
+const MAIL_ATTACHMENT_TOTAL_BYTES = 10_000_000;
+const MAIL_ATTACHMENT_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip',
+]);
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -771,20 +778,30 @@ export function describeContactEmailProvider(provider) {
   };
 }
 
-async function sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromName }) {
+async function sendViaResend(env, { to, replyTo, subject, text, html, fromEmail, fromName, attachments }) {
+  const recipients = (Array.isArray(to) ? to : [to]).map((value) => String(value || '').trim()).filter(Boolean);
+  const payload = {
+    from: `${fromName} <${fromEmail}>`,
+    to: recipients,
+    reply_to: replyTo || undefined,
+    subject,
+    text,
+  };
+  if (html) payload.html = html;
+  if (Array.isArray(attachments) && attachments.length) {
+    payload.attachments = attachments.map((file) => ({
+      filename: file.filename,
+      content: file.content,
+      content_type: file.content_type || undefined,
+    }));
+  }
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      from: `${fromName} <${fromEmail}>`,
-      to: [to],
-      reply_to: replyTo || undefined,
-      subject,
-      text,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     const body = await response.text();
@@ -794,6 +811,126 @@ async function sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromN
     throw new Error(`Resend error: ${body}`);
   }
   return { provider: 'resend' };
+}
+
+export function htmlToPlainText(html) {
+  return String(html || '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*p\s*>/gi, '\n\n')
+    .replace(/<\/\s*li\s*>/gi, '\n')
+    .replace(/<\/\s*h[1-6]\s*>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extensionOfFilename(filename) {
+  const name = String(filename || '').trim().toLowerCase();
+  const idx = name.lastIndexOf('.');
+  return idx >= 0 ? name.slice(idx) : '';
+}
+
+export async function normalizeMailAttachments(files = []) {
+  const list = Array.isArray(files) ? files : [];
+  if (list.length > MAIL_ATTACHMENT_MAX_FILES) {
+    throw new Error(`You can attach up to ${MAIL_ATTACHMENT_MAX_FILES} files.`);
+  }
+  let total = 0;
+  const attachments = [];
+  for (const file of list) {
+    if (!file || typeof file.arrayBuffer !== 'function') continue;
+    const filename = String(file.name || 'attachment').trim() || 'attachment';
+    const ext = extensionOfFilename(filename);
+    if (!MAIL_ATTACHMENT_EXTENSIONS.has(ext)) {
+      throw new Error(`Unsupported attachment type for ${filename}. Allowed: PDF, Office, images, TXT, CSV, ZIP.`);
+    }
+    const size = Number(file.size || 0);
+    if (size <= 0) throw new Error(`Attachment ${filename} is empty.`);
+    if (size > MAIL_ATTACHMENT_MAX_BYTES) {
+      throw new Error(`Attachment ${filename} exceeds the 4 MB limit.`);
+    }
+    total += size;
+    if (total > MAIL_ATTACHMENT_TOTAL_BYTES) {
+      throw new Error('Attachments exceed the 10 MB total limit.');
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    attachments.push({
+      filename,
+      content: btoa(binary),
+      content_type: String(file.type || '').trim() || undefined,
+      size,
+    });
+  }
+  return attachments;
+}
+
+export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
+  const cleanSubject = String(subject || '').trim();
+  const cleanHtml = sanitizeRichHtml(html || '');
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0))];
+  return {
+    subject: cleanSubject,
+    html: cleanHtml,
+    text: htmlToPlainText(cleanHtml),
+    user_ids: ids,
+  };
+}
+
+async function parseAdminMailRequest(request) {
+  const contentType = String(request.headers.get('content-type') || '');
+  if (contentType.includes('multipart/form-data')) {
+    const form = await request.formData();
+    const userIds = form.getAll('user_ids')
+      .flatMap((value) => String(value || '').split(/[,\s]+/))
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    const files = form.getAll('attachments').filter((file) => file && typeof file.arrayBuffer === 'function' && Number(file.size || 0) > 0);
+    return {
+      ...normalizeAdminMailPayload({
+        subject: form.get('subject'),
+        html: form.get('html'),
+        userIds,
+      }),
+      attachments: await normalizeMailAttachments(files),
+    };
+  }
+  const payload = await request.json();
+  return {
+    ...normalizeAdminMailPayload({
+      subject: payload.subject,
+      html: payload.html || payload.body_html || payload.message,
+      userIds: payload.user_ids || payload.userIds || [],
+    }),
+    attachments: [],
+  };
+}
+
+async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments }) {
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
+  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  if (!isValidEmail(to)) throw new Error('Recipient email is invalid');
+  if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
+  if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+  return sendViaResend(env, {
+    to,
+    replyTo,
+    subject,
+    html,
+    text,
+    fromEmail,
+    fromName,
+    attachments,
+  });
 }
 
 async function sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName }) {
@@ -1406,6 +1543,91 @@ async function handleApi(request, env, url) {
     return jsonResponse(rows.results || []);
   }
 
+  if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
+    const recipients = (rows.results || [])
+      .map((user) => ({
+        id: user.id,
+        username: user.username,
+        display_name: user.display_name,
+        role: user.role,
+        email: String(user.username || '').trim().toLowerCase(),
+        can_email: isValidEmail(user.username),
+      }))
+      .filter((user) => user.can_email);
+    return jsonResponse(recipients);
+  }
+  if (url.pathname === '/api/admin/mail/delivery' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    const provider = resolveContactEmailProvider(env);
+    return jsonResponse({
+      ...describeContactEmailProvider(provider),
+      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
+      from_name: String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      requires_resend: true,
+      detail: provider === 'resend'
+        ? 'Delivering with Resend. Rich text and attachments are supported.'
+        : 'Mail requires Resend. Add a Cloudflare Pages secret named RESEND_API_KEY, verify efhsband.org in Resend, then redeploy.',
+      configured: provider === 'resend',
+    });
+  }
+  if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    let mail;
+    try {
+      mail = await parseAdminMailRequest(request);
+    } catch (error) {
+      return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
+    }
+    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
+    if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
+    if (resolveContactEmailProvider(env) !== 'resend') {
+      return jsonResponse({ detail: 'Mail requires Resend. Add RESEND_API_KEY in Cloudflare Pages secrets.' }, 503);
+    }
+
+    const placeholders = mail.user_ids.map(() => '?').join(', ');
+    const rows = await env.DB.prepare(
+      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
+    ).bind(...mail.user_ids).all();
+    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
+    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+
+    const replyTo = isValidEmail(auth.user.username) ? String(auth.user.username).trim().toLowerCase() : undefined;
+    const results = [];
+    for (const user of users) {
+      const email = String(user.username).trim().toLowerCase();
+      try {
+        await sendAdminUserMail(env, {
+          to: email,
+          replyTo,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text || htmlToPlainText(mail.html),
+          attachments: mail.attachments,
+        });
+        results.push({ user_id: user.id, email, ok: true });
+      } catch (error) {
+        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
+      }
+    }
+    const sent = results.filter((item) => item.ok).length;
+    const failed = results.length - sent;
+    return jsonResponse({
+      ok: failed === 0,
+      sent,
+      failed,
+      results,
+      detail: failed
+        ? `Sent ${sent} of ${results.length}. ${failed} failed.`
+        : `Sent to ${sent} recipient${sent === 1 ? '' : 's'}.`,
+    }, failed && sent ? 207 : failed ? 502 : 200);
+  }
+
   if (url.pathname === '/api/admin/events' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -1648,7 +1870,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-mobile-menu">Menu</button>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-tab="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-tab="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Mail</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Click text in the live preview to edit it in place, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click a text block to edit · Tab between blocks · Save publishes to the site</small></div><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><details class="page-text-fields"><summary>Text fields (advanced)</summary><div class="form-grid"><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" required placeholder="Sound. Spirit. Eagle Pride."></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="8" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div></details><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
@@ -1672,7 +1894,42 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
+<section id="tab-mail" class="cms-panel mail-panel">
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Mail</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users.</p><p class="notice" id="mail-delivery-status">Checking email delivery…</p></div></div>
+<div class="editor-layout">
+<form id="mail-form" class="admin-card stack mail-compose">
+<label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
+<div class="mail-recipients">
+  <div class="mail-recipients-head">
+    <h2>Recipients</h2>
+    <div class="panel-actions">
+      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
+      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
+    </div>
+  </div>
+  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
+  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+</div>
+<div class="mail-editor-block">
+  <div class="mail-editor-label">Message</div>
+  <div id="mail-rich-toolbar" class="mail-rich-toolbar" role="toolbar" aria-label="Formatting">
+    <button type="button" data-mail-rich="bold" title="Bold"><b>B</b></button>
+    <button type="button" data-mail-rich="italic" title="Italic"><i>I</i></button>
+    <button type="button" data-mail-rich="underline" title="Underline"><u>U</u></button>
+    <button type="button" data-mail-rich="insertUnorderedList" title="Bulleted list">• List</button>
+    <label class="rich-color" title="Text color"><span>Color</span><input type="color" id="mail-rich-color" value="#002142"></label>
+  </div>
+  <div id="mail-body" class="mail-body-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Email message" data-placeholder="Write your message…"></div>
+</div>
+<label class="full">Attachments <small>Optional · up to 5 files · 4 MB each · 10 MB total · PDF, Office, images, TXT, CSV, ZIP</small>
+  <input name="attachments" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,application/pdf,image/*">
+</label>
+<button class="btn primary" type="submit">Send email</button>
+<p class="status" id="mail-status"></p>
+</form>
+</div>
+</section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;

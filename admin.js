@@ -14,7 +14,7 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null };
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -37,6 +37,10 @@ function canEditStaff() {
 
 function canEditContact() {
   return hasPermission('contact') || canEditPage('contact');
+}
+
+function canSendMail() {
+  return hasPermission('mail');
 }
 
 function formControl(form, name) {
@@ -536,6 +540,7 @@ function showAllowedPanels() {
     contact: canEditContact(),
     site: hasPermission('site'),
     users: hasPermission('users'),
+    mail: canSendMail(),
     events: hasPermission('events') || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
@@ -641,6 +646,7 @@ function renderDashboard() {
     canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
+    canSendMail() && ['Mail', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration'],
     hasPermission('events') && ['Calendar Events', 'Manage event text and date blocks.', 'events', 'Program'],
   ].filter(Boolean);
 
@@ -831,6 +837,121 @@ async function moveSponsor(id, direction) {
   await loadSponsors();
 }
 
+async function loadMailDeliveryStatus() {
+  const status = document.querySelector('#mail-delivery-status');
+  if (!status || !canSendMail()) return;
+  try {
+    const delivery = await jsonFetch('/api/admin/mail/delivery');
+    status.textContent = delivery.configured
+      ? `${delivery.detail} From: ${delivery.from_name} <${delivery.from_email}>.`
+      : delivery.detail || 'Mail delivery is not configured.';
+    status.classList.toggle('error', !delivery.configured);
+  } catch (error) {
+    status.textContent = `Could not check mail delivery: ${error.message}`;
+    status.classList.add('error');
+  }
+}
+
+function renderMailRecipients() {
+  const list = document.querySelector('#mail-recipients-list');
+  if (!list) return;
+  if (!state.mailRecipients.length) {
+    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
+    return;
+  }
+  list.innerHTML = state.mailRecipients.map((user) => `
+    <label class="mail-recipient checkline">
+      <input type="checkbox" name="user_ids" value="${user.id}">
+      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${user.role === 'admin' ? 'Super Admin' : 'Editor'}</small></span>
+    </label>
+  `).join('');
+}
+
+async function loadMailRecipients() {
+  if (!canSendMail()) return;
+  state.mailRecipients = await jsonFetch('/api/admin/mail/recipients');
+  renderMailRecipients();
+  await loadMailDeliveryStatus();
+}
+
+function selectedMailUserIds(form) {
+  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+}
+
+function bindMailComposer() {
+  const form = document.querySelector('#mail-form');
+  const editor = document.querySelector('#mail-body');
+  const toolbar = document.querySelector('#mail-rich-toolbar');
+  if (!form || !editor || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+
+  toolbar?.querySelectorAll('[data-mail-rich]').forEach((button) => {
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => {
+      editor.focus();
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand(button.dataset.mailRich, false, null);
+    });
+  });
+  document.querySelector('#mail-rich-color')?.addEventListener('input', (event) => {
+    editor.focus();
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, event.target.value);
+  });
+
+  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
+    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
+  });
+  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
+    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#mail-status');
+    const subject = String(form.elements.subject?.value || '').trim();
+    const html = sanitizeRichHtml(editor.innerHTML || '');
+    const userIds = selectedMailUserIds(form);
+    if (!userIds.length) {
+      if (status) status.textContent = 'Select at least one recipient.';
+      return;
+    }
+    if (!subject) {
+      if (status) status.textContent = 'Subject is required.';
+      return;
+    }
+    if (!html.replace(/<[^>]+>/g, '').trim()) {
+      if (status) status.textContent = 'Message body is required.';
+      return;
+    }
+
+    const payload = new FormData();
+    payload.set('subject', subject);
+    payload.set('html', html);
+    userIds.forEach((id) => payload.append('user_ids', String(id)));
+    [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
+
+    if (status) status.textContent = 'Sending…';
+    try {
+      const result = await jsonFetch('/api/admin/mail', { method: 'POST', body: payload });
+      if (status) status.textContent = result.detail || 'Email sent.';
+      if (result.ok) {
+        editor.innerHTML = '';
+        form.elements.attachments.value = '';
+      }
+    } catch (error) {
+      let message = error.message || 'Could not send email.';
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed?.detail) message = parsed.detail;
+      } catch {
+        // Keep raw error text when the API did not return JSON.
+      }
+      if (status) status.textContent = message;
+    }
+  });
+}
+
 async function loadUsers() {
   if (!hasPermission('users')) return;
   state.users = await jsonFetch('/api/admin/users');
@@ -1008,7 +1129,7 @@ async function loadContactTopics() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadEvents(), loadPhotos(), loadContactTopics()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics()]);
 }
 
 function bindForms() {
@@ -1307,9 +1428,10 @@ function bindForms() {
 
 bindPageVisualEditor();
 bindForms();
+bindMailComposer();
 refreshAll().catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* contact-form-topics: 20260801-27 */
+/* admin-mail-compose: 20260802-38 */

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -283,4 +283,19 @@ test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
   assert.equal(preserved.city, 'Greensboro');
   const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
   assert.equal(disabled.homepage_ad, 0);
+});
+
+test('admin mail payload sanitizes rich html and builds plain text', () => {
+  const mail = normalizeAdminMailPayload({
+    subject: '  Practice update  ',
+    html: '<p>Hello <strong>team</strong></p><script>alert(1)</script><p>See you Thursday.</p>',
+    userIds: ['3', 3, 7, 'nope'],
+  });
+  assert.equal(mail.subject, 'Practice update');
+  assert.deepEqual(mail.user_ids, [3, 7]);
+  assert.match(mail.html, /<strong>team<\/strong>/);
+  assert.doesNotMatch(mail.html, /script/i);
+  assert.match(mail.text, /Hello team/);
+  assert.match(mail.text, /See you Thursday/);
+  assert.equal(htmlToPlainText('<p>Line one</p><br>Line two'), 'Line one\n\nLine two');
 });
