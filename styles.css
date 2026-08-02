@@ -275,7 +275,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .utility-link-row{
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);
+  grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(140px,.8fr);
   gap:10px;
   padding:12px;
   border:1px solid #e1e8f1;

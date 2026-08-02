@@ -1,9 +1,9 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 
 export const DEFAULT_UTILITY_LINKS = [
-  { label: 'Upcoming Events', href: '/calendar.html' },
-  { label: 'Student Resources', href: '/resources.html' },
-  { label: 'Contact', href: '/contact.html' },
+  { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
+  { label: 'Student Resources', href: '/resources.html', target: '_self' },
+  { label: 'Contact', href: '/contact.html', target: '_self' },
 ];
 
 export const DEFAULT_SITE = {
@@ -34,7 +34,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-55';
+const ASSET_VERSION = 'admin-cms-20260802-56';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -382,7 +382,9 @@ export function normalizeUtilityLinks(value) {
     } else {
       href = `/${href.replace(/^\/+/, '')}`;
     }
-    return { label, href };
+    const rawTarget = String(item?.target || '_self').trim().toLowerCase();
+    const target = rawTarget === '_blank' ? '_blank' : '_self';
+    return { label, href, target };
   }).filter((item) => item.label);
 }
 
@@ -392,7 +394,12 @@ function canManageUtilityLinks(user) {
 
 function renderUtilityLinks(site = {}) {
   return normalizeUtilityLinks(site.utility_links)
-    .map((link) => `<a href="${escapeAttr(link.href)}">${escapeHtml(link.label)}</a>`)
+    .map((link) => {
+      const targetAttr = link.target === '_blank'
+        ? ' target="_blank" rel="noopener noreferrer"'
+        : '';
+      return `<a href="${escapeAttr(link.href)}"${targetAttr}>${escapeHtml(link.label)}</a>`;
+    })
     .join('');
 }
 

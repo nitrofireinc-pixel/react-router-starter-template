@@ -378,21 +378,28 @@ function renderUtilityLinksEditor() {
   const links = Array.isArray(state.utilityLinks) && state.utilityLinks.length
     ? state.utilityLinks
     : [
-      { label: 'Upcoming Events', href: '/calendar.html' },
-      { label: 'Student Resources', href: '/resources.html' },
-      { label: 'Contact', href: '/contact.html' },
+      { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
+      { label: 'Student Resources', href: '/resources.html', target: '_self' },
+      { label: 'Contact', href: '/contact.html', target: '_self' },
     ];
-  list.innerHTML = links.map((link, index) => `
+  list.innerHTML = links.map((link, index) => {
+    const target = link.target === '_blank' ? '_blank' : '_self';
+    return `
     <article class="utility-link-row" data-utility-index="${index}">
       <label>Label<input name="utility_label" value="${escapeHtml(link.label || '')}" required maxlength="60"></label>
       <label>URL<input name="utility_href" value="${escapeHtml(link.href || '')}" required placeholder="/calendar.html"></label>
+      <label>Open in<select name="utility_target">
+        <option value="_self"${target === '_self' ? ' selected' : ''}>Same tab (_self)</option>
+        <option value="_blank"${target === '_blank' ? ' selected' : ''}>New tab (_blank)</option>
+      </select></label>
       <div class="utility-link-actions">
         <button type="button" class="btn outline" data-utility-up ${index === 0 ? 'disabled' : ''} aria-label="Move link up">↑</button>
         <button type="button" class="btn outline" data-utility-down ${index === links.length - 1 ? 'disabled' : ''} aria-label="Move link down">↓</button>
         <button type="button" class="btn outline" data-utility-remove ${links.length <= 1 ? 'disabled' : ''}>Remove</button>
       </div>
     </article>
-  `).join('');
+  `;
+  }).join('');
   list.querySelectorAll('[data-utility-up]').forEach((button) => button.addEventListener('click', () => moveUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex), -1)));
   list.querySelectorAll('[data-utility-down]').forEach((button) => button.addEventListener('click', () => moveUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex), 1)));
   list.querySelectorAll('[data-utility-remove]').forEach((button) => button.addEventListener('click', () => removeUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex))));
@@ -401,10 +408,14 @@ function renderUtilityLinksEditor() {
 function readUtilityLinksDraft() {
   const list = document.querySelector('#utility-links-list');
   if (!list) return [];
-  return [...list.querySelectorAll('.utility-link-row')].map((row) => ({
-    label: String(row.querySelector('input[name="utility_label"]')?.value || '').trim(),
-    href: String(row.querySelector('input[name="utility_href"]')?.value || '').trim(),
-  })).filter((link) => link.label && link.href);
+  return [...list.querySelectorAll('.utility-link-row')].map((row) => {
+    const rawTarget = String(row.querySelector('select[name="utility_target"]')?.value || '_self').trim();
+    return {
+      label: String(row.querySelector('input[name="utility_label"]')?.value || '').trim(),
+      href: String(row.querySelector('input[name="utility_href"]')?.value || '').trim(),
+      target: rawTarget === '_blank' ? '_blank' : '_self',
+    };
+  }).filter((link) => link.label && link.href);
 }
 
 function moveUtilityLink(index, delta) {
@@ -1630,7 +1641,7 @@ function bindForms() {
       if (status) status.textContent = 'You can add up to 6 utility links.';
       return;
     }
-    state.utilityLinks = [...draft, { label: 'New link', href: '/' }];
+    state.utilityLinks = [...draft, { label: 'New link', href: '/', target: '_self' }];
     renderUtilityLinksEditor();
   });
 
