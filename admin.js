@@ -1262,7 +1262,43 @@ async function ensureFullPagesLoaded() {
 }
 
 function pageLabel(slug) {
-  return ({ home: 'Home', directors: 'Directors & Staff', resources: 'Student Resources' }[slug]) || slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return ({
+    home: 'Home',
+    directors: 'Directors & Staff',
+    resources: 'Student Resources',
+    'become-a-sponsor': 'Become a Sponsor',
+  }[slug]) || slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function pageShortcutLabel(page) {
+  const title = String(page?.title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim();
+  return title || pageLabel(page?.slug || '');
+}
+
+function editablePages() {
+  return (state.pages || [])
+    .filter(canEditPage)
+    .slice()
+    .sort((a, b) => {
+      const orderA = Number(a.nav_order ?? 99);
+      const orderB = Number(b.nav_order ?? 99);
+      if (orderA !== orderB) return orderA - orderB;
+      return pageShortcutLabel(a).localeCompare(pageShortcutLabel(b));
+    });
+}
+
+function renderPageShortcuts() {
+  const mount = document.querySelector('#admin-page-shortcuts');
+  const label = document.querySelector('[data-page-shortcuts-label]');
+  if (!mount) return;
+  const pages = editablePages();
+  if (label) label.hidden = !pages.length;
+  mount.innerHTML = pages.map((page) => (
+    `<button type="button" data-edit-shortcut="${escapeAttr(page.slug)}">${escapeHtml(pageShortcutLabel(page))}</button>`
+  )).join('');
+  mount.querySelectorAll('[data-edit-shortcut]').forEach((button) => {
+    button.onclick = () => editPage(button.dataset.editShortcut);
+  });
 }
 
 function showAllowedPanels() {
@@ -1281,18 +1317,18 @@ function showAllowedPanels() {
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
+  let manageVisible = false;
   document.querySelectorAll('.admin-menu > [data-tab]').forEach(button => {
     const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
+    if (allowed && button.dataset.tab !== 'dashboard') manageVisible = true;
   });
-  document.querySelectorAll('[data-edit-shortcut]').forEach(button => {
-    const slug = button.dataset.editShortcut;
-    button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
-    button.onclick = () => editPage(slug);
-  });
+  const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
+  if (manageLabel) manageLabel.hidden = !manageVisible;
+  renderPageShortcuts();
   const newPageButton = document.querySelector('#new-page');
-  if (newPageButton) newPageButton.hidden = true;
+  if (newPageButton) newPageButton.hidden = !hasPermission('pages');
   const editCalendarPage = document.querySelector('#edit-calendar-page');
   if (editCalendarPage) {
     editCalendarPage.hidden = !canEditPage('calendar');
@@ -1307,6 +1343,11 @@ function showAllowedPanels() {
   if (editSponsorsPage) {
     editSponsorsPage.hidden = !canEditPage('sponsors');
     editSponsorsPage.onclick = () => editPage('sponsors');
+  }
+  const editBecomeSponsorPage = document.querySelector('#edit-become-sponsor-page');
+  if (editBecomeSponsorPage) {
+    editBecomeSponsorPage.hidden = !canEditPage('become-a-sponsor');
+    editBecomeSponsorPage.onclick = () => editPage('become-a-sponsor');
   }
   const editContactPage = document.querySelector('#edit-contact-page');
   if (editContactPage) {
@@ -1365,10 +1406,7 @@ async function loadSite() {
 async function loadPages() {
   if (!state.pages.some(canEditPage)) return;
   state.pages = await jsonFetch('/api/admin/pages');
-  document.querySelectorAll('[data-edit-shortcut]').forEach(button => {
-    const slug = button.dataset.editShortcut;
-    button.hidden = !state.pages.find(page => page.slug === slug && canEditPage(page));
-  });
+  renderPageShortcuts();
   renderMobileAdminMenu();
   renderPagePermissionBoxes();
 }
@@ -1421,12 +1459,15 @@ function editPage(slug, { skipGuard = false } = {}) {
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
     const sponsorsHint = form.querySelector('[data-sponsors-hint]');
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
+    const becomeSponsorHint = form.querySelector('[data-become-sponsor-hint]');
+    if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     if (form.elements.layout) {
-      form.elements.layout.value = isHomePage ? 'home' : (form.elements.layout.value || 'standard');
+      const fields = structuredPageFields(page);
+      form.elements.layout.value = isHomePage ? 'home' : (fields.layout || form.elements.layout.value || 'standard');
       form.elements.layout.closest('label')?.classList.toggle('is-home-locked', isHomePage);
       form.elements.layout.disabled = isHomePage;
     }
