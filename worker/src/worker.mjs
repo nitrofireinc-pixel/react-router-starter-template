@@ -748,8 +748,8 @@ export function resolveContactEmailProvider(env = {}) {
   if (env.RESEND_API_KEY) return 'resend';
   if (env.MAILCHANNELS_API_KEY) return 'mailchannels';
   const forced = String(env.CONTACT_EMAIL_PROVIDER || '').trim().toLowerCase();
-  if (forced === 'none') return 'none';
-  if (forced === 'formsubmit' || forced === '') return 'formsubmit';
+  if (forced === 'formsubmit') return 'formsubmit';
+  if (forced === 'none' || forced === '') return 'none';
   return forced;
 }
 
@@ -766,7 +766,7 @@ export function describeContactEmailProvider(provider) {
   return {
     provider: provider || 'none',
     configured: false,
-    detail: 'No email provider configured. Messages are saved in Recent Messages only. Add a RESEND_API_KEY Pages secret for reliable delivery.',
+    detail: 'No email provider configured. Messages are saved below. Add a Cloudflare Pages secret named RESEND_API_KEY (from resend.com), then redeploy.',
   };
 }
 

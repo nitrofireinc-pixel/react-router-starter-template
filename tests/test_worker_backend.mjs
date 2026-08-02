@@ -229,13 +229,13 @@ test('formatSponsorAddress capitalizes parts and uses proper commas', () => {
   assert.match(maps.embedUrl, /output=embed/);
 });
 
-test('contact email provider prefers Resend, then Mailchannels, then FormSubmit', () => {
+test('contact email provider prefers Resend, then Mailchannels API key', () => {
   assert.equal(resolveContactEmailProvider({ RESEND_API_KEY: 're_test' }), 'resend');
   assert.equal(resolveContactEmailProvider({ MAILCHANNELS_API_KEY: 'mc_test' }), 'mailchannels');
-  assert.equal(resolveContactEmailProvider({}), 'formsubmit');
-  assert.equal(resolveContactEmailProvider({ CONTACT_EMAIL_PROVIDER: 'none' }), 'none');
+  assert.equal(resolveContactEmailProvider({}), 'none');
+  assert.equal(resolveContactEmailProvider({ CONTACT_EMAIL_PROVIDER: 'formsubmit' }), 'formsubmit');
   assert.equal(describeContactEmailProvider('none').configured, false);
-  assert.equal(describeContactEmailProvider('formsubmit').configured, true);
+  assert.equal(describeContactEmailProvider('resend').configured, true);
 });
 
 test('contact topics require labels and valid delivery emails', () => {

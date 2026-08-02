@@ -14,7 +14,7 @@ EFBAND_ADMIN_PASSWORD = "admin123$"
 CONTACT_FROM_EMAIL = "noreply@efhsband.org"
 CONTACT_FROM_NAME = "East Forsyth Band Website"
 CONTACT_DEFAULT_EMAIL = ""
-CONTACT_EMAIL_PROVIDER = "formsubmit"
+CONTACT_EMAIL_PROVIDER = "none"
 
 [[d1_databases]]
 binding = "DB"
