@@ -47,8 +47,10 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .brand{flex:1 1 100%;min-width:0;max-width:100%}
   .brand span{font-size:.95rem;min-width:0;overflow-wrap:anywhere}
   .menu-button{display:inline-flex;margin:0;align-self:flex-start}
-  header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:60}
+  header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
+  /* Keep the mobile menu above the sponsor marquee strip. */
+  .sponsor-marquee-section{position:relative;z-index:1}
 }
 /* Mid-width desktops (e.g. 1024x768): slightly tighter nav pills so more links fit per row. */
 @media(max-width:1100px) and (min-width:761px){
@@ -1404,6 +1406,7 @@ body.sponsor-map-open{overflow:hidden}
   position:relative;
   min-width:0;
   overflow:hidden;
+  touch-action:pan-y;
   mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
 }
 .sponsor-marquee-track{
@@ -1412,13 +1415,17 @@ body.sponsor-map-open{overflow:hidden}
   gap:12px;
   width:max-content;
   animation:sponsorMarquee 36s linear infinite;
+  will-change:transform;
 }
-.sponsor-marquee:hover .sponsor-marquee-track{animation-play-state:paused}
+@media(hover:hover){
+  .sponsor-marquee:hover .sponsor-marquee-track{animation-play-state:paused}
+}
 .sponsor-marquee-item{
   display:inline-flex;
   align-items:center;
   gap:10px;
   min-width:180px;
+  max-width:240px;
   padding:8px 12px;
   border:1px solid #d5deea;
   border-radius:12px;
@@ -1448,16 +1455,67 @@ body.sponsor-map-open{overflow:hidden}
   font-weight:800;
   font-size:.84rem;
   line-height:1.15;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 @keyframes sponsorMarquee{
   from{transform:translateX(0)}
   to{transform:translateX(-50%)}
 }
-@media(max-width:700px){
-  .sponsor-marquee-bar{grid-template-columns:1fr;gap:8px}
+@media(max-width:760px){
+  .sponsor-marquee-section{padding:8px 0}
+  .sponsor-marquee-bar{
+    grid-template-columns:auto minmax(0,1fr);
+    gap:10px;
+    padding-left:4px;
+    padding-right:0;
+  }
+  .sponsor-marquee-label{
+    font-size:.66rem;
+    letter-spacing:.12em;
+  }
+  .sponsor-marquee{
+    mask-image:linear-gradient(90deg,transparent,#000 4%,#000 88%,transparent);
+  }
+  .sponsor-marquee-track{
+    gap:8px;
+    animation-duration:28s;
+  }
+  .sponsor-marquee-item{
+    min-width:0;
+    max-width:168px;
+    padding:7px 10px;
+    gap:8px;
+    border-radius:10px;
+  }
+  .sponsor-marquee-item img{
+    width:36px;
+    height:28px;
+  }
+  .sponsor-marquee-mark{
+    width:28px;
+    height:28px;
+    border-radius:8px;
+    font-size:.78rem;
+  }
+  .sponsor-marquee-item span{font-size:.78rem}
+}
+@media(max-width:420px){
+  .sponsor-marquee-label{display:none}
+  .sponsor-marquee-bar{grid-template-columns:minmax(0,1fr);gap:0}
+  .sponsor-marquee{mask-image:linear-gradient(90deg,transparent,#000 3%,#000 90%,transparent)}
 }
 @media(prefers-reduced-motion:reduce){
-  .sponsor-marquee-track{animation:none;flex-wrap:wrap;width:auto;justify-content:flex-start}
+  .sponsor-marquee-track{
+    animation:none;
+    width:auto;
+    max-width:100%;
+    overflow-x:auto;
+    overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;
+    padding-bottom:2px;
+  }
   .sponsor-marquee{mask-image:none}
 }
 
