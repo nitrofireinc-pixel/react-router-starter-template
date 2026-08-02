@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -145,6 +145,31 @@ test('normalizeEventPayload stores year for ordering and ignores sort_order', ()
   assert.equal(event.sort_order, 0);
   assert.equal(event.date_label, 'Jan');
   assert.equal(event.date_detail, '12');
+  assert.equal(event.show_on_boosters, 0);
+  const booster = normalizeEventPayload({
+    date_label: 'Sep',
+    date_detail: '10',
+    event_year: 2026,
+    title: 'Booster Meeting',
+    description: 'Monthly meeting',
+    show_on_boosters: '1',
+  });
+  assert.equal(booster.show_on_boosters, 1);
+  const preserved = normalizeEventPayload({
+    date_label: 'Sep',
+    date_detail: '10',
+    event_year: 2026,
+    title: 'Booster Meeting',
+    description: 'Monthly meeting',
+  }, { show_on_boosters: 1 });
+  assert.equal(preserved.show_on_boosters, 1);
+});
+
+test('ensureBoosterMeetingsSlot injects meetings list hook into Boosters card', () => {
+  const html = ensureBoosterMeetingsSlot('<article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p>Placeholder for monthly meeting schedule.</p></article>');
+  assert.match(html, /data-booster-meetings/);
+  assert.match(html, /Booster Meetings/);
+  assert.equal(ensureBoosterMeetingsSlot(html), html);
 });
 
 test('isMaintenanceMode treats common truthy site setting values as enabled', () => {

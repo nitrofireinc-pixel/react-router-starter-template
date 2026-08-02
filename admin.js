@@ -980,6 +980,14 @@ function defaultEventYear() {
   return new Date().getFullYear();
 }
 
+function setEventBoosterPlacement(form, value) {
+  if (!form) return;
+  const selected = Number(value) === 1 ? '1' : '0';
+  form.querySelectorAll('input[name="show_on_boosters"]').forEach((input) => {
+    input.checked = input.value === selected;
+  });
+}
+
 function isPastEventLocal(event) {
   const year = Number(event.event_year) || new Date().getFullYear();
   const months = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12, Spring: 3, Summer: 6, Fall: 9, Autumn: 9, Winter: 12 };
@@ -1005,7 +1013,7 @@ async function loadEvents() {
   list.innerHTML = ordered.length
     ? ordered.map(event => `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small></div>
       <div class="row-actions"><button type="button" data-edit-event="${event.id}">Edit</button><button type="button" data-delete-event="${event.id}">Delete</button></div>
     </article>
   `).join('')
@@ -1028,6 +1036,7 @@ async function loadEvents() {
     setSelectValue(formControl(form, 'date_label'), event.date_label);
     setSelectValue(formControl(form, 'date_detail'), event.date_detail);
     formControl(form, 'event_year').value = String(event.event_year || defaultEventYear());
+    setEventBoosterPlacement(form, event.show_on_boosters);
     if (status) status.textContent = `Editing “${event.title}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     formControl(form, 'title')?.focus();
@@ -1372,6 +1381,7 @@ function bindForms() {
     try {
       const payload = formPayload(form);
       payload.event_year = Number(payload.event_year || defaultEventYear());
+      payload.show_on_boosters = String(payload.show_on_boosters || '0') === '1' ? 1 : 0;
       const id = String(payload.event_id || payload.id || '').trim();
       delete payload.event_id;
       delete payload.id;
@@ -1391,6 +1401,7 @@ function bindForms() {
       formControl(form, 'date_label').value = 'Aug';
       formControl(form, 'date_detail').value = '01';
       formControl(form, 'event_year').value = String(defaultEventYear());
+      setEventBoosterPlacement(form, 0);
       await loadEvents();
     } catch (error) {
       if (status) status.textContent = `Could not save event: ${error.message}`;
@@ -1404,6 +1415,7 @@ function bindForms() {
     formControl(form, 'date_label').value = 'Aug';
     formControl(form, 'date_detail').value = '01';
     formControl(form, 'event_year').value = String(defaultEventYear());
+    setEventBoosterPlacement(form, 0);
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
     formControl(form, 'title')?.focus();

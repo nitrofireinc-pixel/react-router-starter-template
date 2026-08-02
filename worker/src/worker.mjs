@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-38';
+const ASSET_VERSION = 'admin-cms-20260802-39';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
 const MAIL_ATTACHMENT_TOTAL_BYTES = 10_000_000;
@@ -185,7 +185,7 @@ async function verifyPassword(password, stored) {
 async function initDb(env) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -201,6 +201,11 @@ async function initDb(env) {
     // Column already exists on upgraded databases.
   }
   await env.DB.prepare('UPDATE events SET event_year = 2026 WHERE event_year IS NULL OR event_year = 0').run();
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN show_on_boosters INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
   try {
     await env.DB.prepare('ALTER TABLE sponsors ADD COLUMN homepage_ad INTEGER NOT NULL DEFAULT 0').run();
   } catch {
@@ -386,6 +391,9 @@ export function normalizeEventPayload(payload = {}, existing = null) {
   const event_year = eventYearValue({
     event_year: payload.event_year ?? existing?.event_year ?? new Date().getFullYear(),
   });
+  const rawBooster = payload.show_on_boosters !== undefined
+    ? payload.show_on_boosters
+    : existing?.show_on_boosters;
   return {
     date_label,
     date_detail,
@@ -393,16 +401,33 @@ export function normalizeEventPayload(payload = {}, existing = null) {
     title,
     description,
     sort_order: 0,
+    show_on_boosters: rawBooster === true || rawBooster === 1 || rawBooster === '1' ? 1 : 0,
   };
 }
 
 async function getEvents(env, { upcomingOnly = false, now = new Date() } = {}) {
-  const rows = await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events').all();
+  const rows = await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order, show_on_boosters FROM events').all();
   const events = (rows.results || [])
-    .map((row) => ({ ...row, event_year: eventYearValue(row) }))
+    .map((row) => ({
+      ...row,
+      event_year: eventYearValue(row),
+      show_on_boosters: Number(row.show_on_boosters) === 1 ? 1 : 0,
+    }))
     .sort(compareEventsByDate);
   if (!upcomingOnly) return events;
   return events.filter((event) => isUpcomingEvent(event, now));
+}
+
+export function ensureBoosterMeetingsSlot(html) {
+  const source = String(html || '');
+  if (/data-booster-meetings/i.test(source)) return source;
+  if (/<h3>\s*Booster Meetings\s*<\/h3>/i.test(source)) {
+    return source.replace(
+      /(<h3>\s*Booster Meetings\s*<\/h3>)([\s\S]*?)(<\/article>)/i,
+      '$1<p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div>$3'
+    );
+  }
+  return `${source}<div class="timeline booster-meetings" data-booster-meetings></div>`;
 }
 
 
@@ -1007,6 +1032,7 @@ function renderPageBody(page, sponsors = [], staff = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
+  if (page.slug === 'boosters') return ensureBoosterMeetingsSlot(page.body_html);
   return page.body_html;
 }
 
@@ -1643,8 +1669,8 @@ async function handleApi(request, env, url) {
     if (!p.date_label || !p.date_detail || !p.title || !p.description) {
       return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
     }
-    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events WHERE id = ?').bind(result.meta.last_row_id).first());
+    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order, show_on_boosters) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, p.show_on_boosters).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order, show_on_boosters FROM events WHERE id = ?').bind(result.meta.last_row_id).first());
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -1661,8 +1687,8 @@ async function handleApi(request, env, url) {
     if (!p.date_label || !p.date_detail || !p.title || !p.description) {
       return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
     }
-    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?, sort_order = ? WHERE id = ?').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, id).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order FROM events WHERE id = ?').bind(id).first());
+    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?, sort_order = ?, show_on_boosters = ? WHERE id = ?').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, p.show_on_boosters, id).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order, show_on_boosters FROM events WHERE id = ?').bind(id).first());
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
@@ -1930,6 +1956,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Add/edit calendar events only</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
-<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
+<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="4" required></textarea></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><fieldset class="event-placement"><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1"> Boosters meetings card</label></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;

@@ -826,6 +826,33 @@ body.sponsor-map-open{overflow:hidden}
 }
 .maintenance-shell .btn.outline:hover{background:rgba(255,255,255,.1)}
 
+.event-placement{
+  margin:0;
+  padding:12px 14px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#f8fafc;
+  display:grid;
+  gap:8px;
+}
+.event-placement legend{
+  padding:0 6px;
+  font-weight:900;
+  color:#10233c;
+}
+.booster-meetings{
+  margin-top:14px;
+  display:grid;
+  gap:12px;
+}
+.booster-meetings .event{
+  margin:0;
+}
+.booster-meetings-intro{
+  margin:0 0 4px;
+  color:#5b6f88;
+}
+
 /* Admin mail composer */
 .mail-compose{max-width:820px}
 .mail-recipients{display:grid;gap:10px}

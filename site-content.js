@@ -152,6 +152,26 @@ function bindSponsorMapCards(root = document) {
   });
 }
 
+function ensureBoosterMeetingsContainers() {
+  if (document.querySelector('[data-booster-meetings]')) return;
+  const cards = [...document.querySelectorAll('article.card, .card')];
+  const meetingsCard = cards.find((card) => {
+    const tag = card.querySelector('.tag')?.textContent || '';
+    const heading = card.querySelector('h3')?.textContent || '';
+    return /meetings/i.test(tag) || /booster meetings/i.test(heading);
+  });
+  if (!meetingsCard) return;
+  let slot = meetingsCard.querySelector('[data-booster-meetings]');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.className = 'timeline booster-meetings';
+    slot.dataset.boosterMeetings = '';
+    const placeholder = [...meetingsCard.querySelectorAll('p')].find((node) => /placeholder|monthly meeting/i.test(node.textContent || ''));
+    if (placeholder) placeholder.replaceWith(slot);
+    else meetingsCard.appendChild(slot);
+  }
+}
+
 async function loadPublicContent() {
   const [site, events, photos] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
@@ -178,6 +198,21 @@ async function loadPublicContent() {
       return;
     }
     container.innerHTML = visibleEvents.map(event => `
+      <article class="event">
+        <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+        <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.description)}</p></div>
+      </article>
+    `).join('');
+  });
+
+  ensureBoosterMeetingsContainers();
+  const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => Number(event.show_on_boosters) === 1);
+  document.querySelectorAll('[data-booster-meetings]').forEach((container) => {
+    if (!boosterMeetings.length) {
+      container.innerHTML = '<p class="draft">No upcoming booster meetings are scheduled yet.</p>';
+      return;
+    }
+    container.innerHTML = boosterMeetings.map((event) => `
       <article class="event">
         <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
         <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.description)}</p></div>
