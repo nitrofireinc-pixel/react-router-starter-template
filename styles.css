@@ -111,10 +111,6 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     outline:none;
   }
   .admin-mobile-menu{
-    max-height:min(70vh,560px);
-    overflow:auto;
-  }
-  .admin-mobile-menu{
     display:grid!important;
     gap:4px;
     margin-top:10px;
@@ -123,6 +119,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     border-radius:16px;
     background:#071b34;
     box-shadow:0 18px 40px rgba(15,34,58,.18);
+    max-height:min(70vh,560px);
+    overflow:auto;
   }
   .admin-mobile-menu[hidden]{display:none!important}
   .admin-mobile-menu button{
