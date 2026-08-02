@@ -74,7 +74,8 @@ function syncServiceModeForm() {
   const form = document.querySelector('#service-mode-form');
   if (!form) return;
   const canManage = hasPermission('site');
-  form.hidden = !canManage;
+  if (canManage) form.removeAttribute('hidden');
+  else form.setAttribute('hidden', '');
   const checkbox = formControl(form, 'service_mode');
   if (checkbox) checkbox.checked = isServiceModeEnabled(state.site);
 }
@@ -652,6 +653,7 @@ function renderDashboard() {
   const displayName = state.me.user.display_name || state.me.user.username;
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
+  syncServiceModeForm();
 
   // Page edit shortcuts live in the left nav, so omit page cards here. Remaining cards respect assigned permissions.
   const cards = [
