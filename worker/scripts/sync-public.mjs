@@ -18,6 +18,7 @@ for (const name of [
   'sponsors.html',
   'directors.html',
   'ensembles.html',
+  'maintenance.html',
   'styles.css',
   'script.js',
   'site-content.js',
