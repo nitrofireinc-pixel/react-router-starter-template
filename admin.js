@@ -1015,10 +1015,11 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
-    form.querySelector('[data-home-hint]').hidden = !page.is_home;
+    const isHomePage = Boolean(page.is_home) || page.slug === 'home';
+    form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
-    showUtilityLinksEditor(Boolean(page.is_home || page.slug === 'home'));
+    showUtilityLinksEditor(isHomePage);
     syncPreviewFromForm();
     await activateTab('pages');
     activatePageShortcut(slug);

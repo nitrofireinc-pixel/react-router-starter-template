@@ -252,7 +252,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .page-preview-empty[hidden],
 .page-preview[hidden],
-#page-form[hidden]{display:none!important}
+#page-form[hidden],
+#utility-links-form[hidden]{display:none!important}
 .page-preview-empty h2{
   margin:0;
   color:#10233c;
