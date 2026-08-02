@@ -1455,19 +1455,42 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
 </body></html>`;
 }
 
-async function serveMaintenanceAsset(request, env) {
-  const assetUrl = new URL(request.url);
-  assetUrl.pathname = '/maintenance.html';
-  const asset = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
-  const headers = new Headers(asset.headers);
-  headers.set('cache-control', 'no-store');
-  return new Response(asset.body, { status: asset.status, headers });
+function renderMaintenancePage(site = {}) {
+  const title = site.title || 'East Forsyth Band';
+  const logo = site.logo_url || '/assets/efhs-logo.png';
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${escapeAttr(title)} website is temporarily undergoing maintenance.">
+  <meta name="robots" content="noindex">
+  <title>Maintenance | ${escapeHtml(title)}</title>
+  <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
+</head>
+<body class="maintenance-body">
+<main class="maintenance-shell" id="main">
+  <img class="maintenance-logo" src="${escapeAttr(logo)}" alt="${escapeAttr(title)} logo">
+  <p class="kicker">${escapeHtml(title)}</p>
+  <h1>We’ll be right back.</h1>
+  <p class="maintenance-copy">The website is temporarily down for maintenance. Please check back soon, or visit the school site for general information.</p>
+  <div class="button-row">
+    <a class="btn primary" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
+    <a class="btn outline" href="/contact.html">Contact</a>
+  </div>
+</main>
+</body>
+</html>`;
 }
 
 async function serveStaticOrCms(request, env, url) {
   await initDb(env);
   if (url.pathname === '/maintenance' || url.pathname === '/maintenance.html') {
-    return serveMaintenanceAsset(request, env);
+    return htmlResponse(renderMaintenancePage(await getSite(env)));
   }
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
   const isHomeLanding = url.pathname === '/' || path === '/index.html';
