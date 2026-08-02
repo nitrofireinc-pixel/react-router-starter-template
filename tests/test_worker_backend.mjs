@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -278,13 +278,29 @@ test('sponsors layout keeps directory placeholder and page copy editable', () =>
   assert.match(html, /sponsor-hero/);
   assert.match(html, /Our &lt;Sponsors&gt;/);
   assert.match(html, /data-sponsors/);
-  assert.match(html, /data-sponsor-tiers/);
-  assert.match(html, /Gold Sponsor/);
-  assert.match(html, /Silver Sponsor/);
-  assert.match(html, /Bronze Sponsor/);
+  assert.doesNotMatch(html, /data-sponsor-tiers/);
+  assert.match(html, /become-a-sponsor\.html/);
   assert.match(html, /sponsor-cta/);
   assert.match(html, /Ask about levels &amp; benefits\./);
   assert.doesNotMatch(html, /<Sponsors>/);
+});
+
+test('become-sponsor layout includes packages and contact form slot', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'become-sponsor',
+    kicker: 'Support',
+    heading: 'Become a Sponsor',
+    intro: 'Choose a package.',
+    body_text: 'Ready to partner with Eagle Pride?',
+  });
+  assert.match(html, /data-cms-layout="become-sponsor"/);
+  assert.match(html, /data-sponsor-tiers/);
+  assert.match(html, /Bronze Sponsor/);
+  assert.match(html, /Silver Sponsor/);
+  assert.match(html, /Gold Sponsor/);
+  assert.match(html, /become-sponsor-panel/);
+  assert.match(html, /data-contact-form-slot/);
+  assert.doesNotMatch(html, /data-sponsors/);
 });
 
 test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () => {
@@ -296,6 +312,15 @@ test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () =>
   const injected = ensureSponsorTiersSection(bare);
   assert.match(injected, /data-sponsor-tiers/);
   assert.equal(ensureSponsorTiersSection(injected), injected);
+});
+
+test('stripSponsorTiersSection removes packages and rewriteBecomeSponsorLinks updates CTAs', () => {
+  const withTiers = `${renderSponsorTiersHtml()}<a class="btn primary" href="contact.html">Become a sponsor</a><a class="btn secondary" href="/sponsors.html#sponsor-packages">Ask about sponsoring</a>`;
+  const stripped = stripSponsorTiersSection(withTiers);
+  assert.doesNotMatch(stripped, /data-sponsor-tiers/);
+  const rewritten = rewriteBecomeSponsorLinks(stripped);
+  assert.match(rewritten, /href="\/become-a-sponsor\.html">Become a sponsor/);
+  assert.match(rewritten, /href="\/become-a-sponsor\.html">Ask about sponsoring/);
 });
 
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {

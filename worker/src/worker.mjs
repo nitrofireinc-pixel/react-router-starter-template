@@ -86,7 +86,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-76';
+const ASSET_VERSION = 'admin-cms-20260803-01';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -352,6 +352,24 @@ async function initDb(env) {
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
     await env.DB.batch(DEFAULT_CMS_PAGES.map((page) => env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active)));
+  }
+  const becomeSponsorPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'become-a-sponsor');
+  if (becomeSponsorPage) {
+    const existingBecome = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'become-a-sponsor'").first();
+    if (!existingBecome) {
+      await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(becomeSponsorPage.slug, becomeSponsorPage.path, becomeSponsorPage.title, becomeSponsorPage.body_html, becomeSponsorPage.nav_order, becomeSponsorPage.is_home, becomeSponsorPage.active)
+        .run();
+    }
+  }
+  const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
+  if (sponsorsPageRow?.body_html) {
+    const nextSponsorsHtml = rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html));
+    if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextSponsorsHtml, sponsorsPageRow.id)
+        .run();
+    }
   }
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
@@ -1078,25 +1096,50 @@ export function ensureSponsorTiersSection(html) {
   const source = String(html || '');
   if (/data-sponsor-tiers/i.test(source)) return source;
   const tiers = renderSponsorTiersHtml();
-  if (/data-sponsors/i.test(source) || /class=["']sponsor-directory["']/i.test(source)) {
-    return source.replace(/(<div[^>]*(?:data-sponsors|class=["']sponsor-directory["'])[^>]*>)/i, `${tiers}$1`);
-  }
-  if (/class=["']sponsor-intro["']/i.test(source)) {
-    return source.replace(/(<\/div>\s*)(<aside class=["']sponsor-cta["']|<div[^>]*sponsor-directory)/i, `$1${tiers}$2`);
+  if (/become-sponsor-panel|data-contact-form-slot/i.test(source)) {
+    return source.replace(/(<div[^>]*(?:become-sponsor-panel|data-contact-form-slot)[^>]*>)/i, `${tiers}$1`);
   }
   return `${source}${tiers}`;
 }
 
+export function stripSponsorTiersSection(html) {
+  return String(html || '').replace(/<section[^>]*data-sponsor-tiers[^>]*>[\s\S]*?<\/section>/gi, '');
+}
+
+export function rewriteBecomeSponsorLinks(html) {
+  return String(html || '')
+    .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html#sponsor-packages\1/gi, 'href="/become-a-sponsor.html"')
+    .replace(/href=(["'])(?:\.\/)?(?:\/)?contact\.html\1(?=[^>]*>\s*Become a sponsor)/gi, 'href="/become-a-sponsor.html"')
+    .replace(/href=(["'])(?:\.\/)?(?:\/)?contact\.html\1(?=[^>]*>\s*Ask about sponsoring)/gi, 'href="/become-a-sponsor.html"')
+    .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html\1(?=[^>]*>\s*(?:Become a sponsor|Ask about sponsoring))/gi, 'href="/become-a-sponsor.html"');
+}
+
 function renderSponsorPageBody(page, sponsors) {
   const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
-  let html = ensureSponsorTiersSection(page.body_html || '');
+  let html = rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || ''));
   if (html.includes('data-sponsors')) {
     return replaceMarkedDirectory(html, 'data-sponsors', directory) || `${html}${directory}`;
   }
   if (html.includes('class="sponsor-directory"')) {
     return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
   }
-  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="contact.html">Become a sponsor</a></div>${renderSponsorTiersHtml()}${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Put your support in the spotlight.</h2><div data-cms-field="callout_text"><p>Choose Bronze, Silver, or Gold — then contact us about artwork, payment, and the best fit for your business.</p></div></div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside></div></section>`;
+  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
+}
+
+function renderBecomeSponsorPageBody(page) {
+  const form = '<div data-contact-form-slot></div>';
+  let html = ensureSponsorTiersSection(page.body_html || '');
+  if (!html.trim()) {
+    return `<section class="page-hero sponsor-hero" data-cms-layout="become-sponsor"><div class="page-title"><div class="kicker" data-cms-field="kicker">Support</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Become a Sponsor')}</h1><p data-cms-field="intro">Choose a package and tell us how you would like to support East Forsyth Band.</p></div></section><section class="content sponsor-content"><div class="wrap">${renderSponsorTiersHtml()}<div class="become-sponsor-panel grid two"><article class="card" data-cms-field="body_text"><span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p></article>${form}</div></div></section>`;
+  }
+  if (html.includes('data-contact-form-slot')) {
+    html = html.replace(/<div[^>]*data-contact-form-slot[^>]*>[\s\S]*?<\/div>/i, form);
+  } else if (/become-sponsor-panel/i.test(html)) {
+    html = html.replace(/(<div[^>]*become-sponsor-panel[^>]*>)([\s\S]*?)(<\/div>\s*<\/div>\s*<\/section>)/i, `$1$2${form}$3`);
+  } else {
+    html = `${html}<div class="become-sponsor-panel grid two">${form}</div>`;
+  }
+  return html;
 }
 
 async function getStaff(env, includeInactive = false) {
@@ -1491,6 +1534,7 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
 
 function renderPageBody(page, sponsors = [], staff = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
+  if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') return ensureBoosterMeetingsSlot(page.body_html);
@@ -1737,9 +1781,13 @@ export function generateStructuredPageHtml(payload = {}) {
 
   if (layout === 'sponsors') {
     const sponsorCallout = calloutTitle || calloutText
-      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside>`
+      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside>`
       : '';
-    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div><a class="btn primary" href="contact.html">Become a sponsor</a></div>${renderSponsorTiersHtml()}<div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
+    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
+  }
+
+  if (layout === 'become-sponsor') {
+    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap">${renderSponsorTiersHtml()}<div class="become-sponsor-panel grid two"><article class="card" data-cms-field="body_text">${body}</article><div data-contact-form-slot></div></div>${callout}</div></section>`;
   }
 
   return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div>${callout}</div></section>`;
@@ -2435,7 +2483,9 @@ function logout() {
 }
 
 function renderNav(pages) {
-  return pages.map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
+  return pages
+    .filter((page) => page.slug !== 'become-a-sponsor')
+    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
 }
 
 function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
@@ -2460,7 +2510,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></div></header>
 <section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div><h3 data-site-field="title">${escapeHtml(site.title)}</h3><p data-site-field="footer_note">${escapeHtml(site.footer_note)}</p>${renderSocialLinks(site)}<small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div><h3 data-site-field="title">${escapeHtml(site.title)}</h3><p data-site-field="footer_note">${escapeHtml(site.footer_note)}</p>${renderSocialLinks(site)}<small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>
 </body></html>`;
 }
@@ -2613,7 +2663,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use Formatting for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Assign each sponsor a Bronze, Silver, or Gold tier. Tier controls marquee, fly-in, and game-day announcements.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack announcer-list-card">
   <h2>Game-day announcer list</h2>

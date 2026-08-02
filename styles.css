@@ -1379,6 +1379,10 @@ body.sponsor-map-open{overflow:hidden}
   .sponsor-tiers-grid{grid-template-columns:1fr}
   .sponsor-tier-gold{transform:none}
 }
+.become-sponsor-panel{
+  margin:8px 0 10px;
+  align-items:start;
+}
 
 /* Sitewide sponsor marquee under the header */
 .sponsor-marquee-section{

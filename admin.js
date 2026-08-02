@@ -317,7 +317,8 @@ function structuredPageFields(page) {
       : page.slug === 'contact' ? 'contact'
         : page.slug === 'directors' ? 'directory'
           : page.slug === 'sponsors' ? 'sponsors'
-            : 'standard');
+            : (page.slug === 'become-a-sponsor' || page.slug === 'become-sponsor') ? 'become-sponsor'
+              : 'standard');
   return {
     layout: inferredLayout,
     kicker: inlineHtmlFromNode(kickerNode) || '',
@@ -328,7 +329,9 @@ function structuredPageFields(page) {
         ? 'Add calendar events from the Calendar tab. They will appear here automatically.'
         : page.slug === 'sponsors'
           ? '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>'
-          : textFromHtml(page.body_html)),
+          : (page.slug === 'become-a-sponsor' || page.slug === 'become-sponsor')
+            ? '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry. We will follow up about artwork, payment, and recognition details.</p>'
+            : textFromHtml(page.body_html)),
     callout_title: inlineHtmlFromNode(calloutTitleNode) || '',
     callout_text: calloutTextNode
       ? richHtmlFromNode(calloutTextNode)
@@ -365,6 +368,7 @@ function layoutChipLabel(layout) {
     contact: 'Contact layout',
     directory: 'Staff directory layout',
     sponsors: 'Sponsors layout',
+    'become-sponsor': 'Become a sponsor layout',
   })[layout] || 'Standard layout';
 }
 
@@ -514,13 +518,13 @@ function buildEditablePagePreview(payload = {}) {
   const callout = showCallout
     ? `<aside class="notice cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div>${editableField('callout_title', 'h3', calloutTitle || 'Note', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add callout block</button>`;
-  const heroClass = layout === 'sponsors' ? 'page-hero sponsor-hero' : 'page-hero';
+  const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
     ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
     : '';
   const sponsorsCallout = showCallout
-    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="contact.html">Ask about sponsoring</a></aside>`
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
 
   if (layout === 'calendar') {
@@ -533,7 +537,10 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
   }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="contact.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+  }
+  if (layout === 'become-sponsor') {
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages"><div class="sponsor-tiers-head"><span class="kicker">Sponsor packages</span><h2>Choose your level of support.</h2><p>Three clear ways to back Eagle Pride — from a website marquee feature to full game-day recognition.</p></div><div class="sponsor-tiers-grid"><article class="sponsor-tier sponsor-tier-bronze" data-tier="bronze"><span class="sponsor-tier-label">Bronze</span><h3>Bronze Sponsor</h3><p>Put your brand in front of families online.</p><ul><li>Logo featured on the website sponsor marquee</li></ul></article><article class="sponsor-tier sponsor-tier-silver" data-tier="silver"><span class="sponsor-tier-label">Silver</span><h3>Silver Sponsor</h3><p>Stand out across the site experience.</p><ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul></article><article class="sponsor-tier sponsor-tier-gold" data-tier="gold"><span class="sponsor-tier-label">Gold</span><h3>Gold Sponsor</h3><p>Our top package for game-day and digital impact.</p><ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul></article></div></section><div class="become-sponsor-panel grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p>', 'Sponsor inquiry intro')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab. Choose Sponsor inquiry when available.</p></div></div>${showCallout ? callout : ''}</div></section>`;
   }
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
