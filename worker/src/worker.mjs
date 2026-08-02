@@ -1571,7 +1571,8 @@ function renderMaintenancePage(site = {}) {
   <h1>We’ll be right back.</h1>
   <p class="maintenance-copy">The website is temporarily down for maintenance. Please check back soon, or visit the school site for general information.</p>
   <div class="button-row">
-    <a class="btn primary" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
+    <a class="btn primary" href="/">Try homepage again</a>
+    <a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
     <a class="btn outline" href="/contact.html">Contact</a>
   </div>
 </main>
@@ -1581,16 +1582,19 @@ function renderMaintenancePage(site = {}) {
 
 async function serveStaticOrCms(request, env, url) {
   await initDb(env);
+  const site = await getSite(env);
+  const maintenanceOn = isMaintenanceMode(site);
   if (url.pathname === '/maintenance' || url.pathname === '/maintenance.html') {
-    return htmlResponse(renderMaintenancePage(await getSite(env)));
+    // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
+    if (!maintenanceOn) {
+      return new Response(null, { status: 302, headers: { location: '/', 'cache-control': 'no-store' } });
+    }
+    return htmlResponse(renderMaintenancePage(site));
   }
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
   const isHomeLanding = url.pathname === '/' || path === '/index.html';
-  if (isHomeLanding) {
-    const site = await getSite(env);
-    if (isMaintenanceMode(site)) {
-      return new Response(null, { status: 302, headers: { location: '/maintenance.html', 'cache-control': 'no-store' } });
-    }
+  if (isHomeLanding && maintenanceOn) {
+    return new Response(null, { status: 302, headers: { location: '/maintenance.html', 'cache-control': 'no-store' } });
   }
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
