@@ -1348,7 +1348,17 @@ async function getPageByPath(env, path) {
 }
 
 async function getUserByUsername(env, username) {
-  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(username).first();
+  const normalized = String(username || '').trim();
+  if (!normalized) return null;
+  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(normalized).first();
+  if (direct) return direct;
+  // Bootstrap alias: allow "admin" (or the configured bootstrap username) to reach the
+  // active site administrator even after the account was renamed to an email address.
+  const bootstrap = String(adminUsername(env) || 'admin').trim().toLowerCase();
+  if (normalized.toLowerCase() === 'admin' || normalized.toLowerCase() === bootstrap) {
+    return env.DB.prepare("SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1").first();
+  }
+  return null;
 }
 
 async function getUserById(env, id) {

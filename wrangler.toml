@@ -9,7 +9,7 @@ directory = "./assets"
 binding = "ASSETS"
 
 [vars]
-EFBAND_ADMIN_USERNAME = "admin"
+EFBAND_ADMIN_USERNAME = "admin@efhsband.org"
 EFBAND_ADMIN_PASSWORD = "admin123$"
 CONTACT_FROM_EMAIL = "noreply@efhsband.org"
 CONTACT_FROM_NAME = "East Forsyth Band Website"
