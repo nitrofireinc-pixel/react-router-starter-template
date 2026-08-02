@@ -23,7 +23,21 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [] };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], homeBodyHtml: '' };
+
+const DEFAULT_HOME_FEATURE_CARDS = {
+  boosters_tag: 'Boosters',
+  boosters_heading: 'Parents make the program move.',
+  boosters_body: 'Add booster meeting dates, volunteer signups, concessions, uniforms, meals, transportation, and fundraising needs.',
+  boosters_button: 'Booster info',
+  boosters_href: 'boosters.html',
+  launch_tag: 'Launch note',
+  launch_heading: 'This is a first website draft.',
+  launch_body: 'Because official names, dates, director bios, forms, and contact details were not provided yet, those areas are clearly marked as placeholders.',
+  launch_footer: 'Ready for review, copy replacement, and GitHub publishing.',
+};
+
+const HOME_FEATURE_CARD_KEYS = Object.keys(DEFAULT_HOME_FEATURE_CARDS);
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -212,7 +226,50 @@ function plainTextFromHtml(value) {
   return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function extractHomeFeatureCardsFromHtml(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  const root = template.content;
+  const boosters = root.querySelector('[data-cms-block="home-boosters"], .accent-card');
+  const launch = root.querySelector('[data-cms-block="home-launch"]')
+    || boosters?.parentElement?.querySelector('article.card:not(.accent-card)');
+  const textOf = (node) => String(node?.textContent || '').replace(/\s+/g, ' ').trim();
+  const boostersLink = boosters?.querySelector('a.btn.secondary, a.btn');
+  return {
+    boosters_tag: textOf(boosters?.querySelector('.tag, [data-cms-field="boosters_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_tag,
+    boosters_heading: textOf(boosters?.querySelector('h3, [data-cms-field="boosters_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_heading,
+    boosters_body: textOf(boosters?.querySelector('h3 + p, [data-cms-field="boosters_body"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_body,
+    boosters_button: textOf(boostersLink || boosters?.querySelector('[data-cms-field="boosters_button"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_button,
+    boosters_href: String(boostersLink?.getAttribute('href') || DEFAULT_HOME_FEATURE_CARDS.boosters_href).trim() || DEFAULT_HOME_FEATURE_CARDS.boosters_href,
+    launch_tag: textOf(launch?.querySelector('.tag, [data-cms-field="launch_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_tag,
+    launch_heading: textOf(launch?.querySelector('h3, [data-cms-field="launch_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_heading,
+    launch_body: textOf(launch?.querySelector('h3 + p:not(.draft), [data-cms-field="launch_body"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_body,
+    launch_footer: textOf(launch?.querySelector('.draft, [data-cms-field="launch_footer"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_footer,
+  };
+}
+
+function homeFeatureCardsFromForm(payload = {}) {
+  const cards = {};
+  for (const key of HOME_FEATURE_CARD_KEYS) {
+    const value = String(payload[key] ?? DEFAULT_HOME_FEATURE_CARDS[key] ?? '').replace(/\s+/g, ' ').trim();
+    cards[key] = value || DEFAULT_HOME_FEATURE_CARDS[key];
+  }
+  return cards;
+}
+
 function structuredPageFields(page) {
+  if (page?.slug === 'home' || page?.is_home) {
+    return {
+      layout: 'home',
+      kicker: '',
+      heading: page.title || 'Home',
+      intro: '',
+      body_text: '',
+      callout_title: '',
+      callout_text: '',
+      ...extractHomeFeatureCardsFromHtml(page.body_html),
+    };
+  }
   const template = document.createElement('template');
   template.innerHTML = page.body_html || '';
   const root = template.content;
@@ -255,6 +312,8 @@ function structuredPageFields(page) {
 function pagePayload(form) {
   const payload = formPayload(form);
   payload.nav_order = Number(payload.nav_order || 99);
+  // Disabled controls are omitted from FormData; keep home layout explicit.
+  if (form?.elements?.layout?.disabled) payload.layout = form.elements.layout.value;
   return payload;
 }
 
@@ -273,6 +332,7 @@ function paragraphsFromText(value) {
 
 function layoutChipLabel(layout) {
   return ({
+    home: 'Home layout',
     standard: 'Standard layout',
     calendar: 'Calendar layout',
     contact: 'Contact layout',
@@ -288,7 +348,59 @@ const PAGE_FIELD_LABELS = {
   body_text: 'Body content',
   callout_title: 'Callout title',
   callout_text: 'Callout text',
+  boosters_tag: 'Boosters tag',
+  boosters_heading: 'Boosters heading',
+  boosters_body: 'Boosters body',
+  boosters_button: 'Boosters button',
+  launch_tag: 'Launch tag',
+  launch_heading: 'Launch heading',
+  launch_body: 'Launch body',
+  launch_footer: 'Launch footer note',
 };
+
+const HOME_FEATURE_SECTION_RE = /<section(?:\s+data-cms-home-cards)?[^>]*>\s*<div class="wrap grid two">\s*<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*(?:home-launch|class="card")[^>]*>[\s\S]*?<\/article>\s*<\/div>\s*<\/section>/i;
+
+function buildEditableHomeFeatureSection(cards = {}) {
+  const c = homeFeatureCardsFromForm(cards);
+  return `<section data-cms-home-cards>
+  <div class="wrap grid two">
+    <article class="card accent-card" data-cms-block="home-boosters">
+      ${editableField('boosters_tag', 'span', c.boosters_tag, 'Tag', 'tag')}
+      ${editableField('boosters_heading', 'h3', c.boosters_heading, 'Heading')}
+      ${editableField('boosters_body', 'p', c.boosters_body, 'Body text')}
+      <p style="margin-top:18px" class="cms-home-button-row">
+        <a class="btn secondary cms-edit-field cms-edit-rich cms-edit-inline" href="${escapeAttr(c.boosters_href)}" data-cms-field="boosters_button" data-edit-label="Boosters button" contenteditable="true" role="textbox" spellcheck="true" aria-label="Boosters button">${escapeHtml(c.boosters_button)}</a>
+      </p>
+      <label class="cms-home-href-field">Button link URL<input type="text" data-home-href-input value="${escapeAttr(c.boosters_href)}" placeholder="boosters.html"></label>
+    </article>
+    <article class="card" data-cms-block="home-launch">
+      ${editableField('launch_tag', 'span', c.launch_tag, 'Tag', 'tag')}
+      ${editableField('launch_heading', 'h3', c.launch_heading, 'Heading')}
+      ${editableField('launch_body', 'p', c.launch_body, 'Body text')}
+      ${editableField('launch_footer', 'p', c.launch_footer, 'Footer note', 'draft')}
+    </article>
+  </div>
+</section>`;
+}
+
+function buildEditableHomePreview(payload = {}) {
+  const section = buildEditableHomeFeatureSection(payload);
+  const base = String(state.homeBodyHtml || '').trim();
+  if (!base) {
+    return `<div class="cms-home-preview-note"><p class="kicker">Home page</p><h2>Feature cards</h2><p>Edit the Boosters and Launch note cards below. Hero copy is managed in Site Settings.</p></div>${section}`;
+  }
+  if (HOME_FEATURE_SECTION_RE.test(base)) return base.replace(HOME_FEATURE_SECTION_RE, section);
+  if (/accent-card|home-boosters/i.test(base)) {
+    return base.replace(
+      /<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*>[\s\S]*?<\/article>/i,
+      () => {
+        const inner = section.match(/<div class="wrap grid two">([\s\S]*?)<\/div>/i);
+        return inner ? inner[1].trim() : section;
+      }
+    );
+  }
+  return `${base}\n${section}`;
+}
 
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
   const classes = ['cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', extraClass].filter(Boolean).join(' ');
@@ -305,6 +417,9 @@ function editableRichField(name, value, placeholder = '') {
 
 function buildEditablePagePreview(payload = {}) {
   const layout = String(payload.layout || 'standard');
+  if (layout === 'home' || payload.slug === 'home' || payload.original_slug === 'home') {
+    return buildEditableHomePreview(payload);
+  }
   const kicker = String(payload.kicker || 'Page');
   const heading = String(payload.heading || payload.title || 'Untitled Page');
   const intro = String(payload.intro || '');
@@ -386,16 +501,16 @@ function renderUtilityLinksEditor() {
     const target = link.target === '_blank' ? '_blank' : '_self';
     return `
     <article class="utility-link-row" data-utility-index="${index}">
-      <label>Label<input name="utility_label" value="${escapeHtml(link.label || '')}" required maxlength="60"></label>
-      <label>URL<input name="utility_href" value="${escapeHtml(link.href || '')}" required placeholder="/calendar.html"></label>
-      <label>Open in<select name="utility_target">
-        <option value="_self"${target === '_self' ? ' selected' : ''}>Same tab (_self)</option>
-        <option value="_blank"${target === '_blank' ? ' selected' : ''}>New tab (_blank)</option>
-      </select></label>
+      <input name="utility_label" value="${escapeHtml(link.label || '')}" required maxlength="60" placeholder="Label" aria-label="Label">
+      <input name="utility_href" value="${escapeHtml(link.href || '')}" required placeholder="/calendar.html" aria-label="URL">
+      <select name="utility_target" aria-label="Open in">
+        <option value="_self"${target === '_self' ? ' selected' : ''}>Same tab</option>
+        <option value="_blank"${target === '_blank' ? ' selected' : ''}>New tab</option>
+      </select>
       <div class="utility-link-actions">
         <button type="button" class="btn outline" data-utility-up ${index === 0 ? 'disabled' : ''} aria-label="Move link up">↑</button>
         <button type="button" class="btn outline" data-utility-down ${index === links.length - 1 ? 'disabled' : ''} aria-label="Move link down">↓</button>
-        <button type="button" class="btn outline" data-utility-remove ${links.length <= 1 ? 'disabled' : ''}>Remove</button>
+        <button type="button" class="btn outline" data-utility-remove ${links.length <= 1 ? 'disabled' : ''} aria-label="Remove link">×</button>
       </div>
     </article>
   `;
@@ -441,6 +556,7 @@ function pageSnapshotFromPayload(payload) {
   const keys = [
     'original_slug', 'title', 'slug', 'path', 'nav_order', 'layout', 'active',
     'kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text',
+    ...HOME_FEATURE_CARD_KEYS,
   ];
   const snap = {};
   for (const key of keys) {
@@ -515,6 +631,8 @@ async function discardPageEdits() {
     await ensureFullPagesLoaded();
     const page = state.pages.find(item => item.slug === slug);
     if (page) {
+      const isHomePage = Boolean(page.is_home) || page.slug === 'home';
+      state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
       fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
       form.elements.active.checked = Boolean(page.active);
       syncPreviewFromForm();
@@ -530,14 +648,20 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const status = document.querySelector('#page-status');
   if (!form) return false;
   document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
+  const hrefInput = document.querySelector('#page-preview [data-home-href-input]');
+  if (hrefInput && form.elements.boosters_href) {
+    form.elements.boosters_href.value = hrefInput.value.trim();
+  }
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
-  if (!plainTextFromHtml(payload.heading)) {
+  const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
+  if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
     document.querySelector('#page-preview [data-cms-field="heading"]')?.focus();
     return false;
   }
+  if (isHomeSave && !plainTextFromHtml(payload.heading)) payload.heading = 'Home';
   if (status) status.textContent = 'Saving…';
   try {
     await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
@@ -642,7 +766,20 @@ function bindPagePreviewInteractions(preview) {
       event.preventDefault();
       field.blur();
     });
+    if (field.tagName === 'A') {
+      field.addEventListener('click', (event) => event.preventDefault());
+    }
   });
+  const hrefInput = preview.querySelector('[data-home-href-input]');
+  if (hrefInput) {
+    hrefInput.addEventListener('input', () => {
+      const form = document.querySelector('#page-form');
+      if (form?.elements?.boosters_href) form.elements.boosters_href.value = hrefInput.value.trim();
+      const button = preview.querySelector('[data-cms-field="boosters_button"]');
+      if (button) button.setAttribute('href', hrefInput.value.trim() || '#');
+      refreshPageDirtyState();
+    });
+  }
   preview.querySelectorAll('[data-add-callout]').forEach(button => {
     button.addEventListener('click', () => {
       const form = document.querySelector('#page-form');
@@ -680,7 +817,15 @@ function bindPageVisualEditor() {
       refreshPageDirtyState();
       return;
     }
-    if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text'].includes(name)) {
+    if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text', ...HOME_FEATURE_CARD_KEYS].includes(name)) {
+      if (name === 'boosters_href') {
+        const hrefInput = preview.querySelector('[data-home-href-input]');
+        if (hrefInput) hrefInput.value = event.target.value;
+        const button = preview.querySelector('[data-cms-field="boosters_button"]');
+        if (button) button.setAttribute('href', event.target.value.trim() || '#');
+        refreshPageDirtyState();
+        return;
+      }
       const field = preview.querySelector(`[data-cms-field="${name}"]`);
       if (!field) {
         syncPreviewFromForm();
@@ -1008,6 +1153,8 @@ function editPage(slug, { skipGuard = false } = {}) {
     await ensureFullPagesLoaded();
     const page = state.pages.find(item => item.slug === slug);
     if (!page) return;
+    const isHomePage = Boolean(page.is_home) || page.slug === 'home';
+    state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
@@ -1015,9 +1162,13 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
-    const isHomePage = Boolean(page.is_home) || page.slug === 'home';
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
+    if (form.elements.layout) {
+      form.elements.layout.value = isHomePage ? 'home' : (form.elements.layout.value || 'standard');
+      form.elements.layout.closest('label')?.classList.toggle('is-home-locked', isHomePage);
+      form.elements.layout.disabled = isHomePage;
+    }
     showPageEditorChrome(true);
     showUtilityLinksEditor(isHomePage);
     syncPreviewFromForm();
@@ -1650,14 +1801,22 @@ function bindForms() {
     if (!(await confirmLeavePageEditor())) return;
     const form = document.querySelector('#page-form');
     form.reset();
+    state.homeBodyHtml = '';
     form.elements.original_slug.value = '';
-    form.elements.layout.value = 'standard';
+    if (form.elements.layout) {
+      form.elements.layout.disabled = false;
+      form.elements.layout.closest('label')?.classList.remove('is-home-locked');
+      form.elements.layout.value = 'standard';
+    }
     form.elements.kicker.value = 'New page';
     form.elements.heading.value = 'New Page';
     form.elements.intro.value = 'Short introduction for this page.';
     form.elements.body_text.value = 'Add the page information here. Use blank lines to make separate paragraphs.';
     form.elements.callout_title.value = '';
     form.elements.callout_text.value = '';
+    for (const key of HOME_FEATURE_CARD_KEYS) {
+      if (form.elements[key]) form.elements[key].value = '';
+    }
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
     showPageEditorChrome(true);

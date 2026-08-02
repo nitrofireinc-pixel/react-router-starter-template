@@ -34,7 +34,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-58';
+const ASSET_VERSION = 'admin-cms-20260802-59';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -401,6 +401,119 @@ function renderUtilityLinks(site = {}) {
       return `<a href="${escapeAttr(link.href)}"${targetAttr}>${escapeHtml(link.label)}</a>`;
     })
     .join('');
+}
+
+export const DEFAULT_HOME_FEATURE_CARDS = {
+  boosters_tag: 'Boosters',
+  boosters_heading: 'Parents make the program move.',
+  boosters_body: 'Add booster meeting dates, volunteer signups, concessions, uniforms, meals, transportation, and fundraising needs.',
+  boosters_button: 'Booster info',
+  boosters_href: 'boosters.html',
+  launch_tag: 'Launch note',
+  launch_heading: 'This is a first website draft.',
+  launch_body: 'Because official names, dates, director bios, forms, and contact details were not provided yet, those areas are clearly marked as placeholders.',
+  launch_footer: 'Ready for review, copy replacement, and GitHub publishing.',
+};
+
+const HOME_FEATURE_CARD_KEYS = Object.keys(DEFAULT_HOME_FEATURE_CARDS);
+
+function normalizeCmsHref(value, fallback = '#') {
+  let href = String(value || '').trim() || fallback;
+  if (/^\s*javascript:/i.test(href)) return fallback || '#';
+  if (/^https?:\/\//i.test(href) || href.startsWith('/') || href === '#' || /^[a-z0-9][a-z0-9._-]*\.html(?:[?#].*)?$/i.test(href)) {
+    return href;
+  }
+  return `/${href.replace(/^\/+/, '')}`;
+}
+
+function plainTextFromMarkup(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function normalizeHomeFeatureCards(payload = {}) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  return {
+    boosters_tag: plainTextFromMarkup(source.boosters_tag ?? DEFAULT_HOME_FEATURE_CARDS.boosters_tag) || DEFAULT_HOME_FEATURE_CARDS.boosters_tag,
+    boosters_heading: plainTextFromMarkup(source.boosters_heading ?? DEFAULT_HOME_FEATURE_CARDS.boosters_heading) || DEFAULT_HOME_FEATURE_CARDS.boosters_heading,
+    boosters_body: plainTextFromMarkup(source.boosters_body ?? DEFAULT_HOME_FEATURE_CARDS.boosters_body) || DEFAULT_HOME_FEATURE_CARDS.boosters_body,
+    boosters_button: plainTextFromMarkup(source.boosters_button ?? DEFAULT_HOME_FEATURE_CARDS.boosters_button) || DEFAULT_HOME_FEATURE_CARDS.boosters_button,
+    boosters_href: normalizeCmsHref(source.boosters_href ?? DEFAULT_HOME_FEATURE_CARDS.boosters_href, DEFAULT_HOME_FEATURE_CARDS.boosters_href),
+    launch_tag: plainTextFromMarkup(source.launch_tag ?? DEFAULT_HOME_FEATURE_CARDS.launch_tag) || DEFAULT_HOME_FEATURE_CARDS.launch_tag,
+    launch_heading: plainTextFromMarkup(source.launch_heading ?? DEFAULT_HOME_FEATURE_CARDS.launch_heading) || DEFAULT_HOME_FEATURE_CARDS.launch_heading,
+    launch_body: plainTextFromMarkup(source.launch_body ?? DEFAULT_HOME_FEATURE_CARDS.launch_body) || DEFAULT_HOME_FEATURE_CARDS.launch_body,
+    launch_footer: plainTextFromMarkup(source.launch_footer ?? DEFAULT_HOME_FEATURE_CARDS.launch_footer) || DEFAULT_HOME_FEATURE_CARDS.launch_footer,
+  };
+}
+
+export function hasHomeFeatureCardFields(payload = {}) {
+  return HOME_FEATURE_CARD_KEYS.some((key) => payload?.[key] !== undefined);
+}
+
+function matchInner(block, pattern) {
+  const match = String(block || '').match(pattern);
+  return match ? plainTextFromMarkup(match[1]) : '';
+}
+
+export function extractHomeFeatureCards(html = '') {
+  const source = String(html || '');
+  const boostersMatch = source.match(/<article[^>]*class="[^"]*\baccent-card\b[^"]*"[^>]*>([\s\S]*?)<\/article>/i)
+    || source.match(/<article[^>]*data-cms-block="home-boosters"[^>]*>([\s\S]*?)<\/article>/i);
+  const launchMatch = source.match(/data-cms-block="home-launch"[^>]*>([\s\S]*?)<\/article>/i)
+    || source.match(/<article[^>]*class="[^"]*\baccent-card\b[^"]*"[^>]*>[\s\S]*?<\/article>\s*<article[^>]*class="card"[^>]*>([\s\S]*?)<\/article>/i);
+
+  const boosters = boostersMatch?.[1] || '';
+  const launch = launchMatch?.[1] || '';
+  const buttonHref = (boosters.match(/<a[^>]*class="[^"]*\bbtn secondary\b[^"]*"[^>]*href="([^"]*)"/i)
+    || boosters.match(/href="([^"]*)"[^>]*class="[^"]*\bbtn secondary\b[^"]*"/i)
+    || [])[1];
+
+  return normalizeHomeFeatureCards({
+    boosters_tag: matchInner(boosters, /<span[^>]*class="[^"]*\btag\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i) || undefined,
+    boosters_heading: matchInner(boosters, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
+    boosters_body: matchInner(boosters, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    boosters_button: matchInner(boosters, /<a[^>]*class="[^"]*\bbtn secondary\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i) || undefined,
+    boosters_href: buttonHref || undefined,
+    launch_tag: matchInner(launch, /<span[^>]*class="[^"]*\btag\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i) || undefined,
+    launch_heading: matchInner(launch, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
+    launch_body: matchInner(launch, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p(?![^>]*class="draft")[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+    launch_footer: matchInner(launch, /<p[^>]*class="[^"]*\bdraft\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i) || undefined,
+  });
+}
+
+export function renderHomeFeatureCardsSection(cards = {}) {
+  const c = normalizeHomeFeatureCards(cards);
+  return `<section data-cms-home-cards>
+  <div class="wrap grid two">
+    <article class="card accent-card" data-cms-block="home-boosters"><span class="tag" data-cms-field="boosters_tag">${escapeHtml(c.boosters_tag)}</span><h3 data-cms-field="boosters_heading">${escapeHtml(c.boosters_heading)}</h3><p data-cms-field="boosters_body">${escapeHtml(c.boosters_body)}</p><p style="margin-top:18px"><a class="btn secondary" href="${escapeAttr(c.boosters_href)}" data-cms-field="boosters_button">${escapeHtml(c.boosters_button)}</a></p></article>
+    <article class="card" data-cms-block="home-launch"><span class="tag" data-cms-field="launch_tag">${escapeHtml(c.launch_tag)}</span><h3 data-cms-field="launch_heading">${escapeHtml(c.launch_heading)}</h3><p data-cms-field="launch_body">${escapeHtml(c.launch_body)}</p><p class="draft" data-cms-field="launch_footer">${escapeHtml(c.launch_footer)}</p></article>
+  </div>
+</section>`;
+}
+
+const HOME_FEATURE_CARDS_SECTION_RE = /<section(?:\s+data-cms-home-cards)?[^>]*>\s*<div class="wrap grid two">\s*<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*(?:home-launch|class="card")[^>]*>[\s\S]*?<\/article>\s*<\/div>\s*<\/section>/i;
+
+export function applyHomeFeatureCards(html = '', cards = {}) {
+  const section = renderHomeFeatureCardsSection(cards);
+  const source = String(html || '').trim();
+  if (!source) return section;
+  if (HOME_FEATURE_CARDS_SECTION_RE.test(source)) {
+    return source.replace(HOME_FEATURE_CARDS_SECTION_RE, section);
+  }
+  if (/data-cms-block="home-boosters"/i.test(source) || /class="[^"]*\baccent-card\b/i.test(source)) {
+    return source.replace(
+      /<article[^>]*(?:accent-card|home-boosters)[^>]*>[\s\S]*?<\/article>\s*<article[^>]*>[\s\S]*?<\/article>/i,
+      () => {
+        const inner = section.match(/<div class="wrap grid two">([\s\S]*?)<\/div>/i);
+        return inner ? inner[1].trim() : section;
+      }
+    );
+  }
+  return `${source}\n${section}`;
 }
 
 async function getSite(env) {
@@ -1440,11 +1553,24 @@ export function serializePagePayload(payload, existing = null) {
   const slug = normalizePageSlug(payload.slug || payload.title || existing?.slug);
   const path = payload.path ? normalizeStaticPath(payload.path) : pagePathFromSlug(slug);
   const defaultHtml = '<section><div class="wrap"><h1>New Page</h1><p>Edit this page in the CMS.</p></div></section>';
+  let body_html;
+  if (slug === 'home') {
+    const baseHtml = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+    const cards = normalizeHomeFeatureCards({
+      ...extractHomeFeatureCards(baseHtml),
+      ...payload,
+    });
+    body_html = applyHomeFeatureCards(baseHtml, cards);
+  } else if (hasStructuredPageFields(payload)) {
+    body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
+  } else {
+    body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+  }
   return {
     slug,
     path: slug === 'home' ? '/' : path,
     title: String(payload.title || existing?.title || 'Untitled Page').trim(),
-    body_html: hasStructuredPageFields(payload) ? generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload }) : String(payload.body_html ?? existing?.body_html ?? defaultHtml),
+    body_html,
     nav_order: Number(payload.nav_order ?? existing?.nav_order ?? 99),
     is_home: slug === 'home' || payload.is_home ? 1 : 0,
     active: payload.active === false || payload.active === 0 ? 0 : 1,
@@ -2220,16 +2346,15 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use Formatting for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="utility-links-form" class="admin-card stack utility-links-card" hidden>
-  <h2>Top utility links</h2>
-  <p class="muted">Home page only. These are the links in the dark bar at the very top right of every public page (Upcoming Events, Student Resources, Contact). Use Open in for same tab (_self) or new tab (_blank).</p>
+  <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Dark bar links (top right). Home only.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>
-  <div class="page-settings-actions">
-    <button class="btn outline" type="button" id="utility-link-add">Add link</button>
-    <button class="btn primary" type="submit">Save utility links</button>
+  <div class="page-settings-actions utility-links-actions">
+    <button class="btn outline" type="button" id="utility-link-add">Add</button>
+    <button class="btn primary" type="submit">Save links</button>
   </div>
   <p class="status" id="utility-links-status"></p>
 </form>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. Use Top utility links to edit the dark bar links at the top right of every page. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline is in Site Settings. Edit the Boosters and Launch note cards in the live preview. Top utility links edits the dark bar at the top right.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in ad</h2><p class="muted">Choose how long the featured sponsor ad stays on the homepage before it closes automatically.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>

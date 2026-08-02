@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -405,6 +405,46 @@ test('normalizeUtilityLinks cleans top-right utility bar links', () => {
   assert.equal(links[2].target, '_blank');
   assert.equal(normalizeUtilityLinks(null)[0].label, 'Upcoming Events');
   assert.equal(normalizeUtilityLinks(null)[0].target, '_self');
+});
+
+test('home feature cards extract, normalize, and patch without wiping the page', () => {
+  const cards = normalizeHomeFeatureCards({
+    boosters_tag: '  Boosters Club ',
+    boosters_heading: 'Parents lead.',
+    boosters_body: 'Volunteer and fundraising details go here.',
+    boosters_button: 'Learn more',
+    boosters_href: 'boosters.html',
+    launch_tag: 'Note',
+    launch_heading: 'Draft site',
+    launch_body: 'Replace placeholders soon.',
+    launch_footer: 'Ready for review.',
+  });
+  assert.equal(cards.boosters_tag, 'Boosters Club');
+  assert.equal(cards.boosters_href, 'boosters.html');
+
+  const seed = `${renderHomeFeatureCardsSection()}`;
+  const extracted = extractHomeFeatureCards(seed);
+  assert.equal(extracted.boosters_heading, 'Parents make the program move.');
+  assert.equal(extracted.launch_footer.includes('Ready for review'), true);
+
+  const page = '<section class="hero"><h1>Keep me</h1></section>\n' + seed;
+  const updated = applyHomeFeatureCards(page, cards);
+  assert.match(updated, /Keep me/);
+  assert.match(updated, /Parents lead\./);
+  assert.match(updated, /Draft site/);
+  assert.match(updated, /href="boosters\.html"/);
+  assert.doesNotMatch(updated, /page-hero/);
+
+  const saved = serializePagePayload({
+    slug: 'home',
+    title: 'Home',
+    layout: 'home',
+    heading: 'Home',
+    ...cards,
+  }, { body_html: page, slug: 'home', is_home: 1 });
+  assert.match(saved.body_html, /Keep me/);
+  assert.match(saved.body_html, /Parents lead\./);
+  assert.equal(saved.path, '/');
 });
 
 test('admin mail payload sanitizes rich html and builds plain text', () => {
