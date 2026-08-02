@@ -260,12 +260,142 @@ function buildEditablePagePreview(payload = {}) {
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
 
-const pageEditor = { rebuilding: false, bound: false };
+const pageEditor = { rebuilding: false, bound: false, baseline: '', dirty: false, capturing: false };
 
 function showPageEditorChrome(active) {
   document.querySelector('#page-form')?.toggleAttribute('hidden', !active);
   document.querySelector('#page-preview')?.toggleAttribute('hidden', !active);
   document.querySelector('[data-page-preview-empty]')?.toggleAttribute('hidden', active);
+  if (!active) {
+    pageEditor.baseline = '';
+    pageEditor.dirty = false;
+    updatePageDirtyUi();
+  }
+}
+
+function pageSnapshotFromPayload(payload) {
+  const keys = [
+    'original_slug', 'title', 'slug', 'path', 'nav_order', 'layout', 'active',
+    'kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text',
+  ];
+  const snap = {};
+  for (const key of keys) {
+    let value = payload?.[key];
+    if (key === 'nav_order') value = Number(value || 99);
+    else if (key === 'active') value = Boolean(value);
+    else value = value == null ? '' : String(value);
+    snap[key] = value;
+  }
+  return JSON.stringify(snap);
+}
+
+function currentPageSnapshot() {
+  const form = document.querySelector('#page-form');
+  if (!form || form.hidden) return '';
+  pageEditor.capturing = true;
+  try {
+    document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
+    return pageSnapshotFromPayload(pagePayload(form));
+  } finally {
+    pageEditor.capturing = false;
+  }
+}
+
+function updatePageDirtyUi() {
+  document.querySelector('[data-page-dirty-chip]')?.classList.toggle('is-visible', Boolean(pageEditor.dirty));
+}
+
+function capturePageBaseline() {
+  pageEditor.baseline = currentPageSnapshot();
+  pageEditor.dirty = false;
+  updatePageDirtyUi();
+}
+
+function refreshPageDirtyState() {
+  const form = document.querySelector('#page-form');
+  if (!form || form.hidden || !pageEditor.baseline || pageEditor.rebuilding || pageEditor.capturing) {
+    if (!form || form.hidden || !pageEditor.baseline) {
+      pageEditor.dirty = false;
+      updatePageDirtyUi();
+    }
+    return;
+  }
+  pageEditor.dirty = currentPageSnapshot() !== pageEditor.baseline;
+  updatePageDirtyUi();
+}
+
+function askUnsavedPageDialog() {
+  const dialog = document.querySelector('#unsaved-page-dialog');
+  if (!dialog?.showModal) return Promise.resolve('discard');
+  return new Promise(resolve => {
+    const onClose = () => {
+      dialog.removeEventListener('close', onClose);
+      resolve(dialog.returnValue || 'stay');
+    };
+    dialog.addEventListener('close', onClose);
+    dialog.returnValue = '';
+    dialog.showModal();
+  });
+}
+
+async function discardPageEdits() {
+  const form = document.querySelector('#page-form');
+  if (!form) {
+    pageEditor.baseline = '';
+    pageEditor.dirty = false;
+    updatePageDirtyUi();
+    return;
+  }
+  const slug = String(form.elements.original_slug?.value || '').trim();
+  if (slug) {
+    await ensureFullPagesLoaded();
+    const page = state.pages.find(item => item.slug === slug);
+    if (page) {
+      fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+      form.elements.active.checked = Boolean(page.active);
+      syncPreviewFromForm();
+      capturePageBaseline();
+      return;
+    }
+  }
+  capturePageBaseline();
+}
+
+async function saveCurrentPage({ reloadEditor = true } = {}) {
+  const form = document.querySelector('#page-form');
+  const status = document.querySelector('#page-status');
+  if (!form) return false;
+  document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
+  const payload = pagePayload(form);
+  const original = payload.original_slug;
+  delete payload.original_slug;
+  if (status) status.textContent = 'Saving…';
+  try {
+    await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
+      method: original ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (status) status.textContent = 'Page saved. Public site updated.';
+    if (form.elements.original_slug) form.elements.original_slug.value = payload.slug || original || '';
+    capturePageBaseline();
+    await refreshAll();
+    if (reloadEditor && payload.slug) await editPage(payload.slug, { skipGuard: true });
+    else capturePageBaseline();
+    return true;
+  } catch (error) {
+    if (status) status.textContent = `Could not save page: ${error.message}`;
+    return false;
+  }
+}
+
+async function confirmLeavePageEditor() {
+  refreshPageDirtyState();
+  if (!pageEditor.dirty) return true;
+  const choice = await askUnsavedPageDialog();
+  if (choice === 'stay' || choice === '') return false;
+  if (choice === 'save') return saveCurrentPage({ reloadEditor: false });
+  await discardPageEdits();
+  return true;
 }
 
 function syncFieldFromPreview(field) {
@@ -278,6 +408,7 @@ function syncFieldFromPreview(field) {
     ? sanitizeRichHtml(field.innerHTML)
     : field.textContent.replace(/\s+/g, ' ').trim();
   if (control.value !== value) control.value = value;
+  if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
 function setRichToolbarVisible(visible, anchor = null) {
@@ -354,6 +485,7 @@ function bindPagePreviewInteractions(preview) {
       if (!form.elements.callout_title.value) form.elements.callout_title.value = 'Note';
       if (!form.elements.callout_text.value) form.elements.callout_text.value = 'Add an important note for families here.';
       syncPreviewFromForm();
+      refreshPageDirtyState();
       preview.querySelector('[data-cms-field="callout_title"]')?.focus();
     });
   });
@@ -363,6 +495,7 @@ function bindPagePreviewInteractions(preview) {
       form.elements.callout_title.value = '';
       form.elements.callout_text.value = '';
       syncPreviewFromForm();
+      refreshPageDirtyState();
     });
   });
 }
@@ -380,12 +513,14 @@ function bindPageVisualEditor() {
     if (!name) return;
     if (['layout', 'title'].includes(name)) {
       syncPreviewFromForm();
+      refreshPageDirtyState();
       return;
     }
     if (['kicker', 'heading', 'intro', 'body_text', 'callout_title', 'callout_text'].includes(name)) {
       const field = preview.querySelector(`[data-cms-field="${name}"]`);
       if (!field) {
         syncPreviewFromForm();
+        refreshPageDirtyState();
         return;
       }
       if (field.classList.contains('cms-edit-rich')) {
@@ -394,10 +529,12 @@ function bindPageVisualEditor() {
         field.textContent = event.target.value;
       }
     }
+    refreshPageDirtyState();
   });
 
   form.addEventListener('change', event => {
     if (event.target?.name === 'layout') syncPreviewFromForm();
+    refreshPageDirtyState();
   });
 
   preview.addEventListener('focusin', event => {
@@ -461,7 +598,24 @@ function bindPageVisualEditor() {
     if (!title.value) title.value = 'Note';
     if (!text.value) text.value = 'Add an important note for families here.';
     syncPreviewFromForm();
+    refreshPageDirtyState();
     preview.querySelector('[data-cms-field="callout_title"]')?.focus();
+  });
+
+  window.addEventListener('beforeunload', event => {
+    refreshPageDirtyState();
+    if (!pageEditor.dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
+  const logoutForm = document.querySelector('form[action="/admin/logout"]');
+  logoutForm?.addEventListener('submit', async event => {
+    if (logoutForm.dataset.forceLogout === '1') return;
+    event.preventDefault();
+    if (!(await confirmLeavePageEditor())) return;
+    logoutForm.dataset.forceLogout = '1';
+    logoutForm.submit();
   });
 }
 
@@ -507,12 +661,24 @@ function renderMobileAdminMenu() {
 }
 
 function activateTab(name) {
-  document.querySelectorAll('.cms-panel').forEach(panel => panel.hidden = true);
-  document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
-  document.querySelectorAll('.admin-menu button').forEach(button => {
-    button.classList.toggle('active', button.dataset.tab === name && !button.dataset.editShortcut);
+  const pagesPanel = document.querySelector('#tab-pages');
+  const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
+  const apply = () => {
+    document.querySelectorAll('.cms-panel').forEach(panel => { panel.hidden = true; });
+    document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
+    document.querySelectorAll('.admin-menu button').forEach(button => {
+      button.classList.toggle('active', button.dataset.tab === name && !button.dataset.editShortcut);
+    });
+    closeAdminNav();
+  };
+  if (!leavingPages) {
+    apply();
+    return Promise.resolve(true);
+  }
+  return confirmLeavePageEditor().then(ok => {
+    if (ok) apply();
+    return ok;
   });
-  closeAdminNav();
 }
 
 function activatePageShortcut(slug) {
@@ -658,12 +824,22 @@ function renderDashboard() {
   }));
 }
 
-function editPage(slug) {
+function editPage(slug, { skipGuard = false } = {}) {
   return (async () => {
+    const form = document.querySelector('#page-form');
+    const currentSlug = String(form?.elements?.original_slug?.value || '').trim();
+    const alreadyEditing = Boolean(form && !form.hidden && currentSlug);
+    if (!skipGuard && alreadyEditing) {
+      if (currentSlug === slug) {
+        await activateTab('pages');
+        activatePageShortcut(slug);
+        return;
+      }
+      if (!(await confirmLeavePageEditor())) return;
+    }
     await ensureFullPagesLoaded();
     const page = state.pages.find(item => item.slug === slug);
     if (!page) return;
-    const form = document.querySelector('#page-form');
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
@@ -675,8 +851,9 @@ function editPage(slug) {
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
     syncPreviewFromForm();
-    activateTab('pages');
+    await activateTab('pages');
     activatePageShortcut(slug);
+    capturePageBaseline();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   })().catch(error => {
     console.error(error);
@@ -1234,24 +1411,11 @@ function bindForms() {
 
   document.querySelector('#page-form')?.addEventListener('submit', async event => {
     event.preventDefault();
-    const form = event.currentTarget;
-    document.querySelector('#page-preview')?.querySelectorAll('[data-cms-field]').forEach(syncFieldFromPreview);
-    const payload = pagePayload(form);
-    const original = payload.original_slug;
-    const status = document.querySelector('#page-status');
-    delete payload.original_slug;
-    status.textContent = 'Saving…';
-    try {
-      await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', { method: original ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      status.textContent = 'Page saved. Public site updated.';
-      await refreshAll();
-      if (payload.slug) await editPage(payload.slug);
-    } catch (error) {
-      status.textContent = `Could not save page: ${error.message}`;
-    }
+    await saveCurrentPage({ reloadEditor: true });
   });
 
-  document.querySelector('#new-page')?.addEventListener('click', () => {
+  document.querySelector('#new-page')?.addEventListener('click', async () => {
+    if (!(await confirmLeavePageEditor())) return;
     const form = document.querySelector('#page-form');
     form.reset();
     form.elements.original_slug.value = '';
@@ -1266,7 +1430,8 @@ function bindForms() {
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
     showPageEditorChrome(true);
     syncPreviewFromForm();
-    activateTab('pages');
+    await activateTab('pages');
+    capturePageBaseline();
   });
 
   document.querySelector('#staff-form')?.addEventListener('submit', async event => {
@@ -1507,4 +1672,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* admin-mail-compose: 20260802-38 */
+/* unsaved-page-warning: 20260802-46 */

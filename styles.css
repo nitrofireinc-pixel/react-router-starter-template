@@ -969,3 +969,40 @@ body.sponsor-map-open{overflow:hidden}
   .mail-recipients-list{max-height:180px}
   .mail-body-editor{min-height:180px}
 }
+
+
+/* Unsaved page-editor leave prompt */
+.unsaved-dialog{
+  border:0;
+  padding:0;
+  background:transparent;
+  max-width:calc(100vw - 32px);
+}
+.unsaved-dialog::backdrop{background:rgba(7,27,52,.55);backdrop-filter:blur(2px)}
+.unsaved-dialog-card{
+  width:min(440px,100%);
+  display:grid;
+  gap:14px;
+  margin:0;
+  padding:24px;
+  border:1px solid #d5deea;
+  border-radius:20px;
+  background:#fff;
+  box-shadow:0 24px 60px rgba(15,34,58,.28);
+}
+.unsaved-dialog-card h2{margin:0;color:#10233c;font-size:1.35rem}
+.unsaved-dialog-card p{margin:0;color:#5b6f88;line-height:1.45}
+.unsaved-dialog-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.page-dirty-chip{
+  display:none;
+  margin-left:8px;
+  padding:4px 8px;
+  border-radius:999px;
+  background:#fff0f1;
+  color:#c8121d;
+  font-size:.68rem;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.page-dirty-chip.is-visible{display:inline-flex}
