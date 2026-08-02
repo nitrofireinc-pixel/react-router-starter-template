@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -198,6 +198,17 @@ test('maintenance mode redirects all public HTML pages except maintenance itself
   assert.equal(shouldRedirectToMaintenance('/maintenance.html', on), false);
   assert.equal(shouldRedirectToMaintenance('/styles.css', on), false);
   assert.equal(shouldRedirectToMaintenance('/contact.html', off), false);
+});
+
+test('maintenance return path cookie values are sanitized to safe same-site pages', () => {
+  assert.equal(sanitizeMaintenanceReturnPath('/contact.html'), '/contact.html');
+  assert.equal(sanitizeMaintenanceReturnPath('/boosters.html?from=nav'), '/boosters.html?from=nav');
+  assert.equal(sanitizeMaintenanceReturnPath('/index.html'), '/');
+  assert.equal(sanitizeMaintenanceReturnPath('https://evil.example/'), '/');
+  assert.equal(sanitizeMaintenanceReturnPath('//evil.example'), '/');
+  assert.equal(sanitizeMaintenanceReturnPath('/maintenance.html'), '/');
+  assert.equal(sanitizeMaintenanceReturnPath('/admin'), '/');
+  assert.equal(sanitizeMaintenanceReturnPath('/styles.css'), '/');
 });
 
 test('isUpcomingEvent hides past dates and keeps today and future dates public', () => {

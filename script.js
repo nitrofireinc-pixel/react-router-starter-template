@@ -18,7 +18,10 @@ if (btn && nav) {
       const enabled = site.maintenance_mode === true
         || site.maintenance_mode === 1
         || site.maintenance_mode === '1';
-      if (enabled) window.location.replace('/maintenance.html');
+      if (!enabled) return;
+      const returnTo = `${location.pathname || '/'}${location.search || ''}`;
+      document.cookie = `efband_maintenance_return=${encodeURIComponent(returnTo)}; Path=/; Max-Age=604800; SameSite=Lax`;
+      window.location.replace('/maintenance.html');
     })
     .catch(() => {});
 })();

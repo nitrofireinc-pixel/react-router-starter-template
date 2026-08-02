@@ -21,18 +21,40 @@
   <div class="button-row">
     <a class="btn primary" href="/">Try homepage again</a>
     <a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
-    <a class="btn outline" href="/contact.html">Contact</a>
   </div>
 </main>
 <script>
 (function () {
+  function readReturnPath() {
+    var parts = document.cookie.split(';');
+    for (var i = 0; i < parts.length; i += 1) {
+      var part = parts[i].trim();
+      if (part.indexOf('efband_maintenance_return=') !== 0) continue;
+      try {
+        var value = decodeURIComponent(part.slice('efband_maintenance_return='.length) || '');
+        if (!value || value.charAt(0) !== '/' || value.indexOf('//') === 0 || value.indexOf(':') !== -1) return '/';
+        if (value.indexOf('/maintenance') !== -1 || value.indexOf('/admin') === 0) return '/';
+        return value.split('#')[0] || '/';
+      } catch (error) {
+        return '/';
+      }
+    }
+    return '/';
+  }
+  function clearReturnPath() {
+    document.cookie = 'efband_maintenance_return=; Path=/; Max-Age=0; SameSite=Lax';
+  }
   async function leaveIfLive() {
     try {
       const response = await fetch('/api/site', { cache: 'no-store' });
       if (!response.ok) return;
       const site = await response.json();
       const enabled = site && (site.maintenance_mode === true || site.maintenance_mode === 1 || site.maintenance_mode === '1');
-      if (!enabled) window.location.replace('/');
+      if (!enabled) {
+        var target = readReturnPath() || '/';
+        clearReturnPath();
+        window.location.replace(target);
+      }
     } catch (_) {}
   }
   leaveIfLive();

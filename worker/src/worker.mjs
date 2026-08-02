@@ -26,7 +26,8 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-42';
+const ASSET_VERSION = 'admin-cms-20260802-43';
+const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
 const MAIL_ATTACHMENT_TOTAL_BYTES = 10_000_000;
@@ -287,6 +288,42 @@ export function shouldRedirectToMaintenance(pathname = '/', site = {}) {
   if (!isMaintenanceMode(site)) return false;
   if (isMaintenancePath(pathname)) return false;
   return isPublicHtmlPath(pathname);
+}
+
+export function sanitizeMaintenanceReturnPath(value = '/') {
+  let raw = String(value || '').trim();
+  if (!raw) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\') || raw.includes(':')) return '/';
+  raw = raw.split('#')[0];
+  const pathPart = raw.split('?')[0] || '/';
+  if (isMaintenancePath(pathPart) || pathPart.startsWith('/admin') || pathPart.startsWith('/api') || pathPart.startsWith('/uploads/')) {
+    return '/';
+  }
+  if (pathPart !== '/' && !isPublicHtmlPath(pathPart)) return '/';
+  const normalized = pathPart === '/' ? '/' : normalizeStaticPath(pathPart);
+  const query = raw.includes('?') ? `?${raw.split('?').slice(1).join('?')}` : '';
+  const base = normalized === '/index.html' ? '/' : normalized;
+  if (base === '/') return query ? `/${query}` : '/';
+  return `${base}${query}`;
+}
+
+export function maintenanceReturnCookie(pathname = '/') {
+  const path = sanitizeMaintenanceReturnPath(pathname);
+  return `${MAINTENANCE_RETURN_COOKIE}=${encodeURIComponent(path)}; Path=/; Max-Age=604800; SameSite=Lax`;
+}
+
+export function clearMaintenanceReturnCookie() {
+  return `${MAINTENANCE_RETURN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+export function readMaintenanceReturnPath(request) {
+  const raw = getCookie(request, MAINTENANCE_RETURN_COOKIE);
+  if (!raw) return '/';
+  try {
+    return sanitizeMaintenanceReturnPath(decodeURIComponent(raw));
+  } catch {
+    return '/';
+  }
 }
 
 async function getSite(env) {
@@ -1869,18 +1906,40 @@ function renderMaintenancePage(site = {}) {
   <div class="button-row">
     <a class="btn primary" href="/">Try homepage again</a>
     <a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
-    <a class="btn outline" href="/contact.html">Contact</a>
   </div>
 </main>
 <script>
 (function () {
+  function readReturnPath() {
+    var parts = document.cookie.split(';');
+    for (var i = 0; i < parts.length; i += 1) {
+      var part = parts[i].trim();
+      if (part.indexOf('efband_maintenance_return=') !== 0) continue;
+      try {
+        var value = decodeURIComponent(part.slice('efband_maintenance_return='.length) || '');
+        if (!value || value.charAt(0) !== '/' || value.indexOf('//') === 0 || value.indexOf(':') !== -1) return '/';
+        if (value.indexOf('/maintenance') !== -1 || value.indexOf('/admin') === 0) return '/';
+        return value.split('#')[0] || '/';
+      } catch (error) {
+        return '/';
+      }
+    }
+    return '/';
+  }
+  function clearReturnPath() {
+    document.cookie = 'efband_maintenance_return=; Path=/; Max-Age=0; SameSite=Lax';
+  }
   async function leaveIfLive() {
     try {
       const response = await fetch('/api/site', { cache: 'no-store' });
       if (!response.ok) return;
       const site = await response.json();
       const enabled = site && (site.maintenance_mode === true || site.maintenance_mode === 1 || site.maintenance_mode === '1');
-      if (!enabled) window.location.replace('/');
+      if (!enabled) {
+        var target = readReturnPath() || '/';
+        clearReturnPath();
+        window.location.replace(target);
+      }
     } catch (_) {}
   }
   leaveIfLive();
@@ -1901,13 +1960,29 @@ async function serveStaticOrCms(request, env, url) {
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
-      return new Response(null, { status: 302, headers: { location: '/', 'cache-control': 'no-store' } });
+      const returnTo = readMaintenanceReturnPath(request);
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: returnTo || '/',
+          'cache-control': 'no-store',
+          'set-cookie': clearMaintenanceReturnCookie(),
+        },
+      });
     }
     return htmlResponse(renderMaintenancePage(site));
   }
   // Keep admin/API available; send every public HTML page to maintenance while enabled.
   if (shouldRedirectToMaintenance(url.pathname, site)) {
-    return new Response(null, { status: 302, headers: { location: '/maintenance.html', 'cache-control': 'no-store' } });
+    const returnPath = `${url.pathname || '/'}${url.search || ''}`;
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: '/maintenance.html',
+        'cache-control': 'no-store',
+        'set-cookie': maintenanceReturnCookie(returnPath),
+      },
+    });
   }
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
