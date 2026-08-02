@@ -86,7 +86,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-72';
+const ASSET_VERSION = 'admin-cms-20260802-73';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -315,6 +315,17 @@ async function initDb(env) {
     await env.DB.prepare('UPDATE sponsors SET address = ?, city = ?, state = ? WHERE id = ?')
       .bind(parsed.address, parsed.city, parsed.state, row.id)
       .run();
+  }
+  const tierRows = await env.DB.prepare('SELECT id, level, homepage_ad FROM sponsors').all();
+  for (const row of tierRows.results || []) {
+    const nextLevel = normalizeSponsorLevel(row.level, { homepageAd: row.homepage_ad });
+    const benefits = sponsorBenefitsFromLevel(nextLevel);
+    const nextAd = benefits.show_flyin ? 1 : 0;
+    if (nextLevel !== String(row.level || '') || Number(row.homepage_ad) !== nextAd) {
+      await env.DB.prepare('UPDATE sponsors SET level = ?, homepage_ad = ? WHERE id = ?')
+        .bind(nextLevel, nextAd, row.id)
+        .run();
+    }
   }
   const siteRows = await env.DB.prepare('SELECT key FROM site_content').all();
   const existingKeys = new Set((siteRows.results || []).map((row) => row.key));
@@ -940,11 +951,16 @@ export function hydrateSponsor(sponsor) {
   const address = titleCaseAddressPart(source.address || '');
   const formatted_address = formatSponsorAddress({ address, city, state });
   const maps = sponsorMapsUrls(formatted_address);
+  const level = normalizeSponsorLevel(source.level, { homepageAd: source.homepage_ad });
+  const benefits = sponsorBenefitsFromLevel(level);
   return {
     ...source,
     address,
     city,
     state,
+    level,
+    ...benefits,
+    homepage_ad: benefits.show_flyin ? 1 : 0,
     formatted_address,
     maps_embed_url: maps.embedUrl,
     maps_directions_url: maps.directionsUrl,
@@ -957,6 +973,39 @@ async function getSponsors(env, includeInactive = false) {
   return (rows.results || []).map((row) => hydrateSponsor(row));
 }
 
+export function normalizeSponsorTier(level = '') {
+  const raw = String(level || '').trim().toLowerCase();
+  if (/\bgold\b/.test(raw)) return 'gold';
+  if (/\bsilver\b/.test(raw)) return 'silver';
+  if (/\bbronze\b/.test(raw)) return 'bronze';
+  return '';
+}
+
+export function sponsorTierLabel(tier = '') {
+  if (tier === 'gold') return 'Gold';
+  if (tier === 'silver') return 'Silver';
+  if (tier === 'bronze') return 'Bronze';
+  return 'Sponsor';
+}
+
+export function normalizeSponsorLevel(level = '', { homepageAd } = {}) {
+  let tier = normalizeSponsorTier(level);
+  if (!tier && (homepageAd === true || homepageAd === 1 || homepageAd === '1')) tier = 'silver';
+  if (!tier) tier = 'bronze';
+  return `${sponsorTierLabel(tier)} Sponsor`;
+}
+
+export function sponsorBenefitsFromLevel(level = '') {
+  const tier = normalizeSponsorTier(level) || 'bronze';
+  return {
+    tier,
+    tier_label: sponsorTierLabel(tier),
+    show_marquee: true,
+    show_flyin: tier === 'silver' || tier === 'gold',
+    show_game_announcement: tier === 'gold',
+  };
+}
+
 export function normalizeSponsorPayload(payload = {}, existing = null) {
   const name = String(payload.name || existing?.name || '').trim();
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word.match(/[a-z0-9]/i)?.[0]?.toUpperCase()).filter(Boolean).join('') || '★';
@@ -967,20 +1016,21 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
   const city = titleCaseAddressPart(String(payload.city ?? legacy?.city ?? existing?.city ?? 'Kernersville').trim()) || 'Kernersville';
   const state = normalizeStateCode(payload.state ?? legacy?.state ?? existing?.state ?? 'NC');
   const hasSortOrder = payload.sort_order !== undefined && payload.sort_order !== null && payload.sort_order !== '';
+  const level = normalizeSponsorLevel(payload.level ?? existing?.level, {
+    homepageAd: payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad,
+  });
+  const benefits = sponsorBenefitsFromLevel(level);
   return {
     name,
     address,
     city,
     state,
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
-    level: String(payload.level ?? existing?.level ?? 'Sponsor').trim() || 'Sponsor',
+    level,
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
     sort_order: hasSortOrder ? Number(payload.sort_order) : Number(existing?.sort_order ?? 0),
     active: payload.active === false || payload.active === 0 ? 0 : 1,
-    homepage_ad: (() => {
-      const raw = payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad;
-      return raw === true || raw === 1 || raw === '1' ? 1 : 0;
-    })(),
+    homepage_ad: benefits.show_flyin ? 1 : 0,
     _assign_sort_order: !hasSortOrder && !existing,
   };
 }
@@ -997,7 +1047,8 @@ export function renderSponsorsDirectory(sponsors = []) {
       : `<span class="sponsor-mark">${escapeHtml(item.mark_text || '★')}</span>`;
     const formatted = item.formatted_address;
     const hasMap = Boolean(formatted);
-    return `<article class="sponsor-card${featured}${hasMap ? ' sponsor-card-clickable' : ''}" data-sponsor-id="${escapeAttr(item.id || '')}"${hasMap ? ` data-sponsor-card data-sponsor-name="${escapeAttr(item.name)}" data-sponsor-address="${escapeAttr(formatted)}" data-sponsor-map-embed="${escapeAttr(item.maps_embed_url)}" data-sponsor-map-directions="${escapeAttr(item.maps_directions_url)}" role="button" tabindex="0"` : ''}>${logo}<div><span class="sponsor-level">${escapeHtml(item.level || 'Sponsor')}</span><h3>${escapeHtml(item.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}${hasMap ? '<span class="sponsor-map-hint">View map &amp; directions</span>' : ''}</div></article>`;
+    const tier = item.tier || normalizeSponsorTier(item.level) || 'bronze';
+    return `<article class="sponsor-card${featured}${hasMap ? ' sponsor-card-clickable' : ''}" data-sponsor-id="${escapeAttr(item.id || '')}"${hasMap ? ` data-sponsor-card data-sponsor-name="${escapeAttr(item.name)}" data-sponsor-address="${escapeAttr(formatted)}" data-sponsor-map-embed="${escapeAttr(item.maps_embed_url)}" data-sponsor-map-directions="${escapeAttr(item.maps_directions_url)}" role="button" tabindex="0"` : ''}>${logo}<div><span class="sponsor-level sponsor-tier-badge tier-${escapeAttr(tier)}">${escapeHtml(item.tier_label || item.level || 'Sponsor')}</span><h3>${escapeHtml(item.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}${hasMap ? '<span class="sponsor-map-hint">View map &amp; directions</span>' : ''}</div></article>`;
   }).join('');
 }
 
@@ -2563,7 +2614,13 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
 <form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
-<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Drag rows to reorder the public Sponsors page.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in ad</h2><p class="muted">Choose how long the featured sponsor ad stays on the homepage before it closes automatically.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<select name="level"><option value="Bronze Sponsor">Bronze Sponsor</option><option value="Silver Sponsor">Silver Sponsor</option><option value="Gold Sponsor" selected>Gold Sponsor</option></select></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Assign each sponsor a Bronze, Silver, or Gold tier. Tier controls marquee, fly-in, and game-day announcements.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack announcer-list-card">
+  <h2>Game-day announcer list</h2>
+  <p class="muted">Gold sponsors get home football game announcements. Print this list for the press box.</p>
+  <div id="announcer-list-preview" class="announcer-list-preview"></div>
+  <button class="btn outline" type="button" id="print-announcer-list">Print announcer list</button>
+</div>
+<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold — marquee + fly-in + game announcement</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>

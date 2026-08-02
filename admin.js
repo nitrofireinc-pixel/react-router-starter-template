@@ -117,11 +117,31 @@ function formPayload(form) {
   const payload = Object.fromEntries(new FormData(form).entries());
   const active = formControl(form, 'active');
   if (active) payload.active = Boolean(active.checked);
-  const homepageAd = formControl(form, 'homepage_ad');
-  if (homepageAd) payload.homepage_ad = Boolean(homepageAd.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
   if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
   return payload;
+}
+
+function sponsorTierFromLevel(level = '') {
+  const raw = String(level || '').trim().toLowerCase();
+  if (/\bgold\b/.test(raw)) return 'gold';
+  if (/\bsilver\b/.test(raw)) return 'silver';
+  if (/\bbronze\b/.test(raw)) return 'bronze';
+  return 'bronze';
+}
+
+function sponsorTierBenefitsText(level = '') {
+  const tier = sponsorTierFromLevel(level);
+  if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and home football game announcements.';
+  if (tier === 'silver') return 'Includes website marquee and homepage fly-in ad.';
+  return 'Includes website marquee logo feature.';
+}
+
+function syncSponsorTierBenefits(form = document.querySelector('#sponsor-form')) {
+  const hint = document.querySelector('#sponsor-tier-benefits');
+  if (!hint) return;
+  const level = formControl(form, 'level')?.value || 'Bronze Sponsor';
+  hint.textContent = sponsorTierBenefitsText(level);
 }
 
 function textFromHtml(html) {
@@ -1587,7 +1607,9 @@ function sponsorPreviewCard(sponsor, index = 0) {
   const featured = index === 0 ? ' sponsor-featured' : '';
   const mark = sponsor.logo_url ? `<span class="sponsor-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>` : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
   const formatted = formatAdminSponsorAddress(sponsor);
-  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}</div></article>`;
+  const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
+  const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
+  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)} Sponsor</span><h3>${escapeHtml(sponsor.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}</div></article>`;
 }
 
 function syncSponsorLogoPreview(form, url = '') {
@@ -1615,27 +1637,109 @@ function resetSponsorForm(form) {
   formControl(form, 'city').value = 'Kernersville';
   setSelectValue(formControl(form, 'state'), 'NC');
   form.elements.active.checked = true;
-  if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
   form.elements.level.value = 'Bronze Sponsor';
   const file = formControl(form, 'logo_file');
   if (file) file.value = '';
   syncSponsorLogoPreview(form, '');
+  syncSponsorTierBenefits(form);
+}
+
+function goldAnnouncerSponsors() {
+  return orderedSponsors().filter((sponsor) => (
+    Number(sponsor.active) !== 0
+    && (sponsor.show_game_announcement || sponsorTierFromLevel(sponsor.level) === 'gold')
+  ));
+}
+
+function renderAnnouncerListPreview() {
+  const preview = document.querySelector('#announcer-list-preview');
+  if (!preview) return;
+  const gold = goldAnnouncerSponsors();
+  if (!gold.length) {
+    preview.innerHTML = '<p class="draft">No active Gold sponsors yet. Assign the Gold tier to include a business on game-day announcements.</p>';
+    return;
+  }
+  preview.innerHTML = `
+    <ol class="announcer-list">
+      ${gold.map((sponsor, index) => `
+        <li>
+          <b>${index + 1}. ${escapeHtml(sponsor.name)}</b>
+          <span>Please welcome our Gold sponsor, ${escapeHtml(sponsor.name)}.</span>
+        </li>
+      `).join('')}
+    </ol>
+  `;
+}
+
+function printAnnouncerList() {
+  const gold = goldAnnouncerSponsors();
+  const rows = gold.length
+    ? gold.map((sponsor, index) => `
+        <li>
+          <strong>${index + 1}. ${escapeHtml(sponsor.name)}</strong>
+          <div class="script">Please welcome our Gold sponsor, ${escapeHtml(sponsor.name)}.</div>
+        </li>
+      `).join('')
+    : '<li><strong>No active Gold sponsors yet.</strong></li>';
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Game-day Announcer List | East Forsyth Band</title>
+  <style>
+    body{font-family:Georgia,"Times New Roman",serif;color:#111;margin:32px;line-height:1.4}
+    h1{font-size:1.8rem;margin:0 0 .25rem}
+    .meta{color:#444;margin:0 0 1.25rem}
+    ol{margin:0;padding-left:1.4rem}
+    li{margin:0 0 1rem}
+    .script{margin-top:.25rem;font-size:1.05rem}
+    @media print{body{margin:.6in}}
+  </style>
+</head>
+<body>
+  <h1>East Forsyth Band — Gold Sponsor Announcements</h1>
+  <p class="meta">Home football game announcer list · ${escapeHtml(new Date().toLocaleDateString())}</p>
+  <ol>${rows}</ol>
+  <script>window.addEventListener('load', () => window.print());<\/script>
+</body>
+</html>`;
+  const popup = window.open('', '_blank', 'noopener,noreferrer,width=820,height=900');
+  if (!popup) {
+    alert('Allow pop-ups to print the announcer list.');
+    return;
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
 }
 
 function renderSponsors() {
   const list = document.querySelector('#sponsors-list');
   if (!list) return;
   const ordered = orderedSponsors();
-  list.innerHTML = ordered.map((sponsor) => `
+  list.innerHTML = ordered.map((sponsor) => {
+    const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
+    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
+    const benefits = [];
+    if (sponsor.show_marquee !== false) benefits.push('Marquee');
+    if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
+    if (sponsor.show_game_announcement || tier === 'gold') benefits.push('Game announcement');
+    return `
     <article class="admin-row sponsor-admin-row" data-sponsor-id="${sponsor.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(sponsor.name || 'sponsor')}" title="Drag to reorder">⋮⋮</button>
       <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
-      <div><b>${escapeHtml(sponsor.name)}</b><span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span><small>${escapeHtml(sponsor.level || 'Sponsor')} · ${sponsor.active ? 'Active' : 'Hidden'}${Number(sponsor.homepage_ad) ? ' · Homepage ad' : ''}</small></div>
+      <div>
+        <b>${escapeHtml(sponsor.name)}</b>
+        <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
+        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${sponsor.active ? 'Active' : 'Hidden'} · ${escapeHtml(benefits.join(' · '))}</small>
+      </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
-  `).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
+  `;
+  }).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
   const preview = document.querySelector('#sponsor-preview');
   if (preview) preview.innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
+  renderAnnouncerListPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
@@ -1657,10 +1761,10 @@ function renderSponsors() {
       setSelectValue(levelSelect, level);
     }
     form.elements.active.checked = Boolean(Number(sponsor.active));
-    if (form.elements.homepage_ad) form.elements.homepage_ad.checked = Boolean(Number(sponsor.homepage_ad));
     const file = formControl(form, 'logo_file');
     if (file) file.value = '';
     syncSponsorLogoPreview(form, sponsor.logo_url || '');
+    syncSponsorTierBenefits(form);
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
@@ -2225,7 +2329,7 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#sponsor-status');
     const payload = formPayload(form);
-    payload.homepage_ad = Boolean(form.elements.homepage_ad?.checked);
+    delete payload.homepage_ad;
     payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
     payload.state = String(payload.state || 'NC').trim() || 'NC';
     const id = payload.id;
@@ -2269,6 +2373,13 @@ function bindForms() {
     const objectUrl = URL.createObjectURL(file);
     syncSponsorLogoPreview(form, objectUrl);
   });
+  document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
+    syncSponsorTierBenefits(event.currentTarget.form);
+  });
+  document.querySelector('#print-announcer-list')?.addEventListener('click', () => {
+    printAnnouncerList();
+  });
+  syncSponsorTierBenefits();
 
   document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();

@@ -48,7 +48,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
       <a class="sponsor-flyin-card" href="/sponsors.html">
         ${logo}
         <div class="sponsor-flyin-copy">
-          <span class="sponsor-flyin-kicker">Community Partner</span>
+          <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
           <strong>${escapeHtml(sponsor.name)}</strong>
           <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
           <em>View all sponsors</em>
@@ -75,6 +75,20 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   }, durationMs);
 }
 
+function sponsorShowsFlyin(sponsor = {}) {
+  if (Number(sponsor.active) === 0) return false;
+  if (sponsor.show_flyin === true || sponsor.show_flyin === 1) return true;
+  const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
+  return /\b(silver|gold)\b/.test(tier) || Number(sponsor.homepage_ad) === 1;
+}
+
+function sponsorShowsMarquee(sponsor = {}) {
+  if (Number(sponsor.active) === 0) return false;
+  if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
+  const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
+  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
@@ -82,14 +96,64 @@ async function maybeShowHomepageSponsorAd() {
       fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
       fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
     ]);
-    const eligible = (Array.isArray(sponsors) ? sponsors : []).filter((sponsor) => (
-      Number(sponsor.active) !== 0 && Number(sponsor.homepage_ad) === 1
-    ));
+    const eligible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsFlyin);
     if (!eligible.length) return;
     const picked = pickRandomSponsor(eligible);
     if (picked) showHomepageSponsorAd(picked, site?.sponsor_ad_seconds);
   } catch {
     // Bypass the ad entirely if sponsors cannot be loaded.
+  }
+}
+
+function ensureSponsorMarqueeMount() {
+  if (!isHomePage()) return null;
+  let mount = document.querySelector('[data-sponsor-marquee]');
+  if (mount) return mount;
+  const hero = document.querySelector('main .hero, main section.hero');
+  if (!hero) return null;
+  mount = document.createElement('section');
+  mount.className = 'sponsor-marquee-section';
+  mount.setAttribute('data-sponsor-marquee', '');
+  mount.setAttribute('aria-label', 'Sponsor marquee');
+  hero.insertAdjacentElement('afterend', mount);
+  return mount;
+}
+
+function renderSponsorMarquee(sponsors = []) {
+  const mount = ensureSponsorMarqueeMount();
+  if (!mount) return;
+  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  if (!items.length) {
+    mount.hidden = true;
+    mount.innerHTML = '';
+    return;
+  }
+  const logos = items.map((sponsor) => {
+    const visual = sponsor.logo_url
+      ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
+      : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
+    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+  }).join('');
+  // Duplicate the track so the CSS loop can scroll seamlessly.
+  mount.hidden = false;
+  mount.innerHTML = `
+    <div class="wrap sponsor-marquee-head">
+      <span class="kicker">Community partners</span>
+      <h2>Thank you to our sponsors</h2>
+    </div>
+    <div class="sponsor-marquee" data-marquee-track>
+      <div class="sponsor-marquee-track">${logos}${logos}</div>
+    </div>
+  `;
+}
+
+async function loadSponsorMarquee() {
+  if (!isHomePage()) return;
+  try {
+    const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
+    renderSponsorMarquee(sponsors);
+  } catch {
+    // Leave the homepage alone if sponsors cannot load.
   }
 }
 
@@ -239,7 +303,7 @@ async function loadPublicContent() {
   });
 
   bindSponsorMapCards();
-  await Promise.all([maybeShowHomepageSponsorAd(), loadContactForms()]);
+  await Promise.all([loadSponsorMarquee(), maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
 function buildContactFormHtml(topics = []) {

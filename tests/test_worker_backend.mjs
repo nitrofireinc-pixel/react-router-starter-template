@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -311,7 +311,8 @@ test('sponsor helpers normalize editable rows and render safe sponsor cards', ()
 
   assert.equal(sponsor.mark_text, 'KM');
   assert.equal(sponsor.sort_order, 2);
-  assert.equal(sponsor.homepage_ad, 0);
+  assert.equal(sponsor.level, 'Gold Sponsor');
+  assert.equal(sponsor.homepage_ad, 1);
   assert.equal(sponsor.address, '123 Main Street');
   assert.equal(sponsor.city, 'Kernersville');
   assert.equal(sponsor.state, 'NC');
@@ -381,23 +382,45 @@ test('contact layout keeps a form slot beside page copy', () => {
   assert.match(html, /Add office hours here/);
 });
 
-test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
-  const enabled = normalizeSponsorPayload({
+test('sponsor tiers drive marquee, fly-in, and game-day benefits', () => {
+  assert.equal(normalizeSponsorTier('Gold Sponsor'), 'gold');
+  assert.equal(normalizeSponsorLevel('Community Sponsor', { homepageAd: 1 }), 'Silver Sponsor');
+  assert.equal(normalizeSponsorLevel('navy partner'), 'Bronze Sponsor');
+  const gold = sponsorBenefitsFromLevel('Gold Sponsor');
+  assert.equal(gold.show_marquee, true);
+  assert.equal(gold.show_flyin, true);
+  assert.equal(gold.show_game_announcement, true);
+  const silver = sponsorBenefitsFromLevel('Silver Sponsor');
+  assert.equal(silver.show_flyin, true);
+  assert.equal(silver.show_game_announcement, false);
+  const bronze = sponsorBenefitsFromLevel('Bronze Sponsor');
+  assert.equal(bronze.show_flyin, false);
+  assert.equal(bronze.show_marquee, true);
+  const hydrated = hydrateSponsor({ name: 'Eagle Financial Partners', level: 'Gold Sponsor', homepage_ad: 0, city: 'Kernersville', state: 'NC' });
+  assert.equal(hydrated.tier, 'gold');
+  assert.equal(hydrated.homepage_ad, 1);
+  assert.equal(hydrated.show_game_announcement, true);
+});
+
+test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
+  const gold = normalizeSponsorPayload({
     name: 'Eagle Financial Partners',
-    homepage_ad: true,
+    level: 'Gold Sponsor',
     active: true,
   });
-  assert.equal(enabled.homepage_ad, 1);
-  assert.equal(enabled.city, 'Kernersville');
-  assert.equal(enabled.state, 'NC');
-  assert.equal(enabled._assign_sort_order, true);
-  const preserved = normalizeSponsorPayload({ name: 'Eagle Financial Partners' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC', sort_order: 4 });
-  assert.equal(preserved.homepage_ad, 1);
-  assert.equal(preserved.city, 'Greensboro');
-  assert.equal(preserved.sort_order, 4);
-  assert.equal(preserved._assign_sort_order, false);
-  const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
-  assert.equal(disabled.homepage_ad, 0);
+  assert.equal(gold.homepage_ad, 1);
+  assert.equal(gold.level, 'Gold Sponsor');
+  assert.equal(gold.city, 'Kernersville');
+  assert.equal(gold.state, 'NC');
+  assert.equal(gold._assign_sort_order, true);
+  const bronze = normalizeSponsorPayload({ name: 'Local Shop', level: 'Bronze Sponsor' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC', sort_order: 4 });
+  assert.equal(bronze.homepage_ad, 0);
+  assert.equal(bronze.city, 'Greensboro');
+  assert.equal(bronze.sort_order, 4);
+  assert.equal(bronze._assign_sort_order, false);
+  const legacy = normalizeSponsorPayload({ name: 'Legacy Co', homepage_ad: true }, { level: 'Community Sponsor' });
+  assert.equal(legacy.level, 'Silver Sponsor');
+  assert.equal(legacy.homepage_ad, 1);
 });
 
 test('normalizeSponsorAdSeconds clamps homepage fly-in duration', () => {

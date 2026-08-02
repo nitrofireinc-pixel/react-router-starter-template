@@ -1378,6 +1378,115 @@ body.sponsor-map-open{overflow:hidden}
   .sponsor-tier-gold{transform:none}
 }
 
+/* Homepage sponsor marquee */
+.sponsor-marquee-section{
+  padding:28px 0 34px;
+  background:linear-gradient(180deg,#f4f7fb,#fff);
+  border-top:1px solid #e4ebf3;
+  border-bottom:1px solid #e4ebf3;
+  overflow:hidden;
+}
+.sponsor-marquee-section[hidden]{display:none!important}
+.sponsor-marquee-head{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px 18px;
+  margin-bottom:16px;
+}
+.sponsor-marquee-head h2{
+  margin:0;
+  color:var(--navy);
+  font-size:clamp(1.35rem,2.4vw,1.85rem);
+  letter-spacing:-.03em;
+}
+.sponsor-marquee{
+  position:relative;
+  overflow:hidden;
+  mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
+}
+.sponsor-marquee-track{
+  display:flex;
+  align-items:center;
+  gap:18px;
+  width:max-content;
+  animation:sponsorMarquee 36s linear infinite;
+}
+.sponsor-marquee:hover .sponsor-marquee-track{animation-play-state:paused}
+.sponsor-marquee-item{
+  display:inline-flex;
+  align-items:center;
+  gap:12px;
+  min-width:210px;
+  padding:14px 18px;
+  border:1px solid #d9e2ee;
+  border-radius:16px;
+  background:#fff;
+  color:var(--navy);
+  text-decoration:none;
+  box-shadow:0 10px 24px rgba(0,33,66,.06);
+}
+.sponsor-marquee-item img{
+  width:56px;
+  height:40px;
+  object-fit:contain;
+  flex:0 0 auto;
+}
+.sponsor-marquee-mark{
+  display:grid;
+  place-items:center;
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  background:#edf2f8;
+  font-weight:950;
+  flex:0 0 auto;
+}
+.sponsor-marquee-item span{
+  font-weight:800;
+  font-size:.92rem;
+  line-height:1.2;
+}
+@keyframes sponsorMarquee{
+  from{transform:translateX(0)}
+  to{transform:translateX(-50%)}
+}
+@media(prefers-reduced-motion:reduce){
+  .sponsor-marquee-track{animation:none;flex-wrap:wrap;width:auto;justify-content:center}
+  .sponsor-marquee{mask-image:none}
+}
+
+/* Admin sponsor tier badges + announcer list */
+.sponsor-tier-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:.72rem;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.sponsor-tier-badge.tier-bronze{background:#f3e2d0;color:#7a4d28}
+.sponsor-tier-badge.tier-silver{background:#e7eef6;color:#334155}
+.sponsor-tier-badge.tier-gold{background:#ffe9a8;color:#6a5200}
+.sponsor-tier-benefits{margin:0;grid-column:1/-1}
+.announcer-list-card .announcer-list{
+  margin:0;
+  padding-left:1.2rem;
+  display:grid;
+  gap:10px;
+}
+.announcer-list-card .announcer-list li{
+  display:grid;
+  gap:2px;
+}
+.announcer-list-card .announcer-list span{
+  color:#5b6f88;
+  font-size:.9rem;
+}
+
 /* Unsaved page-editor leave prompt */
 .unsaved-dialog{
   border:0;
