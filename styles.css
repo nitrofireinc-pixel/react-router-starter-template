@@ -320,6 +320,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 .cms-edit-rich{min-height:4.5rem}
 .cms-edit-rich p{margin:0 0 .75rem}
 .cms-edit-rich p:last-child{margin-bottom:0}
+.cms-edit-inline.cms-edit-rich{min-height:1.15em}
+.cms-edit-inline.cms-edit-rich p{display:inline;margin:0}
 .cms-edit-block{position:relative;margin-top:18px}
 .cms-edit-block-bar{
   display:flex;

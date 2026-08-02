@@ -94,6 +94,10 @@ function looksLikeHtml(value) {
   return /<\/?[a-z][^>]*>/i.test(String(value || ''));
 }
 
+function looksLikeInlineRichHtml(value) {
+  return /<\/?(?:span|strong|b|em|i|u|br)(?:\s|>|\/)/i.test(String(value || ''));
+}
+
 function sanitizeStyleAttribute(attrs) {
   const match = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   if (!match) return '';
@@ -133,6 +137,35 @@ function sanitizeRichHtml(dirty) {
   return html;
 }
 
+function sanitizeInlineRichHtml(dirty) {
+  let html = String(dirty || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/<\/?(p|div|ul|ol|li|h[1-6]|section|article)[^>]*>/gi, ' ');
+  const allowed = new Set(['br', 'strong', 'b', 'em', 'i', 'u', 'span']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'br') return '<br>';
+    if (tag === 'span') {
+      const style = sanitizeStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  return html.replace(/\s+/g, ' ').replace(/(?:<br>\s*){2,}/gi, '<br>').trim();
+}
+
+function formatInlineRichText(value, fallback = '') {
+  const raw = String(value ?? '');
+  const source = raw.trim() ? raw : String(fallback || '');
+  if (!source.trim()) return '';
+  return looksLikeInlineRichHtml(source) ? sanitizeInlineRichHtml(source) : escapeHtml(source);
+}
+
 function formatRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
@@ -146,6 +179,15 @@ function richHtmlFromNode(node) {
   return sanitizeRichHtml(field.innerHTML || '');
 }
 
+function inlineHtmlFromNode(node) {
+  if (!node) return '';
+  return sanitizeInlineRichHtml(node.innerHTML || '');
+}
+
+function plainTextFromHtml(value) {
+  return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function structuredPageFields(page) {
   const template = document.createElement('template');
   template.innerHTML = page.body_html || '';
@@ -156,6 +198,12 @@ function structuredPageFields(page) {
     || (page.slug === 'calendar' ? null : root.querySelector('.content .card') || root.querySelector('.content .wrap'));
   const callout = root.querySelector('[data-cms-block="callout"], .sponsor-cta, .notice');
   const calloutTextNode = callout?.querySelector('[data-cms-field="callout_text"]') || null;
+  const kickerNode = pageTitle?.querySelector('[data-cms-field="kicker"], .kicker')
+    || root.querySelector('[data-cms-field="kicker"], .page-title .kicker');
+  const headingNode = root.querySelector('[data-cms-field="heading"], .page-title h1');
+  const introNode = pageTitle?.querySelector('[data-cms-field="intro"]')
+    || pageTitle?.querySelector('p');
+  const calloutTitleNode = callout?.querySelector('[data-cms-field="callout_title"], h2, h3');
   const inferredLayout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout
     || (page.slug === 'calendar' ? 'calendar'
       : page.slug === 'contact' ? 'contact'
@@ -164,18 +212,16 @@ function structuredPageFields(page) {
             : 'standard');
   return {
     layout: inferredLayout,
-    kicker: pageTitle?.querySelector('[data-cms-field="kicker"], .kicker')?.textContent.trim()
-      || root.querySelector('[data-cms-field="kicker"], .page-title .kicker')?.textContent.trim()
-      || '',
-    heading: root.querySelector('[data-cms-field="heading"], .page-title h1')?.textContent.trim() || page.title || '',
-    intro: pageTitle?.querySelector('[data-cms-field="intro"], p')?.textContent.trim() || '',
+    kicker: inlineHtmlFromNode(kickerNode) || '',
+    heading: inlineHtmlFromNode(headingNode) || page.title || '',
+    intro: inlineHtmlFromNode(introNode) || '',
     body_text: richHtmlFromNode(bodyNode)
       || (page.slug === 'calendar'
         ? 'Add calendar events from the Calendar tab. They will appear here automatically.'
         : page.slug === 'sponsors'
           ? '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>'
           : textFromHtml(page.body_html)),
-    callout_title: callout?.querySelector('[data-cms-field="callout_title"], h2, h3')?.textContent.trim() || '',
+    callout_title: inlineHtmlFromNode(calloutTitleNode) || '',
     callout_text: calloutTextNode
       ? richHtmlFromNode(calloutTextNode)
       : (callout?.querySelector('p') ? `<p>${escapeHtml(callout.querySelector('p').textContent.trim())}</p>` : paragraphsFromNode(callout)),
@@ -221,8 +267,8 @@ const PAGE_FIELD_LABELS = {
 };
 
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
-  const classes = ['cms-edit-field', extraClass].filter(Boolean).join(' ');
-  const content = escapeHtml(value || '');
+  const classes = ['cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', extraClass].filter(Boolean).join(' ');
+  const content = formatInlineRichText(value) || '';
   const label = PAGE_FIELD_LABELS[name] || name;
   return `<${tag} class="${classes}" data-cms-field="${escapeAttr(name)}" data-edit-label="${escapeAttr(label)}" contenteditable="true" role="textbox" spellcheck="true" aria-label="${escapeAttr(label)}" data-placeholder="${escapeAttr(placeholder)}">${content}</${tag}>`;
 }
@@ -380,7 +426,7 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
-  if (!String(payload.heading || '').trim()) {
+  if (!plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
     document.querySelector('#page-preview [data-cms-field="heading"]')?.focus();
     return false;
@@ -421,7 +467,9 @@ function syncFieldFromPreview(field) {
   const control = form.elements[name];
   if (!control) return;
   const value = field.classList.contains('cms-edit-rich')
-    ? sanitizeRichHtml(field.innerHTML)
+    ? (field.classList.contains('cms-edit-inline')
+      ? sanitizeInlineRichHtml(field.innerHTML)
+      : sanitizeRichHtml(field.innerHTML))
     : field.textContent.replace(/\s+/g, ' ').trim();
   if (control.value !== value) control.value = value;
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
@@ -481,7 +529,9 @@ function bindPagePreviewInteractions(preview) {
       field.classList.add('is-focused');
     });
     field.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || field.classList.contains('cms-edit-rich')) return;
+      if (event.key !== 'Enter') return;
+      // Block multi-line breaks in hero/title fields; body/callout rich blocks still allow Enter.
+      if (field.classList.contains('cms-edit-rich') && !field.classList.contains('cms-edit-inline')) return;
       event.preventDefault();
       field.blur();
     });
@@ -530,7 +580,9 @@ function bindPageVisualEditor() {
         refreshPageDirtyState();
         return;
       }
-      if (field.classList.contains('cms-edit-rich')) {
+      if (field.classList.contains('cms-edit-inline')) {
+        field.innerHTML = formatInlineRichText(event.target.value);
+      } else if (field.classList.contains('cms-edit-rich')) {
         field.innerHTML = formatRichText(event.target.value) || '<p></p>';
       } else {
         field.textContent = event.target.value;
@@ -564,7 +616,9 @@ function bindPageVisualEditor() {
     if (field.classList.contains('cms-edit-rich')) {
       const html = event.clipboardData?.getData('text/html');
       const text = event.clipboardData?.getData('text/plain') || '';
-      const clean = html ? sanitizeRichHtml(html) : formatRichText(text);
+      const clean = field.classList.contains('cms-edit-inline')
+        ? (html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text))
+        : (html ? sanitizeRichHtml(html) : formatRichText(text));
       document.execCommand('insertHTML', false, clean || escapeHtml(text));
       syncFieldFromPreview(field);
     } else {
@@ -1683,4 +1737,4 @@ refreshAll().catch(error => {
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
-/* unsaved-page-warning: 20260802-46 */
+/* hero-rich-formatting: 20260802-49 */

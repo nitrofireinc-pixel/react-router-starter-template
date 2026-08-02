@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -66,6 +66,14 @@ test('sanitizeRichHtml keeps bold/color/size markup and strips unsafe tags', () 
   assert.doesNotMatch(html, /alert\(1\)/);
 });
 
+test('sanitizeInlineRichHtml keeps color spans for headings without block wrappers', () => {
+  const html = sanitizeInlineRichHtml('<span style="color: #E71321">Fundraising</span><script>alert(1)</script><p>extra</p>');
+  assert.match(html, /style="color: #E71321"/);
+  assert.match(html, /Fundraising/);
+  assert.doesNotMatch(html, /<p>/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
 test('generateStructuredPageHtml preserves sanitized rich body html', () => {
   const html = generateStructuredPageHtml({
     layout: 'standard',
@@ -76,6 +84,18 @@ test('generateStructuredPageHtml preserves sanitized rich body html', () => {
   });
   assert.match(html, /<strong>marching band<\/strong>/);
   assert.match(html, /style="color: #014990"/);
+});
+
+test('generateStructuredPageHtml preserves inline heading and intro colors', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'standard',
+    kicker: 'Families',
+    heading: '<span style="color: #E71321">Fundraising</span>',
+    intro: 'Centralize <strong>active campaigns</strong> and giving links.',
+    body_text: 'Details here.',
+  });
+  assert.match(html, /data-cms-field="heading"><span style="color: #E71321">Fundraising<\/span>/);
+  assert.match(html, /<strong>active campaigns<\/strong>/);
 });
 
 test('staff helpers normalize rows and render photo + name cards safely', () => {
