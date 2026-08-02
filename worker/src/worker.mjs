@@ -1455,8 +1455,20 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
 </body></html>`;
 }
 
+async function serveMaintenanceAsset(request, env) {
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = '/maintenance.html';
+  const asset = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+  const headers = new Headers(asset.headers);
+  headers.set('cache-control', 'no-store');
+  return new Response(asset.body, { status: asset.status, headers });
+}
+
 async function serveStaticOrCms(request, env, url) {
   await initDb(env);
+  if (url.pathname === '/maintenance' || url.pathname === '/maintenance.html') {
+    return serveMaintenanceAsset(request, env);
+  }
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
   const isHomeLanding = url.pathname === '/' || path === '/index.html';
   if (isHomeLanding) {
