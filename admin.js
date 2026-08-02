@@ -1523,6 +1523,20 @@ function sponsorPreviewCard(sponsor, index = 0) {
   return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level">${escapeHtml(sponsor.level || 'Sponsor')}</span><h3>${escapeHtml(sponsor.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}</div></article>`;
 }
 
+function syncSponsorLogoPreview(form, url = '') {
+  const preview = form?.querySelector?.('[data-sponsor-logo-preview]') || document.querySelector('[data-sponsor-logo-preview]');
+  const img = preview?.querySelector('img');
+  if (!preview || !img) return;
+  const src = String(url || formControl(form, 'logo_url')?.value || '').trim();
+  if (!src) {
+    preview.hidden = true;
+    img.removeAttribute('src');
+    return;
+  }
+  img.src = src;
+  preview.hidden = false;
+}
+
 function resetSponsorForm(form) {
   if (!form) return;
   form.reset();
@@ -1533,6 +1547,9 @@ function resetSponsorForm(form) {
   if (form.elements.homepage_ad) form.elements.homepage_ad.checked = false;
   form.elements.level.value = 'Community Sponsor';
   form.elements.sort_order.value = String((state.sponsors?.length || 0) + 1);
+  const file = formControl(form, 'logo_file');
+  if (file) file.value = '';
+  syncSponsorLogoPreview(form, '');
 }
 
 function renderSponsors() {
@@ -1558,6 +1575,10 @@ function renderSponsors() {
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     form.elements.active.checked = Boolean(Number(sponsor.active));
     if (form.elements.homepage_ad) form.elements.homepage_ad.checked = Boolean(Number(sponsor.homepage_ad));
+    const file = formControl(form, 'logo_file');
+    if (file) file.value = '';
+    syncSponsorLogoPreview(form, sponsor.logo_url || '');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this sponsor?')) return;
@@ -2042,6 +2063,7 @@ function bindForms() {
   document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
+    const status = document.querySelector('#sponsor-status');
     const payload = formPayload(form);
     payload.sort_order = Number(payload.sort_order || state.sponsors.length + 1);
     payload.homepage_ad = Boolean(form.elements.homepage_ad?.checked);
@@ -2049,10 +2071,43 @@ function bindForms() {
     payload.state = String(payload.state || 'NC').trim() || 'NC';
     const id = payload.id;
     delete payload.id;
-    await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    document.querySelector('#sponsor-status').textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
-    resetSponsorForm(form);
-    await loadSponsors();
+    delete payload.logo_file;
+    if (status) status.textContent = 'Saving…';
+    try {
+      const file = formControl(form, 'logo_file')?.files?.[0];
+      if (file) {
+        const upload = new FormData();
+        upload.set('file', file);
+        upload.set('alt_text', payload.name || 'Sponsor logo');
+        upload.set('caption', payload.level || 'Sponsor');
+        // Negative sort keeps sponsor logos out of the public Photo gallery listing.
+        upload.set('sort_order', '-400');
+        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        payload.logo_url = stored.url;
+        formControl(form, 'logo_url').value = stored.url;
+        syncSponsorLogoPreview(form, stored.url);
+      }
+      await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      if (status) status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+      resetSponsorForm(form);
+      await loadSponsors();
+    } catch (error) {
+      if (status) status.textContent = `Could not save sponsor: ${error.message}`;
+    }
+  });
+
+  document.querySelector('#sponsor-form [name="logo_url"]')?.addEventListener('input', (event) => {
+    syncSponsorLogoPreview(event.currentTarget.form, event.currentTarget.value);
+  });
+  document.querySelector('#sponsor-form [name="logo_file"]')?.addEventListener('change', (event) => {
+    const form = event.currentTarget.form;
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      syncSponsorLogoPreview(form);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    syncSponsorLogoPreview(form, objectUrl);
   });
 
   document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
