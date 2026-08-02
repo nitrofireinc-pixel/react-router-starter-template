@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isServiceMode, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderMaintenancePage, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -221,10 +221,31 @@ test('contact topics require labels and valid delivery emails', () => {
   assert.equal(topic.sort_order, 3);
   assert.equal(isValidEmail(topic.email), true);
   assert.equal(isValidEmail('not-an-email'), false);
+  const appended = normalizeContactTopicPayload({
+    label: 'General question',
+    email: 'band@example.com',
+  });
+  assert.equal(appended.sort_order, null);
   const html = renderContactForm([{ id: 9, label: 'General question' }]);
   assert.match(html, /data-contact-form/);
   assert.match(html, /value="9"/);
   assert.match(html, /General question/);
+});
+
+test('service mode detection and maintenance page keep site styling', () => {
+  assert.equal(isServiceMode({ service_mode: '1' }), true);
+  assert.equal(isServiceMode({ service_mode: '0' }), false);
+  assert.equal(isServiceMode({ service_mode: 'true' }), true);
+  const html = renderMaintenancePage({
+    title: 'East Forsyth Band',
+    footer_note: 'Footer note',
+    logo_url: '/assets/efhs-logo.png',
+  }, [{ path: '/', title: 'Home' }, { path: '/contact.html', title: 'Contact' }]);
+  assert.match(html, /Site under maintenance/);
+  assert.match(html, /page-hero/);
+  assert.match(html, /site-header/);
+  assert.match(html, /styles\.css/);
+  assert.match(html, /East Forsyth Band/);
 });
 
 test('contact layout keeps a form slot beside page copy', () => {

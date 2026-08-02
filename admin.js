@@ -60,7 +60,23 @@ function formPayload(form) {
   if (active) payload.active = Boolean(active.checked);
   const homepageAd = formControl(form, 'homepage_ad');
   if (homepageAd) payload.homepage_ad = Boolean(homepageAd.checked);
+  const serviceMode = formControl(form, 'service_mode');
+  if (serviceMode) payload.service_mode = Boolean(serviceMode.checked);
   return payload;
+}
+
+function isServiceModeEnabled(site) {
+  const value = site?.service_mode;
+  return value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true';
+}
+
+function syncServiceModeForm() {
+  const form = document.querySelector('#service-mode-form');
+  if (!form) return;
+  const canManage = hasPermission('site');
+  form.hidden = !canManage;
+  const checkbox = formControl(form, 'service_mode');
+  if (checkbox) checkbox.checked = isServiceModeEnabled(state.site);
 }
 
 function textFromHtml(html) {
@@ -610,9 +626,13 @@ async function loadMe() {
 }
 
 async function loadSite() {
-  if (!hasPermission('site')) return;
+  if (!hasPermission('site')) {
+    syncServiceModeForm();
+    return;
+  }
   state.site = await jsonFetch('/api/site');
   fillForm(document.querySelector('#site-form'), state.site);
+  syncServiceModeForm();
 }
 
 async function loadPages() {
@@ -928,14 +948,14 @@ function renderContactTopics() {
   list.innerHTML = ordered.length
     ? ordered.map((topic) => `
     <article class="admin-row">
-      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>order ${topic.sort_order} · ${topic.active ? 'Active' : 'Hidden'}</small></div>
-      <div class="row-actions"><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
+      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span></div>
+      <div class="row-actions"><button type="button" data-delete-contact-topic="${topic.id}">Remove</button></div>
     </article>
   `).join('')
     : '<p class="draft">No contact topics yet. Add one to enable the public form.</p>';
 
   list.querySelectorAll('[data-delete-contact-topic]').forEach((button) => button.addEventListener('click', async () => {
-    if (!confirm('Delete this contact topic?')) return;
+    if (!confirm('Remove this contact topic?')) return;
     await jsonFetch(`/api/admin/contact/topics/${button.dataset.deleteContactTopic}`, { method: 'DELETE' });
     await loadContactTopics();
   }));
@@ -974,8 +994,31 @@ function bindForms() {
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
+    state.site = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
+    syncServiceModeForm();
     document.querySelector('#site-status').textContent = 'Saved. Refresh the public site to see changes.';
+  });
+
+  document.querySelector('#service-mode-form')?.addEventListener('change', async (event) => {
+    if (event.target?.name !== 'service_mode') return;
+    const checkbox = event.target;
+    const status = document.querySelector('#service-mode-status');
+    const enabled = Boolean(checkbox.checked);
+    try {
+      state.site = await jsonFetch('/api/admin/site', {
+        method: 'POST',
+        body: JSON.stringify({ service_mode: enabled ? '1' : '0' }),
+      });
+      syncServiceModeForm();
+      if (status) {
+        status.textContent = enabled
+          ? 'Service mode on. The home page now redirects to the maintenance page.'
+          : 'Service mode off. The home page is public again.';
+      }
+    } catch (error) {
+      checkbox.checked = !enabled;
+      if (status) status.textContent = `Could not update service mode: ${error.message}`;
+    }
   });
 
   document.querySelector('#logo-form')?.addEventListener('submit', async event => {
@@ -1103,8 +1146,8 @@ function bindForms() {
     const status = document.querySelector('#contact-topic-status');
     const payload = formPayload(form);
     delete payload.id;
-    payload.sort_order = Number(payload.sort_order || (state.contactTopics.length + 1));
-    payload.active = Boolean(form.elements.active?.checked);
+    delete payload.sort_order;
+    delete payload.active;
     if (!payload.label?.trim()) {
       if (status) status.textContent = 'Topic label is required.';
       return;
@@ -1120,21 +1163,10 @@ function bindForms() {
       });
       if (status) status.textContent = 'Topic added.';
       form.reset();
-      form.elements.active.checked = true;
       await loadContactTopics();
-      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
     } catch (error) {
       if (status) status.textContent = `Could not save topic: ${error.message}`;
     }
-  });
-
-  document.querySelector('#new-contact-topic')?.addEventListener('click', () => {
-    const form = document.querySelector('#contact-topic-form');
-    form.reset();
-    form.elements.active.checked = true;
-    formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
-    document.querySelector('#contact-topic-status').textContent = 'Add a topic to append it to the list.';
-    formControl(form, 'label')?.focus();
   });
 
   document.querySelector('#user-form')?.addEventListener('submit', async event => {
