@@ -16,8 +16,8 @@ async function jsonFetch(url, options = {}) {
       const data = JSON.parse(text);
       throw new Error(data.detail || data.error || text);
     } catch (error) {
-      if (error instanceof Error && error.message !== text && !error.message.startsWith('{')) throw error;
-      throw new Error(text || response.statusText || 'Request failed');
+      if (error instanceof SyntaxError) throw new Error(text || response.statusText || 'Request failed');
+      throw error;
     }
   }
   return response.json();
