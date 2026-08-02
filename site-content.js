@@ -106,17 +106,24 @@ async function maybeShowHomepageSponsorAd() {
 }
 
 function ensureSponsorMarqueeMount() {
-  if (!isHomePage()) return null;
-  let mount = document.querySelector('[data-sponsor-marquee]');
-  if (mount) return mount;
-  const hero = document.querySelector('main .hero, main section.hero');
-  if (!hero) return null;
-  mount = document.createElement('section');
-  mount.className = 'sponsor-marquee-section';
-  mount.setAttribute('data-sponsor-marquee', '');
-  mount.setAttribute('aria-label', 'Sponsor marquee');
-  hero.insertAdjacentElement('afterend', mount);
-  return mount;
+  const header = document.querySelector('header.site-header');
+  let mount = document.querySelector('header.site-header + [data-sponsor-marquee], [data-sponsor-marquee]');
+  if (header) {
+    // Keep a single marquee directly under the site header on every page.
+    if (!mount || mount.previousElementSibling !== header) {
+      mount = document.createElement('section');
+      mount.className = 'sponsor-marquee-section';
+      mount.setAttribute('data-sponsor-marquee', '');
+      mount.setAttribute('aria-label', 'Sponsor marquee');
+      mount.hidden = true;
+      header.insertAdjacentElement('afterend', mount);
+    }
+    document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
+      if (node !== mount) node.remove();
+    });
+    return mount;
+  }
+  return mount || null;
 }
 
 function renderSponsorMarquee(sponsors = []) {
@@ -137,23 +144,21 @@ function renderSponsorMarquee(sponsors = []) {
   // Duplicate the track so the CSS loop can scroll seamlessly.
   mount.hidden = false;
   mount.innerHTML = `
-    <div class="wrap sponsor-marquee-head">
-      <span class="kicker">Community partners</span>
-      <h2>Thank you to our sponsors</h2>
-    </div>
-    <div class="sponsor-marquee" data-marquee-track>
-      <div class="sponsor-marquee-track">${logos}${logos}</div>
+    <div class="wrap sponsor-marquee-bar">
+      <span class="sponsor-marquee-label">Sponsors</span>
+      <div class="sponsor-marquee" data-marquee-track>
+        <div class="sponsor-marquee-track">${logos}${logos}</div>
+      </div>
     </div>
   `;
 }
 
 async function loadSponsorMarquee() {
-  if (!isHomePage()) return;
   try {
     const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
     renderSponsorMarquee(sponsors);
   } catch {
-    // Leave the homepage alone if sponsors cannot load.
+    // Leave the page alone if sponsors cannot load.
   }
 }
 
