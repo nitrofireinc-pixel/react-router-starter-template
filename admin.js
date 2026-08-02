@@ -1419,7 +1419,7 @@ function renderDashboard() {
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
   const cards = [
-    canEditPage('become-a-sponsor') && ['Become a Sponsor', 'Edit sponsor packages copy and the inquiry form intro on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
+    state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit sponsor packages copy and the inquiry form intro on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
