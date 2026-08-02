@@ -23,7 +23,7 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, headerNav: [] };
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -348,10 +348,90 @@ function showPageEditorChrome(active) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
+    showHeaderNavEditor(false);
     pageEditor.baseline = '';
     pageEditor.dirty = false;
     updatePageDirtyUi();
   }
+}
+
+function navLabelFromTitle(title) {
+  return String(title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim();
+}
+
+function showHeaderNavEditor(visible) {
+  const form = document.querySelector('#header-nav-form');
+  if (!form) return;
+  form.hidden = !visible;
+  if (visible) loadHeaderNavEditor().catch((error) => {
+    const status = document.querySelector('#header-nav-status');
+    if (status) status.textContent = `Could not load header links: ${error.message}`;
+  });
+}
+
+async function loadHeaderNavEditor() {
+  if (!hasPermission('pages') && !canEditPage('home')) return;
+  state.headerNav = await jsonFetch('/api/admin/pages/nav');
+  renderHeaderNavEditor();
+}
+
+function renderHeaderNavEditor() {
+  const list = document.querySelector('#header-nav-list');
+  if (!list) return;
+  const items = Array.isArray(state.headerNav) ? [...state.headerNav] : [];
+  items.sort((a, b) => Number(a.nav_order) - Number(b.nav_order) || String(a.slug).localeCompare(String(b.slug)));
+  list.innerHTML = items.length
+    ? items.map((item, index) => `
+      <article class="header-nav-row" data-nav-slug="${escapeHtml(item.slug)}">
+        <div class="header-nav-order">
+          <button type="button" class="btn outline" data-nav-up ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(navLabelFromTitle(item.title) || item.slug)} up">↑</button>
+          <button type="button" class="btn outline" data-nav-down ${index === items.length - 1 ? 'disabled' : ''} aria-label="Move ${escapeHtml(navLabelFromTitle(item.title) || item.slug)} down">↓</button>
+        </div>
+        <label class="header-nav-label">Link label
+          <input name="nav_title" value="${escapeHtml(navLabelFromTitle(item.title) || item.slug)}">
+        </label>
+        <div class="header-nav-meta">
+          <small>${escapeHtml(item.path || '/')}</small>
+          <label class="checkline"><input type="checkbox" name="nav_active" ${Number(item.active) ? 'checked' : ''} ${item.is_home || item.slug === 'home' ? 'disabled' : ''}> Show in header</label>
+        </div>
+      </article>
+    `).join('')
+    : '<p class="draft">No pages are available for the header menu.</p>';
+
+  list.querySelectorAll('[data-nav-up]').forEach((button) => button.addEventListener('click', () => moveHeaderNavRow(button.closest('[data-nav-slug]')?.dataset.navSlug, -1)));
+  list.querySelectorAll('[data-nav-down]').forEach((button) => button.addEventListener('click', () => moveHeaderNavRow(button.closest('[data-nav-slug]')?.dataset.navSlug, 1)));
+}
+
+function readHeaderNavDraft() {
+  const list = document.querySelector('#header-nav-list');
+  if (!list) return [];
+  return [...list.querySelectorAll('[data-nav-slug]')].map((row, index) => {
+    const slug = row.dataset.navSlug;
+    const previous = (state.headerNav || []).find((item) => item.slug === slug) || {};
+    const titleInput = row.querySelector('input[name="nav_title"]');
+    const activeInput = row.querySelector('input[name="nav_active"]');
+    const isHome = Boolean(previous.is_home) || slug === 'home';
+    return {
+      slug,
+      title: String(titleInput?.value || previous.title || slug).trim(),
+      path: previous.path || '/',
+      nav_order: index,
+      active: isHome ? 1 : (activeInput?.checked ? 1 : 0),
+      is_home: isHome ? 1 : 0,
+    };
+  });
+}
+
+function moveHeaderNavRow(slug, delta) {
+  const draft = readHeaderNavDraft();
+  const index = draft.findIndex((item) => item.slug === slug);
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= draft.length) return;
+  const copy = [...draft];
+  const [item] = copy.splice(index, 1);
+  copy.splice(next, 0, item);
+  state.headerNav = copy.map((entry, order) => ({ ...entry, nav_order: order }));
+  renderHeaderNavEditor();
 }
 
 function pageSnapshotFromPayload(payload) {
@@ -935,6 +1015,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     form.querySelector('[data-home-hint]').hidden = !page.is_home;
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
+    showHeaderNavEditor(Boolean(page.is_home || page.slug === 'home'));
     syncPreviewFromForm();
     await activateTab('pages');
     activatePageShortcut(slug);
@@ -1528,6 +1609,28 @@ function bindForms() {
     await saveCurrentPage({ reloadEditor: true });
   });
 
+  document.querySelector('#header-nav-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#header-nav-status');
+    const items = readHeaderNavDraft();
+    if (!items.length) {
+      if (status) status.textContent = 'No header links to save.';
+      return;
+    }
+    if (status) status.textContent = 'Saving header links…';
+    try {
+      state.headerNav = await jsonFetch('/api/admin/pages/nav', {
+        method: 'PUT',
+        body: JSON.stringify({ items }),
+      });
+      renderHeaderNavEditor();
+      await loadPages();
+      if (status) status.textContent = 'Header links saved. The public top menu is updated.';
+    } catch (error) {
+      if (status) status.textContent = `Could not save header links: ${error.message}`;
+    }
+  });
+
   document.querySelector('#new-page')?.addEventListener('click', async () => {
     if (!(await confirmLeavePageEditor())) return;
     const form = document.querySelector('#page-form');
@@ -1543,6 +1646,7 @@ function bindForms() {
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
     showPageEditorChrome(true);
+    showHeaderNavEditor(false);
     syncPreviewFromForm();
     await activateTab('pages');
     capturePageBaseline();
