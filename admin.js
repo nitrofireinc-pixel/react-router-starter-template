@@ -939,11 +939,11 @@ async function loadPhotos() {
 function renderContactTopics() {
   const list = document.querySelector('#contact-topics-list');
   if (!list) return;
-  const ordered = [...state.contactTopics].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  const ordered = [...state.contactTopics].sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' }) || a.id - b.id);
   list.innerHTML = ordered.length
     ? ordered.map((topic) => `
     <article class="admin-row">
-      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>order ${topic.sort_order} · ${topic.active ? 'Active' : 'Hidden'}</small></div>
+      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>${topic.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-contact-topic="${topic.id}">Edit</button><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
     </article>
   `).join('')
@@ -1152,10 +1152,10 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#contact-topic-status');
     const payload = formPayload(form);
-    payload.sort_order = Number(payload.sort_order || (state.contactTopics.length + 1));
     payload.active = Boolean(form.elements.active?.checked);
     const id = String(payload.id || '').trim();
     delete payload.id;
+    delete payload.sort_order;
     if (!payload.label?.trim()) {
       if (status) status.textContent = 'Topic label is required.';
       return;
@@ -1173,7 +1173,6 @@ function bindForms() {
       form.reset();
       formControl(form, 'id').value = '';
       form.elements.active.checked = true;
-      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
       await loadContactTopics();
     } catch (error) {
       if (status) status.textContent = `Could not save topic: ${error.message}`;
@@ -1185,7 +1184,6 @@ function bindForms() {
     form.reset();
     formControl(form, 'id').value = '';
     form.elements.active.checked = true;
-    formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
     document.querySelector('#contact-topic-status').textContent = 'Creating a new contact topic.';
     formControl(form, 'label')?.focus();
   });

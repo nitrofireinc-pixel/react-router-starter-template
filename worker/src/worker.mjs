@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-36';
+const ASSET_VERSION = 'admin-cms-20260802-37';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -690,14 +690,15 @@ export function normalizeContactTopicPayload(payload = {}, existing = null) {
   return {
     label,
     email,
-    sort_order: Number(payload.sort_order ?? existing?.sort_order ?? 0),
+    // Topics are displayed A–Z by label; sort_order is unused in the UI.
+    sort_order: 0,
     active: payload.active === false || payload.active === 0 ? 0 : 1,
   };
 }
 
 async function getContactTopics(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, label, email, sort_order, active FROM contact_topics ${where} ORDER BY sort_order, id`).all();
+  const rows = await env.DB.prepare(`SELECT id, label, email, sort_order, active FROM contact_topics ${where} ORDER BY label COLLATE NOCASE, id`).all();
   return rows.results || [];
 }
 
@@ -1662,13 +1663,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="form-grid">
 <label>Topic label<input name="label" required maxlength="120" placeholder="General question"></label>
 <label>Send messages to<input name="email" type="email" required maxlength="200" placeholder="band@example.com"></label>
-<label>Sort order<input name="sort_order" type="number" value="1"></label>
 <label class="checkline"><input name="active" type="checkbox" checked> Active on contact form</label>
 </div>
 <button class="btn primary" type="submit">Save Topic</button>
 <p class="status" id="contact-topic-status"></p>
 </form>
-<div class="admin-card"><h2>Topics</h2><p class="muted">Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Topics</h2><p class="muted">Topics are listed A–Z. Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>

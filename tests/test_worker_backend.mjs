@@ -247,7 +247,7 @@ test('contact topics require labels and valid delivery emails', () => {
   });
   assert.equal(topic.label, 'Sponsor inquiry');
   assert.equal(topic.email, 'boosters@example.com');
-  assert.equal(topic.sort_order, 3);
+  assert.equal(topic.sort_order, 0);
   assert.equal(isValidEmail(topic.email), true);
   assert.equal(isValidEmail('not-an-email'), false);
   const html = renderContactForm([{ id: 9, label: 'General question' }]);
