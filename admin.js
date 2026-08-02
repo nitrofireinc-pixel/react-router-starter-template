@@ -23,7 +23,7 @@ async function jsonFetch(url, options = {}) {
   return response.json();
 }
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [] };
 
 function hasPermission(scope) {
   if (!state.me?.user) return false;
@@ -348,10 +348,82 @@ function showPageEditorChrome(active) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
+    showUtilityLinksEditor(false);
     pageEditor.baseline = '';
     pageEditor.dirty = false;
     updatePageDirtyUi();
   }
+}
+
+function showUtilityLinksEditor(visible) {
+  const form = document.querySelector('#utility-links-form');
+  if (!form) return;
+  form.hidden = !visible;
+  if (visible) loadUtilityLinksEditor().catch((error) => {
+    const status = document.querySelector('#utility-links-status');
+    if (status) status.textContent = `Could not load utility links: ${error.message}`;
+  });
+}
+
+async function loadUtilityLinksEditor() {
+  if (!(hasPermission('site') || hasPermission('pages') || canEditPage('home'))) return;
+  const result = await jsonFetch('/api/admin/utility-links');
+  state.utilityLinks = Array.isArray(result.utility_links) ? result.utility_links : [];
+  renderUtilityLinksEditor();
+}
+
+function renderUtilityLinksEditor() {
+  const list = document.querySelector('#utility-links-list');
+  if (!list) return;
+  const links = Array.isArray(state.utilityLinks) && state.utilityLinks.length
+    ? state.utilityLinks
+    : [
+      { label: 'Upcoming Events', href: '/calendar.html' },
+      { label: 'Student Resources', href: '/resources.html' },
+      { label: 'Contact', href: '/contact.html' },
+    ];
+  list.innerHTML = links.map((link, index) => `
+    <article class="utility-link-row" data-utility-index="${index}">
+      <label>Label<input name="utility_label" value="${escapeHtml(link.label || '')}" required maxlength="60"></label>
+      <label>URL<input name="utility_href" value="${escapeHtml(link.href || '')}" required placeholder="/calendar.html"></label>
+      <div class="utility-link-actions">
+        <button type="button" class="btn outline" data-utility-up ${index === 0 ? 'disabled' : ''} aria-label="Move link up">↑</button>
+        <button type="button" class="btn outline" data-utility-down ${index === links.length - 1 ? 'disabled' : ''} aria-label="Move link down">↓</button>
+        <button type="button" class="btn outline" data-utility-remove ${links.length <= 1 ? 'disabled' : ''}>Remove</button>
+      </div>
+    </article>
+  `).join('');
+  list.querySelectorAll('[data-utility-up]').forEach((button) => button.addEventListener('click', () => moveUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex), -1)));
+  list.querySelectorAll('[data-utility-down]').forEach((button) => button.addEventListener('click', () => moveUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex), 1)));
+  list.querySelectorAll('[data-utility-remove]').forEach((button) => button.addEventListener('click', () => removeUtilityLink(Number(button.closest('[data-utility-index]')?.dataset.utilityIndex))));
+}
+
+function readUtilityLinksDraft() {
+  const list = document.querySelector('#utility-links-list');
+  if (!list) return [];
+  return [...list.querySelectorAll('.utility-link-row')].map((row) => ({
+    label: String(row.querySelector('input[name="utility_label"]')?.value || '').trim(),
+    href: String(row.querySelector('input[name="utility_href"]')?.value || '').trim(),
+  })).filter((link) => link.label && link.href);
+}
+
+function moveUtilityLink(index, delta) {
+  const draft = readUtilityLinksDraft();
+  const next = index + delta;
+  if (!Number.isInteger(index) || next < 0 || next >= draft.length) return;
+  const copy = [...draft];
+  const [item] = copy.splice(index, 1);
+  copy.splice(next, 0, item);
+  state.utilityLinks = copy;
+  renderUtilityLinksEditor();
+}
+
+function removeUtilityLink(index) {
+  const draft = readUtilityLinksDraft();
+  if (draft.length <= 1 || !Number.isInteger(index)) return;
+  draft.splice(index, 1);
+  state.utilityLinks = draft;
+  renderUtilityLinksEditor();
 }
 
 function pageSnapshotFromPayload(payload) {
@@ -935,6 +1007,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     form.querySelector('[data-home-hint]').hidden = !page.is_home;
     form.elements.active.checked = Boolean(page.active);
     showPageEditorChrome(true);
+    showUtilityLinksEditor(Boolean(page.is_home || page.slug === 'home'));
     syncPreviewFromForm();
     await activateTab('pages');
     activatePageShortcut(slug);
@@ -1528,6 +1601,39 @@ function bindForms() {
     await saveCurrentPage({ reloadEditor: true });
   });
 
+  document.querySelector('#utility-links-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#utility-links-status');
+    const links = readUtilityLinksDraft();
+    if (!links.length) {
+      if (status) status.textContent = 'Add at least one utility link.';
+      return;
+    }
+    if (status) status.textContent = 'Saving…';
+    try {
+      const saved = await jsonFetch('/api/admin/utility-links', {
+        method: 'PUT',
+        body: JSON.stringify({ utility_links: links }),
+      });
+      state.utilityLinks = saved.utility_links || links;
+      renderUtilityLinksEditor();
+      if (status) status.textContent = 'Top utility links saved. They appear on every public page.';
+    } catch (error) {
+      if (status) status.textContent = `Could not save utility links: ${error.message}`;
+    }
+  });
+
+  document.querySelector('#utility-link-add')?.addEventListener('click', () => {
+    const draft = readUtilityLinksDraft();
+    if (draft.length >= 6) {
+      const status = document.querySelector('#utility-links-status');
+      if (status) status.textContent = 'You can add up to 6 utility links.';
+      return;
+    }
+    state.utilityLinks = [...draft, { label: 'New link', href: '/' }];
+    renderUtilityLinksEditor();
+  });
+
   document.querySelector('#new-page')?.addEventListener('click', async () => {
     if (!(await confirmLeavePageEditor())) return;
     const form = document.querySelector('#page-form');
@@ -1543,6 +1649,7 @@ function bindForms() {
     form.elements.active.checked = true;
     document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
     showPageEditorChrome(true);
+    showUtilityLinksEditor(false);
     syncPreviewFromForm();
     await activateTab('pages');
     capturePageBaseline();

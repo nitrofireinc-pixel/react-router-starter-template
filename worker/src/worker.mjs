@@ -1,5 +1,11 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 
+export const DEFAULT_UTILITY_LINKS = [
+  { label: 'Upcoming Events', href: '/calendar.html' },
+  { label: 'Student Resources', href: '/resources.html' },
+  { label: 'Contact', href: '/contact.html' },
+];
+
 export const DEFAULT_SITE = {
   title: 'East Forsyth Band',
   hero_title: 'Sound. Spirit. Eagle Pride.',
@@ -8,6 +14,7 @@ export const DEFAULT_SITE = {
   logo_url: '/assets/efhs-logo.png',
   maintenance_mode: '0',
   sponsor_ad_seconds: '6',
+  utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
 };
 
 export const DEFAULT_EVENTS = [
@@ -27,7 +34,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-53';
+const ASSET_VERSION = 'admin-cms-20260802-55';
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -356,12 +363,46 @@ export function normalizeSponsorAdSeconds(value, fallback = 6) {
   return Math.min(30, Math.max(2, seconds));
 }
 
+export function normalizeUtilityLinks(value) {
+  let items = value;
+  if (typeof value === 'string') {
+    try {
+      items = JSON.parse(value);
+    } catch {
+      items = null;
+    }
+  }
+  if (!Array.isArray(items) || !items.length) items = DEFAULT_UTILITY_LINKS;
+  return items.slice(0, 6).map((item, index) => {
+    const label = String(item?.label || '').trim() || `Link ${index + 1}`;
+    let href = String(item?.href || '').trim() || '#';
+    if (/^\s*javascript:/i.test(href)) href = '#';
+    else if (/^https?:\/\//i.test(href) || href.startsWith('/') || href === '#') {
+      // keep absolute URLs, site-root paths, and placeholders
+    } else {
+      href = `/${href.replace(/^\/+/, '')}`;
+    }
+    return { label, href };
+  }).filter((item) => item.label);
+}
+
+function canManageUtilityLinks(user) {
+  return hasPermission(user, 'site') || hasPermission(user, 'pages') || canEditPage(user, 'home');
+}
+
+function renderUtilityLinks(site = {}) {
+  return normalizeUtilityLinks(site.utility_links)
+    .map((link) => `<a href="${escapeAttr(link.href)}">${escapeHtml(link.label)}</a>`)
+    .join('');
+}
+
 async function getSite(env) {
   const rows = await env.DB.prepare('SELECT key, value FROM site_content').all();
   const payload = { ...DEFAULT_SITE };
   for (const row of rows.results || []) payload[row.key] = row.value;
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
+  payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   return payload;
 }
 
@@ -1493,6 +1534,26 @@ async function handleApi(request, env, url) {
     return jsonResponse(await getSite(env));
   }
 
+  if (url.pathname === '/api/admin/utility-links' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canManageUtilityLinks(auth.user)) return jsonResponse({ detail: 'Permission required: page:home' }, 403);
+    const site = await getSite(env);
+    return jsonResponse({ utility_links: site.utility_links });
+  }
+  if (url.pathname === '/api/admin/utility-links' && request.method === 'PUT') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canManageUtilityLinks(auth.user)) return jsonResponse({ detail: 'Permission required: page:home' }, 403);
+    const payload = await request.json();
+    const links = normalizeUtilityLinks(payload.utility_links || payload);
+    if (!links.length) return jsonResponse({ detail: 'Add at least one utility link.' }, 422);
+    await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+      .bind('utility_links', JSON.stringify(links))
+      .run();
+    return jsonResponse({ utility_links: links });
+  }
+
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
@@ -2002,7 +2063,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
-<div class="utility"><div class="wrap"><a href="/calendar.html">Upcoming Events</a><a href="/resources.html">Student Resources</a><a href="/contact.html">Contact</a></div></div>
+<div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></div></header>
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div><h3 data-site-field="title">${escapeHtml(site.title)}</h3><p data-site-field="footer_note">${escapeHtml(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
@@ -2151,7 +2212,17 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Staff Email</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
-<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use Formatting for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use Formatting for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="utility-links-form" class="admin-card stack utility-links-card" hidden>
+  <h2>Top utility links</h2>
+  <p class="muted">These are the links in the dark bar at the very top right of every public page (Upcoming Events, Student Resources, Contact).</p>
+  <div id="utility-links-list" class="utility-links-list"></div>
+  <div class="page-settings-actions">
+    <button class="btn outline" type="button" id="utility-link-add">Add link</button>
+    <button class="btn primary" type="submit">Save utility links</button>
+  </div>
+  <p class="status" id="utility-links-status"></p>
+</form>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. Use Top utility links to edit the dark bar links at the top right of every page. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in ad</h2><p class="muted">Choose how long the featured sponsor ad stays on the homepage before it closes automatically.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>

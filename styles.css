@@ -264,6 +264,39 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 .page-settings-card h2{font-size:1.2rem}
 .page-settings-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .page-settings-card .page-meta-grid{margin-top:4px}
+.utility-links-card .muted{
+  margin:0;
+  color:#5b6f88;
+  line-height:1.45;
+}
+.utility-links-list{
+  display:grid;
+  gap:10px;
+}
+.utility-link-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);
+  gap:10px;
+  padding:12px;
+  border:1px solid #e1e8f1;
+  border-radius:14px;
+  background:#f8fafc;
+}
+.utility-link-row label{
+  display:grid;
+  gap:6px;
+  font-weight:850;
+  color:#10233c;
+}
+.utility-link-actions{
+  grid-column:1/-1;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+@media(max-width:700px){
+  .utility-link-row{grid-template-columns:1fr}
+}
 .cms-edit-field{
   position:relative;
   outline:2px solid transparent;
