@@ -22,7 +22,14 @@ function dismissSponsorAd(root) {
   window.setTimeout(() => root.remove(), 420);
 }
 
-function showHomepageSponsorAd(sponsor) {
+function normalizeSponsorAdSeconds(value, fallback = 6) {
+  const raw = Number(value);
+  const base = Number.isFinite(raw) ? raw : Number(fallback);
+  const seconds = Math.round(Number.isFinite(base) ? base : 6);
+  return Math.min(30, Math.max(2, seconds));
+}
+
+function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   if (!sponsor || document.querySelector('.sponsor-flyin')) return;
 
   const logo = sponsor.logo_url
@@ -62,21 +69,25 @@ function showHomepageSponsorAd(sponsor) {
   root.querySelector('.sponsor-flyin-close')?.addEventListener('click', close);
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
 
+  const durationMs = normalizeSponsorAdSeconds(durationSeconds, 6) * 1000;
   window.setTimeout(() => {
     if (document.body.contains(root)) dismissSponsorAd(root);
-  }, 6000);
+  }, durationMs);
 }
 
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
-    const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
+    const [sponsors, site] = await Promise.all([
+      fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
+      fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
+    ]);
     const eligible = (Array.isArray(sponsors) ? sponsors : []).filter((sponsor) => (
       Number(sponsor.active) !== 0 && Number(sponsor.homepage_ad) === 1
     ));
     if (!eligible.length) return;
     const picked = pickRandomSponsor(eligible);
-    if (picked) showHomepageSponsorAd(picked);
+    if (picked) showHomepageSponsorAd(picked, site?.sponsor_ad_seconds);
   } catch {
     // Bypass the ad entirely if sponsors cannot be loaded.
   }

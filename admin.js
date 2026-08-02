@@ -928,10 +928,25 @@ function renderPagePermissionBoxes() {
   box.innerHTML = state.pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
 }
 
+async function loadSponsorAdSettings() {
+  if (!canEditSponsors()) return;
+  const form = document.querySelector('#sponsor-ad-settings-form');
+  if (!form) return;
+  try {
+    const settings = await jsonFetch('/api/admin/sponsors/settings');
+    const input = formControl(form, 'sponsor_ad_seconds');
+    if (input) input.value = String(settings.sponsor_ad_seconds ?? 6);
+  } catch (error) {
+    const status = document.querySelector('#sponsor-ad-settings-status');
+    if (status) status.textContent = `Could not load ad timing: ${error.message}`;
+  }
+}
+
 async function loadSponsors() {
   if (!canEditSponsors()) return;
   state.sponsors = await jsonFetch('/api/admin/sponsors');
   renderSponsors();
+  await loadSponsorAdSettings();
 }
 
 async function loadStaff() {
@@ -1558,6 +1573,28 @@ function bindForms() {
     document.querySelector('#sponsor-status').textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
     resetSponsorForm(form);
     await loadSponsors();
+  });
+
+  document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#sponsor-ad-settings-status');
+    const seconds = Number(formControl(form, 'sponsor_ad_seconds')?.value);
+    if (!Number.isFinite(seconds)) {
+      if (status) status.textContent = 'Enter a valid number of seconds.';
+      return;
+    }
+    if (status) status.textContent = 'Saving…';
+    try {
+      const saved = await jsonFetch('/api/admin/sponsors/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ sponsor_ad_seconds: seconds }),
+      });
+      formControl(form, 'sponsor_ad_seconds').value = String(saved.sponsor_ad_seconds);
+      if (status) status.textContent = `Homepage fly-in will close after ${saved.sponsor_ad_seconds} seconds.`;
+    } catch (error) {
+      if (status) status.textContent = `Could not save ad timing: ${error.message}`;
+    }
   });
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {

@@ -504,6 +504,13 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .staff-admin-row .row-actions{grid-column:1/-1;justify-content:flex-end}
 }
 
+.sponsor-ad-settings-card .muted{
+  margin:0;
+  color:#5b6f88;
+  line-height:1.45;
+}
+.sponsor-ad-settings-card label{display:grid;gap:6px}
+
 /* Homepage sponsor fly-in ad — centered modal */
 body.sponsor-flyin-open{overflow:hidden}
 .sponsor-flyin{
