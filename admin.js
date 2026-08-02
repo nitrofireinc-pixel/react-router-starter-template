@@ -1418,21 +1418,27 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  // Page edit shortcuts live in the left nav, so omit page cards here. Remaining cards respect assigned permissions.
   const cards = [
-    canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People'],
-    canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community'],
-    canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect'],
-    hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration'],
-    canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration'],
-    canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program'],
+    canEditPage('become-a-sponsor') && ['Become a Sponsor', 'Edit sponsor packages copy and the inquiry form intro on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
+    canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
+    canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community', 'tab'],
+    canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
+    hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
+    canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
+    canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
   dashboard.innerHTML = cards.length
-    ? cards.map(([title, text, target, kicker]) => `<button class="dash-card" type="button" data-dash-target="${target}"><span>${kicker}</span><b>${title}</b><small>${text}</small></button>`).join('')
+    ? cards.map(([title, text, target, kicker, kind]) => {
+      const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
+      return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
+    }).join('')
     : '<p class="draft">No dashboard tools are available for your account. Use the page shortcuts in the left navigation.</p>';
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
     activateTab(button.dataset.dashTarget);
+  }));
+  dashboard.querySelectorAll('[data-dash-page]').forEach(button => button.addEventListener('click', () => {
+    editPage(button.dataset.dashPage);
   }));
 }
 
