@@ -785,7 +785,13 @@ async function sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromN
       text,
     }),
   });
-  if (!response.ok) throw new Error(`Resend error: ${await response.text()}`);
+  if (!response.ok) {
+    const body = await response.text();
+    if (/domain is not verified/i.test(body)) {
+      throw new Error('Resend domain not verified. Add/verify efhsband.org at https://resend.com/domains (DNS records), then retry.');
+    }
+    throw new Error(`Resend error: ${body}`);
+  }
   return { provider: 'resend' };
 }
 
