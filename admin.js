@@ -1524,23 +1524,80 @@ function closeAdminNav() {
 
 function renderMobileAdminMenu() {
   const menu = document.querySelector('#admin-mobile-menu');
-  // Flatten visible actions only. Skip submenu parents (e.g. Sponsors) and anything
-  // inside a hidden group so Manage / page-edit destinations stay one tap away.
-  const sourceButtons = [...document.querySelectorAll('.admin-menu button')].filter((button) => (
-    !button.hidden
+  const nav = document.querySelector('.admin-menu');
+  if (!menu || !nav) return;
+
+  const sourceButtons = [];
+  const parts = [];
+
+  const isVisibleButton = (button) => (
+    Boolean(button)
+    && !button.hidden
     && !button.closest('[hidden]')
     && !button.hasAttribute('data-sponsors-toggle')
-  ));
-  if (!menu) return;
-  menu.innerHTML = `${sourceButtons.map((button, index) => {
+  );
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    const index = sourceButtons.length;
+    sourceButtons.push(button);
     const label = button.textContent.trim();
     const tab = button.dataset.tab || '';
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
-    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}">${escapeHtml(label)}</button>`;
-  }).join('')}
+    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}">${escapeHtml(label)}</button>`);
+  };
+
+  const pushLabel = (text) => {
+    const label = String(text || '').trim();
+    if (!label) return;
+    parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
+  };
+
+  const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
+    if (node.matches?.('button')) return isVisibleButton(node);
+    return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
+  });
+
+  [...nav.children].forEach((child) => {
+    if (child.matches('button')) {
+      pushButton(child);
+      return;
+    }
+    if (child.matches('.admin-menu-label')) {
+      if (child.hidden) return;
+      if (child.hasAttribute('data-page-shortcuts-label')) {
+        const shortcuts = document.querySelector('#admin-page-shortcuts');
+        if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
+      } else {
+        // Manage label: only show when at least one following manage control is visible.
+        const following = [];
+        let sibling = child.nextElementSibling;
+        while (sibling) {
+          if (sibling.matches('.admin-menu-label')) break;
+          following.push(sibling);
+          sibling = sibling.nextElementSibling;
+        }
+        if (!sectionHasVisibleButtons(following)) return;
+      }
+      pushLabel(child.textContent);
+      return;
+    }
+    if (child.matches('#admin-page-shortcuts, .admin-page-shortcuts')) {
+      [...child.querySelectorAll('button')].forEach(pushButton);
+      return;
+    }
+    if (child.matches('.admin-menu-group')) {
+      if (child.hidden) return;
+      [...child.querySelectorAll('button')].forEach(pushButton);
+      return;
+    }
+    [...child.querySelectorAll?.('button') || []].forEach(pushButton);
+  });
+
+  menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>`;
-  menu.querySelectorAll('button[data-mobile-index]').forEach(button => {
+  menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
       const source = sourceButtons[index];

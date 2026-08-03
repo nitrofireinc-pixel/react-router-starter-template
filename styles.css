@@ -195,6 +195,15 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     background:rgba(255,255,255,.12);
     outline:none;
   }
+  .admin-mobile-menu-label{
+    margin:10px 4px 2px;
+    color:#8aa0b8;
+    font-size:.68rem;
+    font-weight:800;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+  }
+  .admin-mobile-menu-label:first-child{margin-top:2px}
   .admin-workspace{padding:8px 16px 28px;width:100%;max-width:100%;min-width:0;box-sizing:border-box}
   .image-admin-shell .cms-panel,
   .image-admin-shell .editor-layout,
