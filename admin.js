@@ -206,6 +206,29 @@ function applyFormRichCommand(editor, command, value = null) {
   document.execCommand(command, false, value);
 }
 
+function insertRichEditorLineBreak(editor) {
+  if (!editor) return;
+  editor.focus();
+  // Native paragraph break keeps the caret on the next visible line.
+  if (document.execCommand('insertParagraph')) return;
+  // Fallback: two <br>s so Chrome does not collapse a trailing single break.
+  document.execCommand('insertHTML', false, '<br><br>');
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  const container = range.startContainer;
+  const root = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+  if (!root) return;
+  const breaks = [...(root.querySelectorAll?.('br') || [])];
+  if (breaks.length < 2) return;
+  const last = breaks[breaks.length - 1];
+  const nextRange = document.createRange();
+  nextRange.setStartBefore(last);
+  nextRange.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+}
+
 function bindFormRichEditors() {
   if (document.documentElement.dataset.formRichBound === '1') return;
   document.documentElement.dataset.formRichBound = '1';
