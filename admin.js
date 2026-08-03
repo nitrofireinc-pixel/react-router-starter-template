@@ -845,6 +845,8 @@ function showPageEditorChrome(active) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
+    clearFloatingRichToolbar();
+    toolbar?.classList.remove('is-active');
     pageEditor.baseline = '';
     pageEditor.dirty = false;
     updatePageDirtyUi();
@@ -1152,11 +1154,50 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
+function clearFloatingRichToolbar() {
+  const toolbar = document.querySelector('#rich-text-toolbar');
+  if (!toolbar) return;
+  toolbar.classList.remove('is-floating');
+  toolbar.style.top = '';
+  toolbar.style.left = '';
+  toolbar.style.width = '';
+}
+
+function positionFloatingRichToolbar(field) {
+  const toolbar = document.querySelector('#rich-text-toolbar');
+  if (!toolbar || !field || toolbar.hidden) {
+    clearFloatingRichToolbar();
+    return;
+  }
+  const rect = field.getBoundingClientRect();
+  const workspaceScrolled = rect.top < 120 || rect.bottom > window.innerHeight - 24;
+  if (!workspaceScrolled) {
+    clearFloatingRichToolbar();
+    return;
+  }
+  toolbar.classList.add('is-floating');
+  const width = Math.min(640, window.innerWidth - 24);
+  toolbar.style.width = `${width}px`;
+  const toolbarHeight = toolbar.offsetHeight || 64;
+  let top = rect.top - toolbarHeight - 10;
+  if (top < 10) top = Math.min(window.innerHeight - toolbarHeight - 10, rect.bottom + 10);
+  let left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  toolbar.style.top = `${Math.round(top)}px`;
+  toolbar.style.left = `${Math.round(left)}px`;
+}
+
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
-  // Toolbar stays docked above the preview while editing; highlight when a rich field is active.
+  // Keep toolbar available while the page editor is open; highlight + float when editing.
+  if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
+  const preview = document.querySelector('#page-preview');
+  const field = activeField
+    ? (preview?.querySelector('.cms-edit-rich.is-focused') || preview?.querySelector('.cms-edit-rich:focus') || document.activeElement?.closest?.('.cms-edit-rich'))
+    : null;
+  if (field) positionFloatingRichToolbar(field);
+  else clearFloatingRichToolbar();
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1310,6 +1351,22 @@ function bindPageVisualEditor() {
       const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
       setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
     }, 0);
+  });
+  preview.addEventListener('mouseup', () => {
+    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
+    if (field) setRichToolbarVisible(true);
+  });
+  preview.addEventListener('keyup', () => {
+    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
+    if (field) setRichToolbarVisible(true);
+  });
+  window.addEventListener('scroll', () => {
+    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
+    if (field) positionFloatingRichToolbar(field);
+  }, true);
+  window.addEventListener('resize', () => {
+    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
+    if (field) positionFloatingRichToolbar(field);
   });
 
   preview.addEventListener('paste', event => {
