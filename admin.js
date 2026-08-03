@@ -261,8 +261,7 @@ function bindFormRichEditors() {
     // Multiline editors live inside <form>/<label>; stop Enter from submitting and insert a real line break.
     event.preventDefault();
     event.stopPropagation();
-    const ok = document.execCommand('insertLineBreak');
-    if (!ok) document.execCommand('insertHTML', false, '<br>\u200B');
+    document.execCommand('insertHTML', false, '<br>\n');
     syncFormRichEditors(editor.closest('form'));
   });
 
@@ -391,7 +390,10 @@ function sanitizeRichHtml(dirty) {
     }
     return `<${tag}>`;
   });
-  html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
+  html = html
+    .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
+    .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
+    .trim();
   if (!html) return '';
   if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
@@ -2719,7 +2721,12 @@ async function loadEvents() {
         : '<div class="row-actions"><span class="muted">View only</span></div>';
       return `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(plainTextFromHtml(event.title))}</span><small>${escapeHtml(plainTextFromHtml(event.description))}</small><small>Created by ${escapeHtml(creator)}</small></div>
+      <div>
+        <b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b>
+        <span class="event-admin-title">${formatInlineRichText(event.title)}</span>
+        <div class="event-admin-description">${formatRichText(event.description)}</div>
+        <small>Created by ${escapeHtml(creator)}</small>
+      </div>
       ${actions}
     </article>`;
     }).join('')

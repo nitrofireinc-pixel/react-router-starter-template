@@ -801,6 +801,35 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .events-list-card{min-width:0;max-width:100%}
 .events-list-card .admin-list{max-height:min(70vh,720px);overflow:auto;margin-top:0}
+.event-admin-title{
+  display:block;
+  margin-top:2px;
+  color:#10233c;
+  font-weight:750;
+}
+.event-admin-description{
+  margin-top:4px;
+  color:#5b6f88;
+  font-size:.92rem;
+  line-height:1.45;
+}
+.event-admin-description p,
+.event-admin-description div{
+  margin:0 0 .35em;
+}
+.event-admin-description p:last-child,
+.event-admin-description div:last-child{margin-bottom:0}
+.event-description{
+  color:var(--muted);
+  line-height:1.45;
+}
+.event-description p,
+.event-description div{
+  margin:4px 0 0;
+  color:var(--muted);
+}
+.event-description p:first-child,
+.event-description div:first-child{margin-top:4px}
 .staff-live-preview .directory{grid-template-columns:1fr;gap:12px}
 .staff-live-preview .person{min-height:auto;box-shadow:none}
 .cms-staff-placeholder{pointer-events:none;opacity:.92;margin-top:18px}
@@ -1384,8 +1413,6 @@ body.sponsor-map-open{overflow:hidden}
 .form-rich-editor p{margin:0 0 .7em}
 .form-rich-editor p:last-child{margin-bottom:0}
 .person-bio p{margin:4px 0 0;color:var(--muted)}
-.event-description p{margin:4px 0 0;color:var(--muted)}
-.event-description p:first-child{margin-top:4px}
 
 /* Sponsor package tiers */
 .sponsor-tiers{

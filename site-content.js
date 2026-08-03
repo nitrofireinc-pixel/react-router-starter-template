@@ -95,7 +95,10 @@ function sanitizeRichHtml(dirty) {
     }
     return `<${tag}>`;
   });
-  html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
+  html = html
+    .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
+    .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
+    .trim();
   if (!html) return '';
   if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
