@@ -186,11 +186,17 @@ function richTextIsEmpty(value) {
 function applyFormRichCommand(editor, command, value = null) {
   if (!editor) return;
   editor.focus();
-  document.execCommand('styleWithCSS', false, true);
   if (command === 'fontSize' && value) {
     applyRichStyle({ fontSize: value });
     return;
   }
+  if (command === 'foreColor') {
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand(command, false, value);
+    return;
+  }
+  // Prefer semantic <strong>/<em>/<u> so sanitization keeps bold/italic/underline.
+  document.execCommand('styleWithCSS', false, false);
   document.execCommand(command, false, value);
 }
 
@@ -317,13 +323,40 @@ function sanitizeStyleAttribute(attrs) {
   return parts.join('; ');
 }
 
+function normalizeCssEmphasisMarkup(dirty) {
+  // Browsers often apply bold/italic/underline as CSS spans when styleWithCSS is on.
+  // Convert those to semantic tags before style sanitization drops font-weight/etc.
+  return String(dirty || '')
+    .replace(/<span\b([^>]*)style\s*=\s*(["'])([\s\S]*?)\2([^>]*)>([\s\S]*?)<\/span>/gi, (match, pre, _q, style, post, inner) => {
+      const decls = String(style || '');
+      let nextInner = inner;
+      let nextStyle = decls;
+      if (/(?:^|;)\s*font-weight\s*:\s*(bold|[7-9]00|bolder)\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<strong>${nextInner}</strong>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-weight\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*font-style\s*:\s*italic\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<em>${nextInner}</em>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-style\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*text-decoration(?:-line)?\s*:[^;]*underline/i.test(decls)) {
+        nextInner = `<u>${nextInner}</u>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*text-decoration(?:-line)?\s*:\s*[^;]+/ig, ';');
+      }
+      nextStyle = nextStyle.replace(/;{2,}/g, ';').replace(/^;|;$/g, '').trim();
+      const attrs = `${pre || ''} style="${nextStyle}" ${post || ''}`.replace(/\s+/g, ' ').trim();
+      if (!nextStyle) return nextInner;
+      return `<span ${attrs}>${nextInner}</span>`;
+    });
+}
+
 function sanitizeRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
@@ -333,16 +366,24 @@ function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'div') {
+      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const className = String(classMatch?.[1] || classMatch?.[2] || '')
+        .split(/\s+/)
+        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
+        .join(' ');
+      return className ? `<div class="${className}">` : '<div>';
+    }
     return `<${tag}>`;
   });
   html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
   if (!html) return '';
-  if (!/<p[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
 function sanitizeInlineRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
@@ -845,7 +886,6 @@ function showPageEditorChrome(active) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (toolbar) toolbar.hidden = !active;
   if (!active) {
-    clearFloatingRichToolbar();
     toolbar?.classList.remove('is-active');
     pageEditor.baseline = '';
     pageEditor.dirty = false;
@@ -1154,50 +1194,12 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
-function clearFloatingRichToolbar() {
-  const toolbar = document.querySelector('#rich-text-toolbar');
-  if (!toolbar) return;
-  toolbar.classList.remove('is-floating');
-  toolbar.style.top = '';
-  toolbar.style.left = '';
-  toolbar.style.width = '';
-}
-
-function positionFloatingRichToolbar(field) {
-  const toolbar = document.querySelector('#rich-text-toolbar');
-  if (!toolbar || !field || toolbar.hidden) {
-    clearFloatingRichToolbar();
-    return;
-  }
-  const rect = field.getBoundingClientRect();
-  const workspaceScrolled = rect.top < 120 || rect.bottom > window.innerHeight - 24;
-  if (!workspaceScrolled) {
-    clearFloatingRichToolbar();
-    return;
-  }
-  toolbar.classList.add('is-floating');
-  const width = Math.min(640, window.innerWidth - 24);
-  toolbar.style.width = `${width}px`;
-  const toolbarHeight = toolbar.offsetHeight || 64;
-  let top = rect.top - toolbarHeight - 10;
-  if (top < 10) top = Math.min(window.innerHeight - toolbarHeight - 10, rect.bottom + 10);
-  let left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-  toolbar.style.top = `${Math.round(top)}px`;
-  toolbar.style.left = `${Math.round(left)}px`;
-}
-
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
-  // Keep toolbar available while the page editor is open; highlight + float when editing.
+  // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
-  const preview = document.querySelector('#page-preview');
-  const field = activeField
-    ? (preview?.querySelector('.cms-edit-rich.is-focused') || preview?.querySelector('.cms-edit-rich:focus') || document.activeElement?.closest?.('.cms-edit-rich'))
-    : null;
-  if (field) positionFloatingRichToolbar(field);
-  else clearFloatingRichToolbar();
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1352,22 +1354,6 @@ function bindPageVisualEditor() {
       setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
     }, 0);
   });
-  preview.addEventListener('mouseup', () => {
-    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-    if (field) setRichToolbarVisible(true);
-  });
-  preview.addEventListener('keyup', () => {
-    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-    if (field) setRichToolbarVisible(true);
-  });
-  window.addEventListener('scroll', () => {
-    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-    if (field) positionFloatingRichToolbar(field);
-  }, true);
-  window.addEventListener('resize', () => {
-    const field = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-    if (field) positionFloatingRichToolbar(field);
-  });
 
   preview.addEventListener('paste', event => {
     const field = event.target.closest?.('[data-cms-field], [data-cms-home-field]');
@@ -1392,7 +1378,8 @@ function bindPageVisualEditor() {
     button.addEventListener('mousedown', event => event.preventDefault());
     button.addEventListener('click', () => {
       const command = button.dataset.rich;
-      document.execCommand('styleWithCSS', false, true);
+      // Semantic tags for bold/italic/underline; CSS spans are stripped by sanitization.
+      document.execCommand('styleWithCSS', false, false);
       document.execCommand(command, false, null);
       const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
       if (field) syncFieldFromPreview(field);
@@ -2277,7 +2264,7 @@ function bindMailComposer() {
     button.addEventListener('mousedown', (event) => event.preventDefault());
     button.addEventListener('click', () => {
       editor.focus();
-      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('styleWithCSS', false, false);
       document.execCommand(button.dataset.mailRich, false, null);
     });
   });

@@ -27,13 +27,38 @@ function sanitizeStyleAttribute(attrs) {
   return parts.join('; ');
 }
 
+function normalizeCssEmphasisMarkup(dirty) {
+  return String(dirty || '')
+    .replace(/<span\b([^>]*)style\s*=\s*(["'])([\s\S]*?)\2([^>]*)>([\s\S]*?)<\/span>/gi, (match, pre, _q, style, post, inner) => {
+      const decls = String(style || '');
+      let nextInner = inner;
+      let nextStyle = decls;
+      if (/(?:^|;)\s*font-weight\s*:\s*(bold|[7-9]00|bolder)\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<strong>${nextInner}</strong>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-weight\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*font-style\s*:\s*italic\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<em>${nextInner}</em>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-style\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*text-decoration(?:-line)?\s*:[^;]*underline/i.test(decls)) {
+        nextInner = `<u>${nextInner}</u>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*text-decoration(?:-line)?\s*:\s*[^;]+/ig, ';');
+      }
+      nextStyle = nextStyle.replace(/;{2,}/g, ';').replace(/^;|;$/g, '').trim();
+      const attrs = `${pre || ''} style="${nextStyle}" ${post || ''}`.replace(/\s+/g, ' ').trim();
+      if (!nextStyle) return nextInner;
+      return `<span ${attrs}>${nextInner}</span>`;
+    });
+}
+
 function sanitizeRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
@@ -43,16 +68,24 @@ function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'div') {
+      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const className = String(classMatch?.[1] || classMatch?.[2] || '')
+        .split(/\s+/)
+        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
+        .join(' ');
+      return className ? `<div class="${className}">` : '<div>';
+    }
     return `<${tag}>`;
   });
   html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
   if (!html) return '';
-  if (!/<p[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
 function sanitizeInlineRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')

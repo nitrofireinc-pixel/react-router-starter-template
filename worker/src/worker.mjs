@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-08';
+const ASSET_VERSION = 'admin-cms-20260803-09';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -1801,14 +1801,39 @@ function sanitizeStyleAttribute(attrs) {
   return parts.join('; ');
 }
 
+function normalizeCssEmphasisMarkup(dirty) {
+  return String(dirty || '')
+    .replace(/<span\b([^>]*)style\s*=\s*(["'])([\s\S]*?)\2([^>]*)>([\s\S]*?)<\/span>/gi, (match, pre, _q, style, post, inner) => {
+      const decls = String(style || '');
+      let nextInner = inner;
+      let nextStyle = decls;
+      if (/(?:^|;)\s*font-weight\s*:\s*(bold|[7-9]00|bolder)\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<strong>${nextInner}</strong>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-weight\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*font-style\s*:\s*italic\s*(?:;|$)/i.test(decls)) {
+        nextInner = `<em>${nextInner}</em>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*font-style\s*:\s*[^;]+/ig, ';');
+      }
+      if (/(?:^|;)\s*text-decoration(?:-line)?\s*:[^;]*underline/i.test(decls)) {
+        nextInner = `<u>${nextInner}</u>`;
+        nextStyle = nextStyle.replace(/(?:^|;)\s*text-decoration(?:-line)?\s*:\s*[^;]+/ig, ';');
+      }
+      nextStyle = nextStyle.replace(/;{2,}/g, ';').replace(/^;|;$/g, '').trim();
+      const attrs = `${pre || ''} style="${nextStyle}" ${post || ''}`.replace(/\s+/g, ' ').trim();
+      if (!nextStyle) return nextInner;
+      return `<span ${attrs}>${nextInner}</span>`;
+    });
+}
+
 export function sanitizeRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
 
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
@@ -1818,17 +1843,25 @@ export function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'div') {
+      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const className = String(classMatch?.[1] || classMatch?.[2] || '')
+        .split(/\s+/)
+        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
+        .join(' ');
+      return className ? `<div class="${className}">` : '<div>';
+    }
     return `<${tag}>`;
   });
 
   html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
   if (!html) return '';
-  if (!/<p[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
 export function sanitizeInlineRichHtml(dirty) {
-  let html = String(dirty || '')
+  let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')

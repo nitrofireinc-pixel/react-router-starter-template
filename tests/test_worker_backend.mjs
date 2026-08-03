@@ -88,6 +88,14 @@ test('sanitizeRichHtml keeps bold/color/size markup and strips unsafe tags', () 
   assert.doesNotMatch(html, /alert\(1\)/);
 });
 
+test('sanitizeRichHtml converts CSS bold/italic spans into semantic tags', () => {
+  const html = sanitizeRichHtml('<p><span style="font-weight: bold">Our Sponsors</span> and <span style="font-style: italic">more</span></p>');
+  assert.match(html, /<strong>Our Sponsors<\/strong>/);
+  assert.match(html, /<em>more<\/em>/);
+  assert.doesNotMatch(html, /font-weight/);
+  assert.doesNotMatch(html, /font-style/);
+});
+
 test('sanitizeInlineRichHtml keeps color spans for headings without block wrappers', () => {
   const html = sanitizeInlineRichHtml('<span style="color: #E71321">Fundraising</span><script>alert(1)</script><p>extra</p>');
   assert.match(html, /style="color: #E71321"/);
