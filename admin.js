@@ -1868,12 +1868,15 @@ function renderDashboard() {
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
+  const passwordForm = dashboard.querySelector('#password-form');
+  passwordForm?.remove();
   dashboard.innerHTML = cards.length
     ? cards.map(([title, text, target, kicker, kind]) => {
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
     }).join('')
-    : '<p class="draft">No dashboard tools are available for your account. Use the page shortcuts in the left navigation.</p>';
+    : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use the page shortcuts in the left navigation.</p>';
+  if (passwordForm) dashboard.appendChild(passwordForm);
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
     activateTab(button.dataset.dashTarget);
   }));
