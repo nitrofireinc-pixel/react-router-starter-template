@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-14';
+const ASSET_VERSION = 'admin-cms-20260803-15';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -925,6 +925,38 @@ export function ensureBoosterMeetingsSlot(html) {
   return `${source}<div class="timeline booster-meetings" data-booster-meetings></div>`;
 }
 
+export function renderSquareDonateCard() {
+  return `<article class="card accent-card square-donate-card" data-square-donate>
+  <span class="tag">Donate</span>
+  <h3>Direct Support</h3>
+  <p>Give securely online to support instruments, travel, meals, uniforms, and student opportunities.</p>
+  <div class="square-donate">
+    <a class="btn primary" id="embedded-checkout-modal-checkout-button" data-square-checkout data-url="https://square.link/u/IIGMHqVQ?src=embd" href="https://square.link/u/IIGMHqVQ?src=embed" target="_blank" rel="noopener noreferrer">Donate</a>
+  </div>
+</article>`;
+}
+
+export function ensureFundraisingDonateSlot(html) {
+  const source = String(html || '');
+  if (/data-square-checkout|data-square-donate/i.test(source)) return source;
+  const donate = renderSquareDonateCard();
+  if (/data-cms-field=["']body_text["']/i.test(source)) {
+    const replaced = source.replace(
+      /(<div\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/div>)(\s*<\/div>\s*<\/section>)/i,
+      `$1${donate}$2`,
+    );
+    if (replaced !== source) return replaced;
+  }
+  if (/class=["'][^"']*\bwrap\b[^"']*["']/i.test(source)) {
+    const replaced = source.replace(
+      /(<div\b[^>]*class=["'][^"']*\bwrap\b[^"']*["'][^>]*>)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${donate}$3`,
+    );
+    if (replaced !== source) return replaced;
+  }
+  return `${source}<section class="content soft"><div class="wrap">${donate}</div></section>`;
+}
+
 
 export const US_STATES = [
   ['AL', 'Alabama'],
@@ -1648,6 +1680,7 @@ function renderPageBody(page, sponsors = [], staff = []) {
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') return ensureBoosterMeetingsSlot(page.body_html);
+  if (page.slug === 'fundraising') return ensureFundraisingDonateSlot(page.body_html);
   return page.body_html;
 }
 
