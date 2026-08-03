@@ -251,10 +251,19 @@ function bindFormRichEditors() {
   document.addEventListener('keydown', (event) => {
     const editor = event.target.closest?.('[data-rich-input]');
     if (!editor || event.key !== 'Enter') return;
-    if (editor.dataset.richMode === 'inline' || editor.classList.contains('cms-edit-inline')) {
+    const inline = editor.dataset.richMode === 'inline' || editor.classList.contains('cms-edit-inline');
+    if (inline) {
       event.preventDefault();
       editor.blur();
+      return;
     }
+
+    // Multiline editors live inside <form>/<label>; stop Enter from submitting and insert a real line break.
+    event.preventDefault();
+    event.stopPropagation();
+    const ok = document.execCommand('insertLineBreak');
+    if (!ok) document.execCommand('insertHTML', false, '<br>\u200B');
+    syncFormRichEditors(editor.closest('form'));
   });
 
   document.addEventListener('paste', (event) => {
