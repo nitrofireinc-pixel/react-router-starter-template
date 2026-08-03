@@ -6,6 +6,7 @@ export const DEFAULT_SITE = {
   hero_subtitle: 'A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.',
   footer_note: 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.',
   logo_url: '/assets/efhs-logo.png',
+  service_mode: '0',
 };
 
 export const DEFAULT_EVENTS = [
@@ -25,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260801-27';
+const ASSET_VERSION = 'admin-cms-20260802-04';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -245,6 +246,16 @@ async function initDb(env) {
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
     await env.DB.batch(DEFAULT_CMS_PAGES.map((page) => env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active)));
+  }
+  const fundraisingPage = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
+  const fundraisingDefault = DEFAULT_CMS_PAGES.find((page) => page.slug === 'fundraising');
+  if (
+    fundraisingPage
+    && fundraisingDefault
+    && String(fundraisingPage.body_html || '').includes('Placeholder for approved donation/payment link')
+    && !String(fundraisingPage.body_html || '').includes('data-square-checkout')
+  ) {
+    await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(fundraisingDefault.body_html, fundraisingPage.id).run();
   }
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
@@ -639,12 +650,20 @@ export function isValidEmail(value) {
 export function normalizeContactTopicPayload(payload = {}, existing = null) {
   const label = String(payload.label ?? existing?.label ?? '').trim();
   const email = String(payload.email ?? existing?.email ?? '').trim().toLowerCase();
+  const sortOrderRaw = payload.sort_order ?? existing?.sort_order;
   return {
     label,
     email,
-    sort_order: Number(payload.sort_order ?? existing?.sort_order ?? 0),
+    sort_order: sortOrderRaw === undefined || sortOrderRaw === null || sortOrderRaw === ''
+      ? null
+      : Number(sortOrderRaw),
     active: payload.active === false || payload.active === 0 ? 0 : 1,
   };
+}
+
+export function isServiceMode(site) {
+  const value = site?.service_mode;
+  return value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true';
 }
 
 async function getContactTopics(env, includeInactive = false) {
@@ -1025,8 +1044,12 @@ async function handleApi(request, env, url) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const payload = await request.json();
-    for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url']) {
-      if (payload[key] !== undefined) await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, String(payload[key])).run();
+    for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url', 'service_mode']) {
+      if (payload[key] === undefined) continue;
+      const value = key === 'service_mode'
+        ? (isServiceMode({ service_mode: payload[key] }) ? '1' : '0')
+        : String(payload[key]);
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run();
     }
     return jsonResponse(await getSite(env));
   }
@@ -1226,6 +1249,11 @@ async function handleApi(request, env, url) {
     const topic = normalizeContactTopicPayload(await request.json());
     if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
     if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
+    if (topic.sort_order === null || Number.isNaN(topic.sort_order)) {
+      const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM contact_topics').first();
+      topic.sort_order = Number(max?.max_order || 0) + 1;
+    }
+    topic.active = 1;
     const result = await env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email, topic.sort_order, topic.active).run();
     return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(result.meta.last_row_id).first());
   }
@@ -1246,6 +1274,7 @@ async function handleApi(request, env, url) {
     const topic = normalizeContactTopicPayload(await request.json(), existing);
     if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
     if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
+    if (topic.sort_order === null || Number.isNaN(topic.sort_order)) topic.sort_order = Number(existing.sort_order || 0);
     await env.DB.prepare('UPDATE contact_topics SET label = ?, email = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(topic.label, topic.email, topic.sort_order, topic.active, id).run();
     return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(id).first());
   }
@@ -1367,15 +1396,13 @@ function renderNav(pages) {
   return pages.map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
-  const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff);
+function renderSiteShell({ title, description, site, pages, bodyHtml }) {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="${escapeAttr(site.title)} website.">
+  <meta name="description" content="${escapeAttr(description || `${site.title} website.`)}">
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1393,15 +1420,44 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
 </body></html>`;
 }
 
+function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
+  const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
+  return renderSiteShell({
+    title,
+    description: `${site.title} website.`,
+    site,
+    pages,
+    bodyHtml: renderPageBody(page, sponsors, staff),
+  });
+}
+
+export function renderMaintenancePage(site, pages = []) {
+  const bodyHtml = `<section class="page-hero"><div class="page-title"><div class="kicker">Notice</div><h1>Site under maintenance</h1><p>The East Forsyth Band website is temporarily unavailable while we make updates.</p></div></section><section class="content soft"><div class="wrap"><article class="card"><span class="tag">Service mode</span><h3>We’ll be back soon.</h3><p>Thank you for your patience. Please check back shortly for program news, calendar updates, and family resources.</p><p style="margin-top:18px"><a class="btn outline" href="/contact.html">Contact the program</a></p></article></div></section>`;
+  return renderSiteShell({
+    title: `Under Maintenance | ${site.title || 'East Forsyth Band'}`,
+    description: `${site.title || 'East Forsyth Band'} is temporarily under maintenance.`,
+    site,
+    pages,
+    bodyHtml,
+  });
+}
+
 async function serveStaticOrCms(request, env, url) {
   await initDb(env);
+  const site = await getSite(env);
   const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
+  if ((path === '/' || path === '/index.html') && isServiceMode(site)) {
+    return redirect('/maintenance.html');
+  }
+  if (path === '/maintenance.html') {
+    return htmlResponse(renderMaintenancePage(site, await getPages(env)));
+  }
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
     if (page) {
       const sponsors = page.slug === 'sponsors' ? await getSponsors(env) : [];
       const staff = page.slug === 'directors' ? await getStaff(env) : [];
-      return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env), sponsors, staff));
+      return htmlResponse(renderCmsPage(page, site, await getPages(env), sponsors, staff));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
@@ -1431,26 +1487,23 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><span class="brand-dot">EF</span><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-edit-shortcut="home">Home</button><button type="button" data-edit-shortcut="ensembles">Ensembles</button><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><button type="button" data-tab="sponsors">Sponsors</button><button type="button" data-edit-shortcut="fundraising">Fundraising</button><button type="button" data-edit-shortcut="resources">Student Resources</button><button type="button" data-edit-shortcut="boosters">Boosters</button><button type="button" data-tab="contact">Contact</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
-<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><form id="service-mode-form" class="admin-card stack service-mode-card" hidden><h2>Service mode</h2><label class="checkline"><input name="service_mode" type="checkbox"> Put site into service mode</label><p class="muted">When checked, the public home page redirects to a site under maintenance page.</p><p class="status" id="service-mode-status"></p></form><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Click text in the live preview to edit it in place, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click a text block to edit · Tab between blocks · Save publishes to the site</small></div><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div><form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. Sponsor logos and listings are managed in the Sponsors tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>The homepage hero headline is in Site Settings. These fields control the rest of the homepage content.</p><input type="hidden" name="original_slug"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><details class="page-text-fields"><summary>Text fields (advanced)</summary><div class="form-grid"><label>Small label above heading<input name="kicker" placeholder="Families"></label><label>Page heading<input name="heading" required placeholder="Sound. Spirit. Eagle Pride."></label><label class="full">Intro sentence<textarea name="intro" rows="3" placeholder="Short summary shown under the page heading."></textarea></label><label class="full">Content<textarea name="body_text" rows="8" placeholder="Use normal text. Blank lines become separate paragraphs."></textarea></label><label>Optional callout title<input name="callout_title" placeholder="Need forms?"></label><label class="full">Optional callout text<textarea name="callout_text" rows="4" placeholder="Important note, contact instructions, deadlines, etc."></textarea></label></div></details><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label>Role / title<input name="role" placeholder="Band Director"></label><label class="full">Short description<textarea name="bio" rows="3" placeholder="Email, office hours, or a short bio."></textarea></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list"></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Sponsors</h1><p>Add sponsors with a logo, name, and address. Use arrows to reorder rows.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-sponsors-page">Edit page text</button><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor level<input name="level" value="Community Sponsor"></label><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label>Sort order<input name="sort_order" type="number" value="1"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><label class="checkline"><input name="homepage_ad" type="checkbox"> Include in homepage fly-in ad</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer</h1></div></div><div class="editor-layout"><form id="site-form" class="admin-card stack"><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><label>Logo URL<input name="logo_url" required></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-contact" class="cms-panel">
-<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
+<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Add topics for the public form and the email each topic should deliver to. Remove topics from the list below.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button></div></div>
 <div class="editor-layout">
 <form id="contact-topic-form" class="admin-card stack">
-<input type="hidden" name="id">
 <div class="form-grid">
 <label>Topic label<input name="label" required maxlength="120" placeholder="General question"></label>
 <label>Send messages to<input name="email" type="email" required maxlength="200" placeholder="band@example.com"></label>
-<label>Sort order<input name="sort_order" type="number" value="1"></label>
-<label class="checkline"><input name="active" type="checkbox" checked> Active on contact form</label>
 </div>
-<button class="btn primary" type="submit">Save Topic</button>
+<button class="btn primary" type="submit">Add Topic</button>
 <p class="status" id="contact-topic-status"></p>
 </form>
-<div class="admin-card"><h2>Topics</h2><p class="muted">Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Topics</h2><p class="muted">Topics are listed as added. Topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>

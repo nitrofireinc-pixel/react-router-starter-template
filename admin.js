@@ -60,7 +60,24 @@ function formPayload(form) {
   if (active) payload.active = Boolean(active.checked);
   const homepageAd = formControl(form, 'homepage_ad');
   if (homepageAd) payload.homepage_ad = Boolean(homepageAd.checked);
+  const serviceMode = formControl(form, 'service_mode');
+  if (serviceMode) payload.service_mode = Boolean(serviceMode.checked);
   return payload;
+}
+
+function isServiceModeEnabled(site) {
+  const value = site?.service_mode;
+  return value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true';
+}
+
+function syncServiceModeForm() {
+  const form = document.querySelector('#service-mode-form');
+  if (!form) return;
+  const canManage = hasPermission('site');
+  if (canManage) form.removeAttribute('hidden');
+  else form.setAttribute('hidden', '');
+  const checkbox = formControl(form, 'service_mode');
+  if (checkbox) checkbox.checked = isServiceModeEnabled(state.site);
 }
 
 function textFromHtml(html) {
@@ -610,9 +627,13 @@ async function loadMe() {
 }
 
 async function loadSite() {
-  if (!hasPermission('site')) return;
+  if (!hasPermission('site')) {
+    syncServiceModeForm();
+    return;
+  }
   state.site = await jsonFetch('/api/site');
   fillForm(document.querySelector('#site-form'), state.site);
+  syncServiceModeForm();
 }
 
 async function loadPages() {
@@ -632,6 +653,7 @@ function renderDashboard() {
   const displayName = state.me.user.display_name || state.me.user.username;
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
+  syncServiceModeForm();
 
   // Page edit shortcuts live in the left nav, so omit page cards here. Remaining cards respect assigned permissions.
   const cards = [
@@ -928,23 +950,14 @@ function renderContactTopics() {
   list.innerHTML = ordered.length
     ? ordered.map((topic) => `
     <article class="admin-row">
-      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>order ${topic.sort_order} · ${topic.active ? 'Active' : 'Hidden'}</small></div>
-      <div class="row-actions"><button type="button" data-edit-contact-topic="${topic.id}">Edit</button><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
+      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span></div>
+      <div class="row-actions"><button type="button" data-delete-contact-topic="${topic.id}">Remove</button></div>
     </article>
   `).join('')
     : '<p class="draft">No contact topics yet. Add one to enable the public form.</p>';
 
-  list.querySelectorAll('[data-edit-contact-topic]').forEach((button) => button.addEventListener('click', () => {
-    const topic = state.contactTopics.find((item) => item.id === Number(button.dataset.editContactTopic));
-    if (!topic) return;
-    const form = document.querySelector('#contact-topic-form');
-    fillForm(form, topic);
-    form.elements.active.checked = Boolean(Number(topic.active));
-    document.querySelector('#contact-topic-status').textContent = `Editing “${topic.label}”. Save to update.`;
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
   list.querySelectorAll('[data-delete-contact-topic]').forEach((button) => button.addEventListener('click', async () => {
-    if (!confirm('Delete this contact topic?')) return;
+    if (!confirm('Remove this contact topic?')) return;
     await jsonFetch(`/api/admin/contact/topics/${button.dataset.deleteContactTopic}`, { method: 'DELETE' });
     await loadContactTopics();
   }));
@@ -983,8 +996,31 @@ function bindForms() {
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
+    state.site = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(formPayload(form)) });
+    syncServiceModeForm();
     document.querySelector('#site-status').textContent = 'Saved. Refresh the public site to see changes.';
+  });
+
+  document.querySelector('#service-mode-form')?.addEventListener('change', async (event) => {
+    if (event.target?.name !== 'service_mode') return;
+    const checkbox = event.target;
+    const status = document.querySelector('#service-mode-status');
+    const enabled = Boolean(checkbox.checked);
+    try {
+      state.site = await jsonFetch('/api/admin/site', {
+        method: 'POST',
+        body: JSON.stringify({ service_mode: enabled ? '1' : '0' }),
+      });
+      syncServiceModeForm();
+      if (status) {
+        status.textContent = enabled
+          ? 'Service mode on. The home page now redirects to the maintenance page.'
+          : 'Service mode off. The home page is public again.';
+      }
+    } catch (error) {
+      checkbox.checked = !enabled;
+      if (status) status.textContent = `Could not update service mode: ${error.message}`;
+    }
   });
 
   document.querySelector('#logo-form')?.addEventListener('submit', async event => {
@@ -1111,10 +1147,9 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#contact-topic-status');
     const payload = formPayload(form);
-    payload.sort_order = Number(payload.sort_order || (state.contactTopics.length + 1));
-    payload.active = Boolean(form.elements.active?.checked);
-    const id = String(payload.id || '').trim();
     delete payload.id;
+    delete payload.sort_order;
+    delete payload.active;
     if (!payload.label?.trim()) {
       if (status) status.textContent = 'Topic label is required.';
       return;
@@ -1124,29 +1159,16 @@ function bindForms() {
       return;
     }
     try {
-      await jsonFetch(id ? `/api/admin/contact/topics/${id}` : '/api/admin/contact/topics', {
-        method: id ? 'PUT' : 'POST',
+      await jsonFetch('/api/admin/contact/topics', {
+        method: 'POST',
         body: JSON.stringify(payload),
       });
-      if (status) status.textContent = id ? 'Topic updated.' : 'Topic created.';
+      if (status) status.textContent = 'Topic added.';
       form.reset();
-      formControl(form, 'id').value = '';
-      form.elements.active.checked = true;
-      formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
       await loadContactTopics();
     } catch (error) {
       if (status) status.textContent = `Could not save topic: ${error.message}`;
     }
-  });
-
-  document.querySelector('#new-contact-topic')?.addEventListener('click', () => {
-    const form = document.querySelector('#contact-topic-form');
-    form.reset();
-    formControl(form, 'id').value = '';
-    form.elements.active.checked = true;
-    formControl(form, 'sort_order').value = String((state.contactTopics?.length || 0) + 1);
-    document.querySelector('#contact-topic-status').textContent = 'Creating a new contact topic.';
-    formControl(form, 'label')?.focus();
   });
 
   document.querySelector('#user-form')?.addEventListener('submit', async event => {

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_CMS_PAGES } from '../worker/src/default-pages.mjs';
+import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isServiceMode, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderMaintenancePage, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -221,10 +227,31 @@ test('contact topics require labels and valid delivery emails', () => {
   assert.equal(topic.sort_order, 3);
   assert.equal(isValidEmail(topic.email), true);
   assert.equal(isValidEmail('not-an-email'), false);
+  const appended = normalizeContactTopicPayload({
+    label: 'General question',
+    email: 'band@example.com',
+  });
+  assert.equal(appended.sort_order, null);
   const html = renderContactForm([{ id: 9, label: 'General question' }]);
   assert.match(html, /data-contact-form/);
   assert.match(html, /value="9"/);
   assert.match(html, /General question/);
+});
+
+test('service mode detection and maintenance page keep site styling', () => {
+  assert.equal(isServiceMode({ service_mode: '1' }), true);
+  assert.equal(isServiceMode({ service_mode: '0' }), false);
+  assert.equal(isServiceMode({ service_mode: 'true' }), true);
+  const html = renderMaintenancePage({
+    title: 'East Forsyth Band',
+    footer_note: 'Footer note',
+    logo_url: '/assets/efhs-logo.png',
+  }, [{ path: '/', title: 'Home' }, { path: '/contact.html', title: 'Contact' }]);
+  assert.match(html, /Site under maintenance/);
+  assert.match(html, /page-hero/);
+  assert.match(html, /site-header/);
+  assert.match(html, /styles\.css/);
+  assert.match(html, /East Forsyth Band/);
 });
 
 test('contact layout keeps a form slot beside page copy', () => {
@@ -254,4 +281,18 @@ test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
   assert.equal(preserved.city, 'Greensboro');
   const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
   assert.equal(disabled.homepage_ad, 0);
+});
+
+test('fundraising page embeds Square donate checkout in Direct Support', () => {
+  const fundraising = DEFAULT_CMS_PAGES.find((page) => page.slug === 'fundraising');
+  assert.ok(fundraising);
+  assert.match(fundraising.body_html, /data-square-checkout/);
+  assert.match(fundraising.body_html, /square\.link\/u\/IIGMHqVQ/);
+  assert.match(fundraising.body_html, /Direct Support/);
+  const staticHtml = readFileSync(join(ROOT, 'fundraising.html'), 'utf8');
+  assert.match(staticHtml, /data-square-checkout/);
+  assert.match(staticHtml, /square\.link\/u\/IIGMHqVQ/);
+  const script = readFileSync(join(ROOT, 'script.js'), 'utf8');
+  assert.match(script, /data-square-checkout/);
+  assert.match(script, /openSquareCheckoutWindow/);
 });
