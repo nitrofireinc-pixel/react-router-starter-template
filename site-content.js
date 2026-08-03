@@ -4,6 +4,98 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function looksLikeHtml(value) {
+  return /<\/?[a-z][^>]*>/i.test(String(value || ''));
+}
+
+function looksLikeInlineRichHtml(value) {
+  return /<\/?(?:span|strong|b|em|i|u|br)(?:\s|>|\/)/i.test(String(value || ''));
+}
+
+function sanitizeStyleAttribute(attrs) {
+  const match = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  if (!match) return '';
+  const parts = [];
+  for (const declaration of String(match[1] || match[2] || '').split(';')) {
+    const [rawProp, ...rest] = declaration.split(':');
+    if (!rawProp || !rest.length) continue;
+    const prop = rawProp.trim().toLowerCase();
+    const value = rest.join(':').trim();
+    if (prop === 'color' && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i.test(value)) parts.push(`color: ${value}`);
+    if (prop === 'font-size' && /^[\d.]+\s*(px|em|rem|%)$/i.test(value)) parts.push(`font-size: ${value}`);
+  }
+  return parts.join('; ');
+}
+
+function sanitizeRichHtml(dirty) {
+  let html = String(dirty || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '');
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'br') return '<br>';
+    if (tag === 'span') {
+      const style = sanitizeStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  html = html.replace(/(?:<br>\s*){3,}/gi, '<br><br>').trim();
+  if (!html) return '';
+  if (!/<p[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  return html;
+}
+
+function sanitizeInlineRichHtml(dirty) {
+  let html = String(dirty || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/<\/?(p|div|ul|ol|li|h[1-6]|section|article)[^>]*>/gi, ' ');
+  const allowed = new Set(['br', 'strong', 'b', 'em', 'i', 'u', 'span']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'br') return '<br>';
+    if (tag === 'span') {
+      const style = sanitizeStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  return html.replace(/\s+/g, ' ').replace(/(?:<br>\s*){2,}/gi, '<br>').trim();
+}
+
+function paragraphsFromText(value) {
+  return String(value || '')
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p>${escapeHtml(part)}</p>`)
+    .join('') || (String(value || '').trim() ? `<p>${escapeHtml(String(value).trim())}</p>` : '');
+}
+
+function formatInlineRichText(value, fallback = '') {
+  const raw = String(value ?? '');
+  const source = raw.trim() ? raw : String(fallback || '');
+  if (!source.trim()) return '';
+  return looksLikeInlineRichHtml(source) ? sanitizeInlineRichHtml(source) : escapeHtml(source);
+}
+
+function formatRichText(value, fallback = '') {
+  const raw = String(value ?? '');
+  const source = raw.trim() ? raw : String(fallback || '');
+  if (!source.trim()) return '';
+  return looksLikeHtml(source) ? sanitizeRichHtml(source) : paragraphsFromText(source);
+}
+
 function isHomePage() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   return path === '/' || path.endsWith('/index.html') || /(^|\/)index\.html$/i.test(path);
@@ -261,10 +353,29 @@ async function loadPublicContent() {
 
   if (site) {
     document.querySelectorAll('[data-site-field]').forEach(element => {
-      const value = site[element.dataset.siteField];
-      if (value) element.textContent = value;
+      const key = element.dataset.siteField;
+      const value = site[key];
+      if (!value) return;
+      if (key === 'hero_title' || key === 'title') {
+        element.innerHTML = formatInlineRichText(value);
+        return;
+      }
+      if (key === 'hero_subtitle' || key === 'footer_note') {
+        const html = formatRichText(value);
+        if (element.tagName === 'P') {
+          const match = html.match(/^<p>([\s\S]*)<\/p>$/i);
+          element.innerHTML = match ? match[1] : sanitizeInlineRichHtml(html);
+        } else {
+          element.innerHTML = html;
+        }
+        return;
+      }
+      element.textContent = value;
     });
-    if (site.title) document.title = document.title.replace('East Forsyth Band', site.title);
+    if (site.title) {
+      const plainTitle = String(site.title).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (plainTitle) document.title = document.title.replace('East Forsyth Band', plainTitle);
+    }
   }
 
   document.querySelectorAll('[data-events]').forEach(container => {
@@ -280,7 +391,7 @@ async function loadPublicContent() {
     container.innerHTML = visibleEvents.map(event => `
       <article class="event">
         <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
-        <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.description)}</p></div>
+        <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
       </article>
     `).join('');
   });
@@ -295,7 +406,7 @@ async function loadPublicContent() {
     container.innerHTML = boosterMeetings.map((event) => `
       <article class="event">
         <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
-        <div><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.description)}</p></div>
+        <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
       </article>
     `).join('');
   });
@@ -303,7 +414,7 @@ async function loadPublicContent() {
   document.querySelectorAll('[data-photo-gallery]').forEach(container => {
     if (!photos.length) return;
     container.innerHTML = photos.map(photo => `
-      <figure class="gallery-item"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}"><figcaption>${escapeHtml(photo.caption || photo.alt_text)}</figcaption></figure>
+      <figure class="gallery-item"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}"><figcaption>${formatInlineRichText(photo.caption || photo.alt_text)}</figcaption></figure>
     `).join('');
   });
 

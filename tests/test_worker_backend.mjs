@@ -138,12 +138,37 @@ test('staff helpers normalize rows and render photo + name cards safely', () => 
   assert.match(html, /src="\/uploads\/jordan\.jpg"/);
   assert.doesNotMatch(html, /<Smith>/);
 
+  const rich = normalizeStaffPayload({
+    name: 'Casey Lee',
+    role: 'Assistant <strong>Director</strong>',
+    bio: '<p>Office hours <span style="color: #E71321">Mon–Thu</span></p><script>alert(1)</script>',
+  });
+  assert.match(rich.role, /<strong>Director<\/strong>/);
+  assert.match(rich.bio, /<span style="color: #E71321">Mon–Thu<\/span>/);
+  assert.doesNotMatch(rich.bio, /<script>/i);
+  const richHtml = renderStaffDirectory([{ ...rich, id: 9, active: 1 }]);
+  assert.match(richHtml, /<strong>Director<\/strong>/);
+  assert.match(richHtml, /person-bio/);
+
   const created = normalizeStaffPayload({ name: 'Alex Reed', role: 'Percussion' });
   assert.equal(created._assign_sort_order, true);
   const preserved = normalizeStaffPayload({ name: 'Alex Reed', role: 'Percussion' }, { sort_order: 4, active: 1 });
   assert.equal(preserved.sort_order, 4);
   assert.equal(preserved._assign_sort_order, false);
   assert.deepEqual(normalizeStaffReorderIds({ ids: ['3', 1, 1, 2, 'x'] }), [3, 1, 2]);
+});
+
+test('event helpers keep rich text titles and descriptions', () => {
+  const event = normalizeEventPayload({
+    date_label: 'Aug',
+    date_detail: '01',
+    event_year: 2026,
+    title: 'Band Camp <strong>Kickoff</strong>',
+    description: '<p>Bring <em>water</em> and sunscreen.</p><img src=x onerror=alert(1)>',
+  });
+  assert.match(event.title, /<strong>Kickoff<\/strong>/);
+  assert.match(event.description, /<em>water<\/em>/);
+  assert.doesNotMatch(event.description, /<img/i);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {

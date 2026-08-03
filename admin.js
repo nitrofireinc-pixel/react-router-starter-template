@@ -124,6 +124,40 @@ function formControl(form, name) {
   return form.querySelector(`[name="${CSS.escape(name)}"]`) || form.elements.namedItem?.(name) || null;
 }
 
+function syncFormRichEditors(form) {
+  if (!form) return;
+  form.querySelectorAll('[data-rich-input]').forEach((editor) => {
+    const name = editor.dataset.richInput;
+    const control = formControl(form, name);
+    if (!control) return;
+    const mode = editor.dataset.richMode || 'block';
+    control.value = mode === 'inline'
+      ? sanitizeInlineRichHtml(editor.innerHTML || '')
+      : sanitizeRichHtml(editor.innerHTML || '');
+  });
+}
+
+function setFormRichEditorValue(form, name, value) {
+  if (!form || !name) return;
+  const editor = form.querySelector(`[data-rich-input="${CSS.escape(name)}"]`);
+  if (!editor) return;
+  const mode = editor.dataset.richMode || 'block';
+  if (mode === 'inline') {
+    editor.innerHTML = formatInlineRichText(value || '');
+  } else {
+    editor.innerHTML = formatRichText(value || '') || '';
+  }
+}
+
+function clearFormRichEditors(form) {
+  if (!form) return;
+  form.querySelectorAll('[data-rich-input]').forEach((editor) => {
+    editor.innerHTML = '';
+    const control = formControl(form, editor.dataset.richInput);
+    if (control) control.value = '';
+  });
+}
+
 function fillForm(form, data) {
   if (!form) return;
   for (const [key, value] of Object.entries(data || {})) {
@@ -131,16 +165,99 @@ function fillForm(form, data) {
     if (!control || control.type === 'file') continue;
     if (control.type === 'checkbox') control.checked = Boolean(Number(value) || value === true);
     else control.value = value ?? '';
+    setFormRichEditorValue(form, key, value ?? '');
   }
 }
 
 function formPayload(form) {
+  syncFormRichEditors(form);
   const payload = Object.fromEntries(new FormData(form).entries());
   const active = formControl(form, 'active');
   if (active) payload.active = Boolean(active.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
   if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
   return payload;
+}
+
+function richTextIsEmpty(value) {
+  return !String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function applyFormRichCommand(editor, command, value = null) {
+  if (!editor) return;
+  editor.focus();
+  document.execCommand('styleWithCSS', false, true);
+  if (command === 'fontSize' && value) {
+    applyRichStyle({ fontSize: value });
+    return;
+  }
+  document.execCommand(command, false, value);
+}
+
+function bindFormRichEditors() {
+  if (document.documentElement.dataset.formRichBound === '1') return;
+  document.documentElement.dataset.formRichBound = '1';
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-form-rich]');
+    if (!button) return;
+    event.preventDefault();
+    const field = button.closest('.form-rich-label');
+    const editor = field?.querySelector('[data-rich-input]');
+    if (!editor) return;
+    applyFormRichCommand(editor, button.dataset.formRich);
+    syncFormRichEditors(editor.closest('form'));
+  });
+
+  document.addEventListener('input', (event) => {
+    const color = event.target.closest?.('[data-form-rich-color]');
+    if (!color) return;
+    const field = color.closest('.form-rich-label');
+    const editor = field?.querySelector('[data-rich-input]');
+    if (!editor) return;
+    applyFormRichCommand(editor, 'foreColor', color.value);
+    syncFormRichEditors(editor.closest('form'));
+  });
+
+  document.addEventListener('change', (event) => {
+    const size = event.target.closest?.('[data-form-rich-size]');
+    if (!size || !size.value) return;
+    const field = size.closest('.form-rich-label');
+    const editor = field?.querySelector('[data-rich-input]');
+    if (!editor) return;
+    applyFormRichCommand(editor, 'fontSize', size.value);
+    size.value = '';
+    syncFormRichEditors(editor.closest('form'));
+  });
+
+  document.addEventListener('input', (event) => {
+    const editor = event.target.closest?.('[data-rich-input]');
+    if (!editor) return;
+    syncFormRichEditors(editor.closest('form'));
+  });
+
+  document.addEventListener('keydown', (event) => {
+    const editor = event.target.closest?.('[data-rich-input]');
+    if (!editor || event.key !== 'Enter') return;
+    if (editor.dataset.richMode === 'inline' || editor.classList.contains('cms-edit-inline')) {
+      event.preventDefault();
+      editor.blur();
+    }
+  });
+
+  document.addEventListener('paste', (event) => {
+    const editor = event.target.closest?.('[data-rich-input]');
+    if (!editor) return;
+    event.preventDefault();
+    const html = event.clipboardData?.getData('text/html');
+    const text = event.clipboardData?.getData('text/plain') || '';
+    const mode = editor.dataset.richMode || 'block';
+    const clean = mode === 'inline'
+      ? (html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text))
+      : (html ? sanitizeRichHtml(html) : formatRichText(text));
+    document.execCommand('insertHTML', false, clean || escapeHtml(text));
+    syncFormRichEditors(editor.closest('form'));
+  });
 }
 
 function sponsorTierFromLevel(level = '') {
@@ -282,25 +399,31 @@ function extractHomeFeatureCardsFromHtml(html = '') {
   const boosters = root.querySelector('[data-cms-block="home-boosters"], .accent-card');
   const launch = root.querySelector('[data-cms-block="home-launch"]')
     || boosters?.parentElement?.querySelector('article.card:not(.accent-card)');
-  const textOf = (node) => String(node?.textContent || '').replace(/\s+/g, ' ').trim();
+  const plainOf = (node) => String(node?.textContent || '').replace(/\s+/g, ' ').trim();
+  const inlineOf = (node) => sanitizeInlineRichHtml(node?.innerHTML || '') || plainOf(node) || '';
   const boostersLink = boosters?.querySelector('a.btn.secondary, a.btn');
   return {
-    boosters_tag: textOf(boosters?.querySelector('.tag, [data-cms-field="boosters_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_tag,
-    boosters_heading: textOf(boosters?.querySelector('h3, [data-cms-field="boosters_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_heading,
-    boosters_body: textOf(boosters?.querySelector('h3 + p, [data-cms-field="boosters_body"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_body,
-    boosters_button: textOf(boostersLink || boosters?.querySelector('[data-cms-field="boosters_button"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_button,
+    boosters_tag: inlineOf(boosters?.querySelector('.tag, [data-cms-field="boosters_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_tag,
+    boosters_heading: inlineOf(boosters?.querySelector('h3, [data-cms-field="boosters_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_heading,
+    boosters_body: inlineOf(boosters?.querySelector('h3 + p, [data-cms-field="boosters_body"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_body,
+    boosters_button: inlineOf(boostersLink || boosters?.querySelector('[data-cms-field="boosters_button"]')) || DEFAULT_HOME_FEATURE_CARDS.boosters_button,
     boosters_href: String(boostersLink?.getAttribute('href') || DEFAULT_HOME_FEATURE_CARDS.boosters_href).trim() || DEFAULT_HOME_FEATURE_CARDS.boosters_href,
-    launch_tag: textOf(launch?.querySelector('.tag, [data-cms-field="launch_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_tag,
-    launch_heading: textOf(launch?.querySelector('h3, [data-cms-field="launch_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_heading,
-    launch_body: textOf(launch?.querySelector('h3 + p:not(.draft), [data-cms-field="launch_body"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_body,
-    launch_footer: textOf(launch?.querySelector('.draft, [data-cms-field="launch_footer"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_footer,
+    launch_tag: inlineOf(launch?.querySelector('.tag, [data-cms-field="launch_tag"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_tag,
+    launch_heading: inlineOf(launch?.querySelector('h3, [data-cms-field="launch_heading"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_heading,
+    launch_body: inlineOf(launch?.querySelector('h3 + p:not(.draft), [data-cms-field="launch_body"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_body,
+    launch_footer: inlineOf(launch?.querySelector('.draft, [data-cms-field="launch_footer"]')) || DEFAULT_HOME_FEATURE_CARDS.launch_footer,
   };
 }
 
 function homeFeatureCardsFromForm(payload = {}) {
   const cards = {};
   for (const key of HOME_FEATURE_CARD_KEYS) {
-    const value = String(payload[key] ?? DEFAULT_HOME_FEATURE_CARDS[key] ?? '').replace(/\s+/g, ' ').trim();
+    if (key === 'boosters_href') {
+      cards[key] = String(payload[key] ?? DEFAULT_HOME_FEATURE_CARDS[key] ?? '').trim() || DEFAULT_HOME_FEATURE_CARDS[key];
+      continue;
+    }
+    const raw = String(payload[key] ?? DEFAULT_HOME_FEATURE_CARDS[key] ?? '').trim();
+    const value = looksLikeInlineRichHtml(raw) ? sanitizeInlineRichHtml(raw) : raw.replace(/\s+/g, ' ').trim();
     cards[key] = value || DEFAULT_HOME_FEATURE_CARDS[key];
   }
   return cards;
@@ -324,21 +447,22 @@ function extractSponsorTierFieldsFromHtml(html = '') {
   const bronze = card('bronze');
   const silver = card('silver');
   const gold = card('gold');
+  const inlineOf = (node) => sanitizeInlineRichHtml(node?.innerHTML || '') || plainOf(node) || '';
   return {
-    tiers_kicker: plainOf(head?.querySelector('[data-cms-field="tiers_kicker"], .kicker')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_kicker,
-    tiers_heading: textOf(head?.querySelector('[data-cms-field="tiers_heading"], h2')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_heading,
-    tiers_intro: textOf(head?.querySelector('[data-cms-field="tiers_intro"], h2 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_intro,
-    bronze_label: plainOf(bronze?.querySelector('[data-cms-field="bronze_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_label,
-    bronze_title: textOf(bronze?.querySelector('[data-cms-field="bronze_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_title,
-    bronze_blurb: textOf(bronze?.querySelector('[data-cms-field="bronze_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_blurb,
+    tiers_kicker: inlineOf(head?.querySelector('[data-cms-field="tiers_kicker"], .kicker')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_kicker,
+    tiers_heading: inlineOf(head?.querySelector('[data-cms-field="tiers_heading"], h2')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_heading,
+    tiers_intro: inlineOf(head?.querySelector('[data-cms-field="tiers_intro"], h2 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.tiers_intro,
+    bronze_label: inlineOf(bronze?.querySelector('[data-cms-field="bronze_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_label,
+    bronze_title: inlineOf(bronze?.querySelector('[data-cms-field="bronze_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_title,
+    bronze_blurb: inlineOf(bronze?.querySelector('[data-cms-field="bronze_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_blurb,
     bronze_benefits: benefitsOf(bronze) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_benefits,
-    silver_label: plainOf(silver?.querySelector('[data-cms-field="silver_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_label,
-    silver_title: textOf(silver?.querySelector('[data-cms-field="silver_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_title,
-    silver_blurb: textOf(silver?.querySelector('[data-cms-field="silver_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_blurb,
+    silver_label: inlineOf(silver?.querySelector('[data-cms-field="silver_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_label,
+    silver_title: inlineOf(silver?.querySelector('[data-cms-field="silver_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_title,
+    silver_blurb: inlineOf(silver?.querySelector('[data-cms-field="silver_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_blurb,
     silver_benefits: benefitsOf(silver) || DEFAULT_SPONSOR_TIER_FIELDS.silver_benefits,
-    gold_label: plainOf(gold?.querySelector('[data-cms-field="gold_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_label,
-    gold_title: textOf(gold?.querySelector('[data-cms-field="gold_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_title,
-    gold_blurb: textOf(gold?.querySelector('[data-cms-field="gold_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_blurb,
+    gold_label: inlineOf(gold?.querySelector('[data-cms-field="gold_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_label,
+    gold_title: inlineOf(gold?.querySelector('[data-cms-field="gold_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_title,
+    gold_blurb: inlineOf(gold?.querySelector('[data-cms-field="gold_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_blurb,
     gold_benefits: benefitsOf(gold) || DEFAULT_SPONSOR_TIER_FIELDS.gold_benefits,
   };
 }
@@ -497,11 +621,14 @@ function markHomeHtmlEditable(html = '') {
     if (el.closest('.cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
-    el.classList.add('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline');
+    const inline = !['P', 'LI'].includes(el.tagName);
+    el.classList.add('cms-edit-field', 'cms-edit-rich');
+    if (inline) el.classList.add('cms-edit-inline');
     el.setAttribute('contenteditable', 'true');
     el.setAttribute('role', 'textbox');
     el.setAttribute('spellcheck', 'true');
     el.setAttribute('aria-label', label);
+    if (!inline) el.setAttribute('aria-multiline', 'true');
     el.dataset.editLabel = label;
     el.dataset.cmsHomeField = String(index);
     if (el.tagName === 'A') {
@@ -552,10 +679,11 @@ function serializeHomePreviewHtml(preview) {
 function extractHomeSiteFields(html = '') {
   const template = document.createElement('template');
   template.innerHTML = html;
-  const textOf = (selector) => String(template.content.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
+  const titleNode = template.content.querySelector('[data-site-field="hero_title"]');
+  const subtitleNode = template.content.querySelector('[data-site-field="hero_subtitle"]');
   return {
-    hero_title: textOf('[data-site-field="hero_title"]'),
-    hero_subtitle: textOf('[data-site-field="hero_subtitle"]'),
+    hero_title: sanitizeInlineRichHtml(titleNode?.innerHTML || '') || plainTextFromHtml(titleNode?.innerHTML || ''),
+    hero_subtitle: sanitizeRichHtml(subtitleNode?.innerHTML || '') || plainTextFromHtml(subtitleNode?.innerHTML || ''),
   };
 }
 
@@ -1185,7 +1313,7 @@ function bindPageVisualEditor() {
   });
 
   preview.addEventListener('paste', event => {
-    const field = event.target.closest?.('[data-cms-field]');
+    const field = event.target.closest?.('[data-cms-field], [data-cms-home-field]');
     if (!field) return;
     event.preventDefault();
     if (field.classList.contains('cms-edit-rich')) {
@@ -1667,7 +1795,9 @@ function staffPreviewCard(member) {
   const photo = member.photo_url
     ? `<div class="avatar"><img src="${escapeHtml(member.photo_url)}" alt="${escapeHtml(member.name)}"></div>`
     : '<div class="avatar" aria-hidden="true"></div>';
-  return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${member.role ? `<p class="person-role">${escapeHtml(member.role)}</p>` : ''}${member.bio ? `<p>${escapeHtml(member.bio)}</p>` : ''}</div></article>`;
+  const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
+  const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
+  return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;
 }
 
 function orderedStaff() {
@@ -1683,7 +1813,7 @@ function renderStaff() {
     <article class="admin-row staff-admin-row" data-staff-id="${member.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'staff member')}" title="Drag to reorder">⋮⋮</button>
       <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
-      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(member.role || 'Staff')}</span><small>${escapeHtml(member.bio || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
+      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Staff')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
     </article>
   `).join('') || '<p class="draft">No staff members yet.</p>';
@@ -2220,7 +2350,7 @@ async function loadEvents() {
         : '<div class="row-actions"><span class="muted">View only</span></div>';
       return `
     <article class="admin-row">
-      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.description)}</small><small>Created by ${escapeHtml(creator)}</small></div>
+      <div><b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b><span>${escapeHtml(plainTextFromHtml(event.title))}</span><small>${escapeHtml(plainTextFromHtml(event.description))}</small><small>Created by ${escapeHtml(creator)}</small></div>
       ${actions}
     </article>`;
     }).join('')
@@ -2268,7 +2398,7 @@ async function loadPhotos() {
   list.innerHTML = state.photos.map(photo => `
     <article class="admin-row photo-row">
       <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}">
-      <div><b>${escapeHtml(photo.caption || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span></div>
+      <div><b>${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span></div>
       <div class="row-actions"><button data-delete-photo="${photo.id}">Delete</button></div>
     </article>
   `).join('');
@@ -2490,7 +2620,7 @@ function bindForms() {
         const upload = new FormData();
         upload.set('file', file);
         upload.set('alt_text', payload.name || 'Staff photo');
-        upload.set('caption', payload.role || 'Directors & Staff');
+        upload.set('caption', plainTextFromHtml(payload.role) || 'Directors & Staff');
         // Negative sort keeps staff photos out of the public Photo gallery listing.
         upload.set('sort_order', '-500');
         const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
@@ -2504,6 +2634,7 @@ function bindForms() {
       await jsonFetch(id ? `/api/admin/staff/${id}` : '/api/admin/staff', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       status.textContent = id ? 'Staff member updated.' : 'Staff member created.';
       form.reset();
+      clearFormRichEditors(form);
       formControl(form, 'staff_id').value = '';
       formControl(form, 'active').checked = true;
       await loadStaff();
@@ -2515,6 +2646,7 @@ function bindForms() {
   document.querySelector('#new-staff')?.addEventListener('click', () => {
     const form = document.querySelector('#staff-form');
     form.reset();
+    clearFormRichEditors(form);
     formControl(form, 'staff_id').value = '';
     formControl(form, 'active').checked = true;
     document.querySelector('#staff-status').textContent = 'Creating a new staff member.';
@@ -2715,7 +2847,7 @@ function bindForms() {
       delete payload.event_id;
       delete payload.id;
       delete payload.sort_order;
-      if (!payload.title?.trim() || !payload.description?.trim()) {
+      if (richTextIsEmpty(payload.title) || richTextIsEmpty(payload.description)) {
         if (status) status.textContent = 'Title and description are required.';
         return;
       }
@@ -2726,6 +2858,7 @@ function bindForms() {
       await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       if (status) status.textContent = id ? 'Event updated.' : 'Event created.';
       form.reset();
+      clearFormRichEditors(form);
       formControl(form, 'event_id').value = '';
       formControl(form, 'date_label').value = 'Aug';
       formControl(form, 'date_detail').value = '01';
@@ -2740,6 +2873,7 @@ function bindForms() {
   document.querySelector('#new-event')?.addEventListener('click', () => {
     const form = document.querySelector('#event-form');
     form.reset();
+    clearFormRichEditors(form);
     formControl(form, 'event_id').value = '';
     formControl(form, 'date_label').value = 'Aug';
     formControl(form, 'date_detail').value = '01';
@@ -2747,7 +2881,7 @@ function bindForms() {
     setEventBoosterPlacement(form, 0);
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
-    formControl(form, 'title')?.focus();
+    form.querySelector('[data-rich-input="title"]')?.focus();
   });
 
   document.querySelector('#photo-form')?.addEventListener('submit', async event => {
@@ -2756,8 +2890,10 @@ function bindForms() {
     const status = document.querySelector('#photo-status');
     status.textContent = 'Uploading...';
     try {
+      syncFormRichEditors(form);
       await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
       form.reset();
+      clearFormRichEditors(form);
       await loadPhotos();
       status.textContent = 'Photo uploaded.';
     } catch (error) {
@@ -2767,6 +2903,7 @@ function bindForms() {
   });
 }
 
+bindFormRichEditors();
 bindPageVisualEditor();
 bindPageEditorResizer();
 bindForms();

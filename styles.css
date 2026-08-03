@@ -1305,6 +1305,78 @@ body.sponsor-map-open{overflow:hidden}
   .mail-body-editor{min-height:180px}
 }
 
+.form-rich-label{
+  display:grid;
+  gap:8px;
+}
+.form-rich-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+  padding:8px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#fff;
+}
+.form-rich-toolbar button,
+.form-rich-toolbar label{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:34px;
+  padding:6px 10px;
+  border:1px solid #d5deea;
+  border-radius:10px;
+  background:#f8fafc;
+  color:#10233c;
+  font-weight:850;
+  cursor:pointer;
+}
+.form-rich-toolbar button:hover,
+.form-rich-toolbar label:hover{border-color:#014990;background:#fff}
+.form-rich-toolbar input[type="color"]{
+  width:28px;
+  height:22px;
+  padding:0;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+}
+.form-rich-toolbar select{
+  min-height:28px;
+  border:1px solid #d5deea;
+  border-radius:8px;
+  background:#fff;
+  color:#10233c;
+  font-weight:750;
+}
+.form-rich-editor{
+  min-height:120px;
+  padding:12px 14px;
+  border:1px solid #d5deea;
+  border-radius:14px;
+  background:#fff;
+  color:#10233c;
+  line-height:1.5;
+  outline:none;
+}
+.form-rich-editor.form-rich-inline{
+  min-height:46px;
+  padding:10px 12px;
+}
+.form-rich-editor:focus{border-color:#014990;box-shadow:0 0 0 3px rgba(1,73,144,.12)}
+.form-rich-editor:empty::before{
+  content:attr(data-placeholder);
+  color:#7b8da3;
+  pointer-events:none;
+}
+.form-rich-editor p{margin:0 0 .7em}
+.form-rich-editor p:last-child{margin-bottom:0}
+.person-bio p{margin:4px 0 0;color:var(--muted)}
+.event-description p{margin:4px 0 0;color:var(--muted)}
+.event-description p:first-child{margin-top:4px}
+
 /* Sponsor package tiers */
 .sponsor-tiers{
   margin:8px 0 34px;
