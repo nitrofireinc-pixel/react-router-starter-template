@@ -32,4 +32,8 @@ const assetsDest = join(PUBLIC, 'assets');
 rmSync(assetsDest, { recursive: true, force: true });
 cpSync(join(ROOT, 'assets'), assetsDest, { recursive: true });
 
+const vendorDest = join(PUBLIC, 'vendor');
+mkdirSync(vendorDest, { recursive: true });
+cpSync(join(ROOT, 'vendor/jspdf.umd.min.js'), join(vendorDest, 'jspdf.umd.min.js'));
+
 console.log(`Synced static assets to ${PUBLIC}`);

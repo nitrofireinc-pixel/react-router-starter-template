@@ -19,6 +19,7 @@ test('pages build contains advanced worker and runtime module', () => {
   assert.equal(existsSync(join(OUTPUT, 'default-pages.mjs')), true);
   assert.equal(existsSync(join(OUTPUT, 'admin.js')), true);
   assert.equal(existsSync(join(OUTPUT, 'styles.css')), true);
+  assert.equal(existsSync(join(OUTPUT, 'vendor/jspdf.umd.min.js')), true);
 
   const worker = readFileSync(join(OUTPUT, '_worker.js'), 'utf8');
   assert.match(worker, /from '\.\/default-pages\.mjs'/);

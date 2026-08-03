@@ -2012,6 +2012,332 @@ function resetSponsorForm(form) {
   syncSponsorTierBenefits(form);
 }
 
+function goldPrintSponsors() {
+  return orderedSponsors().filter((sponsor) => (
+    Number(sponsor.active) !== 0
+    && (sponsor.show_game_announcement || sponsorTierFromLevel(sponsor.level) === 'gold')
+  ));
+}
+
+function renderGoldSponsorsPrintPreview() {
+  const preview = document.querySelector('#gold-sponsors-print-preview');
+  if (!preview) return;
+  const gold = goldPrintSponsors();
+  if (!gold.length) {
+    preview.innerHTML = '<p class="draft">No active Gold sponsors yet. Assign the Gold tier to include a business on advertising materials.</p>';
+    return;
+  }
+  preview.innerHTML = gold.map((sponsor) => {
+    const mark = escapeHtml(sponsor.mark_text || (sponsor.name || '?').slice(0, 3).toUpperCase());
+    const logo = sponsor.logo_url
+      ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
+      : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    return `
+      <article class="gold-sponsor-print-row">
+        <div class="gold-sponsor-print-logo">${logo}</div>
+        <b>${escapeHtml(sponsor.name)}</b>
+      </article>
+    `;
+  }).join('');
+}
+
+function adminAssetVersion() {
+  const src = document.querySelector('script[src*="/admin.js"]')?.getAttribute('src') || '';
+  const match = src.match(/[?&]v=([^&]+)/);
+  return match ? decodeURIComponent(match[1]) : String(Date.now());
+}
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-dynamic-src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === '1') {
+        resolve();
+        return;
+      }
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Could not load ${src}`)), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.dataset.dynamicSrc = src;
+    script.addEventListener('load', () => {
+      script.dataset.loaded = '1';
+      resolve();
+    }, { once: true });
+    script.addEventListener('error', () => reject(new Error(`Could not load ${src}`)), { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureJsPdf() {
+  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
+  await loadScriptOnce(`/vendor/jspdf.umd.min.js?v=${encodeURIComponent(adminAssetVersion())}`);
+  if (!window.jspdf?.jsPDF) throw new Error('PDF library failed to initialize.');
+  return window.jspdf.jsPDF;
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Image failed to load'));
+    img.src = src;
+  });
+}
+
+async function logoDataUrlForPdf(url) {
+  if (!url) return null;
+  let objectUrl = null;
+  try {
+    const absolute = new URL(url, window.location.origin).href;
+    try {
+      const response = await fetch(absolute, { credentials: 'same-origin' });
+      if (response.ok) {
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+      }
+    } catch {
+      // Fall back to direct image load.
+    }
+    const img = await loadImageElement(objectUrl || absolute);
+    const maxW = 320;
+    const maxH = 160;
+    let width = img.naturalWidth || img.width || maxW;
+    let height = img.naturalHeight || img.height || maxH;
+    const scale = Math.min(maxW / width, maxH / height, 1);
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    return { dataUrl: canvas.toDataURL('image/png'), width, height };
+  } catch {
+    return null;
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function buildGoldSponsorsPdfBlob(sponsors) {
+  const jsPDF = await ensureJsPdf();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  const ensureSpace = (needed) => {
+    if (y + needed <= pageHeight - margin) return;
+    doc.addPage();
+    y = margin;
+  };
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(16, 35, 60);
+  doc.text('East Forsyth Band — Gold Sponsors', margin, y);
+  y += 22;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.setTextColor(91, 111, 136);
+  doc.text(`For programs, flyers, and promotional materials · ${new Date().toLocaleDateString()}`, margin, y);
+  y += 28;
+
+  if (!sponsors.length) {
+    doc.setTextColor(51, 65, 85);
+    doc.text('No active Gold sponsors yet.', margin, y);
+  }
+
+  for (const sponsor of sponsors) {
+    const logo = await logoDataUrlForPdf(sponsor.logo_url || '');
+    const rowHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
+    ensureSpace(rowHeight + 12);
+
+    doc.setDrawColor(216, 226, 239);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y, contentWidth, rowHeight, 6, 6, 'FD');
+
+    const logoBoxX = margin + 12;
+    const logoBoxY = y + 8;
+    const logoBoxW = 96;
+    const logoBoxH = rowHeight - 16;
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(logoBoxX, logoBoxY, logoBoxW, logoBoxH, 4, 4, 'FD');
+
+    if (logo) {
+      const fit = Math.min(logoBoxW - 12, logoBoxH - 12) / Math.max(logo.width, logo.height);
+      const drawW = Math.max(1, logo.width * fit);
+      const drawH = Math.max(1, logo.height * fit);
+      const drawX = logoBoxX + (logoBoxW - drawW) / 2;
+      const drawY = logoBoxY + (logoBoxH - drawH) / 2;
+      doc.addImage(logo.dataUrl, 'PNG', drawX, drawY, drawW, drawH);
+    } else {
+      const mark = String(sponsor.mark_text || (sponsor.name || '?').slice(0, 3)).toUpperCase();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(1, 73, 144);
+      doc.text(mark, logoBoxX + logoBoxW / 2, logoBoxY + logoBoxH / 2 + 4, { align: 'center' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(16, 35, 60);
+    const nameX = logoBoxX + logoBoxW + 16;
+    const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), contentWidth - logoBoxW - 40);
+    const nameBlockHeight = nameLines.length * 18;
+    doc.text(nameLines, nameX, y + (rowHeight - nameBlockHeight) / 2 + 12);
+
+    y += rowHeight + 10;
+  }
+
+  // Ask PDF viewers to open the print dialog when the file loads.
+  if (typeof doc.autoPrint === 'function') doc.autoPrint();
+  return doc.output('blob');
+}
+
+function printPdfBlobInPage(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    let frame = document.getElementById('gold-sponsors-print-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'gold-sponsors-print-frame';
+      frame.setAttribute('title', 'Gold sponsors PDF print');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+      document.body.appendChild(frame);
+    }
+
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    frame.onload = () => {
+      window.setTimeout(() => {
+        try {
+          const win = frame.contentWindow;
+          if (!win) throw new Error('Print frame unavailable');
+          win.focus();
+          win.print();
+          finish();
+        } catch (error) {
+          finish(error);
+        }
+      }, 300);
+    };
+    frame.onerror = () => finish(new Error('Could not load the PDF for printing.'));
+    frame.src = url;
+  });
+}
+
+function printGoldSponsorsHtmlFallback(sponsors) {
+  const rows = sponsors.length
+    ? sponsors.map((sponsor) => {
+      const mark = escapeHtml(sponsor.mark_text || (sponsor.name || '?').slice(0, 3).toUpperCase());
+      const logo = sponsor.logo_url
+        ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
+        : `<span class="mark">${mark}</span>`;
+      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+    }).join('')
+    : '<li><strong>No active Gold sponsors yet.</strong></li>';
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gold Sponsors | East Forsyth Band</title>
+  <style>
+    body{font-family:Georgia,"Times New Roman",serif;color:#111;margin:32px;line-height:1.35}
+    h1{font-size:1.7rem;margin:0 0 .25rem}
+    .meta{color:#444;margin:0 0 1.25rem}
+    ul{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+    li{display:grid;grid-template-columns:110px 1fr;gap:16px;align-items:center;border:1px solid #ccc;padding:12px;border-radius:8px}
+    .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
+    .logo img{max-width:100%;max-height:100%;object-fit:contain}
+    .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    strong{font-size:1.15rem}
+    @media print{body{margin:.55in} li{break-inside:avoid}}
+  </style>
+</head>
+<body>
+  <h1>East Forsyth Band — Gold Sponsors</h1>
+  <p class="meta">For programs, flyers, and promotional materials · ${escapeHtml(new Date().toLocaleDateString())}</p>
+  <ul>${rows}</ul>
+</body>
+</html>`;
+
+  return new Promise((resolve, reject) => {
+    let frame = document.getElementById('gold-sponsors-print-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'gold-sponsors-print-frame';
+      frame.setAttribute('title', 'Gold sponsors print');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+      document.body.appendChild(frame);
+    }
+    frame.onload = () => {
+      try {
+        const win = frame.contentWindow;
+        if (!win) throw new Error('Print frame unavailable');
+        win.focus();
+        win.print();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    frame.srcdoc = html;
+  });
+}
+
+async function printGoldSponsorsPdf() {
+  const button = document.querySelector('#print-gold-sponsors');
+  const status = document.querySelector('#gold-sponsors-print-status');
+  const sponsors = goldPrintSponsors();
+  const originalLabel = button?.textContent || 'Print Gold sponsors PDF';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Preparing PDF…';
+  }
+  if (status) status.textContent = 'Building PDF with logos…';
+  try {
+    const blob = await buildGoldSponsorsPdfBlob(sponsors);
+    if (status) status.textContent = 'Opening print dialog…';
+    await printPdfBlobInPage(blob);
+    if (status) status.textContent = 'Print dialog opened. Choose your printer or Save as PDF.';
+  } catch (error) {
+    console.error(error);
+    try {
+      if (status) status.textContent = 'PDF unavailable; printing on-page list instead…';
+      await printGoldSponsorsHtmlFallback(sponsors);
+      if (status) status.textContent = 'Print dialog opened from on-page list.';
+    } catch (fallbackError) {
+      console.error(fallbackError);
+      if (status) status.textContent = `Could not print Gold sponsors: ${error.message || 'Unknown error'}`;
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+}
+
 function renderSponsors() {
   const list = document.querySelector('#sponsors-list');
   if (!list) return;
@@ -2038,6 +2364,7 @@ function renderSponsors() {
   }).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
   const preview = document.querySelector('#sponsor-preview');
   if (preview) preview.innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
+  renderGoldSponsorsPrintPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
@@ -2678,6 +3005,9 @@ function bindForms() {
   });
   document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
     syncSponsorTierBenefits(event.currentTarget.form);
+  });
+  document.querySelector('#print-gold-sponsors')?.addEventListener('click', () => {
+    printGoldSponsorsPdf();
   });
   syncSponsorTierBenefits();
 
