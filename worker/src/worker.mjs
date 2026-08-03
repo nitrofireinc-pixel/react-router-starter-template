@@ -174,8 +174,8 @@ export function extractSponsorTierFields(html = '') {
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-18';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
+const ASSET_VERSION = 'admin-cms-20260803-19';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -199,6 +199,13 @@ export const DEFAULT_STAFF = [
   { name: 'Name TBD', role: 'Assistant Director', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 2, active: 1 },
   { name: 'Name TBD', role: 'Color Guard Staff', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 3, active: 1 },
   { name: 'Name TBD', role: 'Percussion Staff', bio: 'Add bio, email, or preferred contact notes here.', photo_url: '', sort_order: 4, active: 1 },
+];
+
+export const DEFAULT_BOOSTER_MEMBERS = [
+  { name: 'Name TBD', role: 'Booster President', bio: 'Add contact notes or responsibilities here.', photo_url: '', sort_order: 1, active: 1 },
+  { name: 'Name TBD', role: 'Vice President', bio: 'Add contact notes or responsibilities here.', photo_url: '', sort_order: 2, active: 1 },
+  { name: 'Name TBD', role: 'Treasurer', bio: 'Add contact notes or responsibilities here.', photo_url: '', sort_order: 3, active: 1 },
+  { name: 'Name TBD', role: 'Secretary', bio: 'Add contact notes or responsibilities here.', photo_url: '', sort_order: 4, active: 1 },
 ];
 
 export function escapeHtml(value) {
@@ -374,6 +381,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
@@ -450,6 +458,10 @@ async function initDb(env) {
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
     await env.DB.batch(DEFAULT_STAFF.map((member) => env.DB.prepare('INSERT INTO staff_members (name, role, bio, photo_url, sort_order, active) VALUES (?, ?, ?, ?, ?, ?)').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active)));
+  }
+  const boosterMemberCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM booster_members').first();
+  if (!boosterMemberCount?.count) {
+    await env.DB.batch(DEFAULT_BOOSTER_MEMBERS.map((member) => env.DB.prepare('INSERT INTO booster_members (name, role, bio, photo_url, sort_order, active) VALUES (?, ?, ?, ?, ?, ?)').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active)));
   }
   const topicCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM contact_topics').first();
   if (!topicCount?.count) {
@@ -944,6 +956,12 @@ export function ensureBoosterMeetingsSlot(html) {
   return `${source}<div class="timeline booster-meetings" data-booster-meetings></div>`;
 }
 
+export function ensureBoosterMembersSlot(html) {
+  const source = String(html || '');
+  if (/data-booster-members/i.test(source)) return source;
+  return `${source}<section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers who support the East Forsyth Band program.</p></div><div class="directory" data-booster-members></div></div></section>`;
+}
+
 export function renderSquareDonateCard() {
   return `<article class="card accent-card square-donate-card" data-square-donate>
   <span class="tag">Donate</span>
@@ -1376,6 +1394,41 @@ function renderDirectorsPageBody(page, staff) {
   return `<section class="page-hero" data-cms-layout="directory"><div class="page-title"><div class="kicker" data-cms-field="kicker">People</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Directors & Staff')}</h1><p data-cms-field="intro">Meet the directors and staff who lead the East Forsyth Band program.</p></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Add a short welcome note for families here.</p></div>${directory}</div></section>`;
 }
 
+async function getBoosterMembers(env, includeInactive = false) {
+  const where = includeInactive ? '' : 'WHERE active = 1';
+  const rows = await env.DB.prepare(`SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members ${where} ORDER BY sort_order, id`).all();
+  return rows.results || [];
+}
+
+export function normalizeBoosterMemberPayload(payload = {}, existing = null) {
+  return normalizeStaffPayload(payload, existing);
+}
+
+export function normalizeBoosterMemberReorderIds(payload = {}) {
+  return normalizeStaffReorderIds(payload);
+}
+
+export function renderBoosterMembersDirectory(members = []) {
+  if (!members.length) {
+    return '<div class="staff-empty"><h3>No booster members listed yet.</h3><p>Use the admin Booster Members page to add photos, names, and roles.</p></div>';
+  }
+  return members.map((member) => {
+    const photo = member.photo_url
+      ? `<div class="avatar"><img src="${escapeAttr(member.photo_url)}" alt="${escapeAttr(member.name)}"></div>`
+      : '<div class="avatar" aria-hidden="true"></div>';
+    const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
+    const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
+    return `<article class="person" data-booster-member-id="${escapeAttr(member.id || '')}">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;
+  }).join('');
+}
+
+function renderBoostersPageBody(page, boosterMembers = []) {
+  let html = ensureBoosterMeetingsSlot(page.body_html || '');
+  html = ensureBoosterMembersSlot(html);
+  const directory = `<div class="directory" data-booster-members>${renderBoosterMembersDirectory(boosterMembers)}</div>`;
+  return replaceMarkedDirectory(html, 'data-booster-members', directory) || `${html}${directory}`;
+}
+
 
 export function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -1689,12 +1742,12 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
   throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
 }
 
-function renderPageBody(page, sponsors = [], staff = []) {
+function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
-  if (page.slug === 'boosters') return ensureBoosterMeetingsSlot(page.body_html);
+  if (page.slug === 'boosters') return renderBoostersPageBody(page, boosterMembers);
   if (page.slug === 'fundraising') return ensureFundraisingDonateSlot(page.body_html);
   return page.body_html;
 }
@@ -1708,13 +1761,15 @@ async function getPhotos(env) {
 async function photoUsageLabels(env, filename) {
   const plain = `/uploads/${filename}`;
   const encoded = `/uploads/${encodeURIComponent(filename)}`;
-  const [staff, sponsors, logo] = await Promise.all([
+  const [staff, boosterMembers, sponsors, logo] = await Promise.all([
     env.DB.prepare('SELECT name FROM staff_members WHERE photo_url = ? OR photo_url = ?').bind(plain, encoded).all(),
+    env.DB.prepare('SELECT name FROM booster_members WHERE photo_url = ? OR photo_url = ?').bind(plain, encoded).all(),
     env.DB.prepare('SELECT name FROM sponsors WHERE logo_url = ? OR logo_url = ?').bind(plain, encoded).all(),
     env.DB.prepare("SELECT value FROM site_content WHERE key = 'logo_url' AND (value = ? OR value = ?)").bind(plain, encoded).first(),
   ]);
   const labels = [];
   for (const row of staff.results || []) labels.push(`staff photo for ${row.name}`);
+  for (const row of boosterMembers.results || []) labels.push(`booster member photo for ${row.name}`);
   for (const row of sponsors.results || []) labels.push(`sponsor logo for ${row.name}`);
   if (logo) labels.push('the site logo');
   return labels;
@@ -2057,6 +2112,7 @@ async function handleApi(request, env, url) {
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
+  if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));
   if (url.pathname === '/api/contact/topics' && request.method === 'GET') {
     const topics = (await getContactTopics(env)).filter((topic) => isValidEmail(topic.email));
     return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
@@ -2419,6 +2475,66 @@ async function handleApi(request, env, url) {
     return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM staff_members WHERE id = ?').bind(id).first());
   }
 
+  if (url.pathname === '/api/admin/booster-members' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'boosters') && !canEditPage(auth.user, 'boosters')) {
+      return jsonResponse({ detail: 'Permission required: boosters' }, 403);
+    }
+    return jsonResponse(await getBoosterMembers(env, true));
+  }
+  if (url.pathname === '/api/admin/booster-members' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'boosters') && !canEditPage(auth.user, 'boosters')) {
+      return jsonResponse({ detail: 'Permission required: boosters' }, 403);
+    }
+    const member = normalizeBoosterMemberPayload(await request.json());
+    if (!member.name) return jsonResponse({ detail: 'Booster member name is required' }, 422);
+    if (member._assign_sort_order) {
+      const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM booster_members').first();
+      member.sort_order = Number(max?.max_order || 0) + 1;
+    }
+    const result = await env.DB.prepare('INSERT INTO booster_members (name, role, bio, photo_url, sort_order, active) VALUES (?, ?, ?, ?, ?, ?)').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE id = ?').bind(result.meta.last_row_id).first());
+  }
+  if (url.pathname === '/api/admin/booster-members/reorder' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'boosters') && !canEditPage(auth.user, 'boosters')) {
+      return jsonResponse({ detail: 'Permission required: boosters' }, 403);
+    }
+    const ids = normalizeBoosterMemberReorderIds(await request.json());
+    if (!ids.length) return jsonResponse({ detail: 'Booster member order is required' }, 422);
+    const existing = await getBoosterMembers(env, true);
+    if (ids.length !== existing.length || ids.some((id) => !existing.some((member) => member.id === id))) {
+      return jsonResponse({ detail: 'Booster member order must include every booster member exactly once' }, 422);
+    }
+    await env.DB.batch(ids.map((id, index) => (
+      env.DB.prepare('UPDATE booster_members SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(index + 1, id)
+    )));
+    return jsonResponse(await getBoosterMembers(env, true));
+  }
+  const boosterMemberMatch = url.pathname.match(/^\/api\/admin\/booster-members\/(\d+)$/);
+  if (boosterMemberMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'boosters') && !canEditPage(auth.user, 'boosters')) {
+      return jsonResponse({ detail: 'Permission required: boosters' }, 403);
+    }
+    const id = Number(boosterMemberMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM booster_members WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM booster_members WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Booster member not found' }, 404);
+    const member = normalizeBoosterMemberPayload(await request.json(), existing);
+    if (!member.name) return jsonResponse({ detail: 'Booster member name is required' }, 422);
+    await env.DB.prepare('UPDATE booster_members SET name = ?, role = ?, bio = ?, photo_url = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(member.name, member.role, member.bio, member.photo_url, member.sort_order, member.active, id).run();
+    return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE id = ?').bind(id).first());
+  }
+
   if (url.pathname === '/api/admin/contact/topics' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -2614,6 +2730,8 @@ async function handleApi(request, env, url) {
     const canUpload = hasPermission(auth.user, 'photos')
       || hasPermission(auth.user, 'staff')
       || canEditPage(auth.user, 'directors')
+      || hasPermission(auth.user, 'boosters')
+      || canEditPage(auth.user, 'boosters')
       || hasPermission(auth.user, 'site');
     if (!canUpload) return jsonResponse({ detail: 'Permission required: photos' }, 403);
     const form = await request.formData();
@@ -2695,9 +2813,9 @@ function renderNav(pages) {
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = []) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = []) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2832,7 +2950,8 @@ async function serveStaticOrCms(request, env, url) {
     if (page) {
       const sponsors = page.slug === 'sponsors' ? await getSponsors(env) : [];
       const staff = page.slug === 'directors' ? await getStaff(env) : [];
-      return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env), sponsors, staff));
+      const boosterMembers = page.slug === 'boosters' ? await getBoosterMembers(env) : [];
+      return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env), sponsors, staff, boosterMembers));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
@@ -2865,13 +2984,14 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Staff Email</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Staff Email</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
 <form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, and benefits. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
+<section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-tier-benefits-card">
   <h2>Gold Sponsor Benefits</h2>
   <ul class="gold-tier-benefits-list">
@@ -2958,7 +3078,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Editors can edit or delete only the events they create, unless an admin grants manage-all access. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><fieldset class="event-placement"><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1"> Boosters meetings card</label></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>

@@ -31,7 +31,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -109,6 +109,10 @@ function canEditSponsors() {
 
 function canEditStaff() {
   return hasPermission('staff') || canEditPage('directors');
+}
+
+function canEditBoosterMembers() {
+  return hasPermission('boosters') || canEditPage('boosters');
 }
 
 function canEditContact() {
@@ -1676,6 +1680,7 @@ function showAllowedPanels() {
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
+    'booster-members': canEditBoosterMembers(),
     contact: canEditContact(),
     site: hasPermission('site'),
     users: hasPermission('users'),
@@ -1719,6 +1724,11 @@ function showAllowedPanels() {
   if (editDirectorsPage) {
     editDirectorsPage.hidden = !canEditPage('directors');
     editDirectorsPage.onclick = () => editPage('directors');
+  }
+  const editBoostersPage = document.querySelector('#edit-boosters-page');
+  if (editBoostersPage) {
+    editBoostersPage.hidden = !canEditPage('boosters');
+    editBoostersPage.onclick = () => editPage('boosters');
   }
   const editContactPage = document.querySelector('#edit-contact-page');
   if (editContactPage) {
@@ -1794,6 +1804,7 @@ function renderDashboard() {
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
+    canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
@@ -1893,6 +1904,12 @@ async function loadStaff() {
   if (!canEditStaff()) return;
   state.staff = await jsonFetch('/api/admin/staff');
   renderStaff();
+}
+
+async function loadBoosterMembers() {
+  if (!canEditBoosterMembers()) return;
+  state.boosterMembers = await jsonFetch('/api/admin/booster-members');
+  renderBoosterMembers();
 }
 
 function staffPreviewCard(member) {
@@ -2018,6 +2035,125 @@ function bindStaffDragAndDrop(list) {
         await loadStaff();
         const status = document.querySelector('#staff-status');
         if (status) status.textContent = 'Could not save the new staff order.';
+      }
+    });
+  });
+}
+
+function orderedBoosterMembers() {
+  return [...state.boosterMembers].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+}
+
+function renderBoosterMembers() {
+  const list = document.querySelector('#booster-members-list');
+  const preview = document.querySelector('#booster-members-preview');
+  if (!list || !preview) return;
+  const ordered = orderedBoosterMembers();
+  list.innerHTML = ordered.map((member) => `
+    <article class="admin-row staff-admin-row" data-booster-member-id="${member.id}" draggable="true">
+      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'booster member')}" title="Drag to reorder">⋮⋮</button>
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'B').trim().charAt(0).toUpperCase())}</div>
+      <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Booster member')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
+      <div class="row-actions"><button type="button" data-edit-booster-member="${member.id}">Edit</button><button type="button" data-delete-booster-member="${member.id}">Delete</button></div>
+    </article>
+  `).join('') || '<p class="draft">No booster members yet.</p>';
+  preview.innerHTML = ordered.filter((member) => member.active).map(staffPreviewCard).join('') || '<p class="draft">No active booster members yet.</p>';
+  list.querySelectorAll('[data-edit-booster-member]').forEach((button) => button.addEventListener('click', () => {
+    const member = state.boosterMembers.find((item) => item.id === Number(button.dataset.editBoosterMember));
+    if (!member) return;
+    const form = document.querySelector('#booster-member-form');
+    const status = document.querySelector('#booster-member-status');
+    form.reset();
+    fillForm(form, {
+      booster_member_id: member.id,
+      name: member.name,
+      role: member.role,
+      bio: member.bio,
+      photo_url: member.photo_url,
+      active: member.active,
+    });
+    formControl(form, 'booster_member_id').value = String(member.id);
+    formControl(form, 'active').checked = Boolean(Number(member.active));
+    const photoFile = formControl(form, 'photo_file');
+    if (photoFile) photoFile.value = '';
+    if (status) status.textContent = `Editing ${member.name || 'booster member'}. Save to update.`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    formControl(form, 'name')?.focus();
+  }));
+  list.querySelectorAll('[data-delete-booster-member]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm('Delete this booster member?')) return;
+    await jsonFetch(`/api/admin/booster-members/${button.dataset.deleteBoosterMember}`, { method: 'DELETE' });
+    await loadBoosterMembers();
+  }));
+  bindBoosterMemberDragAndDrop(list);
+}
+
+async function saveBoosterMemberOrder(ids) {
+  state.boosterMembers = await jsonFetch('/api/admin/booster-members/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  renderBoosterMembers();
+}
+
+function bindBoosterMemberDragAndDrop(list) {
+  if (!list) return;
+  let dragId = null;
+  let allowRowDrag = false;
+
+  list.querySelectorAll('[data-booster-member-id]').forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset.boosterMemberId);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset.boosterMemberId) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset.boosterMemberId);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = orderedBoosterMembers();
+      const fromIndex = ordered.findIndex((member) => member.id === fromId);
+      const toIndex = ordered.findIndex((member) => member.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((member) => member.id);
+      state.boosterMembers = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
+      renderBoosterMembers();
+      try {
+        await saveBoosterMemberOrder(ids);
+      } catch (error) {
+        console.error(error);
+        await loadBoosterMembers();
+        const status = document.querySelector('#booster-member-status');
+        if (status) status.textContent = 'Could not save the new booster member order.';
       }
     });
   });
@@ -2885,7 +3021,7 @@ async function loadContactTopics() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics()]);
 }
 
 function bindForms() {
@@ -3050,6 +3186,55 @@ function bindForms() {
     formControl(form, 'staff_id').value = '';
     formControl(form, 'active').checked = true;
     document.querySelector('#staff-status').textContent = 'Creating a new staff member.';
+    formControl(form, 'name')?.focus();
+  });
+
+  document.querySelector('#booster-member-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#booster-member-status');
+    status.textContent = 'Saving…';
+    try {
+      const payload = formPayload(form);
+      const id = String(payload.booster_member_id || payload.id || '').trim();
+      delete payload.booster_member_id;
+      delete payload.id;
+      delete payload.photo_file;
+      delete payload.sort_order;
+      const file = formControl(form, 'photo_file')?.files?.[0];
+      if (file) {
+        const upload = new FormData();
+        upload.set('file', file);
+        upload.set('alt_text', payload.name || 'Booster member photo');
+        upload.set('caption', plainTextFromHtml(payload.role) || 'Booster Members');
+        upload.set('sort_order', '-500');
+        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        payload.photo_url = stored.url;
+        formControl(form, 'photo_url').value = stored.url;
+      }
+      if (!payload.name?.trim()) {
+        status.textContent = 'Name is required.';
+        return;
+      }
+      await jsonFetch(id ? `/api/admin/booster-members/${id}` : '/api/admin/booster-members', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      status.textContent = id ? 'Booster member updated.' : 'Booster member created.';
+      form.reset();
+      clearFormRichEditors(form);
+      formControl(form, 'booster_member_id').value = '';
+      formControl(form, 'active').checked = true;
+      await loadBoosterMembers();
+    } catch (error) {
+      status.textContent = `Could not save booster member: ${error.message}`;
+    }
+  });
+
+  document.querySelector('#new-booster-member')?.addEventListener('click', () => {
+    const form = document.querySelector('#booster-member-form');
+    form.reset();
+    clearFormRichEditors(form);
+    formControl(form, 'booster_member_id').value = '';
+    formControl(form, 'active').checked = true;
+    document.querySelector('#booster-member-status').textContent = 'Creating a new booster member.';
     formControl(form, 'name')?.focus();
   });
 
