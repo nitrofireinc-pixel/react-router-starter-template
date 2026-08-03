@@ -2907,6 +2907,85 @@ function setEventBoosterPlacement(form, value) {
   });
 }
 
+let eventExceptionDates = [];
+
+function syncEventRepeatUi(form = document.querySelector('#event-form')) {
+  if (!form) return;
+  const enabled = Boolean(form.querySelector('[data-repeat-enabled]')?.checked);
+  const options = form.querySelector('[data-repeat-options]');
+  if (options) options.hidden = !enabled;
+  const month = formControl(form, 'date_label');
+  const day = formControl(form, 'date_detail');
+  if (month) month.required = !enabled;
+  if (day) day.required = !enabled;
+  const booster = form.querySelector('[data-booster-placement]');
+  const note = form.querySelector('[data-repeat-booster-note]');
+  if (booster) {
+    booster.disabled = enabled;
+    if (enabled) {
+      setEventBoosterPlacement(form, 0);
+    }
+  }
+  if (note) note.hidden = !enabled;
+  renderEventExceptionsList();
+}
+
+function renderEventExceptionsList() {
+  const list = document.querySelector('#event-exceptions-list');
+  if (!list) return;
+  const dates = [...eventExceptionDates].sort();
+  list.innerHTML = dates.length
+    ? dates.map((date) => `
+      <li>
+        <span>${escapeHtml(date)}</span>
+        <button type="button" data-remove-exception="${escapeHtml(date)}">Remove</button>
+      </li>
+    `).join('')
+    : '<li class="draft">No skipped dates yet.</li>';
+  list.querySelectorAll('[data-remove-exception]').forEach((button) => {
+    button.addEventListener('click', () => {
+      eventExceptionDates = eventExceptionDates.filter((date) => date !== button.dataset.removeException);
+      renderEventExceptionsList();
+    });
+  });
+}
+
+function setEventRepeatFields(form, event = {}) {
+  if (!form) return;
+  const enabled = Number(event.repeat_enabled) === 1;
+  const enabledInput = form.querySelector('[data-repeat-enabled]');
+  if (enabledInput) enabledInput.checked = enabled;
+  const days = new Set((event.repeat_days || []).map(Number));
+  form.querySelectorAll('input[name="repeat_day"]').forEach((input) => {
+    input.checked = days.has(Number(input.value));
+  });
+  const months = new Set((event.repeat_months || []).map(Number));
+  form.querySelectorAll('input[name="repeat_month"]').forEach((input) => {
+    input.checked = months.has(Number(input.value));
+  });
+  eventExceptionDates = Array.isArray(event.repeat_exceptions) ? [...event.repeat_exceptions] : [];
+  syncEventRepeatUi(form);
+}
+
+function collectEventRepeatPayload(form) {
+  const repeat_enabled = form.querySelector('[data-repeat-enabled]')?.checked ? 1 : 0;
+  return {
+    repeat_enabled,
+    repeat_days: [...form.querySelectorAll('input[name="repeat_day"]:checked')].map((input) => Number(input.value)),
+    repeat_months: [...form.querySelectorAll('input[name="repeat_month"]:checked')].map((input) => Number(input.value)),
+    repeat_exceptions: [...eventExceptionDates],
+  };
+}
+
+function resetEventRepeatFields(form) {
+  setEventRepeatFields(form, {
+    repeat_enabled: 0,
+    repeat_days: [],
+    repeat_months: [],
+    repeat_exceptions: [],
+  });
+}
+
 function isPastEventLocal(event) {
   const year = Number(event.event_year) || new Date().getFullYear();
   const months = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12, Spring: 3, Summer: 6, Fall: 9, Autumn: 9, Winter: 12 };
@@ -2939,7 +3018,9 @@ async function loadEvents() {
       return `
     <article class="admin-row">
       <div>
-        <b>${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}${isPastEventLocal(event) ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}</b>
+        <b>${Number(event.repeat_enabled) === 1
+          ? escapeHtml(event.repeat_summary || `Repeats ${event.event_year}`)
+          : `${escapeHtml(event.date_label)} ${escapeHtml(event.date_detail)}, ${escapeHtml(event.event_year)}`}${isPastEventLocal(event) && Number(event.repeat_enabled) !== 1 ? ' · Past' : ''}${Number(event.show_on_boosters) === 1 ? ' · Boosters' : ''}${Number(event.repeat_enabled) === 1 && event.repeat_exceptions?.length ? ` · ${event.repeat_exceptions.length} exception${event.repeat_exceptions.length === 1 ? '' : 's'}` : ''}</b>
         <span class="event-admin-title">${formatInlineRichText(event.title)}</span>
         <div class="event-admin-description">${formatRichText(event.description)}</div>
         <small>Created by ${escapeHtml(creator)}</small>
@@ -2967,9 +3048,10 @@ async function loadEvents() {
     setSelectValue(formControl(form, 'date_detail'), event.date_detail);
     formControl(form, 'event_year').value = String(event.event_year || defaultEventYear());
     setEventBoosterPlacement(form, event.show_on_boosters);
-    if (status) status.textContent = `Editing “${event.title}”. Save to update.`;
+    setEventRepeatFields(form, event);
+    if (status) status.textContent = `Editing “${plainTextFromHtml(event.title) || 'event'}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    formControl(form, 'title')?.focus();
+    form.querySelector('[data-rich-input="title"]')?.focus();
   }));
   list.querySelectorAll('[data-delete-event]').forEach(button => button.addEventListener('click', async () => {
     const event = state.events.find(item => item.id === Number(button.dataset.deleteEvent));
@@ -3483,18 +3565,30 @@ function bindForms() {
     if (status) status.textContent = 'Saving…';
     try {
       const payload = formPayload(form);
+      Object.assign(payload, collectEventRepeatPayload(form));
       payload.event_year = Number(payload.event_year || defaultEventYear());
-      payload.show_on_boosters = String(payload.show_on_boosters || '0') === '1' ? 1 : 0;
+      payload.show_on_boosters = payload.repeat_enabled ? 0 : (String(payload.show_on_boosters || '0') === '1' ? 1 : 0);
       const id = String(payload.event_id || payload.id || '').trim();
       delete payload.event_id;
       delete payload.id;
       delete payload.sort_order;
+      delete payload.repeat_day;
+      delete payload.repeat_month;
       if (richTextIsEmpty(payload.title) || richTextIsEmpty(payload.description)) {
         if (status) status.textContent = 'Title and description are required.';
         return;
       }
       if (!Number.isFinite(payload.event_year) || payload.event_year < 2000 || payload.event_year > 2100) {
         if (status) status.textContent = 'Enter a valid year (2000–2100).';
+        return;
+      }
+      if (payload.repeat_enabled) {
+        if (!payload.repeat_days.length || !payload.repeat_months.length) {
+          if (status) status.textContent = 'Choose at least one weekday and one month for repeating events.';
+          return;
+        }
+      } else if (!payload.date_label || !payload.date_detail) {
+        if (status) status.textContent = 'Month and day are required.';
         return;
       }
       await jsonFetch(id ? `/api/admin/events/${id}` : '/api/admin/events', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -3506,10 +3600,28 @@ function bindForms() {
       formControl(form, 'date_detail').value = '01';
       formControl(form, 'event_year').value = String(defaultEventYear());
       setEventBoosterPlacement(form, 0);
+      resetEventRepeatFields(form);
       await loadEvents();
     } catch (error) {
       if (status) status.textContent = `Could not save event: ${error.message}`;
     }
+  });
+
+  document.querySelector('#event-form [data-repeat-enabled]')?.addEventListener('change', (event) => {
+    syncEventRepeatUi(event.currentTarget.form);
+  });
+  syncEventRepeatUi(document.querySelector('#event-form'));
+  document.querySelector('#event-exception-add')?.addEventListener('click', () => {
+    const input = document.querySelector('[data-exception-date]');
+    const value = String(input?.value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const status = document.querySelector('#event-status');
+      if (status) status.textContent = 'Choose a valid exception date.';
+      return;
+    }
+    if (!eventExceptionDates.includes(value)) eventExceptionDates.push(value);
+    if (input) input.value = '';
+    renderEventExceptionsList();
   });
 
   document.querySelector('#new-event')?.addEventListener('click', () => {
@@ -3521,6 +3633,7 @@ function bindForms() {
     formControl(form, 'date_detail').value = '01';
     formControl(form, 'event_year').value = String(defaultEventYear());
     setEventBoosterPlacement(form, 0);
+    resetEventRepeatFields(form);
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
     form.querySelector('[data-rich-input="title"]')?.focus();

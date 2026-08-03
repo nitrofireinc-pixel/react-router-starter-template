@@ -452,7 +452,11 @@ async function loadPublicContent() {
   });
 
   ensureBoosterMeetingsContainers();
-  const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => Number(event.show_on_boosters) === 1);
+  const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => (
+    Number(event.show_on_boosters) === 1
+    && Number(event.repeat_enabled) !== 1
+    && !event.is_occurrence
+  ));
   document.querySelectorAll('[data-booster-meetings]').forEach((container) => {
     if (!boosterMeetings.length) {
       container.innerHTML = '<p class="draft">No upcoming booster meetings are scheduled yet.</p>';

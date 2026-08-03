@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -291,6 +291,73 @@ test('normalizeEventPayload stores year for ordering and ignores sort_order', ()
     description: 'Monthly meeting',
   }, { show_on_boosters: 1 });
   assert.equal(preserved.show_on_boosters, 1);
+});
+
+test('repeat helpers normalize days, months, and exceptions', () => {
+  assert.deepEqual(normalizeRepeatDays(['Mon', 3, '3', 9, 'friday']), [1, 3, 5]);
+  assert.deepEqual(normalizeRepeatMonths(['Aug', 8, '13', 1]), [1, 8]);
+  assert.deepEqual(normalizeRepeatExceptions(['2026-09-01', 'bad', '2026-09-01', '2026-08-15']), [
+    '2026-08-15',
+    '2026-09-01',
+  ]);
+});
+
+test('normalizeEventPayload forces boosters off for repeating series', () => {
+  const event = normalizeEventPayload({
+    title: 'Rehearsal',
+    description: 'Weekly',
+    event_year: 2026,
+    repeat_enabled: 1,
+    repeat_days: [1, 3],
+    repeat_months: [8, 9],
+    show_on_boosters: 1,
+  });
+  assert.equal(event.repeat_enabled, 1);
+  assert.deepEqual(event.repeat_days, [1, 3]);
+  assert.deepEqual(event.repeat_months, [8, 9]);
+  assert.equal(event.show_on_boosters, 0);
+  assert.equal(event.date_label, 'Aug');
+  assert.equal(event.date_detail, '01');
+  assert.match(formatRepeatSummary(event), /Mon, Wed/);
+  assert.match(formatRepeatSummary(event), /Aug, Sep/);
+});
+
+test('expandRecurringEvent creates dated rows and skips exceptions', () => {
+  const series = {
+    id: 42,
+    title: 'Practice',
+    description: 'After school',
+    event_year: 2026,
+    repeat_enabled: 1,
+    repeat_days: [1], // Mondays
+    repeat_months: [9], // September 2026
+    repeat_exceptions: ['2026-09-07'],
+    show_on_boosters: 1,
+  };
+  const occurrences = expandRecurringEvent(series);
+  assert.ok(occurrences.length > 0);
+  assert.deepEqual(occurrences.map((item) => item.occurrence_date), [
+    '2026-09-14',
+    '2026-09-21',
+    '2026-09-28',
+  ]);
+  assert.ok(occurrences.every((item) => item.is_occurrence === true));
+  assert.ok(occurrences.every((item) => item.series_id === 42));
+  assert.ok(occurrences.every((item) => item.show_on_boosters === 0));
+  assert.equal(occurrences[0].date_label, 'Sep');
+  assert.equal(occurrences[0].date_detail, '14');
+
+  const single = expandRecurringEvent({
+    id: 7,
+    date_label: 'Oct',
+    date_detail: '05',
+    event_year: 2026,
+    title: 'One-off',
+    repeat_enabled: 0,
+  });
+  assert.equal(single.length, 1);
+  assert.equal(single[0].is_occurrence, false);
+  assert.equal(single[0].series_id, 7);
 });
 
 test('ensureBoosterMeetingsSlot injects meetings list hook into Boosters card', () => {

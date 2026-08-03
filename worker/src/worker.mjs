@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-20';
+const ASSET_VERSION = 'admin-cms-20260803-22';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -401,6 +401,26 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE events ADD COLUMN created_by INTEGER').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN repeat_enabled INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN repeat_days TEXT NOT NULL DEFAULT \'[]\'').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN repeat_months TEXT NOT NULL DEFAULT \'[]\'').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE events ADD COLUMN repeat_exceptions TEXT NOT NULL DEFAULT \'[]\'').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -883,6 +903,114 @@ export function isUpcomingEvent(event, now = new Date(), timeZone = 'America/New
   return eventDate.day >= today.day;
 }
 
+const WEEKDAY_NAME_TO_INDEX = {
+  sun: 0, sunday: 0,
+  mon: 1, monday: 1,
+  tue: 2, tues: 2, tuesday: 2,
+  wed: 3, wednesday: 3,
+  thu: 4, thur: 4, thurs: 4, thursday: 4,
+  fri: 5, friday: 5,
+  sat: 6, saturday: 6,
+};
+
+const MONTH_INDEX_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAY_INDEX_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null || value === '') return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      return String(value).split(/[\s,]+/).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+export function normalizeRepeatDays(value) {
+  const out = [];
+  for (const item of parseJsonArray(value)) {
+    if (typeof item === 'number' && Number.isInteger(item) && item >= 0 && item <= 6) {
+      out.push(item);
+      continue;
+    }
+    const asNumber = Number(item);
+    if (Number.isInteger(asNumber) && asNumber >= 0 && asNumber <= 6) {
+      out.push(asNumber);
+      continue;
+    }
+    const mapped = WEEKDAY_NAME_TO_INDEX[String(item || '').trim().toLowerCase()];
+    if (mapped != null) out.push(mapped);
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+export function normalizeRepeatMonths(value) {
+  const out = [];
+  for (const item of parseJsonArray(value)) {
+    const asNumber = Number(item);
+    if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= 12) {
+      out.push(asNumber);
+      continue;
+    }
+    const rank = monthRank(item);
+    if (rank >= 1 && rank <= 12) out.push(rank);
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+export function normalizeRepeatExceptions(value) {
+  const out = [];
+  for (const item of parseJsonArray(value)) {
+    const raw = String(item || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) out.push(raw);
+  }
+  return [...new Set(out)].sort();
+}
+
+export function formatRepeatSummary(event = {}) {
+  if (!Number(event.repeat_enabled)) return '';
+  const days = normalizeRepeatDays(event.repeat_days).map((day) => WEEKDAY_INDEX_LABELS[day]).join(', ');
+  const months = normalizeRepeatMonths(event.repeat_months).map((month) => MONTH_INDEX_LABELS[month - 1]).join(', ');
+  const bits = [];
+  if (days) bits.push(days);
+  if (months) bits.push(months);
+  const year = eventYearValue(event);
+  return bits.length ? `Repeats ${bits.join(' · ')} ${year}` : `Repeats in ${year}`;
+}
+
+export function expandRecurringEvent(event) {
+  if (!Number(event?.repeat_enabled)) return [{ ...event, is_occurrence: false, series_id: event?.id ?? null }];
+  const days = normalizeRepeatDays(event.repeat_days);
+  const months = normalizeRepeatMonths(event.repeat_months);
+  const exceptions = new Set(normalizeRepeatExceptions(event.repeat_exceptions));
+  if (!days.length || !months.length) return [];
+  const year = eventYearValue(event);
+  const occurrences = [];
+  for (const month of months) {
+    const dim = daysInMonth(year, month);
+    for (let day = 1; day <= dim; day += 1) {
+      const dow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+      if (!days.includes(dow)) continue;
+      const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      if (exceptions.has(iso)) continue;
+      occurrences.push({
+        ...event,
+        series_id: event.id,
+        occurrence_date: iso,
+        is_occurrence: true,
+        date_label: MONTH_INDEX_LABELS[month - 1],
+        date_detail: String(day).padStart(2, '0'),
+        show_on_boosters: 0,
+      });
+    }
+  }
+  return occurrences;
+}
+
 export function normalizeEventPayload(payload = {}, existing = null) {
   const date_label = String(payload.date_label ?? existing?.date_label ?? '').trim();
   const date_detail = String(payload.date_detail ?? existing?.date_detail ?? '').trim();
@@ -897,51 +1025,88 @@ export function normalizeEventPayload(payload = {}, existing = null) {
   const event_year = eventYearValue({
     event_year: payload.event_year ?? existing?.event_year ?? new Date().getFullYear(),
   });
+  const repeat_enabled = payload.repeat_enabled !== undefined
+    ? (payload.repeat_enabled === true || payload.repeat_enabled === 1 || payload.repeat_enabled === '1' ? 1 : 0)
+    : (Number(existing?.repeat_enabled) === 1 ? 1 : 0);
+  const repeat_days = normalizeRepeatDays(
+    payload.repeat_days !== undefined ? payload.repeat_days : existing?.repeat_days,
+  );
+  const repeat_months = normalizeRepeatMonths(
+    payload.repeat_months !== undefined ? payload.repeat_months : existing?.repeat_months,
+  );
+  const repeat_exceptions = normalizeRepeatExceptions(
+    payload.repeat_exceptions !== undefined ? payload.repeat_exceptions : existing?.repeat_exceptions,
+  );
   const rawBooster = payload.show_on_boosters !== undefined
     ? payload.show_on_boosters
     : existing?.show_on_boosters;
+  // Repeating series stay on the calendar only — never on Boosters.
+  const show_on_boosters = repeat_enabled
+    ? 0
+    : (rawBooster === true || rawBooster === 1 || rawBooster === '1' ? 1 : 0);
+  const firstMonthLabel = repeat_months.length ? MONTH_INDEX_LABELS[repeat_months[0] - 1] : '';
   return {
-    date_label,
-    date_detail,
+    date_label: date_label || (repeat_enabled ? firstMonthLabel || 'Jan' : ''),
+    date_detail: date_detail || (repeat_enabled ? '01' : ''),
     event_year,
     title,
     description,
     sort_order: 0,
-    show_on_boosters: rawBooster === true || rawBooster === 1 || rawBooster === '1' ? 1 : 0,
+    show_on_boosters,
+    repeat_enabled,
+    repeat_days,
+    repeat_months,
+    repeat_exceptions,
   };
 }
 
-async function getEvents(env, { upcomingOnly = false, now = new Date(), includeCreators = false } = {}) {
+function hydrateEventRow(row = {}) {
+  return {
+    ...row,
+    event_year: eventYearValue(row),
+    show_on_boosters: Number(row.show_on_boosters) === 1 ? 1 : 0,
+    repeat_enabled: Number(row.repeat_enabled) === 1 ? 1 : 0,
+    repeat_days: normalizeRepeatDays(row.repeat_days),
+    repeat_months: normalizeRepeatMonths(row.repeat_months),
+    repeat_exceptions: normalizeRepeatExceptions(row.repeat_exceptions),
+    repeat_summary: formatRepeatSummary(row),
+    created_by: row.created_by == null || row.created_by === '' ? null : Number(row.created_by),
+    created_by_name: row.created_by_name || '',
+    created_by_username: row.created_by_username || '',
+    is_occurrence: false,
+    series_id: row.id ?? null,
+  };
+}
+
+async function getEvents(env, { upcomingOnly = false, now = new Date(), includeCreators = false, expandRepeats = false } = {}) {
+  const selectCols = 'e.id, e.date_label, e.date_detail, e.event_year, e.title, e.description, e.sort_order, e.show_on_boosters, e.created_by, e.repeat_enabled, e.repeat_days, e.repeat_months, e.repeat_exceptions';
   const rows = includeCreators
     ? await env.DB.prepare(`
-        SELECT e.id, e.date_label, e.date_detail, e.event_year, e.title, e.description, e.sort_order, e.show_on_boosters, e.created_by,
+        SELECT ${selectCols},
                u.display_name AS created_by_name, u.username AS created_by_username
         FROM events e
         LEFT JOIN users u ON u.id = e.created_by
       `).all()
-    : await env.DB.prepare('SELECT id, date_label, date_detail, event_year, title, description, sort_order, show_on_boosters, created_by FROM events').all();
-  const events = (rows.results || [])
-    .map((row) => ({
-      ...row,
-      event_year: eventYearValue(row),
-      show_on_boosters: Number(row.show_on_boosters) === 1 ? 1 : 0,
-      created_by: row.created_by == null || row.created_by === '' ? null : Number(row.created_by),
-      created_by_name: row.created_by_name || '',
-      created_by_username: row.created_by_username || '',
-    }))
-    .sort(compareEventsByDate);
-  if (!upcomingOnly) return events;
-  return events.filter((event) => isUpcomingEvent(event, now));
+    : await env.DB.prepare(`SELECT id, date_label, date_detail, event_year, title, description, sort_order, show_on_boosters, created_by, repeat_enabled, repeat_days, repeat_months, repeat_exceptions FROM events`).all();
+  const events = (rows.results || []).map((row) => hydrateEventRow(row));
+  const expanded = expandRepeats
+    ? events.flatMap((event) => expandRecurringEvent(event))
+    : events;
+  expanded.sort(compareEventsByDate);
+  if (!upcomingOnly) return expanded;
+  return expanded.filter((event) => isUpcomingEvent(event, now));
 }
 
 async function getEventById(env, id) {
-  return env.DB.prepare(`
+  const row = await env.DB.prepare(`
     SELECT e.id, e.date_label, e.date_detail, e.event_year, e.title, e.description, e.sort_order, e.show_on_boosters, e.created_by,
+           e.repeat_enabled, e.repeat_days, e.repeat_months, e.repeat_exceptions,
            u.display_name AS created_by_name, u.username AS created_by_username
     FROM events e
     LEFT JOIN users u ON u.id = e.created_by
     WHERE e.id = ?
   `).bind(id).first();
+  return row ? hydrateEventRow(row) : null;
 }
 
 export function ensureBoosterMeetingsSlot(html) {
@@ -2108,7 +2273,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/events' && request.method === 'GET') {
-    return jsonResponse(await getEvents(env, { upcomingOnly: true }));
+    return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
@@ -2689,17 +2854,37 @@ async function handleApi(request, env, url) {
     if (!canCreateEvents(auth.user) && !canEditPage(auth.user, 'calendar')) {
       return jsonResponse({ detail: 'Permission required: events' }, 403);
     }
-    return jsonResponse(await getEvents(env, { upcomingOnly: false, includeCreators: true }));
+    return jsonResponse(await getEvents(env, { upcomingOnly: false, includeCreators: true, expandRepeats: false }));
   }
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canCreateEvents(auth.user)) return jsonResponse({ detail: 'Permission required: events' }, 403);
     const p = normalizeEventPayload(await request.json());
-    if (!p.date_label || !p.date_detail || !htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
+    if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
+      return jsonResponse({ detail: 'Title and description are required' }, 422);
+    }
+    if (p.repeat_enabled) {
+      if (!p.repeat_days.length || !p.repeat_months.length) {
+        return jsonResponse({ detail: 'Choose at least one weekday and one month for repeating events' }, 422);
+      }
+    } else if (!p.date_label || !p.date_detail) {
       return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
     }
-    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order, show_on_boosters, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, p.show_on_boosters, auth.user.id).run();
+    const result = await env.DB.prepare('INSERT INTO events (date_label, date_detail, event_year, title, description, sort_order, show_on_boosters, created_by, repeat_enabled, repeat_days, repeat_months, repeat_exceptions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(
+      p.date_label,
+      p.date_detail,
+      p.event_year,
+      p.title,
+      p.description,
+      p.sort_order,
+      p.show_on_boosters,
+      auth.user.id,
+      p.repeat_enabled,
+      JSON.stringify(p.repeat_days),
+      JSON.stringify(p.repeat_months),
+      JSON.stringify(p.repeat_exceptions),
+    ).run();
     return jsonResponse(await getEventById(env, result.meta.last_row_id));
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
@@ -2717,10 +2902,30 @@ async function handleApi(request, env, url) {
       return jsonResponse({ ok: true });
     }
     const p = normalizeEventPayload(await request.json(), existing);
-    if (!p.date_label || !p.date_detail || !htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
+    if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
+      return jsonResponse({ detail: 'Title and description are required' }, 422);
+    }
+    if (p.repeat_enabled) {
+      if (!p.repeat_days.length || !p.repeat_months.length) {
+        return jsonResponse({ detail: 'Choose at least one weekday and one month for repeating events' }, 422);
+      }
+    } else if (!p.date_label || !p.date_detail) {
       return jsonResponse({ detail: 'Month, day, title, and description are required' }, 422);
     }
-    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?, sort_order = ?, show_on_boosters = ? WHERE id = ?').bind(p.date_label, p.date_detail, p.event_year, p.title, p.description, p.sort_order, p.show_on_boosters, id).run();
+    await env.DB.prepare('UPDATE events SET date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?, sort_order = ?, show_on_boosters = ?, repeat_enabled = ?, repeat_days = ?, repeat_months = ?, repeat_exceptions = ? WHERE id = ?').bind(
+      p.date_label,
+      p.date_detail,
+      p.event_year,
+      p.title,
+      p.description,
+      p.sort_order,
+      p.show_on_boosters,
+      p.repeat_enabled,
+      JSON.stringify(p.repeat_days),
+      JSON.stringify(p.repeat_months),
+      JSON.stringify(p.repeat_exceptions),
+      id,
+    ).run();
     return jsonResponse(await getEventById(env, id));
   }
 
@@ -3079,7 +3284,54 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
-<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Editors can edit or delete only the events they create, unless an admin grants manage-all access. Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label><fieldset class="event-placement"><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1"> Boosters meetings card</label></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
+<section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
+<fieldset class="event-repeat" data-event-repeat>
+  <legend>Repeat</legend>
+  <label class="checkline"><input type="checkbox" name="repeat_enabled" value="1" data-repeat-enabled> Repeat on selected days and months</label>
+  <div class="event-repeat-options" data-repeat-options hidden>
+    <p class="muted">Creates a dated calendar row for each matching weekday in the selected months of this year. Public calendar still shows only the next 5 upcoming dates. Repeating events stay on the calendar only (not Boosters).</p>
+    <div class="event-repeat-grid">
+      <div>
+        <p class="event-repeat-heading">Days of the week</p>
+        <div class="event-repeat-checks">
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="0"> Sun</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="1"> Mon</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="2"> Tue</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="3"> Wed</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="4"> Thu</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="5"> Fri</label>
+          <label class="checkline"><input type="checkbox" name="repeat_day" value="6"> Sat</label>
+        </div>
+      </div>
+      <div>
+        <p class="event-repeat-heading">Months</p>
+        <div class="event-repeat-checks">
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="1"> Jan</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="2"> Feb</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="3"> Mar</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="4"> Apr</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="5"> May</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="6"> Jun</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="7"> Jul</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="8"> Aug</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="9"> Sep</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="10"> Oct</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="11"> Nov</label>
+          <label class="checkline"><input type="checkbox" name="repeat_month" value="12"> Dec</label>
+        </div>
+      </div>
+    </div>
+    <div class="event-repeat-exceptions">
+      <p class="event-repeat-heading">Exceptions (skip these dates)</p>
+      <div class="event-exception-add">
+        <input type="date" data-exception-date aria-label="Exception date">
+        <button class="btn outline" type="button" id="event-exception-add">Add exception</button>
+      </div>
+      <ul id="event-exceptions-list" class="event-exceptions-list"></ul>
+    </div>
+  </div>
+</fieldset>
+<fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
 <section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
