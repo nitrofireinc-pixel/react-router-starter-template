@@ -1288,13 +1288,20 @@ function closeAdminNav() {
 
 function renderMobileAdminMenu() {
   const menu = document.querySelector('#admin-mobile-menu');
-  const sourceButtons = [...document.querySelectorAll('.admin-menu button')].filter(button => !button.hidden);
+  // Flatten visible actions only. Skip submenu parents (e.g. Sponsors) and anything
+  // inside a hidden group so Manage / page-edit destinations stay one tap away.
+  const sourceButtons = [...document.querySelectorAll('.admin-menu button')].filter((button) => (
+    !button.hidden
+    && !button.closest('[hidden]')
+    && !button.hasAttribute('data-sponsors-toggle')
+  ));
   if (!menu) return;
   menu.innerHTML = `${sourceButtons.map((button, index) => {
     const label = button.textContent.trim();
     const tab = button.dataset.tab || '';
     const shortcut = button.dataset.editShortcut || '';
-    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}">${escapeHtml(label)}</button>`;
+    const sponsorNav = button.dataset.sponsorNav || '';
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}">${escapeHtml(label)}</button>`;
   }).join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>`;
   menu.querySelectorAll('button[data-mobile-index]').forEach(button => {
@@ -1311,15 +1318,26 @@ function renderMobileAdminMenu() {
   });
 }
 
+function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
+  document.querySelectorAll('.admin-menu button').forEach((button) => {
+    const isTab = Boolean(tab) && button.dataset.tab === tab && !button.dataset.editShortcut && !button.dataset.sponsorNav;
+    const isPage = Boolean(pageSlug) && button.dataset.editShortcut === pageSlug;
+    const isSponsorNav = Boolean(sponsorNav) && button.dataset.sponsorNav === sponsorNav;
+    button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav));
+  });
+}
+
 function activateTab(name) {
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
     document.querySelectorAll('.cms-panel').forEach(panel => { panel.hidden = true; });
     document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
-    document.querySelectorAll('.admin-menu button').forEach(button => {
-      button.classList.toggle('active', button.dataset.tab === name && !button.dataset.editShortcut);
-    });
+    markAdminNavActive({ tab: name });
+    if (name === 'sponsors') {
+      setSponsorsMenuOpen(true);
+      loadSponsors().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -1333,7 +1351,9 @@ function activateTab(name) {
 }
 
 function activatePageShortcut(slug) {
-  document.querySelectorAll('.admin-menu button').forEach(button => button.classList.toggle('active', button.dataset.editShortcut === slug));
+  const sponsorNav = slug === 'sponsors' ? 'sponsors-page' : (slug === 'become-a-sponsor' ? 'become-a-sponsor' : '');
+  if (sponsorNav) setSponsorsMenuOpen(true);
+  markAdminNavActive({ pageSlug: slug, sponsorNav });
   closeAdminNav();
 }
 
@@ -1355,9 +1375,11 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
+
 function editablePages() {
   return (state.pages || [])
-    .filter(canEditPage)
+    .filter((page) => canEditPage(page) && !SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug))
     .slice()
     .sort((a, b) => {
       const orderA = Number(a.nav_order ?? 99);
@@ -1365,6 +1387,38 @@ function editablePages() {
       if (orderA !== orderB) return orderA - orderB;
       return pageShortcutLabel(a).localeCompare(pageShortcutLabel(b));
     });
+}
+
+function canAccessSponsorsMenu() {
+  return canEditSponsors() || canEditPage('sponsors') || canEditPage('become-a-sponsor');
+}
+
+function setSponsorsMenuOpen(open) {
+  document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-sponsors-toggle]');
+    const sub = menu.querySelector('[data-sponsors-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindSponsorsMenu() {
+  const menu = document.querySelector('[data-sponsors-menu]');
+  const toggle = menu?.querySelector('[data-sponsors-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setSponsorsMenuOpen(open);
+  });
+  menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sponsorNav;
+      setSponsorsMenuOpen(true);
+      if (key === 'sponsors-page') editPage('sponsors');
+      else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
+    });
+  });
 }
 
 function renderPageShortcuts() {
@@ -1398,12 +1452,27 @@ function showAllowedPanels() {
     photos: hasPermission('photos'),
   };
   let manageVisible = false;
-  document.querySelectorAll('.admin-menu > [data-tab]').forEach(button => {
+  document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
     const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard') manageVisible = true;
   });
+  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
+  const sponsorsAccess = canAccessSponsorsMenu();
+  if (sponsorsMenu) {
+    sponsorsMenu.hidden = !sponsorsAccess;
+    if (sponsorsAccess) manageVisible = true;
+    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
+    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
+    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
+    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
+    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
+    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
+    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
+    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
+  }
+  bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
@@ -1418,16 +1487,6 @@ function showAllowedPanels() {
   if (editDirectorsPage) {
     editDirectorsPage.hidden = !canEditPage('directors');
     editDirectorsPage.onclick = () => editPage('directors');
-  }
-  const editSponsorsPage = document.querySelector('#edit-sponsors-page');
-  if (editSponsorsPage) {
-    editSponsorsPage.hidden = !canEditPage('sponsors');
-    editSponsorsPage.onclick = () => editPage('sponsors');
-  }
-  const editBecomeSponsorPage = document.querySelector('#edit-become-sponsor-page');
-  if (editBecomeSponsorPage) {
-    editBecomeSponsorPage.hidden = !canEditPage('become-a-sponsor');
-    editBecomeSponsorPage.onclick = () => editPage('become-a-sponsor');
   }
   const editContactPage = document.querySelector('#edit-contact-page');
   if (editContactPage) {
@@ -1499,9 +1558,10 @@ function renderDashboard() {
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
   const cards = [
-    state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit sponsor packages copy and the inquiry form intro on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
+    canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
+    state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
+    state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
-    canEditSponsors() && ['Sponsors', 'Add, edit, and reorder sponsor logos, names, and addresses.', 'sponsors', 'Community', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
