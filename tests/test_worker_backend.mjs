@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
+<<<<<<< HEAD
 import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, extractSponsorTierFields, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection } from '../worker/src/worker.mjs';
+=======
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureSponsorTiersSection, escapeHtml, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection } from '../worker/src/worker.mjs';
+>>>>>>> ae634f5 (Fix calendar event titles showing &amp; and &nbsp;)
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -177,6 +181,28 @@ test('event helpers keep rich text titles and descriptions', () => {
   assert.match(event.title, /<strong>Kickoff<\/strong>/);
   assert.match(event.description, /<em>water<\/em>/);
   assert.doesNotMatch(event.description, /<img/i);
+});
+
+test('event helpers decode contenteditable entities instead of showing &amp; / &nbsp;', () => {
+  assert.equal(decodeBasicHtmlEntities('Band &amp; Guard'), 'Band & Guard');
+  assert.equal(decodeBasicHtmlEntities('Hello&nbsp;World'), 'Hello World');
+  assert.equal(decodeBasicHtmlEntities('A &amp;amp; B'), 'A & B');
+
+  const event = normalizeEventPayload({
+    date_label: 'Aug',
+    date_detail: '01',
+    event_year: 2026,
+    title: 'Band &amp; Guard',
+    description: 'Meet&nbsp;at&nbsp;the&nbsp;field',
+  });
+  assert.equal(event.title, 'Band & Guard');
+  assert.equal(event.description, 'Meet at the field');
+
+  assert.equal(formatInlineRichText('Band &amp; Guard'), 'Band &amp; Guard');
+  assert.equal(formatInlineRichText('Hello&nbsp;World'), 'Hello World');
+  assert.match(formatRichText('Meet&nbsp;at the field'), /<p>Meet at the field<\/p>/);
+  assert.doesNotMatch(formatInlineRichText('Band &amp; Guard'), /&amp;amp;/);
+  assert.doesNotMatch(formatInlineRichText('Hello&nbsp;World'), /&nbsp;/);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {

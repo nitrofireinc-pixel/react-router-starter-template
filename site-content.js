@@ -4,6 +4,23 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function decodeBasicHtmlEntities(value) {
+  let text = String(value ?? '');
+  for (let i = 0; i < 3; i += 1) {
+    const next = text
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0*39;/gi, "'")
+      .replace(/&#x0*27;/gi, "'");
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
 function looksLikeHtml(value) {
   return /<\/?[a-z][^>]*>/i.test(String(value || ''));
 }
@@ -109,17 +126,19 @@ function sanitizeInlineRichHtml(dirty) {
 function paragraphsFromText(value) {
   return String(value || '')
     .split(/\n\s*\n/)
-    .map((part) => part.trim())
+    .map((part) => decodeBasicHtmlEntities(part).trim())
     .filter(Boolean)
     .map((part) => `<p>${escapeHtml(part)}</p>`)
-    .join('') || (String(value || '').trim() ? `<p>${escapeHtml(String(value).trim())}</p>` : '');
+    .join('') || (String(value || '').trim() ? `<p>${escapeHtml(decodeBasicHtmlEntities(String(value).trim()))}</p>` : '');
 }
 
 function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
   if (!source.trim()) return '';
-  return looksLikeInlineRichHtml(source) ? sanitizeInlineRichHtml(source) : escapeHtml(source);
+  return looksLikeInlineRichHtml(source)
+    ? sanitizeInlineRichHtml(source)
+    : escapeHtml(decodeBasicHtmlEntities(source));
 }
 
 function formatRichText(value, fallback = '') {

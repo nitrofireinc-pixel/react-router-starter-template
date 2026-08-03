@@ -131,9 +131,15 @@ function syncFormRichEditors(form) {
     const control = formControl(form, name);
     if (!control) return;
     const mode = editor.dataset.richMode || 'block';
-    control.value = mode === 'inline'
-      ? sanitizeInlineRichHtml(editor.innerHTML || '')
-      : sanitizeRichHtml(editor.innerHTML || '');
+    if (mode === 'inline') {
+      const cleaned = sanitizeInlineRichHtml(editor.innerHTML || '');
+      // Contenteditable serializes & and spaces as entities; store plain text when no rich tags remain.
+      control.value = cleaned && !looksLikeInlineRichHtml(cleaned)
+        ? decodeBasicHtmlEntities(cleaned)
+        : cleaned;
+      return;
+    }
+    control.value = sanitizeRichHtml(editor.innerHTML || '');
   });
 }
 
@@ -404,11 +410,30 @@ function sanitizeInlineRichHtml(dirty) {
   return html.replace(/\s+/g, ' ').replace(/(?:<br>\s*){2,}/gi, '<br>').trim();
 }
 
+function decodeBasicHtmlEntities(value) {
+  let text = String(value ?? '');
+  for (let i = 0; i < 3; i += 1) {
+    const next = text
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0*39;/gi, "'")
+      .replace(/&#x0*27;/gi, "'");
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
 function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
   if (!source.trim()) return '';
-  return looksLikeInlineRichHtml(source) ? sanitizeInlineRichHtml(source) : escapeHtml(source);
+  return looksLikeInlineRichHtml(source)
+    ? sanitizeInlineRichHtml(source)
+    : escapeHtml(decodeBasicHtmlEntities(source));
 }
 
 function formatRichText(value, fallback = '') {
@@ -430,7 +455,7 @@ function inlineHtmlFromNode(node) {
 }
 
 function plainTextFromHtml(value) {
-  return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeBasicHtmlEntities(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 function extractHomeFeatureCardsFromHtml(html = '') {
@@ -581,7 +606,7 @@ function escapeAttr(value) {
 function paragraphsFromText(value) {
   return String(value || '')
     .split(/\n\s*\n/)
-    .map(part => part.trim())
+    .map(part => decodeBasicHtmlEntities(part).trim())
     .filter(Boolean)
     .map(part => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
     .join('');

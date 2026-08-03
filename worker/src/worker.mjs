@@ -207,6 +207,23 @@ export function escapeHtml(value) {
   }[char]));
 }
 
+export function decodeBasicHtmlEntities(value) {
+  let text = String(value ?? '');
+  for (let i = 0; i < 3; i += 1) {
+    const next = text
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0*39;/gi, "'")
+      .replace(/&#x0*27;/gi, "'");
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
 function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
@@ -859,9 +876,11 @@ export function normalizeEventPayload(payload = {}, existing = null) {
   const date_detail = String(payload.date_detail ?? existing?.date_detail ?? '').trim();
   const titleRaw = String(payload.title ?? existing?.title ?? '').trim();
   const descriptionRaw = String(payload.description ?? existing?.description ?? '').trim();
-  const title = titleRaw ? (looksLikeInlineRichHtml(titleRaw) ? sanitizeInlineRichHtml(titleRaw) : titleRaw) : '';
+  const title = titleRaw
+    ? (looksLikeInlineRichHtml(titleRaw) ? sanitizeInlineRichHtml(titleRaw) : decodeBasicHtmlEntities(titleRaw).trim())
+    : '';
   const description = descriptionRaw
-    ? (looksLikeHtml(descriptionRaw) ? sanitizeRichHtml(descriptionRaw) : descriptionRaw)
+    ? (looksLikeHtml(descriptionRaw) ? sanitizeRichHtml(descriptionRaw) : decodeBasicHtmlEntities(descriptionRaw).trim())
     : '';
   const event_year = eventYearValue({
     event_year: payload.event_year ?? existing?.event_year ?? new Date().getFullYear(),
@@ -1485,18 +1504,14 @@ async function sendViaResend(env, { to, replyTo, subject, text, html, fromEmail,
 }
 
 export function htmlToPlainText(html) {
-  return String(html || '')
-    .replace(/<\s*br\s*\/?>/gi, '\n')
-    .replace(/<\/\s*p\s*>/gi, '\n\n')
-    .replace(/<\/\s*li\s*>/gi, '\n')
-    .replace(/<\/\s*h[1-6]\s*>/gi, '\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+  return decodeBasicHtmlEntities(
+    String(html || '')
+      .replace(/<\s*br\s*\/?>/gi, '\n')
+      .replace(/<\/\s*p\s*>/gi, '\n\n')
+      .replace(/<\/\s*li\s*>/gi, '\n')
+      .replace(/<\/\s*h[1-6]\s*>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+  )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -1801,7 +1816,7 @@ function pagePathFromSlug(slug) {
 function paragraphsFromText(value) {
   return String(value || '')
     .split(/\n\s*\n/)
-    .map((part) => part.trim())
+    .map((part) => decodeBasicHtmlEntities(part).trim())
     .filter(Boolean)
     .map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
     .join('');
@@ -1921,7 +1936,9 @@ export function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
   if (!source.trim()) return '';
-  return looksLikeInlineRichHtml(source) ? sanitizeInlineRichHtml(source) : escapeHtml(source);
+  return looksLikeInlineRichHtml(source)
+    ? sanitizeInlineRichHtml(source)
+    : escapeHtml(decodeBasicHtmlEntities(source));
 }
 
 export function formatRichText(value, fallback = '') {
