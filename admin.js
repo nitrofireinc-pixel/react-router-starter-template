@@ -3164,6 +3164,42 @@ async function refreshAll() {
 }
 
 function bindForms() {
+  document.querySelector('#password-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#password-status');
+    const currentPassword = String(form.elements.current_password?.value || '');
+    const newPassword = String(form.elements.new_password?.value || '');
+    const confirmPassword = String(form.elements.confirm_password?.value || '');
+    if (!currentPassword) {
+      if (status) status.textContent = 'Enter your current password.';
+      return;
+    }
+    if (newPassword.length < 8) {
+      if (status) status.textContent = 'New password must be at least 8 characters.';
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      if (status) status.textContent = 'New password and confirmation do not match.';
+      return;
+    }
+    if (status) status.textContent = 'Updating password…';
+    try {
+      await jsonFetch('/api/admin/password', {
+        method: 'POST',
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        }),
+      });
+      form.reset();
+      if (status) status.textContent = 'Password updated. Use your new password the next time you log in.';
+    } catch (error) {
+      if (status) status.textContent = error?.message || 'Could not update password.';
+    }
+  });
+
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
