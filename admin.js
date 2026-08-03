@@ -276,7 +276,7 @@ function sponsorTierFromLevel(level = '') {
 
 function sponsorTierBenefitsText(level = '') {
   const tier = sponsorTierFromLevel(level);
-  if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and home football game announcements.';
+  if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and public advertising.';
   if (tier === 'silver') return 'Includes website marquee and homepage fly-in ad.';
   return 'Includes website marquee logo feature.';
 }
@@ -2012,75 +2012,6 @@ function resetSponsorForm(form) {
   syncSponsorTierBenefits(form);
 }
 
-function goldAnnouncerSponsors() {
-  return orderedSponsors().filter((sponsor) => (
-    Number(sponsor.active) !== 0
-    && (sponsor.show_game_announcement || sponsorTierFromLevel(sponsor.level) === 'gold')
-  ));
-}
-
-function renderAnnouncerListPreview() {
-  const preview = document.querySelector('#announcer-list-preview');
-  if (!preview) return;
-  const gold = goldAnnouncerSponsors();
-  if (!gold.length) {
-    preview.innerHTML = '<p class="draft">No active Gold sponsors yet. Assign the Gold tier to include a business on game-day announcements.</p>';
-    return;
-  }
-  preview.innerHTML = `
-    <ol class="announcer-list">
-      ${gold.map((sponsor, index) => `
-        <li>
-          <b>${index + 1}. ${escapeHtml(sponsor.name)}</b>
-          <span>Please welcome our Gold sponsor, ${escapeHtml(sponsor.name)}.</span>
-        </li>
-      `).join('')}
-    </ol>
-  `;
-}
-
-function printAnnouncerList() {
-  const gold = goldAnnouncerSponsors();
-  const rows = gold.length
-    ? gold.map((sponsor, index) => `
-        <li>
-          <strong>${index + 1}. ${escapeHtml(sponsor.name)}</strong>
-          <div class="script">Please welcome our Gold sponsor, ${escapeHtml(sponsor.name)}.</div>
-        </li>
-      `).join('')
-    : '<li><strong>No active Gold sponsors yet.</strong></li>';
-  const html = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Game-day Announcer List | East Forsyth Band</title>
-  <style>
-    body{font-family:Georgia,"Times New Roman",serif;color:#111;margin:32px;line-height:1.4}
-    h1{font-size:1.8rem;margin:0 0 .25rem}
-    .meta{color:#444;margin:0 0 1.25rem}
-    ol{margin:0;padding-left:1.4rem}
-    li{margin:0 0 1rem}
-    .script{margin-top:.25rem;font-size:1.05rem}
-    @media print{body{margin:.6in}}
-  </style>
-</head>
-<body>
-  <h1>East Forsyth Band — Gold Sponsor Announcements</h1>
-  <p class="meta">Home football game announcer list · ${escapeHtml(new Date().toLocaleDateString())}</p>
-  <ol>${rows}</ol>
-  <script>window.addEventListener('load', () => window.print());<\/script>
-</body>
-</html>`;
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=820,height=900');
-  if (!popup) {
-    alert('Allow pop-ups to print the announcer list.');
-    return;
-  }
-  popup.document.open();
-  popup.document.write(html);
-  popup.document.close();
-}
-
 function renderSponsors() {
   const list = document.querySelector('#sponsors-list');
   if (!list) return;
@@ -2091,7 +2022,7 @@ function renderSponsors() {
     const benefits = [];
     if (sponsor.show_marquee !== false) benefits.push('Marquee');
     if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
-    if (sponsor.show_game_announcement || tier === 'gold') benefits.push('Game announcement');
+    if (sponsor.show_game_announcement || tier === 'gold') benefits.push('Public advert');
     return `
     <article class="admin-row sponsor-admin-row" data-sponsor-id="${sponsor.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(sponsor.name || 'sponsor')}" title="Drag to reorder">⋮⋮</button>
@@ -2107,7 +2038,6 @@ function renderSponsors() {
   }).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
   const preview = document.querySelector('#sponsor-preview');
   if (preview) preview.innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
-  renderAnnouncerListPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
@@ -2748,9 +2678,6 @@ function bindForms() {
   });
   document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
     syncSponsorTierBenefits(event.currentTarget.form);
-  });
-  document.querySelector('#print-announcer-list')?.addEventListener('click', () => {
-    printAnnouncerList();
   });
   syncSponsorTierBenefits();
 

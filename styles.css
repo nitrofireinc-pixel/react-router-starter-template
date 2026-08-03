@@ -1673,20 +1673,17 @@ body.sponsor-map-open{overflow:hidden}
 .sponsor-tier-badge.tier-silver{background:#e7eef6;color:#334155}
 .sponsor-tier-badge.tier-gold{background:#ffe9a8;color:#6a5200}
 .sponsor-tier-benefits{margin:0;grid-column:1/-1}
-.announcer-list-card .announcer-list{
+.gold-tier-benefits-card h2{margin:0}
+.gold-tier-benefits-list{
   margin:0;
   padding-left:1.2rem;
   display:grid;
   gap:10px;
+  color:#334155;
+  font-size:.95rem;
+  line-height:1.45;
 }
-.announcer-list-card .announcer-list li{
-  display:grid;
-  gap:2px;
-}
-.announcer-list-card .announcer-list span{
-  color:#5b6f88;
-  font-size:.9rem;
-}
+.gold-tier-benefits-list li::marker{color:#014990}
 
 /* Unsaved page-editor leave prompt */
 .unsaved-dialog{
