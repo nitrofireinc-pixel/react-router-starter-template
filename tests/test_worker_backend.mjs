@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_CMS_PAGES } from '../worker/src/default-pages.mjs';
 import { compareEventsByDate, escapeHtml, formatSponsorAddress, generateStructuredPageHtml, hasPermission, isServiceMode, isValidEmail, jsonResponse, normalizeContactTopicPayload, normalizeEventPayload, normalizePageSlug, normalizeSponsorPayload, normalizeStaffPayload, normalizeStaticPath, parseLegacySponsorAddress, parsePermissions, renderContactForm, renderMaintenancePage, renderSponsorsDirectory, renderStaffDirectory, sanitizeRichHtml, serializePagePayload, sponsorMapsUrls } from '../worker/src/worker.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -275,4 +281,18 @@ test('normalizeSponsorPayload stores homepage fly-in eligibility', () => {
   assert.equal(preserved.city, 'Greensboro');
   const disabled = normalizeSponsorPayload({ name: 'Eagle Financial Partners', homepage_ad: false }, { homepage_ad: 1 });
   assert.equal(disabled.homepage_ad, 0);
+});
+
+test('fundraising page embeds Square donate checkout in Direct Support', () => {
+  const fundraising = DEFAULT_CMS_PAGES.find((page) => page.slug === 'fundraising');
+  assert.ok(fundraising);
+  assert.match(fundraising.body_html, /data-square-checkout/);
+  assert.match(fundraising.body_html, /square\.link\/u\/IIGMHqVQ/);
+  assert.match(fundraising.body_html, /Direct Support/);
+  const staticHtml = readFileSync(join(ROOT, 'fundraising.html'), 'utf8');
+  assert.match(staticHtml, /data-square-checkout/);
+  assert.match(staticHtml, /square\.link\/u\/IIGMHqVQ/);
+  const script = readFileSync(join(ROOT, 'script.js'), 'utf8');
+  assert.match(script, /data-square-checkout/);
+  assert.match(script, /openSquareCheckoutWindow/);
 });

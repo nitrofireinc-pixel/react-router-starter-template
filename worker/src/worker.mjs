@@ -26,7 +26,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'users', 'events', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260802-03';
+const ASSET_VERSION = 'admin-cms-20260802-04';
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -246,6 +246,16 @@ async function initDb(env) {
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
     await env.DB.batch(DEFAULT_CMS_PAGES.map((page) => env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active)));
+  }
+  const fundraisingPage = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
+  const fundraisingDefault = DEFAULT_CMS_PAGES.find((page) => page.slug === 'fundraising');
+  if (
+    fundraisingPage
+    && fundraisingDefault
+    && String(fundraisingPage.body_html || '').includes('Placeholder for approved donation/payment link')
+    && !String(fundraisingPage.body_html || '').includes('data-square-checkout')
+  ) {
+    await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(fundraisingDefault.body_html, fundraisingPage.id).run();
   }
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
