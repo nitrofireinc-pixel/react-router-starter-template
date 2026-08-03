@@ -258,10 +258,11 @@ function bindFormRichEditors() {
       return;
     }
 
-    // Multiline editors live inside <form>/<label>; stop Enter from submitting and insert a real line break.
+    // Multiline editors live inside <form>/<label>; stop Enter from submitting.
+    // A single <br> collapses in contenteditable, so insert a paragraph/block break.
     event.preventDefault();
     event.stopPropagation();
-    document.execCommand('insertHTML', false, '<br>\n');
+    insertRichEditorLineBreak(editor);
     syncFormRichEditors(editor.closest('form'));
   });
 
