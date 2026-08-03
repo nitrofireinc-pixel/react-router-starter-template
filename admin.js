@@ -2161,8 +2161,12 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     const logo = await logoDataUrlForPdf(sponsor.logo_url || '');
     const nameX = margin + 12 + 96 + 16;
     const textWidth = contentWidth - 96 - 40;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
     const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
     const addressLines = doc.splitTextToSize(address, textWidth);
     const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
@@ -2210,34 +2214,42 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     y += rowHeight + 10;
   }
 
-  // Ask PDF viewers to open the print dialog when the file loads.
-  if (typeof doc.autoPrint === 'function') doc.autoPrint();
   return doc.output('blob');
+}
+
+function createGoldSponsorsPrintFrame(title = 'Gold sponsors print') {
+  const previous = document.getElementById('gold-sponsors-print-frame');
+  if (previous) {
+    try { previous.src = 'about:blank'; } catch { /* ignore */ }
+    previous.remove();
+  }
+  const frame = document.createElement('iframe');
+  frame.id = 'gold-sponsors-print-frame';
+  frame.setAttribute('title', title);
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+  document.body.appendChild(frame);
+  return frame;
 }
 
 function printPdfBlobInPage(blob) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
-    let frame = document.getElementById('gold-sponsors-print-frame');
-    if (!frame) {
-      frame = document.createElement('iframe');
-      frame.id = 'gold-sponsors-print-frame';
-      frame.setAttribute('title', 'Gold sponsors PDF print');
-      frame.setAttribute('aria-hidden', 'true');
-      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
-      document.body.appendChild(frame);
-    }
-
+    const frame = createGoldSponsorsPrintFrame('Gold sponsors PDF print');
     let settled = false;
     const finish = (error) => {
       if (settled) return;
       settled = true;
-      setTimeout(() => URL.revokeObjectURL(url), 120000);
+      window.clearTimeout(timeoutId);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       if (error) reject(error);
       else resolve();
     };
+    const timeoutId = window.setTimeout(() => {
+      finish(new Error('Timed out waiting for the print dialog.'));
+    }, 12000);
 
-    frame.onload = () => {
+    const triggerPrint = () => {
       window.setTimeout(() => {
         try {
           const win = frame.contentWindow;
@@ -2248,9 +2260,12 @@ function printPdfBlobInPage(blob) {
         } catch (error) {
           finish(error);
         }
-      }, 300);
+      }, 250);
     };
-    frame.onerror = () => finish(new Error('Could not load the PDF for printing.'));
+
+    frame.addEventListener('load', triggerPrint, { once: true });
+    frame.addEventListener('error', () => finish(new Error('Could not load the PDF for printing.')), { once: true });
+    // Assign after listeners so the first load is never missed.
     frame.src = url;
   });
 }
@@ -2291,35 +2306,43 @@ function printGoldSponsorsHtmlFallback(sponsors) {
 </html>`;
 
   return new Promise((resolve, reject) => {
-    let frame = document.getElementById('gold-sponsors-print-frame');
-    if (!frame) {
-      frame = document.createElement('iframe');
-      frame.id = 'gold-sponsors-print-frame';
-      frame.setAttribute('title', 'Gold sponsors print');
-      frame.setAttribute('aria-hidden', 'true');
-      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
-      document.body.appendChild(frame);
-    }
-    frame.onload = () => {
+    const frame = createGoldSponsorsPrintFrame('Gold sponsors print');
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timeoutId = window.setTimeout(() => {
+      finish(new Error('Timed out waiting for the print dialog.'));
+    }, 12000);
+
+    frame.addEventListener('load', () => {
       try {
         const win = frame.contentWindow;
         if (!win) throw new Error('Print frame unavailable');
         win.focus();
         win.print();
-        resolve();
+        finish();
       } catch (error) {
-        reject(error);
+        finish(error);
       }
-    };
+    }, { once: true });
     frame.srcdoc = html;
   });
 }
 
+let goldSponsorsPrintBusy = false;
+
 async function printGoldSponsorsPdf() {
+  if (goldSponsorsPrintBusy) return;
+  goldSponsorsPrintBusy = true;
   const button = document.querySelector('#print-gold-sponsors');
   const status = document.querySelector('#gold-sponsors-print-status');
   const sponsors = goldPrintSponsors();
-  const originalLabel = button?.textContent || 'Print Gold sponsors PDF';
+  const originalLabel = 'Print Gold sponsors PDF';
   if (button) {
     button.disabled = true;
     button.textContent = 'Preparing PDF…';
@@ -2341,6 +2364,7 @@ async function printGoldSponsorsPdf() {
       if (status) status.textContent = `Could not print Gold sponsors: ${error.message || 'Unknown error'}`;
     }
   } finally {
+    goldSponsorsPrintBusy = false;
     if (button) {
       button.disabled = false;
       button.textContent = originalLabel;
