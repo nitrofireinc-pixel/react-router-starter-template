@@ -2159,7 +2159,14 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
 
   for (const sponsor of sponsors) {
     const logo = await logoDataUrlForPdf(sponsor.logo_url || '');
-    const rowHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
+    const nameX = margin + 12 + 96 + 16;
+    const textWidth = contentWidth - 96 - 40;
+    const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
+    const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
+    const addressLines = doc.splitTextToSize(address, textWidth);
+    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
+    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -2189,13 +2196,16 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
       doc.text(mark, logoBoxX + logoBoxW / 2, logoBoxY + logoBoxH / 2 + 4, { align: 'center' });
     }
 
+    const textTop = y + (rowHeight - textBlockHeight) / 2 + 12;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.setTextColor(16, 35, 60);
-    const nameX = logoBoxX + logoBoxW + 16;
-    const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), contentWidth - logoBoxW - 40);
-    const nameBlockHeight = nameLines.length * 18;
-    doc.text(nameLines, nameX, y + (rowHeight - nameBlockHeight) / 2 + 12);
+    doc.text(nameLines, nameX, textTop);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(91, 111, 136);
+    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
 
     y += rowHeight + 10;
   }
