@@ -135,6 +135,10 @@ function canManageMinutes() {
   return hasPermission('minutes');
 }
 
+function canViewMinutes() {
+  return canManageMinutes() || hasPermission('minutes:view');
+}
+
 function formControl(form, name) {
   if (!form || !name) return null;
   return form.querySelector(`[name="${CSS.escape(name)}"]`) || form.elements.namedItem?.(name) || null;
@@ -1768,7 +1772,7 @@ function showAllowedPanels() {
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
     'booster-members': canEditBoosterMembers(),
-    minutes: canManageMinutes(),
+    minutes: canViewMinutes(),
     contact: canEditContact(),
     site: hasPermission('site'),
     users: hasPermission('users'),
@@ -1833,6 +1837,7 @@ function showAllowedPanels() {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
@@ -1891,6 +1896,7 @@ function renderDashboard() {
   const cards = [
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
+    canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
@@ -3387,11 +3393,24 @@ function selectedMinutes() {
   return state.minutes.find((item) => Number(item.id) === Number(state.selectedMinutesId)) || null;
 }
 
+function syncMinutesPanelMode() {
+  const form = document.querySelector('#minutes-form');
+  const newBtn = document.querySelector('#new-minutes');
+  const manage = canManageMinutes();
+  if (form) form.hidden = !manage;
+  if (newBtn) newBtn.hidden = !manage;
+}
+
 function showMinutesCompose(editing = false) {
+  if (!canManageMinutes()) {
+    showMinutesView();
+    return;
+  }
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
   if (form) form.hidden = false;
   if (view) view.hidden = true;
+  clearMinutesDocumentFrame();
   const cancel = document.querySelector('#cancel-minutes-edit');
   if (cancel) cancel.hidden = !editing;
   const submit = document.querySelector('[data-minutes-submit]');
@@ -3405,8 +3424,27 @@ function showMinutesView() {
   if (view) view.hidden = false;
 }
 
+function clearMinutesDocumentFrame() {
+  const frame = document.querySelector('#minutes-document-frame');
+  const body = document.querySelector('[data-minutes-view-body]');
+  if (frame) {
+    frame.hidden = true;
+    frame.removeAttribute('src');
+  }
+  if (body) body.hidden = true;
+}
+
 function resetMinutesForm() {
   const form = document.querySelector('#minutes-form');
+  syncMinutesPanelMode();
+  state.selectedMinutesId = null;
+  clearMinutesDocumentFrame();
+  if (!canManageMinutes()) {
+    const view = document.querySelector('#minutes-view');
+    if (view) view.hidden = true;
+    renderMinutesList();
+    return;
+  }
   if (!form) return;
   form.reset();
   clearFormRichEditors(form);
@@ -3414,7 +3452,6 @@ function resetMinutesForm() {
   showMinutesCompose(false);
   const status = document.querySelector('#minutes-status');
   if (status) status.textContent = 'Add a meeting date and minutes, then save.';
-  state.selectedMinutesId = null;
   renderMinutesList();
 }
 
@@ -3483,9 +3520,21 @@ function renderMinutesView(item) {
     meta.push('View only');
   }
   view.querySelector('[data-minutes-view-meta]').textContent = meta.join(' · ');
-  view.querySelector('[data-minutes-view-body]').innerHTML = item.body_html || '<p class="draft">No minutes content.</p>';
+  const frame = document.querySelector('#minutes-document-frame');
+  const body = document.querySelector('[data-minutes-view-body]');
+  const documentUrl = item.document_url || `/api/admin/minutes/${item.id}/document`;
+  if (frame) {
+    frame.hidden = false;
+    if (frame.getAttribute('src') !== documentUrl) frame.setAttribute('src', documentUrl);
+  }
+  if (body) {
+    body.hidden = true;
+    body.innerHTML = '';
+  }
+  const printBtn = document.querySelector('#print-minutes');
   const editBtn = document.querySelector('#edit-minutes');
   const deleteBtn = document.querySelector('#delete-minutes');
+  if (printBtn) printBtn.hidden = false;
   if (editBtn) editBtn.hidden = !item.can_edit;
   if (deleteBtn) deleteBtn.hidden = !item.can_delete;
   showMinutesView();
@@ -3513,7 +3562,8 @@ function editSelectedMinutes() {
 }
 
 async function loadMinutes() {
-  if (!canManageMinutes()) return;
+  if (!canViewMinutes()) return;
+  syncMinutesPanelMode();
   state.minutes = await jsonFetch('/api/admin/minutes');
   if (state.selectedMinutesId) {
     const stillThere = state.minutes.some((item) => Number(item.id) === Number(state.selectedMinutesId));
@@ -3522,7 +3572,12 @@ async function loadMinutes() {
   renderMinutesList();
   const selected = selectedMinutes();
   if (selected) renderMinutesView(selected);
-  else resetMinutesForm();
+  else if (canManageMinutes()) resetMinutesForm();
+  else {
+    const view = document.querySelector('#minutes-view');
+    if (view) view.hidden = true;
+    clearMinutesDocumentFrame();
+  }
 }
 
 function bindMinutesPanel() {
@@ -3541,6 +3596,7 @@ function bindMinutesPanel() {
     });
   }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
+    if (!canManageMinutes()) return;
     setMinutesNavOpen(false);
     resetMinutesForm();
     document.querySelector('#minutes-form [name="meeting_date"]')?.focus();
@@ -3549,6 +3605,16 @@ function bindMinutesPanel() {
     const selected = selectedMinutes();
     if (selected) openMinutesView(selected.id);
     else resetMinutesForm();
+  });
+  document.querySelector('#print-minutes')?.addEventListener('click', () => {
+    const frame = document.querySelector('#minutes-document-frame');
+    try {
+      frame?.contentWindow?.focus();
+      frame?.contentWindow?.print();
+    } catch {
+      const item = selectedMinutes();
+      if (item?.document_url) window.open(item.document_url, '_blank', 'noopener');
+    }
   });
   document.querySelector('#edit-minutes')?.addEventListener('click', () => editSelectedMinutes());
   document.querySelector('#delete-minutes')?.addEventListener('click', async () => {
@@ -3567,6 +3633,7 @@ function bindMinutesPanel() {
   });
   document.querySelector('#minutes-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!canManageMinutes()) return;
     const form = event.currentTarget;
     const status = document.querySelector('#minutes-status');
     syncFormRichEditors(form);

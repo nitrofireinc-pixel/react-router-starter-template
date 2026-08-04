@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, resolveAdminMailSender, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, resolveAdminMailSender, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -800,14 +800,38 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(MINUTES_EDIT_WINDOW_DAYS, 10);
 
   const secretary = { role: 'editor', permissions: ['minutes'] };
+  const viewer = { role: 'editor', permissions: ['minutes:view'] };
+  const outsider = { role: 'editor', permissions: ['mail'] };
   const admin = { role: 'admin', permissions: [] };
   const fresh = { created_at: new Date().toISOString() };
   const stale = { created_at: new Date(Date.now() - (11 * 24 * 60 * 60 * 1000)).toISOString() };
+  assert.equal(canViewMeetingMinutes(secretary), true);
+  assert.equal(canViewMeetingMinutes(viewer), true);
+  assert.equal(canViewMeetingMinutes(outsider), false);
+  assert.equal(canManageMeetingMinutes(secretary), true);
+  assert.equal(canManageMeetingMinutes(viewer), false);
   assert.equal(canEditMeetingMinutes(secretary, fresh), true);
   assert.equal(canEditMeetingMinutes(secretary, stale), false);
+  assert.equal(canEditMeetingMinutes(viewer, fresh), false);
   assert.equal(canEditMeetingMinutes(admin, stale), true);
   assert.equal(canDeleteMeetingMinutes(secretary), false);
+  assert.equal(canDeleteMeetingMinutes(viewer), false);
   assert.equal(canDeleteMeetingMinutes(admin), true);
   assert.ok(minutesEditableUntil(fresh.created_at) instanceof Date);
+
+  const documentHtml = renderMinutesDocumentHtml(
+    { title: 'East Forsyth Band' },
+    {
+      meeting_date: '2026-08-04',
+      created_by_name: 'Secretary Sue',
+      body_html: '<p>Called to order</p><script>alert(1)</script>',
+    },
+  );
+  assert.match(documentHtml, /Booster Meeting Minutes/);
+  assert.match(documentHtml, /08\/04\/2026/);
+  assert.match(documentHtml, /Secretary Sue/);
+  assert.match(documentHtml, /Called to order/);
+  assert.doesNotMatch(documentHtml, /<script/i);
+  assert.match(documentHtml, /window\.print\(\)/);
 });
 
