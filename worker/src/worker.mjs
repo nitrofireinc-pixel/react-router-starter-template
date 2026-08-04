@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-02';
+const ASSET_VERSION = 'admin-cms-20260804-03';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -1930,7 +1930,10 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
 
 async function getPhotos(env) {
   // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
-  const rows = await env.DB.prepare('SELECT id, filename, original_name, alt_text, caption, sort_order FROM photos WHERE sort_order >= 0 ORDER BY sort_order, id').all();
+  // Gallery photos are ordered by upload time (newest first), not manual sort_order.
+  const rows = await env.DB.prepare(
+    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY datetime(created_at) DESC, id DESC',
+  ).all();
   return (rows.results || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
 }
 
@@ -2050,6 +2053,11 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
   if (size > IMAGE_UPLOAD_MAX_BYTES) {
     throw new Error('Upload an image under 1.5 MB');
   }
+  // Negative sort_order hides utility uploads (staff/logo) from the public gallery.
+  // Gallery photos always use 0 and are ordered by created_at instead.
+  const requestedSort = Number(sortOrder);
+  const resolvedSort = Number.isFinite(requestedSort) && requestedSort < 0 ? requestedSort : 0;
+  const createdAt = new Date().toISOString();
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   const dataBase64 = arrayBufferToBase64(await file.arrayBuffer());
   const cleanAlt = String(altText || '').trim();
@@ -2058,14 +2066,17 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
     ? (looksLikeInlineRichHtml(captionRaw) ? sanitizeInlineRichHtml(captionRaw) : captionRaw)
     : '';
   try {
-    const result = await env.DB.prepare('INSERT INTO photos (filename, original_name, alt_text, caption, sort_order, content_type, data_base64) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(
+    const result = await env.DB.prepare(
+      'INSERT INTO photos (filename, original_name, alt_text, caption, sort_order, content_type, data_base64, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
       filename,
       originalName,
       cleanAlt,
       cleanCaption,
-      Number(sortOrder || 0),
+      resolvedSort,
       file.type || 'application/octet-stream',
       dataBase64,
+      createdAt,
     ).run();
     return {
       id: result.meta.last_row_id,
@@ -2073,7 +2084,8 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
       original_name: originalName,
       alt_text: cleanAlt,
       caption: cleanCaption,
-      sort_order: Number(sortOrder || 0),
+      sort_order: resolvedSort,
+      created_at: createdAt,
       url: `/uploads/${encodeURIComponent(filename)}`,
     };
   } catch (error) {
@@ -3000,7 +3012,16 @@ async function handleApi(request, env, url) {
     if (!canUpload) return jsonResponse({ detail: 'Permission required: photos' }, 403);
     const form = await request.formData();
     try {
-      return jsonResponse(await storeImageUpload(env, form.get('file'), String(form.get('alt_text') || ''), String(form.get('caption') || ''), Number(form.get('sort_order') || 0)));
+      // Gallery uploads omit sort_order (ordered by created_at). Negative values still hide staff/logo utility images.
+      const rawSort = form.get('sort_order');
+      const sortOrder = rawSort === null || rawSort === '' ? 0 : Number(rawSort);
+      return jsonResponse(await storeImageUpload(
+        env,
+        form.get('file'),
+        String(form.get('alt_text') || ''),
+        String(form.get('caption') || ''),
+        sortOrder,
+      ));
     } catch (error) {
       return jsonResponse({ detail: error.message }, 400);
     }
@@ -3222,8 +3243,9 @@ async function serveStaticOrCms(request, env, url) {
   const assetUrl = new URL(request.url);
   assetUrl.pathname = normalizeStaticPath(url.pathname);
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
-  // Keep CMS scripts fresh so deploy fixes are not masked by long CDN/browser caches.
-  if (/\.(?:js|css)$/i.test(assetUrl.pathname) && /(?:^|\/)(admin|site-content|script)\.js$/i.test(assetUrl.pathname) || assetUrl.pathname.endsWith('/styles.css') || assetUrl.pathname === '/styles.css') {
+  // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
+  const assetName = assetUrl.pathname.split('/').pop() || '';
+  if (['admin.js', 'site-content.js', 'script.js', 'styles.css'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
@@ -3398,7 +3420,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.5 MB.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.5 MB. Photos are listed newest first by upload time.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">

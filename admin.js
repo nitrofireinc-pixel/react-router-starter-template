@@ -3073,13 +3073,17 @@ async function loadPhotos() {
   if (!hasPermission('photos')) return;
   state.photos = await jsonFetch('/api/photos');
   const list = document.querySelector('#photos-list');
-  list.innerHTML = state.photos.map(photo => `
+  list.innerHTML = state.photos.map(photo => {
+    const uploaded = photo.created_at
+      ? new Date(photo.created_at).toLocaleString()
+      : '';
+    return `
     <article class="admin-row photo-row">
       <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}">
-      <div><b>${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span></div>
+      <div><b>${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span>${uploaded ? `<small>Uploaded ${escapeHtml(uploaded)}</small>` : ''}</div>
       <div class="row-actions"><button data-delete-photo="${photo.id}">Delete</button></div>
-    </article>
-  `).join('');
+    </article>`;
+  }).join('');
   list.querySelectorAll('[data-delete-photo]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this photo?')) return;
     try {
