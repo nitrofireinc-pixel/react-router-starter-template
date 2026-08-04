@@ -3394,13 +3394,35 @@ function selectedMinutes() {
   return state.minutes.find((item) => Number(item.id) === Number(state.selectedMinutesId)) || null;
 }
 
+function todayMeetingDateDisplay(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const year = String(now.getFullYear());
+  return `${month}/${day}/${year}`;
+}
+
+function formatMinutesDateMask(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function isValidMinutesDateInput(value) {
+  const raw = String(value || '').trim();
+  if (/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/.test(raw)) return true;
+  if (/^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{4}$/.test(raw)) return true;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return true;
+  return false;
+}
+
 function minutesDateFieldValue(item) {
-  const iso = String(item?.meeting_date || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const display = String(item?.meeting_date_display || '').trim();
-  const match = display.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!match) return '';
-  return `${match[3]}-${String(match[1]).padStart(2, '0')}-${String(match[2]).padStart(2, '0')}`;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(display)) return formatMinutesDateMask(display);
+  const iso = String(item?.meeting_date || '').trim();
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return todayMeetingDateDisplay();
+  return `${match[2]}/${match[3]}/${match[1]}`;
 }
 
 function readMinutesBodyHtml(form) {
@@ -3474,9 +3496,11 @@ function resetMinutesForm() {
   form.reset();
   clearFormRichEditors(form);
   formControl(form, 'minutes_id').value = '';
+  const dateControl = formControl(form, 'meeting_date');
+  if (dateControl) dateControl.value = todayMeetingDateDisplay();
   showMinutesCompose(false);
   const status = document.querySelector('#minutes-status');
-  if (status) status.textContent = 'Pick a meeting date, enter the minutes, then save.';
+  if (status) status.textContent = 'Today is filled in. Enter the minutes, then save.';
   renderMinutesList();
 }
 
@@ -3595,10 +3619,11 @@ async function saveMinutesForm(form) {
   if (!form) return;
   const id = String(formControl(form, 'minutes_id')?.value || '').trim();
   const dateControl = formControl(form, 'meeting_date');
+  if (dateControl) dateControl.value = formatMinutesDateMask(dateControl.value);
   const meetingDate = String(dateControl?.value || '').trim();
   const bodyHtml = readMinutesBodyHtml(form);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)) {
-    if (status) status.textContent = 'Choose a meeting date.';
+  if (!isValidMinutesDateInput(meetingDate)) {
+    if (status) status.textContent = 'Enter a meeting date as MM/DD/YYYY.';
     dateControl?.focus();
     return;
   }
@@ -3693,6 +3718,19 @@ function bindMinutesPanel() {
       alert(error.message || 'Could not delete minutes.');
     }
   });
+  const meetingDateInput = document.querySelector('#minutes-form [name="meeting_date"]');
+  if (meetingDateInput && meetingDateInput.dataset.dateMaskBound !== '1') {
+    meetingDateInput.dataset.dateMaskBound = '1';
+    meetingDateInput.addEventListener('input', () => {
+      const next = formatMinutesDateMask(meetingDateInput.value);
+      if (meetingDateInput.value !== next) meetingDateInput.value = next;
+    });
+    meetingDateInput.addEventListener('blur', () => {
+      const raw = String(meetingDateInput.value || '').trim();
+      if (!raw) return;
+      meetingDateInput.value = formatMinutesDateMask(raw);
+    });
+  }
   document.querySelector('#minutes-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     await saveMinutesForm(event.currentTarget);
