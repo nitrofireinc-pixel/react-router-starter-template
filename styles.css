@@ -1923,14 +1923,21 @@ body.sponsor-map-open{overflow:hidden}
 }
 
 /* Booster meeting minutes */
-.minutes-layout{grid-template-columns:minmax(0,1fr) minmax(200px,240px);gap:18px;align-items:start}
+.minutes-layout{grid-template-columns:minmax(0,1fr) minmax(220px,280px);gap:22px;align-items:start}
+.minutes-main{min-width:0;display:grid;justify-items:stretch}
+.minutes-main > .minutes-view,
+.minutes-main > .minutes-empty,
+.minutes-main > #minutes-form{width:min(100%,920px);margin-inline:auto}
+.minutes-empty{text-align:center;padding:42px 28px;min-height:280px;display:grid;align-content:center;gap:8px}
+.minutes-empty h2{margin:0;color:#10233c;font-size:clamp(1.4rem,2.5vw,1.9rem)}
+.minutes-empty .muted{margin:0}
 .minutes-nav-card{align-self:start;position:sticky;top:18px}
 .minutes-nav-desktop-head h2{margin:0 0 4px}
 .minutes-nav-desktop-head .muted{margin:0 0 10px}
 .minutes-mobile-bar{display:none}
 .minutes-mobile-menu{display:none}
-.minutes-nav{display:grid;gap:8px;margin-top:10px;max-height:min(70vh,720px);overflow:auto}
-.minutes-nav-item{display:grid;gap:2px;width:100%;text-align:left;border:1px solid #e1e8f1;border-radius:12px;background:#fff;padding:10px 12px;cursor:pointer;color:#10233c}
+.minutes-nav{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:min(70vh,720px);overflow:auto}
+.minutes-nav-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;border:1px solid #e1e8f1;border-radius:12px;background:#fff;padding:10px 12px;cursor:pointer;color:#10233c}
 .minutes-nav-item:hover,.minutes-nav-item:focus-visible{border-color:#014990;outline:none}
 .minutes-nav-item.active{background:#10233c;border-color:#10233c;color:#fff}
 .minutes-nav-item b{font-size:.95rem}

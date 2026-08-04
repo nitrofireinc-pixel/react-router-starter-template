@@ -3441,20 +3441,23 @@ function readMinutesBodyHtml(form) {
 }
 
 function syncMinutesPanelMode() {
-  const form = document.querySelector('#minutes-form');
   const newBtn = document.querySelector('#new-minutes');
-  const manage = canManageMinutes();
-  if (form) form.hidden = !manage;
-  if (newBtn) newBtn.hidden = !manage;
+  if (newBtn) newBtn.hidden = !canManageMinutes();
+}
+
+function setMinutesEmptyVisible(visible) {
+  const empty = document.querySelector('#minutes-empty');
+  if (empty) empty.hidden = !visible;
 }
 
 function showMinutesCompose(editing = false) {
   if (!canManageMinutes()) {
-    showMinutesView();
+    showMinutesIdle();
     return;
   }
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
+  setMinutesEmptyVisible(false);
   if (form) form.hidden = false;
   if (view) view.hidden = true;
   clearMinutesDocumentFrame();
@@ -3467,8 +3470,36 @@ function showMinutesCompose(editing = false) {
 function showMinutesView() {
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
+  setMinutesEmptyVisible(false);
   if (form) form.hidden = true;
   if (view) view.hidden = false;
+}
+
+function showMinutesIdle(statusText = '') {
+  const form = document.querySelector('#minutes-form');
+  const view = document.querySelector('#minutes-view');
+  clearMinutesDocumentFrame();
+  if (view) view.hidden = true;
+  if (canManageMinutes() && form) {
+    setMinutesEmptyVisible(false);
+    form.hidden = false;
+    form.reset();
+    clearFormRichEditors(form);
+    formControl(form, 'minutes_id').value = '';
+    const dateControl = formControl(form, 'meeting_date');
+    if (dateControl) dateControl.value = todayMeetingDateDisplay();
+    const cancel = document.querySelector('#cancel-minutes-edit');
+    if (cancel) cancel.hidden = true;
+    const submit = document.querySelector('[data-minutes-submit]');
+    if (submit) submit.textContent = 'Save minutes';
+    const status = document.querySelector('#minutes-status');
+    if (status) {
+      status.textContent = statusText || 'Today is filled in. Enter the minutes, then save.';
+    }
+  } else {
+    if (form) form.hidden = true;
+    setMinutesEmptyVisible(true);
+  }
 }
 
 function clearMinutesDocumentFrame() {
@@ -3481,26 +3512,10 @@ function clearMinutesDocumentFrame() {
   if (body) body.hidden = true;
 }
 
-function resetMinutesForm() {
-  const form = document.querySelector('#minutes-form');
+function resetMinutesForm(statusText = '') {
   syncMinutesPanelMode();
   state.selectedMinutesId = null;
-  clearMinutesDocumentFrame();
-  if (!canManageMinutes()) {
-    const view = document.querySelector('#minutes-view');
-    if (view) view.hidden = true;
-    renderMinutesList();
-    return;
-  }
-  if (!form) return;
-  form.reset();
-  clearFormRichEditors(form);
-  formControl(form, 'minutes_id').value = '';
-  const dateControl = formControl(form, 'meeting_date');
-  if (dateControl) dateControl.value = todayMeetingDateDisplay();
-  showMinutesCompose(false);
-  const status = document.querySelector('#minutes-status');
-  if (status) status.textContent = 'Today is filled in. Enter the minutes, then save.';
+  showMinutesIdle(statusText);
   renderMinutesList();
 }
 
@@ -3639,10 +3654,8 @@ async function saveMinutesForm(form) {
       body: JSON.stringify({ meeting_date: meetingDate, body_html: bodyHtml }),
     });
     if (!saved?.id) throw new Error('Save succeeded but no minutes id was returned.');
-    state.selectedMinutesId = saved.id;
-    await loadMinutes();
-    openMinutesView(saved.id);
-    if (status) status.textContent = id ? 'Minutes updated.' : 'Minutes saved.';
+    state.minutes = await jsonFetch('/api/admin/minutes');
+    resetMinutesForm(id ? 'Minutes updated. Select a date on the right to open it.' : 'Minutes saved. Select a date on the right to open it.');
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
   }
@@ -3652,19 +3665,10 @@ async function loadMinutes() {
   if (!canViewMinutes()) return;
   syncMinutesPanelMode();
   state.minutes = await jsonFetch('/api/admin/minutes');
-  if (state.selectedMinutesId) {
-    const stillThere = state.minutes.some((item) => Number(item.id) === Number(state.selectedMinutesId));
-    if (!stillThere) state.selectedMinutesId = null;
-  }
+  // Never auto-open a document on visit/reload — only open when the user selects one.
+  state.selectedMinutesId = null;
   renderMinutesList();
-  const selected = selectedMinutes();
-  if (selected) renderMinutesView(selected);
-  else if (canManageMinutes()) resetMinutesForm();
-  else {
-    const view = document.querySelector('#minutes-view');
-    if (view) view.hidden = true;
-    clearMinutesDocumentFrame();
-  }
+  showMinutesIdle();
 }
 
 function bindMinutesPanel() {
@@ -3691,7 +3695,7 @@ function bindMinutesPanel() {
   document.querySelector('#cancel-minutes-edit')?.addEventListener('click', () => {
     const selected = selectedMinutes();
     if (selected) openMinutesView(selected.id);
-    else resetMinutesForm();
+    else resetMinutesForm('Today is filled in. Enter the minutes, then save.');
   });
   document.querySelector('#print-minutes')?.addEventListener('click', () => {
     const frame = document.querySelector('#minutes-document-frame');
@@ -3710,10 +3714,8 @@ function bindMinutesPanel() {
     if (!confirm(`Delete minutes for ${item.meeting_date_display || item.meeting_date}? This cannot be undone.`)) return;
     try {
       await jsonFetch(`/api/admin/minutes/${item.id}`, { method: 'DELETE' });
-      state.selectedMinutesId = null;
-      await loadMinutes();
-      const status = document.querySelector('#minutes-status');
-      if (status) status.textContent = 'Minutes deleted.';
+      state.minutes = await jsonFetch('/api/admin/minutes');
+      resetMinutesForm('Minutes deleted.');
     } catch (error) {
       alert(error.message || 'Could not delete minutes.');
     }
