@@ -3357,25 +3357,56 @@ function resetMinutesForm() {
   renderMinutesList();
 }
 
-function renderMinutesList() {
-  const list = document.querySelector('#minutes-list');
-  if (!list) return;
-  if (!state.minutes.length) {
-    list.innerHTML = '<p class="draft">No minutes submitted yet.</p>';
-    return;
-  }
-  list.innerHTML = state.minutes.map((item) => {
+function minutesListMarkup() {
+  if (!state.minutes.length) return '<p class="draft">No minutes submitted yet.</p>';
+  return state.minutes.map((item) => {
     const active = Number(item.id) === Number(state.selectedMinutesId);
     return `<button type="button" class="minutes-nav-item${active ? ' active' : ''}" data-minutes-id="${item.id}">
       <b>${escapeHtml(item.meeting_date_display || item.meeting_date)}</b>
       <small>${escapeHtml(item.created_by_name || 'Secretary')}</small>
     </button>`;
   }).join('');
-  list.querySelectorAll('[data-minutes-id]').forEach((button) => {
+}
+
+function bindMinutesListClicks(root) {
+  root?.querySelectorAll('[data-minutes-id]').forEach((button) => {
     button.addEventListener('click', () => {
       openMinutesView(Number(button.dataset.minutesId));
+      setMinutesNavOpen(false);
     });
   });
+}
+
+function syncMinutesNavToggleLabel() {
+  const toggle = document.querySelector('.minutes-nav-toggle');
+  if (!toggle) return;
+  const selected = selectedMinutes();
+  toggle.textContent = selected
+    ? (selected.meeting_date_display || selected.meeting_date || 'Minutes')
+    : 'Minutes';
+}
+
+function setMinutesNavOpen(open) {
+  const toggle = document.querySelector('.minutes-nav-toggle');
+  const menu = document.querySelector('#minutes-mobile-menu');
+  if (!toggle || !menu) return;
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+}
+
+function renderMinutesList() {
+  const list = document.querySelector('#minutes-list');
+  const mobileMenu = document.querySelector('#minutes-mobile-menu');
+  const markup = minutesListMarkup();
+  if (list) {
+    list.innerHTML = markup;
+    bindMinutesListClicks(list);
+  }
+  if (mobileMenu) {
+    mobileMenu.innerHTML = markup;
+    bindMinutesListClicks(mobileMenu);
+  }
+  syncMinutesNavToggleLabel();
 }
 
 function renderMinutesView(item) {
@@ -3434,7 +3465,22 @@ async function loadMinutes() {
 }
 
 function bindMinutesPanel() {
+  const toggle = document.querySelector('.minutes-nav-toggle');
+  if (toggle && toggle.dataset.bound !== '1') {
+    toggle.dataset.bound = '1';
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      setMinutesNavOpen(open);
+    });
+    document.addEventListener('click', (event) => {
+      const card = document.querySelector('.minutes-nav-card');
+      if (!card || card.contains(event.target)) return;
+      setMinutesNavOpen(false);
+    });
+  }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
+    setMinutesNavOpen(false);
     resetMinutesForm();
     document.querySelector('#minutes-form [name="meeting_date"]')?.focus();
   });
