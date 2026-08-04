@@ -3691,7 +3691,7 @@ function bindForms() {
       await loadPhotos();
       status.textContent = 'Photo uploaded.';
     } catch (error) {
-      status.textContent = 'Photo upload failed. Try a JPG, PNG, WEBP, or GIF under 1.5 MB.';
+      status.textContent = `Photo upload failed: ${error.message || 'Try a JPG, PNG, WEBP, or GIF under 1.5 MB.'}`;
       console.error(error);
     }
   });

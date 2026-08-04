@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260803-24';
+const ASSET_VERSION = 'admin-cms-20260804-01';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -185,6 +185,17 @@ const MAIL_ATTACHMENT_EXTENSIONS = new Set([
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip',
 ]);
+const IMAGE_UPLOAD_MAX_BYTES = 1_500_000;
+const IMAGE_UPLOAD_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
+const IMAGE_UPLOAD_EXT_BY_TYPE = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/pjpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/svg+xml': '.svg',
+};
 
 
 export const DEFAULT_CONTACT_TOPICS = [
@@ -2028,9 +2039,17 @@ function base64ToArrayBuffer(value) {
 async function storeImageUpload(env, file, altText = '', caption = '', sortOrder = 0) {
   if (!file || typeof file === 'string') throw new Error('Photo file is required');
   const originalName = file.name || 'photo';
-  const ext = (originalName.match(/\.[a-z0-9]+$/i)?.[0] || '.bin').toLowerCase();
-  if (!['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg'].includes(ext)) throw new Error('Upload a JPG, PNG, WEBP, GIF, or SVG image');
-  if (file.size && file.size > 1_500_000) throw new Error('Upload an image under 1.5 MB');
+  let ext = (originalName.match(/\.[a-z0-9]+$/i)?.[0] || '').toLowerCase();
+  if (!IMAGE_UPLOAD_EXTENSIONS.has(ext)) {
+    ext = IMAGE_UPLOAD_EXT_BY_TYPE[String(file.type || '').toLowerCase()] || '';
+  }
+  if (!IMAGE_UPLOAD_EXTENSIONS.has(ext)) {
+    throw new Error('Upload a JPG, PNG, WEBP, GIF, or SVG image');
+  }
+  const size = Number(file.size || 0);
+  if (size > IMAGE_UPLOAD_MAX_BYTES) {
+    throw new Error('Upload an image under 1.5 MB');
+  }
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   const dataBase64 = arrayBufferToBase64(await file.arrayBuffer());
   const cleanAlt = String(altText || '').trim();
@@ -2038,8 +2057,32 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
   const cleanCaption = captionRaw
     ? (looksLikeInlineRichHtml(captionRaw) ? sanitizeInlineRichHtml(captionRaw) : captionRaw)
     : '';
-  const result = await env.DB.prepare('INSERT INTO photos (filename, original_name, alt_text, caption, sort_order, content_type, data_base64) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(filename, originalName, cleanAlt, cleanCaption, Number(sortOrder || 0), file.type || 'application/octet-stream', dataBase64).run();
-  return { id: result.meta.last_row_id, filename, original_name: originalName, alt_text: cleanAlt, caption: cleanCaption, sort_order: Number(sortOrder || 0), url: `/uploads/${encodeURIComponent(filename)}` };
+  try {
+    const result = await env.DB.prepare('INSERT INTO photos (filename, original_name, alt_text, caption, sort_order, content_type, data_base64) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(
+      filename,
+      originalName,
+      cleanAlt,
+      cleanCaption,
+      Number(sortOrder || 0),
+      file.type || 'application/octet-stream',
+      dataBase64,
+    ).run();
+    return {
+      id: result.meta.last_row_id,
+      filename,
+      original_name: originalName,
+      alt_text: cleanAlt,
+      caption: cleanCaption,
+      sort_order: Number(sortOrder || 0),
+      url: `/uploads/${encodeURIComponent(filename)}`,
+    };
+  } catch (error) {
+    const detail = String(error?.message || error || 'Database error');
+    if (/too big|TOO_BIG|max.*size|row size|string or blob/i.test(detail)) {
+      throw new Error('That image is too large to store. Try a smaller PNG/JPG under 1.5 MB.');
+    }
+    throw new Error(detail || 'Could not save the image');
+  }
 }
 
 function pagePathFromSlug(slug) {
@@ -3348,7 +3391,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.5 MB.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">
