@@ -3072,19 +3072,36 @@ async function loadEvents() {
 async function loadPhotos() {
   if (!hasPermission('photos')) return;
   state.photos = await jsonFetch('/api/photos');
+  renderPhotos();
+}
+
+function orderedPhotos() {
+  return [...state.photos].sort((a, b) => (
+    Number(a.sort_order || 0) - Number(b.sort_order || 0)
+    || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    || Number(b.id || 0) - Number(a.id || 0)
+  ));
+}
+
+function renderPhotos() {
   const list = document.querySelector('#photos-list');
-  list.innerHTML = state.photos.map(photo => {
-    const uploaded = photo.created_at
-      ? new Date(photo.created_at).toLocaleString()
-      : '';
-    return `
-    <article class="admin-row photo-row">
+  if (!list) return;
+  const ordered = orderedPhotos();
+  list.innerHTML = ordered.length
+    ? ordered.map((photo) => {
+      const uploaded = photo.created_at
+        ? new Date(photo.created_at).toLocaleString()
+        : '';
+      return `
+    <article class="admin-row photo-row photo-admin-row" data-photo-id="${photo.id}" draggable="true">
+      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name || 'photo')}" title="Drag to reorder">⋮⋮</button>
       <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}">
       <div><b>${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span>${uploaded ? `<small>Uploaded ${escapeHtml(uploaded)}</small>` : ''}</div>
-      <div class="row-actions"><button data-delete-photo="${photo.id}">Delete</button></div>
+      <div class="row-actions"><button type="button" data-delete-photo="${photo.id}">Delete</button></div>
     </article>`;
-  }).join('');
-  list.querySelectorAll('[data-delete-photo]').forEach(button => button.addEventListener('click', async () => {
+    }).join('')
+    : '<p class="draft">No gallery photos yet. Upload one above.</p>';
+  list.querySelectorAll('[data-delete-photo]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Delete this photo?')) return;
     try {
       await jsonFetch(`/api/admin/photos/${button.dataset.deletePhoto}`, { method: 'DELETE' });
@@ -3093,6 +3110,80 @@ async function loadPhotos() {
       alert(error.message || 'Could not delete photo.');
     }
   }));
+  bindPhotoDragAndDrop(list);
+}
+
+async function savePhotoOrder(ids) {
+  state.photos = await jsonFetch('/api/admin/photos/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  renderPhotos();
+}
+
+function bindPhotoDragAndDrop(list) {
+  if (!list) return;
+  let dragId = null;
+  let allowRowDrag = false;
+
+  list.querySelectorAll('[data-photo-id]').forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset.photoId);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset.photoId) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset.photoId);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = orderedPhotos();
+      const fromIndex = ordered.findIndex((photo) => photo.id === fromId);
+      const toIndex = ordered.findIndex((photo) => photo.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((photo) => photo.id);
+      state.photos = next.map((photo, index) => ({ ...photo, sort_order: index + 1 }));
+      renderPhotos();
+      try {
+        await savePhotoOrder(ids);
+        const status = document.querySelector('#photo-status');
+        if (status) status.textContent = 'Photo order saved.';
+      } catch (error) {
+        console.error(error);
+        await loadPhotos();
+        const status = document.querySelector('#photo-status');
+        if (status) status.textContent = 'Could not save the new photo order.';
+      }
+    });
+  });
 }
 
 function renderContactTopics() {

@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-05';
+const ASSET_VERSION = 'admin-cms-20260804-06';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -1931,11 +1931,18 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
 
 async function getPhotos(env) {
   // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
-  // Gallery photos are ordered by upload time (newest first), not manual sort_order.
+  // Manual drag order uses sort_order; created_at breaks ties for older rows still at 0.
   const rows = await env.DB.prepare(
-    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY datetime(created_at) DESC, id DESC',
+    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY sort_order ASC, datetime(created_at) DESC, id DESC',
   ).all();
   return (rows.results || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+}
+
+async function nextGalleryPhotoSortOrder(env) {
+  const max = await env.DB.prepare(
+    'SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM photos WHERE sort_order >= 0',
+  ).first();
+  return Number(max?.max_order || 0) + 1;
 }
 
 async function photoUsageLabels(env, filename) {
@@ -2083,9 +2090,16 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
     throw new Error(`Upload an image under ${IMAGE_UPLOAD_MAX_LABEL}`);
   }
   // Negative sort_order hides utility uploads (staff/logo) from the public gallery.
-  // Gallery photos always use 0 and are ordered by created_at instead.
+  // Gallery photos get the next positive sort_order so drag-and-drop can reorder them.
   const requestedSort = Number(sortOrder);
-  const resolvedSort = Number.isFinite(requestedSort) && requestedSort < 0 ? requestedSort : 0;
+  let resolvedSort;
+  if (Number.isFinite(requestedSort) && requestedSort < 0) {
+    resolvedSort = requestedSort;
+  } else if (Number.isFinite(requestedSort) && requestedSort > 0) {
+    resolvedSort = requestedSort;
+  } else {
+    resolvedSort = await nextGalleryPhotoSortOrder(env);
+  }
   const createdAt = new Date().toISOString();
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   // Store raw bytes as a D1 BLOB so ~1.9 MB images fit (base64 would exceed D1's 2 MB row limit).
@@ -3042,7 +3056,7 @@ async function handleApi(request, env, url) {
     if (!canUpload) return jsonResponse({ detail: 'Permission required: photos' }, 403);
     const form = await request.formData();
     try {
-      // Gallery uploads omit sort_order (ordered by created_at). Negative values still hide staff/logo utility images.
+      // Gallery uploads omit sort_order (auto-assigned). Negative values still hide staff/logo utility images.
       const rawSort = form.get('sort_order');
       const sortOrder = rawSort === null || rawSort === '' ? 0 : Number(rawSort);
       return jsonResponse(await storeImageUpload(
@@ -3055,6 +3069,20 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: error.message }, 400);
     }
+  }
+  if (url.pathname === '/api/admin/photos/reorder' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'photos');
+    if (auth.response) return auth.response;
+    const ids = normalizeStaffReorderIds(await request.json());
+    if (!ids.length) return jsonResponse({ detail: 'Photo order is required' }, 422);
+    const existing = await getPhotos(env);
+    if (ids.length !== existing.length || ids.some((id) => !existing.some((photo) => photo.id === id))) {
+      return jsonResponse({ detail: 'Photo order must include every gallery photo exactly once' }, 422);
+    }
+    await env.DB.batch(ids.map((id, index) => (
+      env.DB.prepare('UPDATE photos SET sort_order = ? WHERE id = ? AND sort_order >= 0').bind(index + 1, id)
+    )));
+    return jsonResponse(await getPhotos(env));
   }
   const photoMatch = url.pathname.match(/^\/api\/admin\/photos\/(\d+)$/);
   if (photoMatch && request.method === 'DELETE') {
@@ -3467,7 +3495,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Photos are listed newest first by upload time.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">

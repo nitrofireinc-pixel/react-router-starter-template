@@ -770,17 +770,20 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   cursor:grab;
 }
 .staff-admin-row.is-dragging,
-.sponsor-admin-row.is-dragging{
+.sponsor-admin-row.is-dragging,
+.photo-admin-row.is-dragging{
   opacity:.55;
   cursor:grabbing;
 }
 .staff-admin-row.is-drop-target,
-.sponsor-admin-row.is-drop-target{
+.sponsor-admin-row.is-drop-target,
+.photo-admin-row.is-drop-target{
   outline:2px solid #014990;
   outline-offset:2px;
 }
 .staff-admin-row .drag-handle,
-.sponsor-admin-row .drag-handle{
+.sponsor-admin-row .drag-handle,
+.photo-admin-row .drag-handle{
   display:inline-grid;
   place-items:center;
   width:28px;
@@ -798,10 +801,26 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 .staff-admin-row .drag-handle:hover,
 .staff-admin-row .drag-handle:focus-visible,
 .sponsor-admin-row .drag-handle:hover,
-.sponsor-admin-row .drag-handle:focus-visible{
+.sponsor-admin-row .drag-handle:focus-visible,
+.photo-admin-row .drag-handle:hover,
+.photo-admin-row .drag-handle:focus-visible{
   border-color:#014990;
   color:#014990;
   outline:none;
+}
+.photo-admin-row{
+  display:grid;
+  grid-template-columns:28px 72px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  cursor:grab;
+}
+.photo-admin-row img{
+  width:72px;
+  height:72px;
+  object-fit:cover;
+  border-radius:12px;
+  background:#eef3f8;
 }
 .staff-mini-photo{
   border-radius:50%;
