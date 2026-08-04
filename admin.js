@@ -3447,7 +3447,7 @@ function syncMinutesPanelMode() {
 
 function setMinutesEmptyVisible(visible) {
   const empty = document.querySelector('#minutes-empty');
-  if (empty) empty.hidden = !visible;
+  if (empty) empty.toggleAttribute('hidden', !visible);
 }
 
 function showMinutesCompose(editing = false) {
@@ -3458,11 +3458,11 @@ function showMinutesCompose(editing = false) {
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
   setMinutesEmptyVisible(false);
-  if (form) form.hidden = false;
-  if (view) view.hidden = true;
+  if (form) form.toggleAttribute('hidden', false);
+  if (view) view.toggleAttribute('hidden', true);
   clearMinutesDocumentFrame();
   const cancel = document.querySelector('#cancel-minutes-edit');
-  if (cancel) cancel.hidden = !editing;
+  if (cancel) cancel.toggleAttribute('hidden', !editing);
   const submit = document.querySelector('[data-minutes-submit]');
   if (submit) submit.textContent = editing ? 'Save changes' : 'Save minutes';
 }
@@ -3471,25 +3471,25 @@ function showMinutesView() {
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
   setMinutesEmptyVisible(false);
-  if (form) form.hidden = true;
-  if (view) view.hidden = false;
+  if (form) form.toggleAttribute('hidden', true);
+  if (view) view.toggleAttribute('hidden', false);
 }
 
 function showMinutesIdle(statusText = '') {
   const form = document.querySelector('#minutes-form');
   const view = document.querySelector('#minutes-view');
   clearMinutesDocumentFrame();
-  if (view) view.hidden = true;
+  if (view) view.toggleAttribute('hidden', true);
   if (canManageMinutes() && form) {
     setMinutesEmptyVisible(false);
-    form.hidden = false;
+    form.toggleAttribute('hidden', false);
     form.reset();
     clearFormRichEditors(form);
     formControl(form, 'minutes_id').value = '';
     const dateControl = formControl(form, 'meeting_date');
     if (dateControl) dateControl.value = todayMeetingDateDisplay();
     const cancel = document.querySelector('#cancel-minutes-edit');
-    if (cancel) cancel.hidden = true;
+    if (cancel) cancel.toggleAttribute('hidden', true);
     const submit = document.querySelector('[data-minutes-submit]');
     if (submit) submit.textContent = 'Save minutes';
     const status = document.querySelector('#minutes-status');
@@ -3497,7 +3497,7 @@ function showMinutesIdle(statusText = '') {
       status.textContent = statusText || 'Today is filled in. Enter the minutes, then save.';
     }
   } else {
-    if (form) form.hidden = true;
+    if (form) form.toggleAttribute('hidden', true);
     setMinutesEmptyVisible(true);
   }
 }
@@ -3506,10 +3506,10 @@ function clearMinutesDocumentFrame() {
   const frame = document.querySelector('#minutes-document-frame');
   const body = document.querySelector('[data-minutes-view-body]');
   if (frame) {
-    frame.hidden = true;
+    frame.toggleAttribute('hidden', true);
     frame.removeAttribute('src');
   }
-  if (body) body.hidden = true;
+  if (body) body.toggleAttribute('hidden', true);
 }
 
 function resetMinutesForm(statusText = '') {

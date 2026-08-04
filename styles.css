@@ -1928,6 +1928,14 @@ body.sponsor-map-open{overflow:hidden}
 .minutes-main > .minutes-view,
 .minutes-main > .minutes-empty,
 .minutes-main > #minutes-form{width:min(100%,920px);margin-inline:auto}
+#minutes-view[hidden],
+#minutes-form[hidden],
+#minutes-empty[hidden],
+.minutes-document-frame[hidden],
+#cancel-minutes-edit[hidden],
+#print-minutes[hidden],
+#edit-minutes[hidden],
+#delete-minutes[hidden]{display:none!important}
 .minutes-empty{text-align:center;padding:42px 28px;min-height:280px;display:grid;align-content:center;gap:8px}
 .minutes-empty h2{margin:0;color:#10233c;font-size:clamp(1.4rem,2.5vw,1.9rem)}
 .minutes-empty .muted{margin:0}
