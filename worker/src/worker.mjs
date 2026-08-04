@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-09';
+const ASSET_VERSION = 'admin-cms-20260804-10';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -1833,12 +1833,29 @@ async function parseAdminMailRequest(request) {
   };
 }
 
-async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments }) {
+export function resolveAdminMailSender(user = {}) {
+  const replyTo = String(user?.username || '').trim().toLowerCase();
+  if (!isValidEmail(replyTo)) {
+    return {
+      ok: false,
+      detail: 'Your account username must be a valid email address so replies can go back to you. Update it in User Management, then try again.',
+    };
+  }
+  const displayName = String(user?.display_name || '').trim();
+  return {
+    ok: true,
+    replyTo,
+    fromName: displayName || replyTo,
+  };
+}
+
+async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments, fromName }) {
   const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
-  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  const senderName = String(fromName || env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
   if (!isValidEmail(to)) throw new Error('Recipient email is invalid');
   if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
   if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+  if (!isValidEmail(replyTo)) throw new Error('Sender Reply-To email is required');
   return sendViaResend(env, {
     to,
     replyTo,
@@ -1846,7 +1863,7 @@ async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attach
     html,
     text,
     fromEmail,
-    fromName,
+    fromName: senderName,
     attachments,
   });
 }
@@ -2911,15 +2928,20 @@ async function handleApi(request, env, url) {
     const auth = await requirePermission(request, env, 'mail');
     if (auth.response) return auth.response;
     const provider = resolveContactEmailProvider(env);
+    const sender = resolveAdminMailSender(auth.user);
     return jsonResponse({
       ...describeContactEmailProvider(provider),
       from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
-      from_name: String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      from_name: sender.ok ? sender.fromName : String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      reply_to: sender.ok ? sender.replyTo : '',
+      sender_ready: sender.ok,
       requires_resend: true,
-      detail: provider === 'resend'
-        ? 'Delivering with Resend. Rich text and attachments are supported.'
-        : 'Mail requires Resend. Add a Cloudflare Pages secret named RESEND_API_KEY, verify efhsband.org in Resend, then redeploy.',
-      configured: provider === 'resend',
+      detail: provider !== 'resend'
+        ? 'Mail requires Resend. Add a Cloudflare Pages secret named RESEND_API_KEY, verify efhsband.org in Resend, then redeploy.'
+        : sender.ok
+          ? `Delivering with Resend. Recipients see your name, and replies go to ${sender.replyTo}.`
+          : sender.detail,
+      configured: provider === 'resend' && sender.ok,
     });
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
@@ -2937,6 +2959,8 @@ async function handleApi(request, env, url) {
     if (resolveContactEmailProvider(env) !== 'resend') {
       return jsonResponse({ detail: 'Mail requires Resend. Add RESEND_API_KEY in Cloudflare Pages secrets.' }, 503);
     }
+    const sender = resolveAdminMailSender(auth.user);
+    if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
     const placeholders = mail.user_ids.map(() => '?').join(', ');
     const rows = await env.DB.prepare(
@@ -2945,14 +2969,14 @@ async function handleApi(request, env, url) {
     const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
     if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
 
-    const replyTo = isValidEmail(auth.user.username) ? String(auth.user.username).trim().toLowerCase() : undefined;
     const results = [];
     for (const user of users) {
       const email = String(user.username).trim().toLowerCase();
       try {
         await sendAdminUserMail(env, {
           to: email,
-          replyTo,
+          replyTo: sender.replyTo,
+          fromName: sender.fromName,
           subject: mail.subject,
           html: mail.html,
           text: mail.text || htmlToPlainText(mail.html),
@@ -3440,7 +3464,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>

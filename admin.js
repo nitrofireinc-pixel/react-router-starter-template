@@ -2762,13 +2762,18 @@ function bindSponsorDragAndDrop(list) {
 }
 
 async function loadMailDeliveryStatus() {
-  // Only surface a warning when delivery is not ready. Do not show a "Delivering with Resend" card.
   const status = document.querySelector('#mail-status');
   if (!status || !canSendMail()) return;
   try {
     const delivery = await jsonFetch('/api/admin/mail/delivery');
-    if (delivery.configured) return;
-    status.textContent = delivery.detail || 'Mail delivery is not configured.';
+    if (!delivery.configured) {
+      status.textContent = delivery.detail || 'Mail delivery is not configured.';
+      return;
+    }
+    const replyTo = String(delivery.reply_to || state.me?.user?.username || '').trim();
+    status.textContent = replyTo
+      ? `Ready to send. Replies will go to ${replyTo}.`
+      : (delivery.detail || 'Ready to send.');
   } catch (error) {
     status.textContent = `Could not check mail delivery: ${error.message}`;
   }
