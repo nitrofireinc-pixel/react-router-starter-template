@@ -3333,8 +3333,11 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url);
     if (url.pathname === '/admin/login') return handleLogin(request, env);
-    if (url.pathname === '/admin/logout' && request.method === 'POST') return logout();
+    // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
+    // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
+    if (url.pathname === '/admin/logout') return logout();
     if (url.pathname === '/admin') return handleAdmin(request, env);
+    if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
     return serveStaticOrCms(request, env, url);
   },
