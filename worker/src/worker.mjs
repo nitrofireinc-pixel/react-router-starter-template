@@ -175,7 +175,8 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260804-20';
+const ASSET_VERSION = 'admin-cms-20260804-21';
+const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -2134,6 +2135,8 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   const dateLabel = formatMeetingDateDisplay(minutes.meeting_date_display || minutes.meeting_date);
   const recorder = String(minutes.created_by_name || '').trim();
   const body = sanitizeRichHtml(minutes.body_html || '');
+  // Letterhead mark is fixed in code (not CMS-editable).
+  const letterheadMark = MINUTES_LETTERHEAD_MARK;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2141,7 +2144,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meeting Minutes ${escapeHtml(dateLabel)} | ${escapeHtml(title)}</title>
   <style>
-    @page { size: letter; margin: 0.75in; }
+    @page { size: letter; margin: 0.65in; }
     :root { color-scheme: only light; }
     * { box-sizing: border-box; }
     body {
@@ -2154,9 +2157,24 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       width: min(8.5in, 100%);
       min-height: 11in;
       margin: 16px auto;
-      padding: 0.75in;
+      padding: 0.65in 0.75in 0.75in;
       background: #fff;
       box-shadow: 0 10px 30px rgba(15, 34, 58, 0.18);
+    }
+    .letterhead {
+      display: flex;
+      justify-content: center;
+      margin: 0 0 14px;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .letterhead-mark {
+      display: block;
+      width: 1.45in;
+      height: 1.45in;
+      opacity: 0.48;
+      -webkit-user-drag: none;
     }
     .doc-kicker {
       margin: 0 0 6px;
@@ -2164,11 +2182,13 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: #c8121d;
+      text-align: center;
     }
     h1 {
       margin: 0 0 8px;
       font: 700 22pt/1.15 "Work Sans", system-ui, sans-serif;
       color: #10233c;
+      text-align: center;
     }
     .meta {
       margin: 0 0 22px;
@@ -2176,6 +2196,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       border-bottom: 1px solid #d5deea;
       font: 10pt/1.4 "Work Sans", system-ui, sans-serif;
       color: #5b6f88;
+      text-align: center;
     }
     .body { font: 12pt/1.55 "Times New Roman", Times, serif; color: #1a1a1a; }
     .body p { margin: 0 0 0.85em; }
@@ -2205,12 +2226,16 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
+      .letterhead-mark { opacity: 0.42; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
   <main class="sheet">
+    <header class="letterhead" aria-hidden="true">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+    </header>
     <p class="doc-kicker">${escapeHtml(title)}</p>
     <h1>Booster Meeting Minutes</h1>
     <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>

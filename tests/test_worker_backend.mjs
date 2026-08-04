@@ -837,5 +837,8 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /Called to order/);
   assert.doesNotMatch(documentHtml, /<script/i);
   assert.match(documentHtml, /window\.print\(\)/);
+  assert.match(documentHtml, /efhs-blue-regiment-mark/);
+  assert.match(documentHtml, /letterhead-mark/);
+  assert.match(documentHtml, /opacity:\s*0\.48/);
 });
 
