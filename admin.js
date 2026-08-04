@@ -31,7 +31,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -68,14 +68,18 @@ const DEFAULT_SPONSOR_TIER_FIELDS = {
 const SPONSOR_TIER_FIELD_KEYS = Object.keys(DEFAULT_SPONSOR_TIER_FIELDS);
 const SPONSOR_TIER_BENEFIT_KEYS = ['bronze_benefits', 'silver_benefits', 'gold_benefits'];
 
+function isSuperAdmin(user = state.me?.user) {
+  return String(user?.role || '').trim().toLowerCase() === 'admin';
+}
+
 function hasPermission(scope) {
   if (!state.me?.user) return false;
-  if (state.me.user.role === 'admin') return true;
+  if (isSuperAdmin(state.me.user)) return true;
   return state.me.user.permissions.includes(scope) || state.me.user.permissions.includes('all');
 }
 
 function canManageAllEvents() {
-  return hasPermission('events:manage');
+  return isSuperAdmin() || hasPermission('events:manage');
 }
 
 function canCreateEvents() {
@@ -85,7 +89,10 @@ function canCreateEvents() {
 function canMutateEvent(event) {
   if (canManageAllEvents()) return true;
   if (!hasPermission('events')) return false;
-  return Number(event?.created_by) === Number(state.me?.user?.id);
+  const ownerId = Number(event?.created_by);
+  // Legacy rows with no creator are editable by anyone who can create events.
+  if (!Number.isInteger(ownerId) || ownerId <= 0) return true;
+  return ownerId === Number(state.me?.user?.id);
 }
 
 function eventCreatorLabel(event) {
@@ -176,10 +183,21 @@ function clearFormRichEditors(form) {
 function fillForm(form, data) {
   if (!form) return;
   for (const [key, value] of Object.entries(data || {})) {
-    const control = formControl(form, key);
+    if (Array.isArray(value)) continue;
+    const controls = [...form.querySelectorAll(`[name="${CSS.escape(key)}"]`)];
+    if (!controls.length) {
+      setFormRichEditorValue(form, key, value ?? '');
+      continue;
+    }
+    // Multi-checkbox groups (e.g. permissions) are handled by the caller.
+    if (controls.length > 1) continue;
+    const control = controls[0];
     if (!control || control.type === 'file') continue;
-    if (control.type === 'checkbox') control.checked = Boolean(Number(value) || value === true);
-    else control.value = value ?? '';
+    if (control.type === 'checkbox' || control.type === 'radio') {
+      control.checked = Boolean(Number(value) || value === true);
+      continue;
+    }
+    control.value = value ?? '';
     setFormRichEditorValue(form, key, value ?? '');
   }
 }
@@ -1741,7 +1759,7 @@ function renderPageShortcuts() {
 
 function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
-  document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${state.me.user.role === 'admin' ? 'Super Admin' : 'Editor'}</span>`;
+  document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
 
   const panels = {
     dashboard: true,
@@ -1840,7 +1858,8 @@ function bindAdminNavToggle() {
 
 async function loadMe() {
   state.me = await jsonFetch('/api/admin/me');
-  state.pages = state.me.pages;
+  state.pageCatalog = Array.isArray(state.me.pages) ? state.me.pages : [];
+  state.pages = state.pageCatalog;
   renderPagePermissionBoxes();
   showAllowedPanels();
 }
@@ -1854,10 +1873,11 @@ async function loadSite() {
 }
 
 async function loadPages() {
-  if (!state.pages.some(canEditPage)) return;
+  if (!state.pages.some(canEditPage) && !hasPermission('users')) return;
   state.pages = await jsonFetch('/api/admin/pages');
   renderPageShortcuts();
   renderMobileAdminMenu();
+  // Keep the full page catalog for User Management checkboxes; /api/admin/pages may be filtered.
   renderPagePermissionBoxes();
 }
 
@@ -1949,7 +1969,8 @@ function editPage(slug, { skipGuard = false } = {}) {
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  box.innerHTML = state.pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+  const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
+  box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
 }
 
 async function loadSponsorAdSettings() {
@@ -2802,7 +2823,7 @@ function renderMailRecipients() {
   list.innerHTML = state.mailRecipients.map((user) => `
     <label class="mail-recipient checkline">
       <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${user.role === 'admin' ? 'Super Admin' : 'Editor'}</small></span>
+      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
     </label>
   `).join('');
 }
@@ -2892,27 +2913,67 @@ function bindMailComposer() {
   });
 }
 
+function canEditManagedUser(user) {
+  if (!user || !hasPermission('users')) return false;
+  if (isSuperAdmin()) return true;
+  // Editors with the users permission can manage other editors, not Super Admins.
+  return !isSuperAdmin(user);
+}
+
 async function loadUsers() {
   if (!hasPermission('users')) return;
   state.users = await jsonFetch('/api/admin/users');
   const list = document.querySelector('#users-list');
-  list.innerHTML = state.users.map(user => `
-    <article class="admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${user.role === 'admin' ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml(user.permissions.join(', ') || 'no permissions')}</small></div>
-      <div class="row-actions"><button data-edit-user="${user.id}">Edit</button>${user.id !== state.me.user.id ? `<button data-delete-user="${user.id}">Delete</button>` : ''}</div>
-    </article>
-  `).join('');
+  const roleSelect = document.querySelector('#user-form [name="role"]');
+  if (roleSelect) {
+    [...roleSelect.options].forEach((option) => {
+      if (option.value === 'admin') option.hidden = !isSuperAdmin();
+    });
+    if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
+  }
+  list.innerHTML = state.users.length
+    ? state.users.map(user => {
+      const editable = canEditManagedUser(user);
+      const actions = editable
+        ? `<div class="row-actions"><button type="button" data-edit-user="${user.id}">Edit</button>${Number(user.id) !== Number(state.me.user.id) ? `<button type="button" data-delete-user="${user.id}">Delete</button>` : ''}</div>`
+        : '<div class="row-actions"><span class="muted">View only</span></div>';
+      return `
+    <article class="admin-row user-admin-row">
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small></div>
+      ${actions}
+    </article>`;
+    }).join('')
+    : '<p class="draft">No users found.</p>';
   list.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => {
     const user = state.users.find(item => item.id === Number(button.dataset.editUser));
+    if (!user || !canEditManagedUser(user)) return;
     const form = document.querySelector('#user-form');
-    fillForm(form, { ...user, password: '' });
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = user.permissions.includes(input.value));
+    fillForm(form, {
+      id: user.id,
+      username: user.username,
+      display_name: user.display_name,
+      role: user.role,
+      password: '',
+    });
+    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+    });
     form.elements.active.checked = Boolean(user.active);
+    const status = document.querySelector('#user-status');
+    if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    formControl(form, 'display_name')?.focus();
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
+    const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
+    if (!user || !canEditManagedUser(user)) return;
     if (!confirm('Delete this user?')) return;
-    await jsonFetch(`/api/admin/users/${button.dataset.deleteUser}`, { method: 'DELETE' });
-    await loadUsers();
+    try {
+      await jsonFetch(`/api/admin/users/${button.dataset.deleteUser}`, { method: 'DELETE' });
+      await loadUsers();
+    } catch (error) {
+      alert(error.message || 'Could not delete user.');
+    }
   }));
 }
 

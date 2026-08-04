@@ -1897,6 +1897,31 @@ body.sponsor-map-open{overflow:hidden}
 }
 .page-dirty-chip.is-visible{display:inline-flex}
 
+.user-admin-row{
+  align-items:flex-start;
+}
+.user-admin-row .row-actions{
+  flex:0 0 auto;
+}
+@media(max-width:900px){
+  .user-admin-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    gap:10px;
+  }
+  .user-admin-row .row-actions{
+    width:100%;
+    justify-content:flex-start;
+  }
+  .user-admin-row .row-actions button{
+    flex:1 1 auto;
+    min-height:40px;
+  }
+  #tab-users .editor-layout > .admin-card:first-child{
+    order:-1;
+  }
+}
+
 /* Booster meeting minutes */
 .minutes-layout{grid-template-columns:minmax(0,1fr) minmax(200px,240px);gap:18px;align-items:start}
 .minutes-nav-card{align-self:start;position:sticky;top:18px}

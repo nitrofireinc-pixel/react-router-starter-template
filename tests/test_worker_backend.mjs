@@ -92,7 +92,7 @@ test('calendar event mutation respects ownership and elevated manage access', ()
   assert.equal(canMutateEvent(other, owned), false);
   assert.equal(canMutateEvent(manager, owned), true);
   assert.equal(canMutateEvent(admin, owned), true);
-  assert.equal(canMutateEvent(owner, orphan), false);
+  assert.equal(canMutateEvent(owner, orphan), true);
   assert.equal(canMutateEvent(manager, orphan), true);
   assert.equal(canMutateEvent(admin, orphan), true);
 });
