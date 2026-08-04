@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-04';
+const ASSET_VERSION = 'admin-cms-20260804-05';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -2042,10 +2042,29 @@ function base64ToArrayBuffer(value) {
 
 function photoBytesFromStored(value) {
   if (value == null || value === '') return null;
-  if (typeof value === 'string') return base64ToArrayBuffer(value);
-  if (value instanceof ArrayBuffer) return value;
-  if (ArrayBuffer.isView(value)) return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
-  if (Array.isArray(value)) return new Uint8Array(value).buffer;
+  if (typeof value === 'string') {
+    try {
+      return new Uint8Array(base64ToArrayBuffer(value));
+    } catch {
+      // Older/odd rows may store raw binary in a text field.
+      const bytes = new Uint8Array(value.length);
+      for (let i = 0; i < value.length; i += 1) bytes[i] = value.charCodeAt(i) & 0xff;
+      return bytes;
+    }
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value)) return new Uint8Array(value);
+  // D1 sometimes returns objects that are array-like.
+  if (typeof value === 'object' && value.length != null) {
+    try {
+      return new Uint8Array(value);
+    } catch {
+      return null;
+    }
+  }
   return null;
 }
 
@@ -3059,9 +3078,24 @@ async function handleUploadGet(env, url) {
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
   const row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
   if (!row) return new Response('Not found', { status: 404 });
-  const bytes = photoBytesFromStored(row.data_base64);
-  if (!bytes) return new Response('Not found', { status: 404 });
-  return new Response(bytes, { headers: { 'content-type': row.content_type || 'application/octet-stream', 'cache-control': 'public, max-age=3600' } });
+  try {
+    const bytes = photoBytesFromStored(row.data_base64);
+    if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404 });
+    return new Response(bytes, {
+      headers: {
+        'content-type': row.content_type || 'application/octet-stream',
+        'cache-control': 'public, max-age=3600',
+      },
+    });
+  } catch (error) {
+    return jsonResponse({
+      detail: 'Could not read stored image bytes',
+      error: String(error?.message || error || ''),
+      valueType: typeof row.data_base64,
+      isArray: Array.isArray(row.data_base64),
+      ctor: row.data_base64?.constructor?.name || null,
+    }, 500);
+  }
 }
 
 function clearSessionCookie() {
