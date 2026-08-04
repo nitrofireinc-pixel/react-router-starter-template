@@ -3588,19 +3588,19 @@ function renderMinutesView(item) {
   const body = document.querySelector('[data-minutes-view-body]');
   const documentUrl = item.document_url || `/api/admin/minutes/${item.id}/document`;
   if (frame) {
-    frame.hidden = false;
+    frame.toggleAttribute('hidden', false);
     if (frame.getAttribute('src') !== documentUrl) frame.setAttribute('src', documentUrl);
   }
   if (body) {
-    body.hidden = true;
+    body.toggleAttribute('hidden', true);
     body.innerHTML = '';
   }
   const printBtn = document.querySelector('#print-minutes');
   const editBtn = document.querySelector('#edit-minutes');
   const deleteBtn = document.querySelector('#delete-minutes');
-  if (printBtn) printBtn.hidden = false;
-  if (editBtn) editBtn.hidden = !item.can_edit;
-  if (deleteBtn) deleteBtn.hidden = !item.can_delete;
+  if (printBtn) printBtn.toggleAttribute('hidden', false);
+  if (editBtn) editBtn.toggleAttribute('hidden', !item.can_edit);
+  if (deleteBtn) deleteBtn.toggleAttribute('hidden', !item.can_delete);
   showMinutesView();
   renderMinutesList();
 }
