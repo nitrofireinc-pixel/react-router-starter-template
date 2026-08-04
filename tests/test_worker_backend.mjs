@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -45,6 +45,23 @@ test('normalizePageSlug creates safe stable slugs for CMS pages', () => {
   assert.equal(normalizePageSlug('Booster Info!'), 'booster-info');
   assert.equal(normalizePageSlug('/Calendar.html'), 'calendar');
   assert.equal(normalizePageSlug('   '), 'page');
+});
+
+test('normalizePhotoMetaPayload updates gallery title and alt text', () => {
+  const existing = { alt_text: 'Old alt', caption: 'Old title' };
+  assert.deepEqual(
+    normalizePhotoMetaPayload({ alt_text: '  Field show  ', caption: 'Friday night lights' }, existing),
+    { alt_text: 'Field show', caption: 'Friday night lights' },
+  );
+  assert.deepEqual(
+    normalizePhotoMetaPayload({ caption: '<b>Bold title</b>' }, existing),
+    { alt_text: 'Old alt', caption: '<b>Bold title</b>' },
+  );
+  assert.deepEqual(
+    normalizePhotoMetaPayload({ alt_text: 'Keep image', caption: '   ' }, existing),
+    { alt_text: 'Keep image', caption: '' },
+  );
+  assert.equal(normalizePhotoMetaPayload({ caption: 'Only title' }, existing).alt_text, 'Old alt');
 });
 
 test('permission checks support admin all-access and page-specific scopes', () => {

@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-07';
+const ASSET_VERSION = 'admin-cms-20260804-08';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -1945,6 +1945,17 @@ async function nextGalleryPhotoSortOrder(env) {
   return Number(max?.max_order || 0) + 1;
 }
 
+export function normalizePhotoMetaPayload(payload = {}, existing = null) {
+  const altRaw = payload.alt_text !== undefined ? payload.alt_text : existing?.alt_text;
+  const captionRaw = payload.caption !== undefined ? payload.caption : existing?.caption;
+  const alt_text = String(altRaw || '').trim();
+  const captionSource = String(captionRaw || '').trim();
+  const caption = captionSource
+    ? (looksLikeInlineRichHtml(captionSource) ? sanitizeInlineRichHtml(captionSource) : captionSource)
+    : '';
+  return { alt_text, caption };
+}
+
 async function photoUsageLabels(env, filename) {
   const plain = `/uploads/${filename}`;
   const encoded = `/uploads/${encodeURIComponent(filename)}`;
@@ -3085,17 +3096,29 @@ async function handleApi(request, env, url) {
     return jsonResponse(await getPhotos(env));
   }
   const photoMatch = url.pathname.match(/^\/api\/admin\/photos\/(\d+)$/);
-  if (photoMatch && request.method === 'DELETE') {
+  if (photoMatch && ['PUT', 'DELETE'].includes(request.method)) {
     const auth = await requirePermission(request, env, 'photos');
     if (auth.response) return auth.response;
-    const photo = await env.DB.prepare('SELECT id, filename FROM photos WHERE id = ?').bind(Number(photoMatch[1])).first();
+    const id = Number(photoMatch[1]);
+    const photo = await env.DB.prepare(
+      'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE id = ?',
+    ).bind(id).first();
     if (!photo) return jsonResponse({ detail: 'Photo not found' }, 404);
-    const usage = await photoUsageLabels(env, photo.filename);
-    if (usage.length) {
-      return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
+    if (request.method === 'DELETE') {
+      const usage = await photoUsageLabels(env, photo.filename);
+      if (usage.length) {
+        return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
+      }
+      await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
     }
-    await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(Number(photoMatch[1])).run();
-    return jsonResponse({ ok: true });
+    const meta = normalizePhotoMetaPayload(await request.json(), photo);
+    if (!meta.alt_text) return jsonResponse({ detail: 'Alt text is required' }, 422);
+    await env.DB.prepare('UPDATE photos SET alt_text = ?, caption = ? WHERE id = ?').bind(meta.alt_text, meta.caption, id).run();
+    const updated = await env.DB.prepare(
+      'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE id = ?',
+    ).bind(id).first();
+    return jsonResponse({ ...updated, url: `/uploads/${encodeURIComponent(updated.filename)}` });
   }
 
   return jsonResponse({ detail: 'Not found' }, 404);
@@ -3498,7 +3521,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery.</p></div></div><form id="photo-form" class="admin-card stack"><label>Photo<input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional caption" aria-label="Caption"></div><input type="hidden" name="caption"></label><button class="btn primary">Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">

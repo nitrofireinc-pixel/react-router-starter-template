@@ -3092,25 +3092,73 @@ function renderPhotos() {
       const uploaded = photo.created_at
         ? new Date(photo.created_at).toLocaleString()
         : '';
+      const title = plainTextFromHtml(photo.caption) || photo.original_name || 'Photo';
       return `
     <article class="admin-row photo-row photo-admin-row" data-photo-id="${photo.id}" draggable="true">
-      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name || 'photo')}" title="Drag to reorder">⋮⋮</button>
+      <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(title)}" title="Drag to reorder">⋮⋮</button>
       <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}">
-      <div><b>${escapeHtml(plainTextFromHtml(photo.caption) || photo.original_name)}</b><span>${escapeHtml(photo.alt_text)}</span>${uploaded ? `<small>Uploaded ${escapeHtml(uploaded)}</small>` : ''}</div>
-      <div class="row-actions"><button type="button" data-delete-photo="${photo.id}">Delete</button></div>
+      <div><b>${escapeHtml(title)}</b><span>${escapeHtml(photo.alt_text)}</span>${uploaded ? `<small>Uploaded ${escapeHtml(uploaded)}</small>` : ''}</div>
+      <div class="row-actions"><button type="button" data-edit-photo="${photo.id}">Edit</button><button type="button" data-delete-photo="${photo.id}">Delete</button></div>
     </article>`;
     }).join('')
     : '<p class="draft">No gallery photos yet. Upload one above.</p>';
+  list.querySelectorAll('[data-edit-photo]').forEach((button) => button.addEventListener('click', () => {
+    const photo = state.photos.find((item) => item.id === Number(button.dataset.editPhoto));
+    if (!photo) return;
+    editPhoto(photo);
+  }));
   list.querySelectorAll('[data-delete-photo]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Delete this photo?')) return;
     try {
       await jsonFetch(`/api/admin/photos/${button.dataset.deletePhoto}`, { method: 'DELETE' });
       await loadPhotos();
+      const editingId = String(document.querySelector('#photo-form [name="photo_id"]')?.value || '');
+      if (editingId && editingId === String(button.dataset.deletePhoto)) resetPhotoForm();
     } catch (error) {
       alert(error.message || 'Could not delete photo.');
     }
   }));
   bindPhotoDragAndDrop(list);
+}
+
+function syncPhotoFormMode(editing = false) {
+  const form = document.querySelector('#photo-form');
+  if (!form) return;
+  const fileInput = formControl(form, 'file');
+  const hint = form.querySelector('[data-photo-file-hint]');
+  const submit = form.querySelector('[data-photo-submit]');
+  if (fileInput) fileInput.required = !editing;
+  if (hint) hint.textContent = editing ? 'Leave empty to keep the current image' : 'Required for new uploads';
+  if (submit) submit.textContent = editing ? 'Save photo' : 'Upload photo';
+}
+
+function resetPhotoForm() {
+  const form = document.querySelector('#photo-form');
+  if (!form) return;
+  form.reset();
+  clearFormRichEditors(form);
+  formControl(form, 'photo_id').value = '';
+  syncPhotoFormMode(false);
+  const status = document.querySelector('#photo-status');
+  if (status) status.textContent = 'Upload a new gallery photo.';
+}
+
+function editPhoto(photo) {
+  const form = document.querySelector('#photo-form');
+  if (!form || !photo) return;
+  form.reset();
+  formControl(form, 'photo_id').value = String(photo.id);
+  formControl(form, 'alt_text').value = photo.alt_text || '';
+  const captionHidden = formControl(form, 'caption');
+  if (captionHidden) captionHidden.value = photo.caption || '';
+  const captionEditor = form.querySelector('[data-rich-input="caption"]');
+  if (captionEditor) captionEditor.innerHTML = photo.caption || '';
+  syncPhotoFormMode(true);
+  const status = document.querySelector('#photo-status');
+  const label = plainTextFromHtml(photo.caption) || photo.original_name || 'photo';
+  if (status) status.textContent = `Editing “${label}”. Save to update the title.`;
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  formControl(form, 'alt_text')?.focus();
 }
 
 async function savePhotoOrder(ids) {
@@ -3777,7 +3825,30 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#photo-status');
+    syncFormRichEditors(form);
+    const photoId = String(formControl(form, 'photo_id')?.value || '').trim();
+    const altText = String(formControl(form, 'alt_text')?.value || '').trim();
+    const caption = String(formControl(form, 'caption')?.value || '').trim();
     const file = form.elements.file?.files?.[0];
+    if (!altText) {
+      status.textContent = 'Alt text is required.';
+      return;
+    }
+    if (photoId) {
+      status.textContent = 'Saving photo…';
+      try {
+        await jsonFetch(`/api/admin/photos/${photoId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ alt_text: altText, caption }),
+        });
+        resetPhotoForm();
+        await loadPhotos();
+        status.textContent = 'Photo updated.';
+      } catch (error) {
+        status.textContent = `Could not save photo: ${error.message || 'Unknown error'}`;
+      }
+      return;
+    }
     if (!file) {
       status.textContent = 'Choose a photo file first.';
       return;
@@ -3785,10 +3856,8 @@ function bindForms() {
     const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
     status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
     try {
-      syncFormRichEditors(form);
       await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
-      form.reset();
-      clearFormRichEditors(form);
+      resetPhotoForm();
       await loadPhotos();
       status.textContent = 'Photo uploaded.';
     } catch (error) {
@@ -3796,6 +3865,11 @@ function bindForms() {
       status.textContent = `Photo upload failed: ${detail}`;
       console.error('Photo upload failed', { name: file.name, type: file.type, size: file.size, error });
     }
+  });
+
+  document.querySelector('#new-photo')?.addEventListener('click', () => {
+    resetPhotoForm();
+    document.querySelector('#photo-form [data-rich-input="caption"]')?.focus();
   });
 }
 
