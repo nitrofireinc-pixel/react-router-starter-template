@@ -6,6 +6,7 @@ function escapeHtml(value) {
 
 async function jsonFetch(url, options = {}) {
   const response = await fetch(url, {
+    credentials: 'same-origin',
     headers: options.body instanceof FormData ? { ...(options.headers || {}) } : { 'Content-Type': 'application/json', ...(options.headers || {}) },
     cache: 'no-store',
     ...options,
@@ -3393,18 +3394,28 @@ function selectedMinutes() {
   return state.minutes.find((item) => Number(item.id) === Number(state.selectedMinutesId)) || null;
 }
 
-function formatMinutesDateMask(value) {
-  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+function minutesDateFieldValue(item) {
+  const iso = String(item?.meeting_date || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const display = String(item?.meeting_date_display || '').trim();
+  const match = display.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return '';
+  return `${match[3]}-${String(match[1]).padStart(2, '0')}-${String(match[2]).padStart(2, '0')}`;
 }
 
-function isValidMinutesDateInput(value) {
-  const raw = String(value || '').trim();
-  if (/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/.test(raw)) return true;
-  if (/^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{4}$/.test(raw)) return true;
-  return false;
+function readMinutesBodyHtml(form) {
+  syncFormRichEditors(form);
+  const control = formControl(form, 'body_html');
+  let html = String(control?.value || '').trim();
+  if (!html.replace(/<[^>]+>/g, '').trim()) {
+    const editor = form?.querySelector('[data-rich-input="body_html"]');
+    const fromEditor = sanitizeRichHtml(editor?.innerHTML || '');
+    if (fromEditor.replace(/<[^>]+>/g, '').trim()) {
+      html = fromEditor;
+      if (control) control.value = fromEditor;
+    }
+  }
+  return html;
 }
 
 function syncMinutesPanelMode() {
@@ -3465,7 +3476,7 @@ function resetMinutesForm() {
   formControl(form, 'minutes_id').value = '';
   showMinutesCompose(false);
   const status = document.querySelector('#minutes-status');
-  if (status) status.textContent = 'Add a meeting date and minutes, then save.';
+  if (status) status.textContent = 'Pick a meeting date, enter the minutes, then save.';
   renderMinutesList();
 }
 
@@ -3567,12 +3578,49 @@ function editSelectedMinutes() {
   const form = document.querySelector('#minutes-form');
   if (!item || !form || !item.can_edit) return;
   formControl(form, 'minutes_id').value = String(item.id);
-  formControl(form, 'meeting_date').value = item.meeting_date_display || item.meeting_date;
+  formControl(form, 'meeting_date').value = minutesDateFieldValue(item);
   setFormRichEditorValue(form, 'body_html', item.body_html || '');
   showMinutesCompose(true);
   const status = document.querySelector('#minutes-status');
   if (status) status.textContent = `Editing minutes for ${item.meeting_date_display || item.meeting_date}.`;
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function saveMinutesForm(form) {
+  const status = document.querySelector('#minutes-status');
+  if (!canManageMinutes()) {
+    if (status) status.textContent = 'You have view-only access to Meeting Minutes.';
+    return;
+  }
+  if (!form) return;
+  const id = String(formControl(form, 'minutes_id')?.value || '').trim();
+  const dateControl = formControl(form, 'meeting_date');
+  const meetingDate = String(dateControl?.value || '').trim();
+  const bodyHtml = readMinutesBodyHtml(form);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)) {
+    if (status) status.textContent = 'Choose a meeting date.';
+    dateControl?.focus();
+    return;
+  }
+  if (!bodyHtml.replace(/<[^>]+>/g, '').trim()) {
+    if (status) status.textContent = 'Minutes content is required.';
+    form.querySelector('[data-rich-input="body_html"]')?.focus();
+    return;
+  }
+  if (status) status.textContent = 'Saving minutes…';
+  try {
+    const saved = await jsonFetch(id ? `/api/admin/minutes/${id}` : '/api/admin/minutes', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify({ meeting_date: meetingDate, body_html: bodyHtml }),
+    });
+    if (!saved?.id) throw new Error('Save succeeded but no minutes id was returned.');
+    state.selectedMinutesId = saved.id;
+    await loadMinutes();
+    openMinutesView(saved.id);
+    if (status) status.textContent = id ? 'Minutes updated.' : 'Minutes saved.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save minutes.';
+  }
 }
 
 async function loadMinutes() {
@@ -3645,48 +3693,9 @@ function bindMinutesPanel() {
       alert(error.message || 'Could not delete minutes.');
     }
   });
-  const meetingDateInput = document.querySelector('#minutes-form [name="meeting_date"]');
-  if (meetingDateInput && meetingDateInput.dataset.dateMaskBound !== '1') {
-    meetingDateInput.dataset.dateMaskBound = '1';
-    meetingDateInput.addEventListener('input', () => {
-      const next = formatMinutesDateMask(meetingDateInput.value);
-      if (meetingDateInput.value !== next) meetingDateInput.value = next;
-    });
-    meetingDateInput.addEventListener('blur', () => {
-      meetingDateInput.value = formatMinutesDateMask(meetingDateInput.value);
-    });
-  }
   document.querySelector('#minutes-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!canManageMinutes()) return;
-    const form = event.currentTarget;
-    const status = document.querySelector('#minutes-status');
-    syncFormRichEditors(form);
-    const id = String(formControl(form, 'minutes_id')?.value || '').trim();
-    const dateControl = formControl(form, 'meeting_date');
-    if (dateControl) dateControl.value = formatMinutesDateMask(dateControl.value);
-    const meetingDate = String(dateControl?.value || '').trim();
-    const bodyHtml = String(formControl(form, 'body_html')?.value || '').trim();
-    if (!isValidMinutesDateInput(meetingDate)) {
-      if (status) status.textContent = 'Use meeting date format MM/DD/YYYY.';
-      return;
-    }
-    if (!bodyHtml.replace(/<[^>]+>/g, '').trim()) {
-      if (status) status.textContent = 'Minutes content is required.';
-      return;
-    }
-    if (status) status.textContent = 'Saving minutes…';
-    try {
-      const saved = await jsonFetch(id ? `/api/admin/minutes/${id}` : '/api/admin/minutes', {
-        method: id ? 'PUT' : 'POST',
-        body: JSON.stringify({ meeting_date: meetingDate, body_html: bodyHtml }),
-      });
-      await loadMinutes();
-      openMinutesView(saved.id);
-      if (status) status.textContent = id ? 'Minutes updated.' : 'Minutes saved.';
-    } catch (error) {
-      if (status) status.textContent = error.message || 'Could not save minutes.';
-    }
+    await saveMinutesForm(event.currentTarget);
   });
 }
 
