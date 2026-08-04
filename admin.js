@@ -3682,7 +3682,13 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#photo-status');
-    status.textContent = 'Uploading...';
+    const file = form.elements.file?.files?.[0];
+    if (!file) {
+      status.textContent = 'Choose a photo file first.';
+      return;
+    }
+    const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
+    status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
     try {
       syncFormRichEditors(form);
       await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
@@ -3691,8 +3697,9 @@ function bindForms() {
       await loadPhotos();
       status.textContent = 'Photo uploaded.';
     } catch (error) {
-      status.textContent = `Photo upload failed: ${error.message || 'Try a JPG, PNG, WEBP, or GIF under 1.5 MB.'}`;
-      console.error(error);
+      const detail = String(error?.message || '').trim() || 'Unknown error';
+      status.textContent = `Photo upload failed: ${detail}`;
+      console.error('Photo upload failed', { name: file.name, type: file.type, size: file.size, error });
     }
   });
 }

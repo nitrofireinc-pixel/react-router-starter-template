@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-01';
+const ASSET_VERSION = 'admin-cms-20260804-02';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -3221,7 +3221,14 @@ async function serveStaticOrCms(request, env, url) {
   if (url.pathname === '/') return env.ASSETS.fetch(request);
   const assetUrl = new URL(request.url);
   assetUrl.pathname = normalizeStaticPath(url.pathname);
-  return env.ASSETS.fetch(new Request(assetUrl, request));
+  const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+  // Keep CMS scripts fresh so deploy fixes are not masked by long CDN/browser caches.
+  if (/\.(?:js|css)$/i.test(assetUrl.pathname) && /(?:^|\/)(admin|site-content|script)\.js$/i.test(assetUrl.pathname) || assetUrl.pathname.endsWith('/styles.css') || assetUrl.pathname === '/styles.css') {
+    const headers = new Headers(assetResponse.headers);
+    headers.set('cache-control', 'no-store');
+    return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
+  }
+  return assetResponse;
 }
 
 export default {
