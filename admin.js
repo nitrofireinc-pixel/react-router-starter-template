@@ -3655,7 +3655,7 @@ async function saveMinutesForm(form) {
     });
     if (!saved?.id) throw new Error('Save succeeded but no minutes id was returned.');
     state.minutes = await jsonFetch('/api/admin/minutes');
-    resetMinutesForm(id ? 'Minutes updated. Select a date on the right to open it.' : 'Minutes saved. Select a date on the right to open it.');
+    resetMinutesForm(id ? 'Minutes updated. Select a date above to open it.' : 'Minutes saved. Select a date above to open it.');
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
   }
