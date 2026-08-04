@@ -788,13 +788,17 @@ test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
 
 test('meeting minutes dates and secretary edit window', () => {
   assert.equal(parseMeetingDateInput('08/04/2026'), '2026-08-04');
+  assert.equal(parseMeetingDateInput('08042026'), '2026-08-04');
+  assert.equal(parseMeetingDateInput('2026-08-04'), '2026-08-04');
   assert.equal(parseMeetingDateInput('13/40/2026'), null);
+  assert.equal(parseMeetingDateInput('13402026'), null);
   assert.equal(formatMeetingDateDisplay('2026-08-04'), '08/04/2026');
   const payload = normalizeMinutesPayload({
     meeting_date: '08/04/2026',
     body_html: '<p>Called to order</p><script>alert(1)</script>',
   });
   assert.equal(payload.meeting_date, '2026-08-04');
+  assert.equal(normalizeMinutesPayload({ meeting_date: '08042026', body_html: '<p>x</p>' }).meeting_date, '2026-08-04');
   assert.match(payload.body_html, /Called to order/);
   assert.doesNotMatch(payload.body_html, /script/i);
   assert.equal(MINUTES_EDIT_WINDOW_DAYS, 10);

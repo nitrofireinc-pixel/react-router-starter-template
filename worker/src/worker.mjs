@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260804-14';
+const ASSET_VERSION = 'admin-cms-20260804-15';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -2045,11 +2045,27 @@ export const MINUTES_EDIT_WINDOW_DAYS = 10;
 
 export function parseMeetingDateInput(value) {
   const raw = String(value || '').trim();
-  const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!match) return null;
-  const month = Number(match[1]);
-  const day = Number(match[2]);
-  const year = Number(match[3]);
+  let month;
+  let day;
+  let year;
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const compact = raw.match(/^(\d{2})(\d{2})(\d{4})$/);
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (slash) {
+    month = Number(slash[1]);
+    day = Number(slash[2]);
+    year = Number(slash[3]);
+  } else if (compact) {
+    month = Number(compact[1]);
+    day = Number(compact[2]);
+    year = Number(compact[3]);
+  } else if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]);
+    day = Number(iso[3]);
+  } else {
+    return null;
+  }
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2200) return null;
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -3766,7 +3782,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>View booster meeting minutes by date. Secretaries can create and edit submissions for 10 days. View-only users can open and print minutes. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-minutes">New minutes</button></div></div><div class="editor-layout minutes-layout"><div class="minutes-main"><form id="minutes-form" class="admin-card stack"><input type="hidden" name="minutes_id" value=""><label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" pattern="(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])/[0-9]{4}" maxlength="10"></label><label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label><div class="panel-actions minutes-form-actions"><button class="btn primary" data-minutes-submit type="submit">Save minutes</button><button class="btn outline" type="button" id="cancel-minutes-edit" hidden>Cancel</button></div><p class="status" id="minutes-status"></p></form><article id="minutes-view" class="admin-card stack minutes-view" hidden><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>All minutes</h2><p class="muted">Select a date to view.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside></div></section><section id="tab-mail" class="cms-panel mail-panel">
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>View booster meeting minutes by date. Secretaries can create and edit submissions for 10 days. View-only users can open and print minutes. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-minutes">New minutes</button></div></div><div class="editor-layout minutes-layout"><div class="minutes-main"><form id="minutes-form" class="admin-card stack"><input type="hidden" name="minutes_id" value=""><label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"><small id="minutes-date-hint" class="field-hint">Type the date digits — slashes are added automatically (e.g. 08042026 → 08/04/2026).</small></label><label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label><div class="panel-actions minutes-form-actions"><button class="btn primary" data-minutes-submit type="submit">Save minutes</button><button class="btn outline" type="button" id="cancel-minutes-edit" hidden>Cancel</button></div><p class="status" id="minutes-status"></p></form><article id="minutes-view" class="admin-card stack minutes-view" hidden><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>All minutes</h2><p class="muted">Select a date to view.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">

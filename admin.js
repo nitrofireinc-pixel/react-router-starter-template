@@ -3393,6 +3393,20 @@ function selectedMinutes() {
   return state.minutes.find((item) => Number(item.id) === Number(state.selectedMinutesId)) || null;
 }
 
+function formatMinutesDateMask(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function isValidMinutesDateInput(value) {
+  const raw = String(value || '').trim();
+  if (/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/.test(raw)) return true;
+  if (/^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{4}$/.test(raw)) return true;
+  return false;
+}
+
 function syncMinutesPanelMode() {
   const form = document.querySelector('#minutes-form');
   const newBtn = document.querySelector('#new-minutes');
@@ -3631,6 +3645,17 @@ function bindMinutesPanel() {
       alert(error.message || 'Could not delete minutes.');
     }
   });
+  const meetingDateInput = document.querySelector('#minutes-form [name="meeting_date"]');
+  if (meetingDateInput && meetingDateInput.dataset.dateMaskBound !== '1') {
+    meetingDateInput.dataset.dateMaskBound = '1';
+    meetingDateInput.addEventListener('input', () => {
+      const next = formatMinutesDateMask(meetingDateInput.value);
+      if (meetingDateInput.value !== next) meetingDateInput.value = next;
+    });
+    meetingDateInput.addEventListener('blur', () => {
+      meetingDateInput.value = formatMinutesDateMask(meetingDateInput.value);
+    });
+  }
   document.querySelector('#minutes-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canManageMinutes()) return;
@@ -3638,9 +3663,11 @@ function bindMinutesPanel() {
     const status = document.querySelector('#minutes-status');
     syncFormRichEditors(form);
     const id = String(formControl(form, 'minutes_id')?.value || '').trim();
-    const meetingDate = String(formControl(form, 'meeting_date')?.value || '').trim();
+    const dateControl = formControl(form, 'meeting_date');
+    if (dateControl) dateControl.value = formatMinutesDateMask(dateControl.value);
+    const meetingDate = String(dateControl?.value || '').trim();
     const bodyHtml = String(formControl(form, 'body_html')?.value || '').trim();
-    if (!/^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/.test(meetingDate)) {
+    if (!isValidMinutesDateInput(meetingDate)) {
       if (status) status.textContent = 'Use meeting date format MM/DD/YYYY.';
       return;
     }
