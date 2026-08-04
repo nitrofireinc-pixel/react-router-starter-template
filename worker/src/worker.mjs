@@ -174,8 +174,8 @@ export function extractSponsorTierFields(html = '') {
 const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-10';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes'];
+const ASSET_VERSION = 'admin-cms-20260804-11';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -396,6 +396,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -2034,6 +2035,104 @@ function canEditPage(user, slug) {
   return hasPermission(user, 'pages') || hasPermission(user, `page:${slug}`);
 }
 
+export const MINUTES_EDIT_WINDOW_DAYS = 10;
+
+export function parseMeetingDateInput(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2200) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function formatMeetingDateDisplay(value) {
+  const raw = String(value || '').trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  const slash = parseMeetingDateInput(raw);
+  if (!slash) return raw;
+  const parts = slash.split('-');
+  return `${parts[1]}/${parts[2]}/${parts[0]}`;
+}
+
+export function normalizeMinutesPayload(payload = {}, existing = null) {
+  const meetingDateRaw = payload.meeting_date !== undefined ? payload.meeting_date : existing?.meeting_date;
+  const meeting_date = parseMeetingDateInput(meetingDateRaw) || (
+    String(meetingDateRaw || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(meetingDateRaw) : ''
+  );
+  const bodyRaw = payload.body_html !== undefined ? payload.body_html : existing?.body_html;
+  const bodySource = String(bodyRaw || '').trim();
+  const body_html = bodySource ? sanitizeRichHtml(bodySource) : '';
+  return { meeting_date, body_html };
+}
+
+export function minutesEditableUntil(createdAt) {
+  const created = new Date(createdAt || 0);
+  if (Number.isNaN(created.getTime())) return null;
+  return new Date(created.getTime() + (MINUTES_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+}
+
+export function canEditMeetingMinutes(user, record, now = new Date()) {
+  if (!user || !record) return false;
+  if (!hasPermission(user, 'minutes')) return false;
+  if (user.role === 'admin') return true;
+  const until = minutesEditableUntil(record.created_at);
+  if (!until) return false;
+  return now.getTime() <= until.getTime();
+}
+
+export function canDeleteMeetingMinutes(user) {
+  return Boolean(user && user.role === 'admin');
+}
+
+function serializeMinutesRow(row, user = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    meeting_date: row.meeting_date,
+    meeting_date_display: formatMeetingDateDisplay(row.meeting_date),
+    body_html: row.body_html || '',
+    created_by: row.created_by || null,
+    created_by_name: row.created_by_name || '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    editable_until: minutesEditableUntil(row.created_at)?.toISOString() || null,
+    can_edit: canEditMeetingMinutes(user, row),
+    can_delete: canDeleteMeetingMinutes(user),
+  };
+}
+
+async function listMeetingMinutes(env, user = null) {
+  const rows = await env.DB.prepare(
+    `SELECT m.id, m.meeting_date, m.body_html, m.created_by, m.created_at, m.updated_at,
+            u.display_name AS created_by_name
+     FROM booster_meeting_minutes m
+     LEFT JOIN users u ON u.id = m.created_by
+     ORDER BY date(m.meeting_date) DESC, datetime(m.created_at) DESC, m.id DESC`,
+  ).all();
+  return (rows.results || []).map((row) => serializeMinutesRow(row, user));
+}
+
+async function getMeetingMinutesById(env, id, user = null) {
+  const row = await env.DB.prepare(
+    `SELECT m.id, m.meeting_date, m.body_html, m.created_by, m.created_at, m.updated_at,
+            u.display_name AS created_by_name
+     FROM booster_meeting_minutes m
+     LEFT JOIN users u ON u.id = m.created_by
+     WHERE m.id = ?`,
+  ).bind(id).first();
+  return serializeMinutesRow(row, user);
+}
+
 async function requireLogin(request, env) {
   const user = await currentUser(request, env);
   if (!user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
@@ -2908,8 +3007,61 @@ async function handleApi(request, env, url) {
     return jsonResponse(rows.results || []);
   }
 
+  if (url.pathname === '/api/admin/minutes' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'minutes');
+    if (auth.response) return auth.response;
+    return jsonResponse(await listMeetingMinutes(env, auth.user));
+  }
+  if (url.pathname === '/api/admin/minutes' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'minutes');
+    if (auth.response) return auth.response;
+    let payload;
+    try {
+      payload = normalizeMinutesPayload(await request.json());
+    } catch (error) {
+      return jsonResponse({ detail: error.message }, 400);
+    }
+    if (!payload.meeting_date) return jsonResponse({ detail: 'Meeting date is required as MM/DD/YYYY' }, 422);
+    if (!payload.body_html.replace(/<[^>]+>/g, '').trim()) return jsonResponse({ detail: 'Minutes content is required' }, 422);
+    const result = await env.DB.prepare(
+      'INSERT INTO booster_meeting_minutes (meeting_date, body_html, created_by) VALUES (?, ?, ?)',
+    ).bind(payload.meeting_date, payload.body_html, auth.user.id).run();
+    return jsonResponse(await getMeetingMinutesById(env, result.meta.last_row_id, auth.user), 201);
+  }
+  const minutesMatch = url.pathname.match(/^\/api\/admin\/minutes\/(\d+)$/);
+  if (minutesMatch && ['GET', 'PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requirePermission(request, env, 'minutes');
+    if (auth.response) return auth.response;
+    const id = Number(minutesMatch[1]);
+    const existing = await getMeetingMinutesById(env, id, auth.user);
+    if (!existing) return jsonResponse({ detail: 'Meeting minutes not found' }, 404);
+    if (request.method === 'GET') return jsonResponse(existing);
+    if (request.method === 'DELETE') {
+      if (!canDeleteMeetingMinutes(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
+      }
+      await env.DB.prepare('DELETE FROM booster_meeting_minutes WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    if (!canEditMeetingMinutes(auth.user, existing)) {
+      return jsonResponse({ detail: 'Meeting minutes can only be edited by the secretary within 10 days of submission' }, 403);
+    }
+    let payload;
+    try {
+      payload = normalizeMinutesPayload(await request.json(), existing);
+    } catch (error) {
+      return jsonResponse({ detail: error.message }, 400);
+    }
+    if (!payload.meeting_date) return jsonResponse({ detail: 'Meeting date is required as MM/DD/YYYY' }, 422);
+    if (!payload.body_html.replace(/<[^>]+>/g, '').trim()) return jsonResponse({ detail: 'Minutes content is required' }, 422);
+    await env.DB.prepare(
+      'UPDATE booster_meeting_minutes SET meeting_date = ?, body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(payload.meeting_date, payload.body_html, id).run();
+    return jsonResponse(await getMeetingMinutesById(env, id, auth.user));
+  }
+
   if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
-    const auth = await requirePermission(request, env, 'mail');
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
     const recipients = (rows.results || [])
@@ -2925,7 +3077,7 @@ async function handleApi(request, env, url) {
     return jsonResponse(recipients);
   }
   if (url.pathname === '/api/admin/mail/delivery' && request.method === 'GET') {
-    const auth = await requirePermission(request, env, 'mail');
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const provider = resolveContactEmailProvider(env);
     const sender = resolveAdminMailSender(auth.user);
@@ -2945,7 +3097,7 @@ async function handleApi(request, env, url) {
     });
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
-    const auth = await requirePermission(request, env, 'mail');
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     let mail;
     try {
@@ -3404,7 +3556,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="mail">Staff Email</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"><form id="password-form" class="dashboard-password-card"><span>Account</span><b>Change password</b><label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label><label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label><label>Confirm new<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn primary" type="submit">Update password</button><p class="status" id="password-status"></p></form></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -3463,7 +3615,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
-<section id="tab-mail" class="cms-panel mail-panel">
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>Record booster meeting minutes by date. Secretaries can edit a submission for 10 days. Only Super Admins can delete minutes.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-minutes">New minutes</button></div></div><div class="editor-layout minutes-layout"><div class="minutes-main"><form id="minutes-form" class="admin-card stack"><input type="hidden" name="minutes_id" value=""><label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" pattern="(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])/[0-9]{4}" maxlength="10"></label><label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label><div class="panel-actions minutes-form-actions"><button class="btn primary" data-minutes-submit type="submit">Save minutes</button><button class="btn outline" type="button" id="cancel-minutes-edit" hidden>Cancel</button></div><p class="status" id="minutes-status"></p></form><article id="minutes-view" class="admin-card stack minutes-view" hidden><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button></div></div><div class="minutes-view-body cms-content" data-minutes-view-body></div></article></div><aside class="admin-card minutes-nav-card"><h2>All minutes</h2><p class="muted">Select a date to view.</p><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
@@ -3498,7 +3650,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Booster Meeting Minutes (Secretary)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

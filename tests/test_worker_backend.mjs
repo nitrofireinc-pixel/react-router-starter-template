@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, resolveAdminMailSender, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, resolveAdminMailSender, resolveContactEmailProvider, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorMapsUrls, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -785,3 +785,29 @@ test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
   const fallback = resolveAdminMailSender({ username: 'admin@efhsband.org', display_name: '  ' });
   assert.equal(fallback.fromName, 'admin@efhsband.org');
 });
+
+test('meeting minutes dates and secretary edit window', () => {
+  assert.equal(parseMeetingDateInput('08/04/2026'), '2026-08-04');
+  assert.equal(parseMeetingDateInput('13/40/2026'), null);
+  assert.equal(formatMeetingDateDisplay('2026-08-04'), '08/04/2026');
+  const payload = normalizeMinutesPayload({
+    meeting_date: '08/04/2026',
+    body_html: '<p>Called to order</p><script>alert(1)</script>',
+  });
+  assert.equal(payload.meeting_date, '2026-08-04');
+  assert.match(payload.body_html, /Called to order/);
+  assert.doesNotMatch(payload.body_html, /script/i);
+  assert.equal(MINUTES_EDIT_WINDOW_DAYS, 10);
+
+  const secretary = { role: 'editor', permissions: ['minutes'] };
+  const admin = { role: 'admin', permissions: [] };
+  const fresh = { created_at: new Date().toISOString() };
+  const stale = { created_at: new Date(Date.now() - (11 * 24 * 60 * 60 * 1000)).toISOString() };
+  assert.equal(canEditMeetingMinutes(secretary, fresh), true);
+  assert.equal(canEditMeetingMinutes(secretary, stale), false);
+  assert.equal(canEditMeetingMinutes(admin, stale), true);
+  assert.equal(canDeleteMeetingMinutes(secretary), false);
+  assert.equal(canDeleteMeetingMinutes(admin), true);
+  assert.ok(minutesEditableUntil(fresh.created_at) instanceof Date);
+});
+

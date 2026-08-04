@@ -31,7 +31,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -120,7 +120,12 @@ function canEditContact() {
 }
 
 function canSendMail() {
-  return hasPermission('mail');
+  // Staff Email is available to every logged-in CMS user.
+  return Boolean(state.me?.user);
+}
+
+function canManageMinutes() {
+  return hasPermission('minutes');
 }
 
 function formControl(form, name) {
@@ -1631,6 +1636,12 @@ function activateTab(name) {
       setSponsorsMenuOpen(true);
       loadSponsors().catch(() => {});
     }
+    if (name === 'minutes') {
+      loadMinutes().catch(() => {});
+    }
+    if (name === 'mail') {
+      loadMailRecipients().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -1734,23 +1745,24 @@ function showAllowedPanels() {
 
   const panels = {
     dashboard: true,
+    mail: true,
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
     'booster-members': canEditBoosterMembers(),
+    minutes: canManageMinutes(),
     contact: canEditContact(),
     site: hasPermission('site'),
     users: hasPermission('users'),
-    mail: canSendMail(),
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
   let manageVisible = false;
   document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
-    const allowed = button.dataset.tab === 'dashboard' || panels[button.dataset.tab];
+    const allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab];
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
-    if (allowed && button.dataset.tab !== 'dashboard') manageVisible = true;
+    if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
   const sponsorsAccess = canAccessSponsorsMenu();
@@ -1857,6 +1869,8 @@ function renderDashboard() {
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
   const cards = [
+    ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
+    canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
@@ -1864,7 +1878,6 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    canSendMail() && ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
@@ -3309,9 +3322,176 @@ async function loadContactTopics() {
   await loadContactDeliveryStatus();
 }
 
+function selectedMinutes() {
+  return state.minutes.find((item) => Number(item.id) === Number(state.selectedMinutesId)) || null;
+}
+
+function showMinutesCompose(editing = false) {
+  const form = document.querySelector('#minutes-form');
+  const view = document.querySelector('#minutes-view');
+  if (form) form.hidden = false;
+  if (view) view.hidden = true;
+  const cancel = document.querySelector('#cancel-minutes-edit');
+  if (cancel) cancel.hidden = !editing;
+  const submit = document.querySelector('[data-minutes-submit]');
+  if (submit) submit.textContent = editing ? 'Save changes' : 'Save minutes';
+}
+
+function showMinutesView() {
+  const form = document.querySelector('#minutes-form');
+  const view = document.querySelector('#minutes-view');
+  if (form) form.hidden = true;
+  if (view) view.hidden = false;
+}
+
+function resetMinutesForm() {
+  const form = document.querySelector('#minutes-form');
+  if (!form) return;
+  form.reset();
+  clearFormRichEditors(form);
+  formControl(form, 'minutes_id').value = '';
+  showMinutesCompose(false);
+  const status = document.querySelector('#minutes-status');
+  if (status) status.textContent = 'Add a meeting date and minutes, then save.';
+  state.selectedMinutesId = null;
+  renderMinutesList();
+}
+
+function renderMinutesList() {
+  const list = document.querySelector('#minutes-list');
+  if (!list) return;
+  if (!state.minutes.length) {
+    list.innerHTML = '<p class="draft">No minutes submitted yet.</p>';
+    return;
+  }
+  list.innerHTML = state.minutes.map((item) => {
+    const active = Number(item.id) === Number(state.selectedMinutesId);
+    return `<button type="button" class="minutes-nav-item${active ? ' active' : ''}" data-minutes-id="${item.id}">
+      <b>${escapeHtml(item.meeting_date_display || item.meeting_date)}</b>
+      <small>${escapeHtml(item.created_by_name || 'Secretary')}</small>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('[data-minutes-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openMinutesView(Number(button.dataset.minutesId));
+    });
+  });
+}
+
+function renderMinutesView(item) {
+  const view = document.querySelector('#minutes-view');
+  if (!view || !item) return;
+  view.querySelector('[data-minutes-view-date]').textContent = item.meeting_date_display || item.meeting_date;
+  const meta = [];
+  if (item.created_by_name) meta.push(`Recorded by ${item.created_by_name}`);
+  if (item.created_at) meta.push(`Submitted ${new Date(item.created_at).toLocaleString()}`);
+  if (item.can_edit && item.editable_until) {
+    meta.push(`Editable until ${new Date(item.editable_until).toLocaleDateString()}`);
+  } else if (!item.can_edit) {
+    meta.push('View only');
+  }
+  view.querySelector('[data-minutes-view-meta]').textContent = meta.join(' · ');
+  view.querySelector('[data-minutes-view-body]').innerHTML = item.body_html || '<p class="draft">No minutes content.</p>';
+  const editBtn = document.querySelector('#edit-minutes');
+  const deleteBtn = document.querySelector('#delete-minutes');
+  if (editBtn) editBtn.hidden = !item.can_edit;
+  if (deleteBtn) deleteBtn.hidden = !item.can_delete;
+  showMinutesView();
+  renderMinutesList();
+}
+
+function openMinutesView(id) {
+  const item = state.minutes.find((row) => Number(row.id) === Number(id));
+  if (!item) return;
+  state.selectedMinutesId = item.id;
+  renderMinutesView(item);
+}
+
+function editSelectedMinutes() {
+  const item = selectedMinutes();
+  const form = document.querySelector('#minutes-form');
+  if (!item || !form || !item.can_edit) return;
+  formControl(form, 'minutes_id').value = String(item.id);
+  formControl(form, 'meeting_date').value = item.meeting_date_display || item.meeting_date;
+  setFormRichEditorValue(form, 'body_html', item.body_html || '');
+  showMinutesCompose(true);
+  const status = document.querySelector('#minutes-status');
+  if (status) status.textContent = `Editing minutes for ${item.meeting_date_display || item.meeting_date}.`;
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function loadMinutes() {
+  if (!canManageMinutes()) return;
+  state.minutes = await jsonFetch('/api/admin/minutes');
+  if (state.selectedMinutesId) {
+    const stillThere = state.minutes.some((item) => Number(item.id) === Number(state.selectedMinutesId));
+    if (!stillThere) state.selectedMinutesId = null;
+  }
+  renderMinutesList();
+  const selected = selectedMinutes();
+  if (selected) renderMinutesView(selected);
+  else resetMinutesForm();
+}
+
+function bindMinutesPanel() {
+  document.querySelector('#new-minutes')?.addEventListener('click', () => {
+    resetMinutesForm();
+    document.querySelector('#minutes-form [name="meeting_date"]')?.focus();
+  });
+  document.querySelector('#cancel-minutes-edit')?.addEventListener('click', () => {
+    const selected = selectedMinutes();
+    if (selected) openMinutesView(selected.id);
+    else resetMinutesForm();
+  });
+  document.querySelector('#edit-minutes')?.addEventListener('click', () => editSelectedMinutes());
+  document.querySelector('#delete-minutes')?.addEventListener('click', async () => {
+    const item = selectedMinutes();
+    if (!item?.can_delete) return;
+    if (!confirm(`Delete minutes for ${item.meeting_date_display || item.meeting_date}? This cannot be undone.`)) return;
+    try {
+      await jsonFetch(`/api/admin/minutes/${item.id}`, { method: 'DELETE' });
+      state.selectedMinutesId = null;
+      await loadMinutes();
+      const status = document.querySelector('#minutes-status');
+      if (status) status.textContent = 'Minutes deleted.';
+    } catch (error) {
+      alert(error.message || 'Could not delete minutes.');
+    }
+  });
+  document.querySelector('#minutes-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#minutes-status');
+    syncFormRichEditors(form);
+    const id = String(formControl(form, 'minutes_id')?.value || '').trim();
+    const meetingDate = String(formControl(form, 'meeting_date')?.value || '').trim();
+    const bodyHtml = String(formControl(form, 'body_html')?.value || '').trim();
+    if (!/^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/.test(meetingDate)) {
+      if (status) status.textContent = 'Use meeting date format MM/DD/YYYY.';
+      return;
+    }
+    if (!bodyHtml.replace(/<[^>]+>/g, '').trim()) {
+      if (status) status.textContent = 'Minutes content is required.';
+      return;
+    }
+    if (status) status.textContent = 'Saving minutes…';
+    try {
+      const saved = await jsonFetch(id ? `/api/admin/minutes/${id}` : '/api/admin/minutes', {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify({ meeting_date: meetingDate, body_html: bodyHtml }),
+      });
+      await loadMinutes();
+      openMinutesView(saved.id);
+      if (status) status.textContent = id ? 'Minutes updated.' : 'Minutes saved.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not save minutes.';
+    }
+  });
+}
+
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes()]);
 }
 
 function bindForms() {
@@ -3883,6 +4063,7 @@ bindPageVisualEditor();
 bindPageEditorResizer();
 bindForms();
 bindMailComposer();
+bindMinutesPanel();
 refreshAll().catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);

@@ -1896,3 +1896,22 @@ body.sponsor-map-open{overflow:hidden}
   text-transform:uppercase;
 }
 .page-dirty-chip.is-visible{display:inline-flex}
+
+/* Booster meeting minutes */
+.minutes-layout{grid-template-columns:minmax(0,1fr) minmax(200px,240px);gap:18px;align-items:start}
+.minutes-nav-card{align-self:start;position:sticky;top:18px}
+.minutes-nav{display:grid;gap:8px;margin-top:10px;max-height:min(70vh,720px);overflow:auto}
+.minutes-nav-item{display:grid;gap:2px;width:100%;text-align:left;border:1px solid #e1e8f1;border-radius:12px;background:#fff;padding:10px 12px;cursor:pointer;color:#10233c}
+.minutes-nav-item:hover,.minutes-nav-item:focus-visible{border-color:#014990;outline:none}
+.minutes-nav-item.active{background:#10233c;border-color:#10233c;color:#fff}
+.minutes-nav-item b{font-size:.95rem}
+.minutes-nav-item small{color:inherit;opacity:.75;font-size:.78rem}
+.minutes-view-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.minutes-view-head h2{margin:.1rem 0 .35rem;color:#10233c;font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.1}
+.minutes-view-body{border-top:1px solid #e1e8f1;padding-top:14px;color:#24364d;line-height:1.55}
+.minutes-view-body p{margin:0 0 .75em}
+.minutes-form-actions{display:flex;flex-wrap:wrap;gap:10px}
+@media(max-width:900px){
+  .minutes-layout{grid-template-columns:1fr}
+  .minutes-nav-card{position:static}
+}
