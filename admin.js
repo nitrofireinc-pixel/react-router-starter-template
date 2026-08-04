@@ -25,9 +25,9 @@ async function jsonFetch(url, options = {}) {
 
 const SOCIAL_PLATFORMS = [
   { id: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/…' },
+  { id: 'x', label: 'X', placeholder: 'https://x.com/…' },
   { id: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/…' },
   { id: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@…' },
-  { id: 'x', label: 'X', placeholder: 'https://x.com/…' },
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 

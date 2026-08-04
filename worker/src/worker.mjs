@@ -8,9 +8,9 @@ export const DEFAULT_UTILITY_LINKS = [
 
 export const SOCIAL_PLATFORMS = [
   { id: 'facebook', label: 'Facebook' },
+  { id: 'x', label: 'X' },
   { id: 'instagram', label: 'Instagram' },
   { id: 'youtube', label: 'YouTube' },
-  { id: 'x', label: 'X' },
   { id: 'tiktok', label: 'TikTok' },
 ];
 
@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact'];
-const ASSET_VERSION = 'admin-cms-20260804-08';
+const ASSET_VERSION = 'admin-cms-20260804-09';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -671,11 +671,13 @@ export function normalizeSocialLinks(value) {
 }
 
 export function renderSocialLinks(site = {}) {
-  const links = normalizeSocialLinks(site.social_links).filter((link) => link.href);
-  if (!links.length) return '';
+  const links = normalizeSocialLinks(site.social_links);
   const items = links.map((link) => {
     const icon = SOCIAL_ICONS[link.platform] || '';
-    return `<a class="footer-social-link" href="${escapeAttr(link.href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeAttr(link.label)}">${icon}<span class="sr-only">${escapeHtml(link.label)}</span></a>`;
+    if (link.href) {
+      return `<a class="footer-social-link" href="${escapeAttr(link.href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeAttr(link.label)}">${icon}<span class="sr-only">${escapeHtml(link.label)}</span></a>`;
+    }
+    return `<span class="footer-social-link is-placeholder" aria-hidden="true" title="${escapeAttr(`${link.label} coming soon`)}">${icon}</span>`;
   }).join('');
   return `<nav class="footer-social" aria-label="Social media">${items}</nav>`;
 }
@@ -3218,7 +3220,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></div></header>
 <section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div><h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p>${renderSocialLinks(site)}<small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>
 </body></html>`;
 }
@@ -3413,7 +3415,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
   <p class="status" id="utility-links-status"></p>
 </form><form id="social-links-form" class="admin-card stack utility-links-card social-links-card">
-  <div class="utility-links-head"><h2>Footer social links</h2><p class="muted">Icons appear under the footer note on every public page. Leave a URL blank to hide that network.</p></div>
+  <div class="utility-links-head"><h2>Footer social links</h2><p class="muted">Icons appear above the footer brand on every public page. Leave a URL blank to show a faded placeholder until that network is ready.</p></div>
   <div id="social-links-list" class="social-links-list"></div>
   <div class="page-settings-actions utility-links-actions">
     <button class="btn primary" type="submit">Save social links</button>

@@ -682,15 +682,21 @@ test('normalizeSocialLinks keeps platform order and cleans URLs', () => {
   assert.equal(links.length, 5);
   assert.equal(links[0].platform, 'facebook');
   assert.equal(links[0].href, '');
-  assert.equal(links[1].platform, 'instagram');
-  assert.equal(links[1].href, 'https://instagram.com/efhsband');
-  assert.equal(links[2].href, 'https://youtube.com/@efhsband');
+  assert.equal(links[1].platform, 'x');
+  assert.equal(links[1].href, '');
+  assert.equal(links[2].platform, 'instagram');
+  assert.equal(links[2].href, 'https://instagram.com/efhsband');
+  assert.equal(links[3].href, 'https://youtube.com/@efhsband');
   const html = renderSocialLinks({ social_links: links });
   assert.match(html, /footer-social/);
   assert.match(html, /instagram\.com\/efhsband/);
   assert.match(html, /aria-label="Instagram"/);
+  assert.match(html, /is-placeholder/);
   assert.doesNotMatch(html, /javascript:/);
-  assert.equal(renderSocialLinks({ social_links: [] }), '');
+  const emptyHtml = renderSocialLinks({ social_links: [] });
+  assert.match(emptyHtml, /footer-social/);
+  assert.match(emptyHtml, /is-placeholder/);
+  assert.doesNotMatch(emptyHtml, /href=/);
 });
 
 test('home feature cards extract, normalize, and patch without wiping the page', () => {
