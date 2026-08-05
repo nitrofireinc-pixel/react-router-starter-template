@@ -303,6 +303,10 @@ function canEditBoosterMembers() {
   return hasPermission('boosters') || canEditPage('boosters');
 }
 
+function canEditBoostersPage() {
+  return canEditPage('boosters') || hasPermission('boosters');
+}
+
 function canEditContact() {
   return hasPermission('contact') || canEditPage('contact');
 }
@@ -825,6 +829,7 @@ function structuredPageFields(page) {
         : page.slug === 'directors' ? 'directory'
           : page.slug === 'sponsors' ? 'sponsors'
             : (page.slug === 'become-a-sponsor' || page.slug === 'become-sponsor') ? 'become-sponsor'
+              : page.slug === 'boosters' ? 'boosters'
               : 'standard');
   const tierFields = (inferredLayout === 'become-sponsor' || page.slug === 'become-a-sponsor')
     ? extractSponsorTierFieldsFromHtml(page.body_html || '')
@@ -880,6 +885,7 @@ function layoutChipLabel(layout) {
     directory: 'Staff directory layout',
     sponsors: 'Sponsors layout',
     'become-sponsor': 'Become a sponsor layout',
+    boosters: 'Boosters layout',
   })[layout] || 'Standard layout';
 }
 
@@ -1068,6 +1074,9 @@ function buildEditablePagePreview(payload = {}) {
   }
   if (layout === 'directory') {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
+  }
+  if (layout === 'boosters') {
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
     return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
@@ -1915,7 +1924,7 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
-const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'boosters']);
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -1950,7 +1959,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canViewMinutes();
+  return canEditBoosterMembers() || canEditBoostersPage() || canViewMinutes();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -1999,6 +2008,13 @@ function bindBoostersMenu() {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     setBoostersMenuOpen(open);
   });
+  menu.querySelectorAll('[data-booster-nav]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.boosterNav;
+      setBoostersMenuOpen(true);
+      if (key === 'boosters-page') editPage('boosters');
+    });
+  });
 }
 
 function renderPageShortcuts() {
@@ -2023,7 +2039,7 @@ function showAllowedPanels() {
     dashboard: true,
     mail: true,
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
-    pages: state.pages.some(canEditPage),
+    pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
@@ -2052,6 +2068,8 @@ function showAllowedPanels() {
     if (boostersToggle) boostersToggle.hidden = !boostersAccess;
     const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
+    const boostersPageBtn = boostersMenu.querySelector('[data-booster-nav="boosters-page"]');
+    if (boostersPageBtn) boostersPageBtn.hidden = !canEditBoostersPage();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
   }
@@ -2089,7 +2107,7 @@ function showAllowedPanels() {
   }
   const editBoostersPage = document.querySelector('#edit-boosters-page');
   if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditPage('boosters');
+    editBoostersPage.hidden = !canEditBoostersPage();
     editBoostersPage.onclick = () => editPage('boosters');
   }
   const editContactPage = document.querySelector('#edit-contact-page');
@@ -2504,6 +2522,8 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
     const becomeSponsorHint = form.querySelector('[data-become-sponsor-hint]');
     if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
+    const boostersHint = form.querySelector('[data-boosters-hint]');
+    if (boostersHint) boostersHint.hidden = page.slug !== 'boosters';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
