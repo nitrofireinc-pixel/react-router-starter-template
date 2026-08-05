@@ -2065,6 +2065,20 @@ body.sponsor-signup-open{overflow:hidden}
   cursor:default;
 }
 .sponsor-signup-pay-note{margin:0;color:var(--muted);line-height:1.4}
+.sponsor-signup-square-status{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  color:var(--navy);
+  font-weight:800;
+  line-height:1.25;
+}
+.sponsor-signup-square-logo{
+  width:1.05em;
+  height:1.05em;
+  flex:0 0 auto;
+  color:#000;
+}
 .sponsor-signup-confirm{
   position:absolute;
   inset:0;

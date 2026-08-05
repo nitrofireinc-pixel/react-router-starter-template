@@ -263,31 +263,28 @@ function ensureSiteChrome(header, mount) {
   }
   if (header.parentElement !== chrome) chrome.appendChild(header);
   if (mount && mount.parentElement !== chrome) chrome.appendChild(mount);
+  // Keep header above the marquee inside the sticky chrome.
+  if (mount && mount.previousElementSibling !== header) chrome.appendChild(mount);
   return chrome;
 }
 
 function ensureSponsorMarqueeMount() {
   const header = document.querySelector('header.site-header');
-  let mount = document.querySelector('header.site-header + [data-sponsor-marquee], [data-sponsor-marquee]');
-  if (header) {
-    // Keep a single marquee directly under the site header on every page.
-    if (!mount || (mount.previousElementSibling !== header && mount.parentElement?.querySelector('header.site-header') !== header)) {
-      if (!mount || !document.contains(mount)) {
-        mount = document.createElement('section');
-        mount.className = 'sponsor-marquee-section';
-        mount.setAttribute('data-sponsor-marquee', '');
-        mount.setAttribute('aria-label', 'Sponsor marquee');
-        mount.hidden = true;
-      }
-      header.insertAdjacentElement('afterend', mount);
-    }
-    ensureSiteChrome(header, mount);
-    document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
-      if (node !== mount) node.remove();
-    });
-    return mount;
+  if (!header) return document.querySelector('[data-sponsor-marquee]') || null;
+
+  let mount = document.querySelector('[data-sponsor-marquee]');
+  if (!mount) {
+    mount = document.createElement('section');
+    mount.className = 'sponsor-marquee-section';
+    mount.setAttribute('data-sponsor-marquee', '');
+    mount.setAttribute('aria-label', 'Sponsor marquee');
+    mount.hidden = true;
   }
-  return mount || null;
+  ensureSiteChrome(header, mount);
+  document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
+    if (node !== mount) node.remove();
+  });
+  return mount;
 }
 
 function renderSponsorMarquee(sponsors = []) {
@@ -938,7 +935,16 @@ function openSponsorSignupModal(pkg) {
     const payments = Square.payments(config.application_id, config.location_id);
     const card = await payments.card();
     await card.attach('#sponsor-square-card');
-    if (liveStatus) liveStatus.textContent = 'Secure Payment Ready.';
+    if (liveStatus) {
+      liveStatus.innerHTML = `
+        <span class="sponsor-signup-square-status">
+          <svg class="sponsor-signup-square-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M4.5 0A4.5 4.5 0 0 0 0 4.5v15A4.5 4.5 0 0 0 4.5 24h15a4.5 4.5 0 0 0 4.5-4.5v-15A4.5 4.5 0 0 0 19.5 0h-15Zm2.036 7.536h4.928v4.928H6.536V7.536Zm6 0H17.464v4.928h-4.928V7.536Zm-6 6h4.928v4.928H6.536v-4.928Zm6 0H17.464v4.928h-4.928v-4.928Z"/>
+          </svg>
+          <span>Square Secure Payment Ready.</span>
+        </span>
+      `;
+    }
     if (payContinue) {
       payContinue.disabled = false;
       payContinue.onclick = async () => {
