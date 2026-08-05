@@ -936,6 +936,89 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .sponsor-ad-settings-card label{display:grid;gap:6px}
 
+/* Admin upload progress — centered fly-in until complete/fail */
+body.admin-upload-open{overflow:hidden}
+.admin-upload-toast{
+  position:fixed;
+  inset:0;
+  z-index:130;
+  display:none;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.admin-upload-toast.is-visible,
+.admin-upload-toast.is-leaving{display:grid}
+.admin-upload-toast-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(2,16,32,.52);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity .3s ease;
+}
+.admin-upload-toast.is-visible .admin-upload-toast-backdrop{opacity:1}
+.admin-upload-toast.is-leaving .admin-upload-toast-backdrop{opacity:0}
+.admin-upload-toast-panel{
+  position:relative;
+  z-index:1;
+  width:min(360px,100%);
+  transform:translate3d(0,36px,0) scale(.94);
+  opacity:0;
+  transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
+}
+.admin-upload-toast.is-visible .admin-upload-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.admin-upload-toast.is-leaving .admin-upload-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
+.admin-upload-toast-card{
+  display:grid;
+  gap:14px;
+  justify-items:center;
+  padding:28px 30px 24px;
+  border-radius:22px;
+  background:linear-gradient(145deg,#001c38 0%,#063362 58%,#0a4478 100%);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 24px 60px rgba(0,16,32,.45);
+  text-align:center;
+}
+.admin-upload-toast-title{
+  color:#fff;
+  font-size:clamp(1.35rem,3.8vw,1.7rem);
+  font-weight:900;
+  letter-spacing:-.02em;
+  line-height:1.1;
+}
+.admin-upload-toast-slashes{
+  color:#ffd86a;
+  font:900 1.05rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing:.08em;
+  min-height:1.1em;
+}
+.admin-upload-toast-track{
+  width:100%;
+  height:12px;
+  border-radius:999px;
+  background:rgba(255,255,255,.14);
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.12);
+}
+.admin-upload-toast-bar{
+  height:100%;
+  width:0;
+  border-radius:inherit;
+  background:linear-gradient(90deg,#c8121d 0%,#fdd703 55%,#fff3a8 100%);
+  transition:width .12s linear;
+}
+.admin-upload-toast-pct{
+  color:#d7e4f3;
+  font-size:.9rem;
+  font-weight:800;
+}
+@media (prefers-reduced-motion:reduce){
+  .admin-upload-toast-backdrop,
+  .admin-upload-toast-panel,
+  .admin-upload-toast-bar{transition:none}
+}
+
 /* Admin save confirmation — centered fly-in (not tied to sponsor ads) */
 .admin-saved-toast{
   position:fixed;
