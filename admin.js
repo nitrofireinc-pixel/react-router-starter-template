@@ -1963,7 +1963,10 @@ function renderZernioFacebookStatus(status) {
   const postForm = document.querySelector('#zernio-post-form');
   const detail = status?.detail || (status?.connected ? 'Facebook connected.' : 'Facebook not connected.');
   if (statusEl) {
-    statusEl.textContent = detail;
+    const debugNote = (!status?.connected && status?.debug?.note)
+      ? ` Last connect note: ${status.debug.note}${status.debug.keys?.length ? ` [${status.debug.keys.join(', ')}]` : ''}.`
+      : '';
+    statusEl.textContent = `${detail}${debugNote}`;
     statusEl.classList.toggle('ok', Boolean(status?.connected));
   }
   if (siteStatusEl) {
@@ -1975,6 +1978,10 @@ function renderZernioFacebookStatus(status) {
     connectBtn.textContent = status?.connected
       ? 'Reconnect Facebook'
       : (status?.needsPageSelection ? 'Restart Facebook connect' : 'Connect Facebook');
+    // Always start OAuth from the custom domain so the callback keeps the CMS session.
+    if (status?.configured) {
+      connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
+    }
   }
   if (refreshBtn) refreshBtn.hidden = !status?.configured;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
@@ -2107,7 +2114,7 @@ function applyZernioQueryFeedback() {
     } else if (zernio === 'facebook_select') {
       messageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
     } else if (zernio === 'facebook_pending') {
-      messageEl.textContent = 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
+      messageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
     } else if (zernio === 'facebook_error') {
       messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
     }

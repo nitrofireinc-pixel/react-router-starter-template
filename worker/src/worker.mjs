@@ -175,12 +175,14 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-06';
+const ASSET_VERSION = 'admin-cms-20260805-07';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
 const ZERNIO_FACEBOOK_PENDING_KEY = 'zernio_facebook_pending';
+const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
+const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -317,6 +319,47 @@ function htmlResponse(html, status = 200, headers = {}) {
 
 function redirect(location) {
   return new Response(null, { status: 303, headers: { location } });
+}
+
+export function sanitizeAdminReturnPath(value = '/admin') {
+  let raw = String(value || '').trim();
+  if (!raw) return '/admin';
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    return '/admin';
+  }
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\') || raw.includes('\n') || raw.includes('\r')) {
+    return '/admin';
+  }
+  raw = raw.split('#')[0];
+  const pathPart = raw.split('?')[0] || '/admin';
+  if (!pathPart.startsWith('/admin')) return '/admin';
+  return raw;
+}
+
+function publicSiteOrigin(request, env = {}) {
+  const configured = String(env.PUBLIC_SITE_URL || env.SITE_URL || '').trim().replace(/\/$/, '');
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      // fall through
+    }
+  }
+  try {
+    const host = String(new URL(request.url).host || '').toLowerCase();
+    if (host === 'efhsband.org' || host.endsWith('.efhsband.org')) {
+      return `https://${host}`;
+    }
+  } catch {
+    // fall through
+  }
+  return PUBLIC_SITE_ORIGIN_DEFAULT;
+}
+
+function zernioFacebookCallbackUrl(request, env = {}) {
+  return `${publicSiteOrigin(request, env)}/admin/zernio/facebook/callback`;
 }
 
 function getCookie(request, name) {
@@ -1071,6 +1114,12 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
     }
   }
   const needsPageSelection = Boolean(pending && !stored?.accountId);
+  let debug = null;
+  try {
+    debug = JSON.parse(String(await getSiteContentValue(env, ZERNIO_FACEBOOK_DEBUG_KEY) || '') || 'null');
+  } catch {
+    debug = null;
+  }
   return {
     configured,
     connected: Boolean(stored?.accountId),
@@ -1078,12 +1127,13 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
     profileId,
     account: stored,
     connectPath: '/admin/zernio/facebook/connect',
+    debug,
     detail: configured
       ? (stored?.accountId
         ? `Connected: ${stored.name || stored.accountId}`
         : (needsPageSelection
           ? 'Facebook login finished. Choose which Page to connect below.'
-          : 'Ready to connect a Facebook Page via OAuth.'))
+          : 'Ready to connect a Facebook Page via OAuth. Use Connect Facebook from https://efhsband.org/admin.'))
       : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
   };
 }
@@ -1131,6 +1181,79 @@ async function syncZernioFacebookConnection(env, profileId = '') {
   return connection;
 }
 
+async function rememberZernioFacebookDebug(env, info = {}) {
+  const payload = {
+    at: new Date().toISOString(),
+    keys: Array.isArray(info.keys) ? info.keys.slice(0, 40) : [],
+    note: String(info.note || '').trim().slice(0, 300),
+  };
+  await setSiteContentValue(env, ZERNIO_FACEBOOK_DEBUG_KEY, JSON.stringify(payload));
+}
+
+async function finalizeZernioFacebookCallback(env, request, url) {
+  const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+  if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+
+  const tempToken = String(url.searchParams.get('tempToken') || url.searchParams.get('temp_token') || '').trim();
+  const step = String(url.searchParams.get('step') || '').trim().toLowerCase();
+  const userProfile = parseZernioUserProfile(url.searchParams.get('userProfile') || url.searchParams.get('user_profile') || '');
+  const connectToken = String(url.searchParams.get('connect_token') || url.searchParams.get('connectToken') || '').trim();
+  const hintedId = String(url.searchParams.get('accountId') || url.searchParams.get('account_id') || '').trim();
+  const hintedName = String(url.searchParams.get('username') || url.searchParams.get('name') || url.searchParams.get('selectedPageName') || 'Facebook Page').trim();
+  const callbackKeys = [...url.searchParams.keys()];
+
+  await rememberZernioFacebookDebug(env, {
+    keys: callbackKeys,
+    note: tempToken ? 'callback_has_temp_token' : (hintedId ? 'callback_has_account_id' : 'callback_no_account_payload'),
+  });
+
+  // Persist headless selection state even before auth checks so a session gap cannot drop OAuth.
+  if (tempToken) {
+    const pending = await setZernioFacebookPending(env, {
+      profileId,
+      tempToken,
+      connectToken,
+      userProfile,
+      createdAt: new Date().toISOString(),
+    });
+    try {
+      const pages = await listZernioFacebookPages(env, pending);
+      if (pages.length === 1) {
+        await selectZernioFacebookPage(env, pending, pages[0].id, `${publicSiteOrigin(request, env)}/`);
+        return '/admin?tab=social&zernio=facebook_connected';
+      }
+      if (!pages.length) {
+        return `/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent('No Facebook Pages were returned. In the Meta dialog, select your business and the East Forsyth Band Page, then connect again.')}`;
+      }
+    } catch (listError) {
+      return `/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(listError?.message || 'Could not list Facebook Pages')}`;
+    }
+    return '/admin?tab=social&zernio=facebook_select';
+  }
+
+  if (hintedId) {
+    await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify({
+      accountId: hintedId,
+      profileId,
+      platform: 'facebook',
+      name: hintedName,
+      username: hintedName,
+      connectedAt: new Date().toISOString(),
+    }));
+    await setZernioFacebookPending(env, null);
+    return '/admin?tab=social&zernio=facebook_connected';
+  }
+
+  const connection = await syncZernioFacebookConnection(env, profileId);
+  if (connection) {
+    await setZernioFacebookPending(env, null);
+    return '/admin?tab=social&zernio=facebook_connected';
+  }
+
+  // Standard Zernio hosted picker may still be in progress, or callback lacked account fields.
+  return `/admin?tab=social&zernio=facebook_pending&detail=${encodeURIComponent(`OAuth returned without a Page yet (${callbackKeys.join(', ') || 'no params'}). If Zernio showed a Page picker, finish it; otherwise connect again and choose the Page.`)}`;
+}
+
 async function handleZernioFacebookConnect(request, env) {
   await initDb(env);
   const user = await currentUser(request, env);
@@ -1143,15 +1266,18 @@ async function handleZernioFacebookConnect(request, env) {
   }
   try {
     const profileId = await ensureZernioProfileId(env);
-    const redirectUrl = new URL('/admin/zernio/facebook/callback', request.url).toString();
+    // Always return to the public custom domain so session cookies match the CMS the admin uses.
+    const redirectUrl = zernioFacebookCallbackUrl(request, env);
     const query = new URLSearchParams({
       profileId,
       redirect_url: redirectUrl,
+      // Headless gives our CMS the Page picker; Zernio still supports hosted UI if this is omitted.
       headless: 'true',
     });
     const data = await zernioApi(env, `/connect/facebook?${query.toString()}`);
     const authUrl = String(data?.authUrl || data?.url || '').trim();
     if (!authUrl) throw new Error('Zernio did not return an OAuth URL.');
+    await rememberZernioFacebookDebug(env, { keys: ['connect_started'], note: `redirect=${redirectUrl}` });
     return redirect(authUrl);
   } catch (error) {
     const message = escapeHtml(error?.message || 'Could not start Facebook OAuth');
@@ -1161,70 +1287,28 @@ async function handleZernioFacebookConnect(request, env) {
 
 async function handleZernioFacebookCallback(request, env) {
   await initDb(env);
-  const user = await currentUser(request, env);
-  if (!user) return redirect('/admin/login');
-  if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
-  }
   const url = new URL(request.url);
   const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
   if (error) {
+    await rememberZernioFacebookDebug(env, { keys: [...url.searchParams.keys()], note: `oauth_error:${error}` });
     return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(error)}`);
   }
+
+  let nextPath = '/admin?tab=social&zernio=facebook_pending';
   try {
-    const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
-    if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
-
-    const tempToken = String(url.searchParams.get('tempToken') || url.searchParams.get('temp_token') || '').trim();
-    const step = String(url.searchParams.get('step') || '').trim().toLowerCase();
-    const userProfile = parseZernioUserProfile(url.searchParams.get('userProfile') || url.searchParams.get('user_profile') || '');
-    const connectToken = String(url.searchParams.get('connect_token') || url.searchParams.get('connectToken') || '').trim();
-
-    if (tempToken && (step === 'select_page' || userProfile || connectToken)) {
-      const pending = await setZernioFacebookPending(env, {
-        profileId,
-        tempToken,
-        connectToken,
-        userProfile,
-        createdAt: new Date().toISOString(),
-      });
-      try {
-        const pages = await listZernioFacebookPages(env, pending);
-        if (pages.length === 1) {
-          await selectZernioFacebookPage(env, pending, pages[0].id, request.url);
-          return redirect('/admin?tab=social&zernio=facebook_connected');
-        }
-        if (!pages.length) {
-          return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent('No Facebook Pages were returned. Make sure you are a Page admin and select the Page/business in the Meta dialog, then connect again.')}`);
-        }
-      } catch (listError) {
-        return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(listError?.message || 'Could not list Facebook Pages')}`);
-      }
-      return redirect('/admin?tab=social&zernio=facebook_select');
-    }
-
-    const connection = await syncZernioFacebookConnection(env, profileId);
-    if (!connection) {
-      const hintedId = String(url.searchParams.get('accountId') || url.searchParams.get('account_id') || '').trim();
-      const hintedName = String(url.searchParams.get('username') || url.searchParams.get('name') || 'Facebook Page').trim();
-      if (hintedId) {
-        await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify({
-          accountId: hintedId,
-          profileId,
-          platform: 'facebook',
-          name: hintedName,
-          username: hintedName,
-          connectedAt: new Date().toISOString(),
-        }));
-        await setZernioFacebookPending(env, null);
-      } else {
-        return redirect('/admin?tab=social&zernio=facebook_pending');
-      }
-    }
-    return redirect('/admin?tab=social&zernio=facebook_connected');
-  } catch (error) {
-    return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(error?.message || 'Facebook connect failed')}`);
+    nextPath = await finalizeZernioFacebookCallback(env, request, url);
+  } catch (callbackError) {
+    nextPath = `/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(callbackError?.message || 'Facebook connect failed')}`;
   }
+
+  const user = await currentUser(request, env);
+  if (!user) {
+    return redirect(`/admin/login?next=${encodeURIComponent(nextPath)}`);
+  }
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  return redirect(nextPath);
 }
 
 
@@ -4030,27 +4114,38 @@ function clearSessionCookie() {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
+function renderLoginHtml(nextPath = '/admin') {
+  const safeNext = sanitizeAdminReturnPath(nextPath);
+  return LOGIN_HTML.replace(
+    '<form class="admin-card" method="post" action="/admin/login">',
+    `<form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="next" value="${escapeAttr(safeNext)}">`,
+  );
+}
+
 async function handleLogin(request, env) {
   await initDb(env);
+  const requestUrl = new URL(request.url);
   if (request.method === 'GET') {
+    const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     // Already authenticated users should not stay on the login form with a live session.
-    if (await currentUser(request, env)) return redirect('/admin');
-    return htmlResponse(LOGIN_HTML);
+    if (await currentUser(request, env)) return redirect(nextPath);
+    return htmlResponse(renderLoginHtml(nextPath));
   }
   const form = await request.formData();
   const username = String(form.get('username') || '').trim();
   const password = String(form.get('password') || '');
+  const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
   const user = await getUserByUsername(env, username);
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     // Always clear any existing session on failed login so a stale cookie cannot
     // keep granting access after an invalid password attempt.
     return htmlResponse(
-      LOGIN_HTML.replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
+      renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
       401,
       { 'set-cookie': clearSessionCookie() },
     );
   }
-  const response = redirect('/admin');
+  const response = redirect(nextPath);
   response.headers.set('set-cookie', `${SESSION_COOKIE}=${await makeSession(user, env)}; HttpOnly; Secure; SameSite=Lax; Path=/`);
   return response;
 }
