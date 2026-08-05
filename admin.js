@@ -3781,15 +3781,31 @@ function setMinutesEmptyVisible(visible) {
   if (empty) empty.toggleAttribute('hidden', !visible);
 }
 
+function syncMinutesFrameBodyLock() {
+  const open = isMinutesViewOpen() || isMinutesEditorOpen();
+  document.body.classList.toggle('minutes-frame-open', open);
+}
+
+function isMinutesViewOpen() {
+  const modal = document.querySelector('#minutes-view-modal');
+  return Boolean(modal && !modal.hasAttribute('hidden'));
+}
+
 function isMinutesEditorOpen() {
   const modal = document.querySelector('#minutes-editor-modal');
   return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
+function closeMinutesView() {
+  const modal = document.querySelector('#minutes-view-modal');
+  if (modal) modal.toggleAttribute('hidden', true);
+  syncMinutesFrameBodyLock();
+}
+
 function closeMinutesEditor() {
   const modal = document.querySelector('#minutes-editor-modal');
   if (modal) modal.toggleAttribute('hidden', true);
-  document.body.classList.remove('minutes-editor-open');
+  syncMinutesFrameBodyLock();
 }
 
 function openMinutesEditor({ editing = false, statusText = '' } = {}) {
@@ -3798,8 +3814,9 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   const form = document.querySelector('#minutes-form');
   const title = document.querySelector('#minutes-editor-title');
   if (!modal || !form) return;
+  closeMinutesView();
   modal.toggleAttribute('hidden', false);
-  document.body.classList.add('minutes-editor-open');
+  syncMinutesFrameBodyLock();
   if (title) title.textContent = editing ? 'Edit Minutes' : 'Add Minutes';
   const submit = document.querySelector('[data-minutes-submit]');
   if (submit) submit.textContent = editing ? 'Save changes' : 'Save minutes';
@@ -3813,30 +3830,18 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   }, 30);
 }
 
-function showMinutesCompose(editing = false) {
-  if (!canManageMinutes()) {
-    showMinutesIdle();
-    return;
-  }
-  const view = document.querySelector('#minutes-view');
-  setMinutesEmptyVisible(false);
-  if (view) view.toggleAttribute('hidden', true);
-  clearMinutesDocumentFrame();
-  openMinutesEditor({ editing });
-}
-
 function showMinutesView() {
   closeMinutesEditor();
-  const view = document.querySelector('#minutes-view');
-  setMinutesEmptyVisible(false);
-  if (view) view.toggleAttribute('hidden', false);
+  const modal = document.querySelector('#minutes-view-modal');
+  setMinutesEmptyVisible(true);
+  if (modal) modal.toggleAttribute('hidden', false);
+  syncMinutesFrameBodyLock();
 }
 
 function showMinutesIdle(statusText = '') {
   closeMinutesEditor();
-  const view = document.querySelector('#minutes-view');
+  closeMinutesView();
   clearMinutesDocumentFrame();
-  if (view) view.toggleAttribute('hidden', true);
   setMinutesEmptyVisible(true);
   const empty = document.querySelector('#minutes-empty');
   if (empty && statusText) {
@@ -3870,8 +3875,8 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list above, or click Add Minutes to create a new entry.'
-    : 'Choose a meeting date from the list above.'));
+    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+    : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
 
@@ -4019,8 +4024,8 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list above, or click Add Minutes to create a new entry.'
-        : 'Choose a meeting date from the list above.';
+        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+        : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
@@ -4059,6 +4064,15 @@ function bindMinutesPanel() {
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });
+  document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
+    button.addEventListener('click', () => {
+      closeMinutesView();
+      clearMinutesDocumentFrame();
+      state.selectedMinutesId = null;
+      renderMinutesList();
+      showMinutesIdle();
+    });
+  });
   document.querySelectorAll('[data-minutes-editor-dismiss], #cancel-minutes-edit').forEach((button) => {
     button.addEventListener('click', () => {
       closeMinutesEditor();
@@ -4068,11 +4082,21 @@ function bindMinutesPanel() {
     });
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || !isMinutesEditorOpen()) return;
-    closeMinutesEditor();
-    const selected = selectedMinutes();
-    if (selected) openMinutesView(selected.id);
-    else showMinutesIdle();
+    if (event.key !== 'Escape') return;
+    if (isMinutesEditorOpen()) {
+      closeMinutesEditor();
+      const selected = selectedMinutes();
+      if (selected) openMinutesView(selected.id);
+      else showMinutesIdle();
+      return;
+    }
+    if (isMinutesViewOpen()) {
+      closeMinutesView();
+      clearMinutesDocumentFrame();
+      state.selectedMinutesId = null;
+      renderMinutesList();
+      showMinutesIdle();
+    }
   });
   document.querySelector('#print-minutes')?.addEventListener('click', () => {
     const frame = document.querySelector('#minutes-document-frame');
