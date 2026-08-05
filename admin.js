@@ -1924,7 +1924,7 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
-const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'boosters']);
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -1942,9 +1942,12 @@ function syncPageSettingsAccess() {
 }
 
 function editablePages() {
-  if (!canManageSitePages()) return [];
   return (state.pages || [])
-    .filter((page) => canEditPage(page) && !SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug))
+    .filter((page) => {
+      if (SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
+      if (page.slug === 'boosters') return canEditBoostersPage();
+      return canManageSitePages() && canEditPage(page);
+    })
     .slice()
     .sort((a, b) => {
       const orderA = Number(a.nav_order ?? 99);
@@ -1959,7 +1962,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canEditBoostersPage() || canViewMinutes();
+  return canEditBoosterMembers() || canViewMinutes();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -2007,13 +2010,6 @@ function bindBoostersMenu() {
   toggle.addEventListener('click', () => {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     setBoostersMenuOpen(open);
-  });
-  menu.querySelectorAll('[data-booster-nav]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const key = button.dataset.boosterNav;
-      setBoostersMenuOpen(true);
-      if (key === 'boosters-page') editPage('boosters');
-    });
   });
 }
 
@@ -2068,8 +2064,6 @@ function showAllowedPanels() {
     if (boostersToggle) boostersToggle.hidden = !boostersAccess;
     const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const boostersPageBtn = boostersMenu.querySelector('[data-booster-nav="boosters-page"]');
-    if (boostersPageBtn) boostersPageBtn.hidden = !canEditBoostersPage();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
   }
