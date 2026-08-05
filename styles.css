@@ -35,6 +35,33 @@ header.site-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,
 .header-inner{max-width:var(--max);margin:auto;padding:12px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;column-gap:26px;row-gap:0}.brand{display:flex;align-items:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:max-content}.brand img{width:50px;height:50px;object-fit:contain}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1}
 /* Keep logo/title on the first row; put every nav link on a full-width row beneath. */
 nav{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start;align-items:center;flex:1 1 100%;width:100%;margin:8px 0 0;padding:8px 0 2px;border-top:1px solid rgba(0,33,66,.1)}nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}nav a:hover,nav a:focus{background:#eef3fa;outline:none}.menu-button{display:none;margin-left:auto;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
+/* Desktop nav bar: lighter blue field, gold links with white outline/glow */
+@media(min-width:761px){
+  header.site-header nav{
+    margin:10px 0 0;
+    padding:8px 10px;
+    border-top:0;
+    border-radius:14px;
+    background:linear-gradient(180deg,#1a6bb5,#0f5a9e 55%,#0c528f);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 6px 16px rgba(0,33,66,.12);
+  }
+  header.site-header nav a{
+    color:var(--gold);
+    text-shadow:
+      -1px -1px 0 rgba(255,255,255,.95),
+      1px -1px 0 rgba(255,255,255,.95),
+      -1px 1px 0 rgba(255,255,255,.95),
+      1px 1px 0 rgba(255,255,255,.95),
+      0 0 10px rgba(255,255,255,.55),
+      0 0 2px rgba(255,255,255,.9);
+  }
+  header.site-header nav a:hover,
+  header.site-header nav a:focus-visible{
+    background:rgba(255,255,255,.16);
+    color:#ffe566;
+    outline:none;
+  }
+}
 .hero{position:relative;overflow:hidden;background:radial-gradient(circle at top right, rgba(253,215,3,.26), transparent 30%),linear-gradient(135deg,var(--navy),#00101f 62%,#000b16);color:#fff}.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,33,66,.15),rgba(0,33,66,.88)),url('assets/efhs-photo-2.png') right center/auto 100% no-repeat;opacity:.55}.hero .wrap{position:relative;max-width:var(--max);margin:auto;padding:86px 20px 74px;display:grid;grid-template-columns:1.15fr .85fr;gap:46px;align-items:center}.eyebrow{display:inline-flex;align-items:center;gap:10px;color:#fff;font-weight:900;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase}.eyebrow:before{content:"";width:34px;height:4px;background:var(--red);border-radius:99px}.hero h1{font-size:clamp(2.6rem,7vw,6.4rem);line-height:.92;margin:18px 0 20px;letter-spacing:-.06em;text-wrap:balance}.hero p{font-size:clamp(1.05rem,2vw,1.35rem);max-width:680px;color:#eaf0f8;margin:0 0 30px}.hero-card{background:rgba(255,255,255,.95);color:var(--ink);border-radius:30px;padding:28px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,.4)}.hero-card img{width:170px;margin:0 auto 14px}.hero-card h2{margin:0;color:var(--navy);font-size:1.55rem}.hero-card ul{margin:14px 0 0;padding-left:20px;color:var(--muted)}
 .button-row{display:flex;gap:13px;flex-wrap:wrap}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:12px 18px;border-radius:999px;font-weight:900;border:2px solid transparent;cursor:pointer}.btn.primary{background:var(--red);color:#fff}.btn.primary:hover{background:#bf101b}.btn.secondary{background:#fff;color:var(--navy);border-color:#fff}.btn.outline{border-color:var(--navy);color:var(--navy);background:#fff}.btn.gold{background:var(--gold);color:#111;border-color:var(--gold)}
 main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-head{display:flex;justify-content:space-between;gap:24px;align-items:end;margin-bottom:30px}.kicker{font-weight:900;color:var(--red);font-size:.78rem;letter-spacing:.16em;text-transform:uppercase}.section-head h2,.page-title h1{margin:.35rem 0 0;color:var(--navy);font-size:clamp(2rem,4vw,3.4rem);line-height:1;letter-spacing:-.04em}.section-head p,.page-title p{max-width:670px;color:var(--muted);font-size:1.05rem}.soft{background:var(--soft)}
@@ -59,6 +86,15 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .menu-button{display:inline-flex;margin:0;align-self:flex-start}
   header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
+  header.site-header nav a{
+    color:var(--navy);
+    text-shadow:none;
+  }
+  header.site-header nav a:hover,
+  header.site-header nav a:focus-visible{
+    background:#eef3fa;
+    color:var(--navy);
+  }
   /* Keep the mobile menu above the sponsor marquee strip. */
   .site-chrome .sponsor-marquee-section,
   .sponsor-marquee-section{position:relative;z-index:1}
