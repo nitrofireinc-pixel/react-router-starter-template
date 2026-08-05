@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-71';
+const ASSET_VERSION = 'admin-cms-20260805-72';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -624,6 +624,15 @@ async function initDb(env) {
     if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextFundraisingHtml, fundraisingPageRow.id)
+        .run();
+    }
+  }
+  const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
+  if (homePageRow?.body_html) {
+    const nextHomeHtml = refreshHomeStartHereSection(homePageRow.body_html);
+    if (nextHomeHtml !== homePageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextHomeHtml, homePageRow.id)
         .run();
     }
   }
@@ -2222,6 +2231,33 @@ export function rewriteFundraisingDonateToPopup(html) {
     '<button type="button" class="btn primary" data-donate-open>Donate</button>',
   );
   return source;
+}
+
+export function refreshHomeStartHereSection(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  if (/Everything families need, all in one place\./i.test(source)) return source;
+  if (!/Start here/i.test(source) || !/Built around the pages families expect\./i.test(source)) {
+    return source;
+  }
+  return source
+    .replace(/Built around the pages families expect\./g, 'Everything families need, all in one place.')
+    .replace(
+      /Modeled after a full high-school band program site structure, with East Forsyth branding and easy paths for students, parents, sponsors, and visitors\./g,
+      'Designed to keep students, parents, alumni, sponsors, and the community connected with the East Forsyth Blue Regiment through quick access to important information, events, and resources.',
+    )
+    .replace(
+      /Marching band, concert bands, percussion, color guard, jazz, and chamber opportunities\./g,
+      "Explore our marching band, concert bands, percussion, color guard, jazz, and chamber ensembles, with information about each group's activities and expectations.",
+    )
+    .replace(
+      /Forms, handbook links, rehearsal expectations, fees, uniforms, and travel information\./g,
+      'Find forms, handbooks, rehearsal schedules, fees, uniform information, travel details, volunteer opportunities, and other essential family resources.',
+    )
+    .replace(
+      /A place for local businesses and alumni to support the program and be recognized\./g,
+      'Discover the businesses and community partners that support our program, learn about sponsorship opportunities, and help strengthen the Blue Regiment tradition.',
+    );
 }
 
 export function ensureFundraisingDonateSlot(html) {
