@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-34';
+const ASSET_VERSION = 'admin-cms-20260805-35';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -774,6 +774,17 @@ export async function resolveSquareLocationId(env = {}) {
   }
 }
 
+export function normalizeSquareBuyerPhone(value = '') {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (String(value || '').trim().startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+  return '';
+}
+
 export async function createSquarePaymentLink(env, {
   name,
   amountCents,
@@ -807,16 +818,28 @@ export async function createSquarePaymentLink(env, {
     body.checkout_options = { redirect_url: String(redirectUrl).slice(0, 2048) };
   }
   if (referenceId) body.payment_note = String(referenceId).slice(0, 500);
-  const phone = String(buyerPhone || '').replace(/[^\d+]/g, '');
-  if (phone.length >= 10) {
-    body.pre_populated_data = { buyer_phone_number: phone.slice(0, 17) };
+  const phone = normalizeSquareBuyerPhone(buyerPhone);
+  if (phone) {
+    body.pre_populated_data = { buyer_phone_number: phone };
   }
-  const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
-    method: 'POST',
-    headers: squareApiHeaders(env),
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({}));
+  const postLink = async (payloadBody) => {
+    const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
+      method: 'POST',
+      headers: squareApiHeaders(env),
+      body: JSON.stringify(payloadBody),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+  let { response, payload } = await postLink(body);
+  // If Square rejects a prefilled phone, retry without it so checkout still works.
+  if (!response.ok && body.pre_populated_data) {
+    const phoneError = String(payload?.errors?.[0]?.detail || payload?.message || '').toLowerCase();
+    if (phoneError.includes('phone')) {
+      delete body.pre_populated_data;
+      ({ response, payload } = await postLink(body));
+    }
+  }
   if (!response.ok) {
     const detail = payload?.errors?.[0]?.detail
       || payload?.message
