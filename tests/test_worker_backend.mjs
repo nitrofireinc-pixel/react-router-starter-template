@@ -506,6 +506,30 @@ test('become-sponsor layout includes packages and contact form slot', () => {
   assert.match(extracted.gold_blurb, /Top package for/);
 });
 
+test('become-sponsor save payload persists custom tier dollar amounts', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'become-sponsor',
+    kicker: 'Support',
+    heading: 'Become a Sponsor',
+    intro: 'Choose a package.',
+    body_text: 'Ready to partner.',
+    bronze_amount: '$175',
+    silver_amount: '$325',
+    gold_amount: '$750',
+  });
+  assert.match(html, /\$175/);
+  assert.match(html, /\$325/);
+  assert.match(html, /\$750/);
+  const extracted = normalizeSponsorTierFields(extractSponsorTierFields(html));
+  assert.equal(extracted.bronze_amount, '$175');
+  assert.equal(extracted.silver_amount, '$325');
+  assert.equal(extracted.gold_amount, '$750');
+  const rebuilt = ensureSponsorTiersSection(html);
+  const rebuiltFields = normalizeSponsorTierFields(extractSponsorTierFields(rebuilt));
+  assert.equal(rebuiltFields.bronze_amount, '$175');
+  assert.equal(rebuiltFields.gold_amount, '$750');
+});
+
 test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () => {
   const tiers = renderSponsorTiersHtml();
   assert.match(tiers, /home football games/);
