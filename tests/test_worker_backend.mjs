@@ -839,7 +839,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /window\.print\(\)/);
   assert.match(documentHtml, /efhs-blue-regiment-mark/);
   assert.match(documentHtml, /letterhead-mark/);
-  assert.match(documentHtml, /opacity:\s*0\.48/);
+  assert.match(documentHtml, /opacity:\s*0\.28/);
 });
 
 test('parseZernioFacebookConnection reads stored page connection', () => {

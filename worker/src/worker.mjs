@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-13';
+const ASSET_VERSION = 'admin-cms-20260805-14';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2900,7 +2900,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       display: block;
       width: 1.45in;
       height: 1.45in;
-      opacity: 0.48;
+      opacity: 0.28;
       -webkit-user-drag: none;
     }
     .doc-kicker {
@@ -2953,7 +2953,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
-      .letterhead-mark { opacity: 0.42; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
