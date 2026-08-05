@@ -2152,7 +2152,8 @@ async function loadZernioEventQueue() {
 
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
-  await loadZernioFacebookStatus({ sync });
+  // Sync from Zernio when opening Social so dashboard-connected Pages appear in CMS.
+  await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   if (state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {

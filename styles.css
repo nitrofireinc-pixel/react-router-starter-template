@@ -1967,7 +1967,7 @@ body.sponsor-map-open{overflow:hidden}
 .minutes-main{order:1;min-width:0;display:grid;justify-items:stretch;position:relative;z-index:1}
 .minutes-main > .minutes-view,
 .minutes-main > .minutes-empty,
-.minutes-main > #minutes-form{width:min(100%,920px);margin-inline:auto}
+.minutes-main > #minutes-form{width:min(100%,980px);margin-inline:auto}
 #minutes-view[hidden],
 #minutes-form[hidden],
 #minutes-empty[hidden],
@@ -1992,7 +1992,18 @@ body.sponsor-map-open{overflow:hidden}
 .minutes-view-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
 .minutes-view-head h2{margin:.1rem 0 .35rem;color:#10233c;font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.1}
 .minutes-document-frame-wrap{border-top:1px solid #e1e8f1;padding-top:14px;min-height:0;position:relative;z-index:0}
-.minutes-document-frame{display:block;width:100%;min-height:min(72vh,820px);height:72vh;border:1px solid #d5deea;border-radius:12px;background:#e8eef5;position:relative;z-index:0}
+/* Tall enough for one US Letter page (11in) plus the document toolbar and sheet margins. */
+.minutes-document-frame{
+  display:block;
+  width:100%;
+  height:calc(11in + 5.75rem);
+  min-height:calc(11in + 5.75rem);
+  border:1px solid #d5deea;
+  border-radius:12px;
+  background:#e8eef5;
+  position:relative;
+  z-index:0;
+}
 .minutes-view-body{border-top:1px solid #e1e8f1;padding-top:14px;color:#24364d;line-height:1.55}
 .minutes-view-body p{margin:0 0 .75em}
 .minutes-form-actions{display:flex;flex-wrap:wrap;gap:10px}
