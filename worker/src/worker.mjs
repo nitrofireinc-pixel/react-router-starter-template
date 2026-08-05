@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-35';
+const ASSET_VERSION = 'admin-cms-20260805-37';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -701,8 +701,16 @@ export function normalizeSponsorTierKey(value) {
   return '';
 }
 
+export function squareAccessToken(env = {}) {
+  return String(env.SQUARE_ACCESS_TOKEN || '')
+    .trim()
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^["']+|["']+$/g, '')
+    .trim();
+}
+
 export function squareCheckoutConfigured(env = {}) {
-  return Boolean(String(env.SQUARE_ACCESS_TOKEN || '').trim());
+  return Boolean(squareAccessToken(env));
 }
 
 export function squareApiBase(env = {}) {
@@ -713,12 +721,24 @@ export function squareApiBase(env = {}) {
 }
 
 export function squareApiHeaders(env = {}) {
-  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
   return {
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${squareAccessToken(env)}`,
     'Content-Type': 'application/json',
-    'Square-Version': '2025-01-16',
+    Accept: 'application/json',
+    'Square-Version': '2024-11-20',
   };
+}
+
+export function formatSquareError(payload = {}, status = 0) {
+  const first = Array.isArray(payload?.errors) ? payload.errors[0] : null;
+  const parts = [
+    first?.detail,
+    first?.code,
+    first?.category,
+    payload?.message,
+    status ? `HTTP ${status}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Square request failed';
 }
 
 export function pickSquareLocationId(locations = [], preferredId = '') {
@@ -738,7 +758,7 @@ export function pickSquareLocationId(locations = [], preferredId = '') {
 
 export async function resolveSquareLocationId(env = {}) {
   const configured = String(env.SQUARE_LOCATION_ID || '').trim();
-  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
+  const token = squareAccessToken(env);
   if (!token) {
     return { ok: false, location_id: '', detail: 'Square access token is not configured' };
   }
@@ -749,11 +769,9 @@ export async function resolveSquareLocationId(env = {}) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const detail = payload?.errors?.[0]?.detail
-        || payload?.message
-        || `Could not load Square locations (${response.status})`;
+      const detail = formatSquareError(payload, response.status);
       if (configured) return { ok: true, location_id: configured, detail: '' };
-      return { ok: false, location_id: '', detail: String(detail) };
+      return { ok: false, location_id: '', detail };
     }
     const locationId = pickSquareLocationId(payload?.locations || [], configured);
     if (!locationId) {
@@ -774,17 +792,6 @@ export async function resolveSquareLocationId(env = {}) {
   }
 }
 
-export function normalizeSquareBuyerPhone(value = '') {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (!digits) return '';
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  if (String(value || '').trim().startsWith('+') && digits.length >= 10 && digits.length <= 15) {
-    return `+${digits}`;
-  }
-  return '';
-}
-
 export async function createSquarePaymentLink(env, {
   name,
   amountCents,
@@ -792,7 +799,7 @@ export async function createSquarePaymentLink(env, {
   buyerPhone = '',
   redirectUrl = '',
 } = {}) {
-  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
+  const token = squareAccessToken(env);
   if (!token) {
     return { ok: false, detail: 'Square is not configured' };
   }
@@ -818,7 +825,6 @@ export async function createSquarePaymentLink(env, {
     body.checkout_options = { redirect_url: String(redirectUrl).slice(0, 2048) };
   }
   if (referenceId) body.payment_note = String(referenceId).slice(0, 500);
-  // Do not prefill Square with phone: many US formats are rejected and block checkout.
   void buyerPhone;
   const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
     method: 'POST',
@@ -827,10 +833,34 @@ export async function createSquarePaymentLink(env, {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = payload?.errors?.[0]?.detail
-      || payload?.message
-      || `Square checkout failed (${response.status})`;
-    return { ok: false, detail: String(detail) };
+    // Minimal retry without optional fields — some accounts reject notes/redirects.
+    if (body.checkout_options || body.payment_note) {
+      const minimal = {
+        idempotency_key: crypto.randomUUID(),
+        quick_pay: body.quick_pay,
+      };
+      const retry = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
+        method: 'POST',
+        headers: squareApiHeaders(env),
+        body: JSON.stringify(minimal),
+      });
+      const retryPayload = await retry.json().catch(() => ({}));
+      if (retry.ok) {
+        const link = retryPayload?.payment_link || {};
+        const url = String(link.url || link.long_url || '').trim();
+        if (url) {
+          return {
+            ok: true,
+            id: String(link.id || ''),
+            url,
+            order_id: String(link.order_id || ''),
+            location_id: locationId,
+          };
+        }
+      }
+      return { ok: false, detail: formatSquareError(retryPayload, retry.status) || formatSquareError(payload, response.status) };
+    }
+    return { ok: false, detail: formatSquareError(payload, response.status) };
   }
   const link = payload?.payment_link || {};
   const url = String(link.url || link.long_url || '').trim();
