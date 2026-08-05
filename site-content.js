@@ -694,7 +694,7 @@ function openSponsorSignupModal(pkg) {
           <label class="sponsor-signup-amount-lock">Amount due
             <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
           </label>
-          <p class="sponsor-signup-pay-note" data-pay-note>Your package amount is locked. Continue to Square to complete payment.</p>
+          <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
           <p class="status" data-pay-status></p>
         </div>
         <div class="sponsor-signup-actions" data-pay-actions>
@@ -1070,7 +1070,7 @@ function openSponsorSignupModal(pkg) {
     paymentStep.hidden = false;
     if (payStatus) payStatus.textContent = '';
     if (payNote) {
-      payNote.textContent = 'Your package amount is locked. Continue to Square to complete payment.';
+      payNote.textContent = 'Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:';
     }
     modal.querySelector('[data-pay-continue]')?.focus();
   });
