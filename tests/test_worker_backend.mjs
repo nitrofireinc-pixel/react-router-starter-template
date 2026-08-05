@@ -821,6 +821,10 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canDeleteMeetingMinutes(secretary), false);
   assert.equal(canDeleteMeetingMinutes(viewer), false);
   assert.equal(canDeleteMeetingMinutes(admin), true);
+  // Editors with broad permissions still cannot delete — Super Admin role only.
+  assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['all'] }), false);
+  assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['minutes', 'minutes:view', 'users'] }), false);
+  assert.equal(canDeleteMeetingMinutes(null), false);
   assert.ok(minutesEditableUntil(fresh.created_at) instanceof Date);
 
   const documentHtml = renderMinutesDocumentHtml(

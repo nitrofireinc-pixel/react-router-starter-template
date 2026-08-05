@@ -3961,7 +3961,8 @@ function renderMinutesView(item) {
   const deleteBtn = document.querySelector('#delete-minutes');
   if (printBtn) printBtn.toggleAttribute('hidden', false);
   if (editBtn) editBtn.toggleAttribute('hidden', !item.can_edit);
-  if (deleteBtn) deleteBtn.toggleAttribute('hidden', !item.can_delete);
+  // Delete is Super Admin only — never show the control for secretaries/viewers.
+  if (deleteBtn) deleteBtn.toggleAttribute('hidden', !(isSuperAdmin() && item.can_delete));
   showMinutesView();
   renderMinutesList();
 }
@@ -4111,7 +4112,10 @@ function bindMinutesPanel() {
   document.querySelector('#edit-minutes')?.addEventListener('click', () => editSelectedMinutes());
   document.querySelector('#delete-minutes')?.addEventListener('click', async () => {
     const item = selectedMinutes();
-    if (!item?.can_delete) return;
+    if (!isSuperAdmin() || !item?.can_delete) {
+      alert('Only Super Admins can delete meeting minutes.');
+      return;
+    }
     if (!confirm(`Delete minutes for ${item.meeting_date_display || item.meeting_date}? This cannot be undone.`)) return;
     try {
       await jsonFetch(`/api/admin/minutes/${item.id}`, { method: 'DELETE' });
