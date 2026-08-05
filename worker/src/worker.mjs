@@ -4093,7 +4093,7 @@ async function handleApi(request, env, url) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canViewMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes:view' }, 403);
+      return jsonResponse({ detail: 'Login required to view meeting minutes' }, 403);
     }
     return jsonResponse(await listMeetingMinutes(env, auth.user));
   }
@@ -4130,7 +4130,7 @@ async function handleApi(request, env, url) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canViewMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes:view' }, 403);
+      return jsonResponse({ detail: 'Login required to view meeting minutes' }, 403);
     }
     const id = Number(minutesDocumentMatch[1]);
     const existing = await getMeetingMinutesById(env, id, auth.user);
@@ -4143,7 +4143,7 @@ async function handleApi(request, env, url) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canViewMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes:view' }, 403);
+      return jsonResponse({ detail: 'Login required to view meeting minutes' }, 403);
     }
     const id = Number(minutesMatch[1]);
     const existing = await getMeetingMinutesById(env, id, auth.user);
