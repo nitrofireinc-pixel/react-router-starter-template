@@ -1563,6 +1563,7 @@ function renderMobileAdminMenu() {
     && !button.hidden
     && !button.closest('[hidden]')
     && !button.hasAttribute('data-sponsors-toggle')
+    && !button.hasAttribute('data-boosters-toggle')
   );
 
   const pushButton = (button) => {
@@ -1659,6 +1660,9 @@ function activateTab(name) {
       setSponsorsMenuOpen(true);
       loadSponsors().catch(() => {});
     }
+    if (name === 'booster-members' || name === 'minutes') {
+      setBoostersMenuOpen(true);
+    }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
     }
@@ -1720,10 +1724,23 @@ function canAccessSponsorsMenu() {
   return canEditSponsors() || canEditPage('sponsors') || canEditPage('become-a-sponsor');
 }
 
+function canAccessBoostersMenu() {
+  return canEditBoosterMembers() || canViewMinutes();
+}
+
 function setSponsorsMenuOpen(open) {
   document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
     const toggle = menu.querySelector('[data-sponsors-toggle]');
     const sub = menu.querySelector('[data-sponsors-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function setBoostersMenuOpen(open) {
+  document.querySelectorAll('[data-boosters-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-boosters-toggle]');
+    const sub = menu.querySelector('[data-boosters-sub]');
     if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
     if (sub) sub.hidden = !open;
   });
@@ -1745,6 +1762,17 @@ function bindSponsorsMenu() {
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
     });
+  });
+}
+
+function bindBoostersMenu() {
+  const menu = document.querySelector('[data-boosters-menu]');
+  const toggle = menu?.querySelector('[data-boosters-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setBoostersMenuOpen(open);
   });
 }
 
@@ -1787,6 +1815,19 @@ function showAllowedPanels() {
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
+  const boostersMenu = document.querySelector('[data-boosters-menu]');
+  const boostersAccess = canAccessBoostersMenu();
+  if (boostersMenu) {
+    boostersMenu.hidden = !boostersAccess;
+    if (boostersAccess) manageVisible = true;
+    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
+    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
+    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
+    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
+    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
+    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+  }
+  bindBoostersMenu();
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
   const sponsorsAccess = canAccessSponsorsMenu();
   if (sponsorsMenu) {
