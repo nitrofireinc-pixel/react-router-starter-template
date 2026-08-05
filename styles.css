@@ -494,6 +494,35 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   color:var(--navy);
   font-size:.86rem;
 }
+#zernio-post-form[hidden],
+#zernio-schedule-fields[hidden]{display:none!important}
+.zernio-publish-mode{
+  margin:0;
+}
+.zernio-posts-list{
+  margin-top:0;
+}
+.zernio-post-row{
+  display:block;
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:12px 14px;
+  background:var(--soft);
+}
+.zernio-post-row b{
+  color:var(--navy);
+  text-transform:capitalize;
+}
+.zernio-post-row small{
+  display:block;
+  color:var(--muted);
+  margin-top:2px;
+}
+.zernio-post-row p{
+  margin:8px 0 0;
+  color:#243447;
+  white-space:pre-wrap;
+}
 .social-link-row input{
   min-height:34px;
   padding:6px 8px;

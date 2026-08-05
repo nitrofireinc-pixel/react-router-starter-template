@@ -32,7 +32,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPosts: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -1669,6 +1669,9 @@ function activateTab(name) {
     if (name === 'mail') {
       loadMailRecipients().catch(() => {});
     }
+    if (name === 'social') {
+      loadSocialPanel().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -1804,6 +1807,7 @@ function showAllowedPanels() {
     minutes: canViewMinutes(),
     contact: canEditContact(),
     site: hasPermission('site'),
+    social: hasPermission('site'),
     users: hasPermission('users'),
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
@@ -1911,29 +1915,111 @@ async function loadMe() {
   showAllowedPanels();
 }
 
-async function loadZernioFacebookStatus() {
+function syncZernioPublishModeUi() {
+  const form = document.querySelector('#zernio-post-form');
+  const scheduleFields = document.querySelector('#zernio-schedule-fields');
+  if (!form || !scheduleFields) return;
+  const mode = String(form.querySelector('input[name="publish_mode"]:checked')?.value || 'now');
+  const scheduled = mode === 'schedule';
+  scheduleFields.hidden = !scheduled;
+  const input = form.elements.scheduled_for;
+  if (input) input.required = scheduled;
+  const submit = form.querySelector('button[type="submit"]');
+  if (submit) submit.textContent = scheduled ? 'Schedule Facebook post' : 'Publish to Facebook';
+}
+
+function renderZernioFacebookStatus(status) {
+  state.zernioFacebook = status || null;
   const statusEl = document.querySelector('#zernio-facebook-status');
-  const messageEl = document.querySelector('#zernio-facebook-message');
+  const siteStatusEl = document.querySelector('#zernio-facebook-status-site');
   const connectBtn = document.querySelector('#zernio-facebook-connect');
+  const refreshBtn = document.querySelector('#zernio-facebook-refresh');
   const disconnectBtn = document.querySelector('#zernio-facebook-disconnect');
-  if (!statusEl || !hasPermission('site')) return null;
+  const postForm = document.querySelector('#zernio-post-form');
+  const detail = status?.detail || (status?.connected ? 'Facebook connected.' : 'Facebook not connected.');
+  if (statusEl) {
+    statusEl.textContent = detail;
+    statusEl.classList.toggle('ok', Boolean(status?.connected));
+  }
+  if (siteStatusEl) {
+    siteStatusEl.textContent = detail;
+    siteStatusEl.classList.toggle('ok', Boolean(status?.connected));
+  }
+  if (connectBtn) {
+    connectBtn.hidden = !status?.configured;
+    connectBtn.textContent = status?.connected ? 'Reconnect Facebook' : 'Connect Facebook';
+  }
+  if (refreshBtn) refreshBtn.hidden = !status?.configured;
+  if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
+  if (postForm) postForm.hidden = !status?.connected;
+  syncZernioPublishModeUi();
+}
+
+async function loadZernioFacebookStatus({ sync = false } = {}) {
+  if (!hasPermission('site')) return null;
+  const statusEl = document.querySelector('#zernio-facebook-status');
   try {
-    const status = await jsonFetch('/api/admin/zernio/facebook');
-    statusEl.textContent = status.detail || (status.connected ? 'Facebook connected.' : 'Facebook not connected.');
-    statusEl.classList.toggle('ok', Boolean(status.connected));
-    if (connectBtn) {
-      connectBtn.hidden = !status.configured;
-      connectBtn.textContent = status.connected ? 'Reconnect Facebook' : 'Connect Facebook';
-    }
-    if (disconnectBtn) disconnectBtn.hidden = !status.connected;
+    const path = sync ? '/api/admin/zernio/facebook?sync=1' : '/api/admin/zernio/facebook';
+    const status = await jsonFetch(path);
+    renderZernioFacebookStatus(status);
     return status;
   } catch (error) {
-    statusEl.textContent = error.message || 'Could not check Facebook connection.';
-    if (connectBtn) connectBtn.hidden = true;
-    if (disconnectBtn) disconnectBtn.hidden = true;
-    if (messageEl) messageEl.textContent = '';
+    if (statusEl) statusEl.textContent = error.message || 'Could not check Facebook connection.';
+    renderZernioFacebookStatus({ configured: false, connected: false, detail: error.message || 'Could not check Facebook connection.' });
     return null;
   }
+}
+
+function formatZernioPostWhen(post) {
+  const raw = post?.publishedAt || post?.scheduledFor || post?.createdAt || post?.created_at || '';
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return String(raw);
+  return date.toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function renderZernioPosts() {
+  const list = document.querySelector('#zernio-posts-list');
+  if (!list) return;
+  const posts = Array.isArray(state.zernioPosts) ? state.zernioPosts : [];
+  if (!posts.length) {
+    list.innerHTML = '<p class="muted">No posts yet. Connect Facebook and publish your first update.</p>';
+    return;
+  }
+  list.innerHTML = posts.map((post) => {
+    const content = String(post?.content || post?.text || '').trim() || '(no text)';
+    const status = String(post?.status || (post?.publishedAt ? 'published' : (post?.scheduledFor ? 'scheduled' : 'draft'))).trim();
+    const when = formatZernioPostWhen(post);
+    return `<article class="admin-list-item zernio-post-row"><div><b>${escapeHtml(status)}</b>${when ? `<small>${escapeHtml(when)} ET</small>` : ''}<p>${escapeHtml(content.slice(0, 280))}${content.length > 280 ? '…' : ''}</p></div></article>`;
+  }).join('');
+}
+
+async function loadZernioPosts() {
+  const statusEl = document.querySelector('#zernio-posts-status');
+  if (!hasPermission('site')) return;
+  if (!state.zernioFacebook?.configured) {
+    state.zernioPosts = [];
+    renderZernioPosts();
+    if (statusEl) statusEl.textContent = '';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Loading posts…';
+  try {
+    const result = await jsonFetch('/api/admin/zernio/posts');
+    state.zernioPosts = Array.isArray(result.posts) ? result.posts : [];
+    renderZernioPosts();
+    if (statusEl) statusEl.textContent = state.zernioPosts.length ? `${state.zernioPosts.length} recent post${state.zernioPosts.length === 1 ? '' : 's'}.` : '';
+  } catch (error) {
+    state.zernioPosts = [];
+    renderZernioPosts();
+    if (statusEl) statusEl.textContent = error.message || 'Could not load posts.';
+  }
+}
+
+async function loadSocialPanel({ sync = false } = {}) {
+  if (!hasPermission('site')) return;
+  await loadZernioFacebookStatus({ sync });
+  await loadZernioPosts();
 }
 
 function applyZernioQueryFeedback() {
@@ -1943,13 +2029,17 @@ function applyZernioQueryFeedback() {
   const zernio = String(params.get('zernio') || '').trim();
   if (!zernio) return;
   const messageEl = document.querySelector('#zernio-facebook-message');
-  if (!messageEl) return;
-  if (zernio === 'facebook_connected') {
-    messageEl.textContent = 'Facebook Page connected successfully.';
-  } else if (zernio === 'facebook_pending') {
-    messageEl.textContent = 'Facebook OAuth finished. If the Page is not listed yet, click Connect Facebook again or refresh in a moment.';
-  } else if (zernio === 'facebook_error') {
-    messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
+  if (messageEl) {
+    if (zernio === 'facebook_connected') {
+      messageEl.textContent = 'Facebook Page connected successfully.';
+    } else if (zernio === 'facebook_pending') {
+      messageEl.textContent = 'Facebook OAuth finished. Click Refresh status if the Page is not listed yet.';
+    } else if (zernio === 'facebook_error') {
+      messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
+    }
+  }
+  if (zernio === 'facebook_connected' || zernio === 'facebook_pending') {
+    loadSocialPanel({ sync: true }).catch(() => {});
   }
   params.delete('zernio');
   params.delete('detail');
@@ -1993,6 +2083,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
+    hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
@@ -3952,16 +4043,66 @@ function bindForms() {
     }
   });
 
+  document.querySelectorAll('[data-open-social-tab]').forEach((button) => {
+    button.addEventListener('click', () => activateTab('social'));
+  });
+
+  document.querySelector('#zernio-facebook-refresh')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-facebook-message');
+    if (messageEl) messageEl.textContent = 'Refreshing…';
+    try {
+      await loadSocialPanel({ sync: true });
+      if (messageEl) messageEl.textContent = state.zernioFacebook?.connected
+        ? 'Facebook connection refreshed.'
+        : 'No Facebook Page connected yet. Use Connect Facebook to finish OAuth.';
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not refresh Facebook status.';
+    }
+  });
+
   document.querySelector('#zernio-facebook-disconnect')?.addEventListener('click', async () => {
     const messageEl = document.querySelector('#zernio-facebook-message');
     if (!confirm('Disconnect the Facebook Page from Zernio?')) return;
     if (messageEl) messageEl.textContent = 'Disconnecting…';
     try {
       await jsonFetch('/api/admin/zernio/facebook', { method: 'DELETE' });
-      await loadZernioFacebookStatus();
+      await loadSocialPanel();
       if (messageEl) messageEl.textContent = 'Facebook Page disconnected.';
     } catch (error) {
       if (messageEl) messageEl.textContent = error.message || 'Could not disconnect Facebook.';
+    }
+  });
+
+  document.querySelectorAll('#zernio-post-form input[name="publish_mode"]').forEach((input) => {
+    input.addEventListener('change', syncZernioPublishModeUi);
+  });
+
+  document.querySelector('#zernio-post-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const statusEl = document.querySelector('#zernio-post-status');
+    const mode = String(form.querySelector('input[name="publish_mode"]:checked')?.value || 'now');
+    const payload = {
+      content: String(form.elements.content?.value || '').trim(),
+      media_url: String(form.elements.media_url?.value || '').trim(),
+      publish_now: mode === 'now',
+      scheduled_for: mode === 'schedule' ? String(form.elements.scheduled_for?.value || '').trim() : '',
+      timezone: 'America/New_York',
+    };
+    if (statusEl) statusEl.textContent = mode === 'schedule' ? 'Scheduling…' : 'Publishing…';
+    try {
+      await jsonFetch('/api/admin/zernio/posts', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      form.reset();
+      const nowRadio = form.querySelector('input[name="publish_mode"][value="now"]');
+      if (nowRadio) nowRadio.checked = true;
+      syncZernioPublishModeUi();
+      if (statusEl) statusEl.textContent = mode === 'schedule' ? 'Post scheduled.' : 'Post published.';
+      await loadZernioPosts();
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not create post.';
     }
   });
 

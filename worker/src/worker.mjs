@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-02';
+const ASSET_VERSION = 'admin-cms-20260805-04';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -889,6 +889,15 @@ async function zernioApi(env, path, options = {}) {
 async function ensureZernioProfileId(env) {
   const existing = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
   if (existing) return existing;
+  const listed = await zernioApi(env, '/profiles');
+  const profiles = Array.isArray(listed?.profiles) ? listed.profiles : [];
+  const named = profiles.find((profile) => String(profile?.name || '').trim().toLowerCase() === 'east forsyth band');
+  const fallback = named || profiles.find((profile) => profile?.isDefault) || profiles[0];
+  const foundId = String(fallback?._id || fallback?.id || '').trim();
+  if (foundId) {
+    await setSiteContentValue(env, ZERNIO_PROFILE_KEY, foundId);
+    return foundId;
+  }
   const created = await zernioApi(env, '/profiles', {
     method: 'POST',
     body: JSON.stringify({
@@ -902,18 +911,72 @@ async function ensureZernioProfileId(env) {
   return profileId;
 }
 
-async function getZernioFacebookStatus(env) {
+async function getZernioFacebookStatus(env, { sync = false } = {}) {
   const configured = zernioConfigured(env);
-  const stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
+  let stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
+  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim();
+  if (configured && sync) {
+    try {
+      profileId = await ensureZernioProfileId(env);
+      const live = await syncZernioFacebookConnection(env, profileId);
+      if (live) stored = live;
+      else if (stored?.accountId) {
+        // Stored account no longer present remotely.
+        const data = await zernioApi(env, '/accounts');
+        const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+        const stillThere = accounts.some((account) => String(account?._id || account?.accountId || '') === stored.accountId);
+        if (!stillThere) {
+          await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, '');
+          stored = null;
+        }
+      }
+    } catch (error) {
+      return {
+        configured,
+        connected: Boolean(stored?.accountId),
+        profileId,
+        account: stored,
+        detail: stored?.accountId
+          ? `Connected: ${stored.name || stored.accountId}`
+          : `Could not refresh Zernio status: ${error.message}`,
+        error: error.message,
+      };
+    }
+  }
   return {
     configured,
     connected: Boolean(stored?.accountId),
-    profileId: String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim(),
+    profileId,
     account: stored,
+    connectPath: '/admin/zernio/facebook/connect',
     detail: configured
       ? (stored?.accountId ? `Connected: ${stored.name || stored.accountId}` : 'Ready to connect a Facebook Page via OAuth.')
       : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
   };
+}
+
+export function normalizeZernioPostPayload(payload = {}, account = null) {
+  const content = String(payload.content || '').trim();
+  const mediaUrl = String(payload.media_url || payload.image_url || '').trim();
+  const publishNow = payload.publish_now !== false && !payload.scheduled_for;
+  const scheduledFor = String(payload.scheduled_for || '').trim();
+  const timezone = String(payload.timezone || 'America/New_York').trim() || 'America/New_York';
+  if (!content) throw new Error('Post content is required.');
+  if (content.length > 5000) throw new Error('Post content is too long.');
+  if (!account?.accountId) throw new Error('Connect a Facebook Page before posting.');
+  if (mediaUrl && !/^https?:\/\//i.test(mediaUrl)) throw new Error('Media URL must start with http:// or https://');
+  const body = {
+    content,
+    platforms: [{ platform: 'facebook', accountId: account.accountId }],
+  };
+  if (mediaUrl) body.mediaItems = [{ type: 'image', url: mediaUrl }];
+  if (publishNow) body.publishNow = true;
+  else {
+    if (!scheduledFor) throw new Error('Choose Publish now or provide a schedule time.');
+    body.scheduledFor = scheduledFor.includes('T') ? scheduledFor : `${scheduledFor}T12:00:00`;
+    body.timezone = timezone;
+  }
+  return body;
 }
 
 async function syncZernioFacebookConnection(env, profileId = '') {
@@ -972,7 +1035,7 @@ async function handleZernioFacebookCallback(request, env) {
   const url = new URL(request.url);
   const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
   if (error) {
-    return redirect(`/admin?tab=site&zernio=facebook_error&detail=${encodeURIComponent(error)}`);
+    return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(error)}`);
   }
   try {
     const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
@@ -992,12 +1055,12 @@ async function handleZernioFacebookCallback(request, env) {
           connectedAt: new Date().toISOString(),
         }));
       } else {
-        return redirect('/admin?tab=site&zernio=facebook_pending');
+        return redirect('/admin?tab=social&zernio=facebook_pending');
       }
     }
-    return redirect('/admin?tab=site&zernio=facebook_connected');
+    return redirect('/admin?tab=social&zernio=facebook_connected');
   } catch (error) {
-    return redirect(`/admin?tab=site&zernio=facebook_error&detail=${encodeURIComponent(error?.message || 'Facebook connect failed')}`);
+    return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(error?.message || 'Facebook connect failed')}`);
   }
 }
 
@@ -2978,7 +3041,8 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/zernio/facebook' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    return jsonResponse(await getZernioFacebookStatus(env));
+    const sync = url.searchParams.get('sync') === '1' || url.searchParams.get('refresh') === '1';
+    return jsonResponse(await getZernioFacebookStatus(env, { sync }));
   }
   if (url.pathname === '/api/admin/zernio/facebook' && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'site');
@@ -2993,6 +3057,37 @@ async function handleApi(request, env, url) {
     }
     await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, '');
     return jsonResponse(await getZernioFacebookStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    try {
+      const data = await zernioApi(env, '/posts?limit=20');
+      const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
+      return jsonResponse({ posts });
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not load posts' }, 502);
+    }
+  }
+  if (url.pathname === '/api/admin/zernio/posts' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    const status = await getZernioFacebookStatus(env, { sync: true });
+    if (!status.connected) return jsonResponse({ detail: 'Connect a Facebook Page before posting.' }, 400);
+    let body;
+    try {
+      body = normalizeZernioPostPayload(await request.json(), status.account);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Invalid post' }, 422);
+    }
+    try {
+      const created = await zernioApi(env, '/posts', { method: 'POST', body: JSON.stringify(body) });
+      return jsonResponse({ ok: true, post: created?.post || created }, 201);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not create post' }, 502);
+    }
   }
 
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
@@ -3961,7 +4056,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"><form id="password-form" class="dashboard-password-card"><span>Account</span><b>Change password</b><label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label><label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label><label>Confirm new<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn primary" type="submit">Update password</button><p class="status" id="password-status"></p></form></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Edit text directly in the live preview. Use the formatting bar for rich text, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -4006,16 +4101,56 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack zernio-facebook-card">
   <div class="utility-links-head">
     <h2>Facebook Page (Zernio)</h2>
-    <p class="muted">Connect the band Facebook Page with Meta OAuth through Zernio. Requires a Facebook Page admin login in the browser.</p>
+    <p class="muted">Connect the Page, compose posts, and schedule publishes in Social / Facebook.</p>
+  </div>
+  <p class="notice" id="zernio-facebook-status-site">Open Social / Facebook to connect or post.</p>
+  <div class="panel-actions">
+    <button class="btn primary" type="button" data-open-social-tab>Open Social / Facebook</button>
+  </div>
+</div>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<section id="tab-social" class="cms-panel social-panel">
+<div class="panel-head"><div><p class="kicker">Publish</p><h1>Social / Facebook</h1><p>Connect the band Facebook Page through Zernio, then publish or schedule posts from the CMS.</p></div></div>
+<div class="editor-layout">
+<div class="admin-card stack zernio-facebook-card">
+  <div class="utility-links-head">
+    <h2>Facebook connection</h2>
+    <p class="muted">Requires a Facebook Page admin login. After OAuth, choose the East Forsyth Band Page if prompted.</p>
   </div>
   <p class="notice" id="zernio-facebook-status">Checking Facebook connection…</p>
   <div class="panel-actions">
     <a class="btn primary" id="zernio-facebook-connect" href="/admin/zernio/facebook/connect">Connect Facebook</a>
+    <button class="btn outline" type="button" id="zernio-facebook-refresh" hidden>Refresh status</button>
     <button class="btn outline" type="button" id="zernio-facebook-disconnect" hidden>Disconnect</button>
   </div>
   <p class="status" id="zernio-facebook-message"></p>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="zernio-post-form" class="admin-card stack" hidden>
+  <h2>Compose Facebook post</h2>
+  <p class="muted">Posts publish through Zernio to the connected Page. Schedule times use America/New_York.</p>
+  <label class="full">Post text<textarea name="content" rows="6" required maxlength="5000" placeholder="Share an update with band families…"></textarea></label>
+  <label class="full">Image URL <small>optional</small><input name="media_url" type="url" inputmode="url" autocomplete="url" placeholder="https://…"></label>
+  <fieldset class="zernio-publish-mode">
+    <legend>When to publish</legend>
+    <label class="checkline"><input type="radio" name="publish_mode" value="now" checked> Publish now</label>
+    <label class="checkline"><input type="radio" name="publish_mode" value="schedule"> Schedule for later</label>
+  </fieldset>
+  <label class="full" id="zernio-schedule-fields" hidden>Schedule date &amp; time <small>Eastern</small><input name="scheduled_for" type="datetime-local"></label>
+  <div class="panel-actions">
+    <button class="btn primary" type="submit">Publish to Facebook</button>
+  </div>
+  <p class="status" id="zernio-post-status"></p>
+</form>
+<div class="admin-card stack">
+  <div class="utility-links-head">
+    <h2>Recent posts</h2>
+    <p class="muted">Latest posts created through Zernio for this account.</p>
+  </div>
+  <div id="zernio-posts-list" class="admin-list zernio-posts-list"></div>
+  <p class="status" id="zernio-posts-status"></p>
+</div>
+</div>
+</section>
 <section id="tab-contact" class="cms-panel">
 <div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p><p class="notice" id="contact-delivery-status">Checking email delivery…</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
 <div class="editor-layout">
