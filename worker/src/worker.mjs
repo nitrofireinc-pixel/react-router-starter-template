@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-58';
+const ASSET_VERSION = 'admin-cms-20260805-59';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2956,7 +2956,7 @@ function renderContactPageBody(page) {
   const form = '<div data-contact-form-slot></div>';
   const html = page.body_html || '';
   if (!html.trim()) {
-    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Website:</strong><br><a href="https://www.wsfcs.k12.nc.us/o/efhs">East Forsyth High School</a></p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p></article>${form}</div></section>`;
+    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p></article>${form}</div></section>`;
   }
   let next = html;
   if (next.includes('data-contact-form-slot')) {
