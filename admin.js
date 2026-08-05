@@ -6,6 +6,7 @@ function escapeHtml(value) {
 
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
+  '/api/admin/password',
   '/api/admin/zernio/facebook/events/publish',
   '/api/admin/zernio/posts',
   '/api/admin/zernio/facebook/connect',
@@ -25,6 +26,7 @@ function shouldShowSavedToast(url, options = {}) {
 }
 
 const SAVED_TOAST_ENVELOPE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 4-8 5L4 8V6l8 5 8-5v2Z"/></svg>`;
+const SAVED_TOAST_KEY_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"><circle cx="8.2" cy="9" r="3.4" stroke="currentColor" stroke-width="1.9"/><path d="M11.2 10.6 L20.4 19.8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.1 16.5 L17.1 19.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
 
 function showSavedToast(message = 'Saved.', options = {}) {
   let root = document.querySelector('#admin-saved-toast');
@@ -58,12 +60,17 @@ function showSavedToast(message = 'Saved.', options = {}) {
       card.prepend(icon);
     }
   }
-  const useEnvelope = options.icon === 'envelope';
-  root.classList.toggle('has-icon', useEnvelope);
+  const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
+  const passwordSuccess = Boolean(options.passwordSuccess);
+  root.classList.toggle('has-icon', Boolean(iconKind));
+  root.classList.toggle('is-password-success', passwordSuccess);
   if (icon) {
-    if (useEnvelope) {
+    if (iconKind === 'envelope') {
       icon.hidden = false;
       icon.innerHTML = SAVED_TOAST_ENVELOPE_SVG;
+    } else if (iconKind === 'key') {
+      icon.hidden = false;
+      icon.innerHTML = SAVED_TOAST_KEY_SVG;
     } else {
       icon.hidden = true;
       icon.innerHTML = '';
@@ -80,8 +87,73 @@ function showSavedToast(message = 'Saved.', options = {}) {
     root.classList.remove('is-visible');
     savedToastLeaveTimer = window.setTimeout(() => {
       root.classList.remove('is-leaving');
+      root.classList.remove('is-password-success');
+      root.classList.remove('has-icon');
     }, 380);
   }, 3000);
+}
+
+let passwordToastLeaveTimer = null;
+
+function ensurePasswordToast() {
+  let root = document.querySelector('#admin-password-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-password-toast';
+  root.className = 'admin-password-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-password-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-password-toast-backdrop" data-password-dismiss aria-label="Close change password"></button>
+    <div class="admin-password-toast-panel">
+      <div class="admin-password-toast-card">
+        <h3 id="admin-password-toast-title">Change Password</h3>
+        <form id="password-form">
+          <label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label>
+          <label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Confirm new password<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <p class="admin-password-toast-status" id="password-status" aria-live="polite"></p>
+          <div class="admin-password-toast-actions">
+            <button class="btn outline" type="button" data-password-dismiss>Cancel</button>
+            <button class="btn primary" type="submit">Update Password</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePasswordToast());
+  });
+  return root;
+}
+
+function showPasswordToast() {
+  const root = ensurePasswordToast();
+  const form = root.querySelector('#password-form');
+  const status = root.querySelector('#password-status');
+  form?.reset();
+  if (status) status.textContent = '';
+  window.clearTimeout(passwordToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
+}
+
+function hidePasswordToast() {
+  const root = document.querySelector('#admin-password-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(passwordToastLeaveTimer);
+  passwordToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
 }
 
 function formDataHasFiles(formData) {
@@ -1858,7 +1930,8 @@ function renderMobileAdminMenu() {
   });
 
   menu.innerHTML = `${parts.join('')}
-  <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>`;
+  <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
+  <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -1870,6 +1943,10 @@ function renderMobileAdminMenu() {
   menu.querySelector('[data-mobile-logout]')?.addEventListener('click', async () => {
     closeAdminNav();
     await submitAdminLogout();
+  });
+  menu.querySelector('[data-mobile-change-password]')?.addEventListener('click', () => {
+    closeAdminNav();
+    showPasswordToast();
   });
 }
 
@@ -2502,15 +2579,12 @@ function renderDashboard() {
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
-  const passwordForm = dashboard.querySelector('#password-form');
-  passwordForm?.remove();
   dashboard.innerHTML = cards.length
     ? cards.map(([title, text, target, kicker, kind]) => {
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
-  if (passwordForm) dashboard.appendChild(passwordForm);
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
     activateTab(button.dataset.dashTarget);
   }));
@@ -4552,11 +4626,20 @@ async function refreshAll() {
   await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
 }
 
-function bindForms() {
-  document.querySelector('#password-form')?.addEventListener('submit', async (event) => {
+function bindPasswordControls() {
+  document.querySelectorAll('[data-open-password]').forEach((button) => {
+    if (button.dataset.boundOpenPassword === '1') return;
+    button.dataset.boundOpenPassword = '1';
+    button.addEventListener('click', () => showPasswordToast());
+  });
+
+  const toast = ensurePasswordToast();
+  const form = toast.querySelector('#password-form');
+  if (!form || form.dataset.boundPasswordSubmit === '1') return;
+  form.dataset.boundPasswordSubmit = '1';
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#password-status');
+    const status = toast.querySelector('#password-status');
     const currentPassword = String(form.elements.current_password?.value || '');
     const newPassword = String(form.elements.new_password?.value || '');
     const confirmPassword = String(form.elements.confirm_password?.value || '');
@@ -4583,11 +4666,17 @@ function bindForms() {
         }),
       });
       form.reset();
-      if (status) status.textContent = 'Password updated. Use your new password the next time you log in.';
+      if (status) status.textContent = '';
+      hidePasswordToast();
+      showSavedToast('Password Changed Successfully!', { icon: 'key', passwordSuccess: true });
     } catch (error) {
       if (status) status.textContent = error?.message || 'Could not update password.';
     }
   });
+}
+
+function bindForms() {
+  bindPasswordControls();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
