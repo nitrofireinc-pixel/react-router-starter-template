@@ -77,7 +77,6 @@ function ensureUploadToast() {
       <div class="admin-upload-toast-panel">
         <div class="admin-upload-toast-card">
           <strong class="admin-upload-toast-title">Uploading</strong>
-          <div class="admin-upload-toast-slashes" data-upload-slashes aria-hidden="true">//////</div>
           <div class="admin-upload-toast-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress" data-upload-progress>
             <div class="admin-upload-toast-bar" data-upload-bar></div>
           </div>
@@ -96,14 +95,9 @@ function setUploadProgress(percent) {
   const bar = root.querySelector('[data-upload-bar]');
   const track = root.querySelector('[data-upload-progress]');
   const label = root.querySelector('[data-upload-pct]');
-  const slashes = root.querySelector('[data-upload-slashes]');
   if (bar) bar.style.width = `${pct}%`;
   if (track) track.setAttribute('aria-valuenow', String(pct));
   if (label) label.textContent = `${pct}%`;
-  if (slashes) {
-    const filled = Math.max(1, Math.round((pct / 100) * 12));
-    slashes.textContent = `${'/'.repeat(filled)}${'·'.repeat(Math.max(0, 12 - filled))}`;
-  }
 }
 
 function showUploadingOverlay() {
