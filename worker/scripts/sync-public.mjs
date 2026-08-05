@@ -18,6 +18,7 @@ for (const name of [
   'fundraising.html',
   'sponsors.html',
   'become-a-sponsor.html',
+  'sponsor-payment-complete.html',
   'directors.html',
   'ensembles.html',
   'styles.css',

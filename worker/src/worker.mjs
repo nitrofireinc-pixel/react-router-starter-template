@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-37';
+const ASSET_VERSION = 'admin-cms-20260805-38';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -460,7 +460,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -508,6 +508,21 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE sponsors ADD COLUMN homepage_ad INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN completion_token TEXT NOT NULL DEFAULT \'\'').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN sponsor_id INTEGER').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN paid_at TEXT').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -2333,6 +2348,85 @@ export function sponsorBenefitsFromLevel(level = '') {
   };
 }
 
+export function sponsorLevelFromTierKey(tier = '') {
+  const key = normalizeSponsorTierKey(tier);
+  if (!key) return '';
+  return normalizeSponsorLevel(`${key} Sponsor`);
+}
+
+export function squareMockPayEnabled(env = {}) {
+  const raw = String(env.SQUARE_ALLOW_MOCK_PAY ?? '1').trim().toLowerCase();
+  return !(raw === '0' || raw === 'false' || raw === 'no' || raw === 'off');
+}
+
+export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
+  const row = application || {};
+  const id = Number(row.id || 0);
+  if (!id) throw new Error('Application not found');
+  if (row.sponsor_id) {
+    const existing = await env.DB.prepare(
+      'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+    ).bind(row.sponsor_id).first();
+    if (existing) {
+      return {
+        application: row,
+        sponsor: hydrateSponsor(existing),
+        created: false,
+        mock: Boolean(mock),
+      };
+    }
+  }
+  const level = sponsorLevelFromTierKey(row.tier);
+  if (!level) throw new Error('Application package is invalid');
+  const sponsor = normalizeSponsorPayload({
+    name: row.business_name,
+    address: row.address,
+    logo_url: row.logo_url || '',
+    level,
+    active: 1,
+  });
+  if (!sponsor.name) throw new Error('Business name is required');
+  if (sponsor._assign_sort_order) {
+    const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
+    sponsor.sort_order = Number(max?.max_order || 0) + 1;
+  }
+  const inserted = await env.DB.prepare(
+    'INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).bind(
+    sponsor.name,
+    sponsor.address,
+    sponsor.city,
+    sponsor.state,
+    sponsor.logo_url,
+    sponsor.level,
+    sponsor.mark_text,
+    sponsor.sort_order,
+    sponsor.active,
+    sponsor.homepage_ad,
+  ).run();
+  const sponsorId = inserted.meta.last_row_id;
+  const paidAt = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE sponsor_applications
+     SET status = ?, sponsor_id = ?, paid_at = ?, updated_at = ?
+     WHERE id = ?`,
+  ).bind(mock ? 'paid_mock' : 'paid', sponsorId, paidAt, paidAt, id).run();
+  const saved = await env.DB.prepare(
+    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+  ).bind(sponsorId).first();
+  return {
+    application: {
+      ...row,
+      status: mock ? 'paid_mock' : 'paid',
+      sponsor_id: sponsorId,
+      paid_at: paidAt,
+    },
+    sponsor: hydrateSponsor(saved),
+    created: true,
+    mock: Boolean(mock),
+  };
+}
+
 export function normalizeSponsorPayload(payload = {}, existing = null) {
   const name = String(payload.name || existing?.name || '').trim();
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word.match(/[a-z0-9]/i)?.[0]?.toUpperCase()).filter(Boolean).join('') || '★';
@@ -3679,6 +3773,7 @@ async function handleApi(request, env, url) {
         environment,
         location_ready: false,
         location_id: '',
+        mock_enabled: squareMockPayEnabled(env),
         detail: 'Add SQUARE_ACCESS_TOKEN in Cloudflare Pages settings.',
       });
     }
@@ -3688,6 +3783,7 @@ async function handleApi(request, env, url) {
       environment,
       location_ready: Boolean(location.ok && location.location_id),
       location_id: location.ok ? location.location_id : '',
+      mock_enabled: squareMockPayEnabled(env),
       detail: location.ok
         ? 'Square access token is connected. Location will be selected automatically.'
         : (location.detail || 'Square location could not be determined'),
@@ -3757,14 +3853,18 @@ async function handleApi(request, env, url) {
       }
     }
     const now = new Date().toISOString();
+    const completionToken = crypto.randomUUID().replace(/-/g, '');
     const insert = await env.DB.prepare(
       `INSERT INTO sponsor_applications
-        (tier, amount_cents, amount_display, business_name, address, phone, logo_url, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?)`,
-    ).bind(tier, amountCents, display, businessName, address, phone, logoUrl, now, now).run();
+        (tier, amount_cents, amount_display, business_name, address, phone, logo_url, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(tier, amountCents, display, businessName, address, phone, logoUrl, completionToken, now, now).run();
     const applicationId = insert.meta.last_row_id;
     const tierLabel = `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`;
-    const redirectUrl = `${publicSiteOrigin(request, env)}/become-a-sponsor.html?sponsored=1`;
+    const origin = publicSiteOrigin(request, env);
+    const completePath = `/sponsor-payment-complete.html?app=${encodeURIComponent(String(applicationId))}&token=${encodeURIComponent(completionToken)}`;
+    const redirectUrl = `${origin}${completePath}`;
+    const mockCheckoutUrl = squareMockPayEnabled(env) ? `${completePath}&mock=1` : '';
     let checkoutUrl = '';
     let paymentLinkId = '';
     let paymentReady = false;
@@ -3807,12 +3907,53 @@ async function handleApi(request, env, url) {
       amount_display: display,
       business_name: businessName,
       logo_url: logoUrl,
+      completion_token: completionToken,
       payment_ready: paymentReady,
       checkout_url: checkoutUrl,
+      mock_enabled: squareMockPayEnabled(env),
+      mock_checkout_url: mockCheckoutUrl,
       detail: paymentReady
         ? 'Application saved. Continue to Square to pay the package amount.'
         : paymentDetail,
     });
+  }
+  const sponsorApplicationCompleteMatch = url.pathname.match(/^\/api\/sponsor-applications\/(\d+)\/complete$/);
+  if (sponsorApplicationCompleteMatch && request.method === 'POST') {
+    const applicationId = Number(sponsorApplicationCompleteMatch[1]);
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    const mock = Boolean(payload.mock);
+    if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
+    if (mock && !squareMockPayEnabled(env)) {
+      return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
+    }
+    const application = await env.DB.prepare(
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+       FROM sponsor_applications WHERE id = ?`,
+    ).bind(applicationId).first();
+    if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
+    if (!token || token !== String(application.completion_token || '')) {
+      return jsonResponse({ detail: 'Invalid payment completion token' }, 403);
+    }
+    if (!['pending_payment', 'checkout_ready', 'payment_setup_needed', 'paid', 'paid_mock'].includes(String(application.status || ''))) {
+      return jsonResponse({ detail: 'This application cannot be completed' }, 422);
+    }
+    try {
+      const result = await activatePaidSponsorApplication(env, application, { mock });
+      return jsonResponse({
+        ok: true,
+        mock: result.mock,
+        created: result.created,
+        sponsor: result.sponsor,
+        application_id: applicationId,
+        detail: result.created
+          ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
+          : 'Sponsorship was already activated.',
+      });
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not activate sponsorship' }, 422);
+    }
   }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));

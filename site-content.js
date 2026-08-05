@@ -644,10 +644,10 @@ function openSponsorSignupModal(pkg) {
   modal.innerHTML = `
     <button type="button" class="sponsor-signup-backdrop" data-signup-cancel aria-label="Cancel signup"></button>
     <div class="sponsor-signup-panel">
-      <div class="sponsor-signup-head">
+      <div class="sponsor-signup-head" data-signup-head>
         <span class="sponsor-signup-kicker">Become a sponsor</span>
         <h3>${escapeHtml(pkg.title)}</h3>
-        <p>Tell us about your business, then continue to payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong>.</p>
+        <p data-signup-head-copy>Tell us about your business, then continue to payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong>.</p>
       </div>
       <div class="sponsor-signup-step" data-signup-step="details">
         <form class="sponsor-signup-form" data-signup-form novalidate>
@@ -660,25 +660,29 @@ function openSponsorSignupModal(pkg) {
           <p class="sponsor-signup-logo-name" data-logo-name hidden></p>
           <p class="status" data-signup-status></p>
           <div class="sponsor-signup-actions">
-            <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
             <button class="btn primary" type="submit">Next</button>
           </div>
         </form>
       </div>
       <div class="sponsor-signup-step" data-signup-step="payment" hidden>
-        <div class="sponsor-signup-summary">
-          <p><span>Business</span><strong data-pay-business></strong></p>
-          <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        <div class="sponsor-signup-payment-body" data-pay-body>
+          <div class="sponsor-signup-summary">
+            <p><span>Business</span><strong data-pay-business></strong></p>
+            <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+          </div>
+          <label class="sponsor-signup-amount-lock">Amount due
+            <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
+          </label>
+          <p class="sponsor-signup-pay-note" data-pay-note>Your package amount is locked. Continue to Square to complete payment.</p>
+          <p class="status" data-pay-status></p>
         </div>
-        <label class="sponsor-signup-amount-lock">Amount due
-          <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
-        </label>
-        <p class="sponsor-signup-pay-note" data-pay-note>Your package amount is locked. Continue to Square to complete payment.</p>
-        <p class="status" data-pay-status></p>
-        <div class="sponsor-signup-actions">
-          <button class="btn outline" type="button" data-pay-back>Back</button>
+        <div class="sponsor-signup-actions" data-pay-actions>
+          <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
           <button class="btn primary" type="button" data-pay-continue>Pay with Square</button>
         </div>
+        <p class="sponsor-signup-mock" data-mock-pay-wrap hidden>
+          <button type="button" class="sponsor-signup-mock-btn" data-mock-pay>Simulate successful payment (test)</button>
+        </p>
       </div>
       <div class="sponsor-signup-confirm" data-signup-confirm hidden>
         <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="sponsor-signup-confirm-title" aria-describedby="sponsor-signup-confirm-copy">
@@ -700,28 +704,102 @@ function openSponsorSignupModal(pkg) {
   const form = modal.querySelector('[data-signup-form]');
   const detailsStep = modal.querySelector('[data-signup-step="details"]');
   const paymentStep = modal.querySelector('[data-signup-step="payment"]');
+  const payBody = modal.querySelector('[data-pay-body]');
   const status = modal.querySelector('[data-signup-status]');
   const payStatus = modal.querySelector('[data-pay-status]');
   const payNote = modal.querySelector('[data-pay-note]');
   const logoName = modal.querySelector('[data-logo-name]');
   const logoInput = form?.querySelector('input[name="logo"]');
+  const mockWrap = modal.querySelector('[data-mock-pay-wrap]');
+  let checkoutMessageBound = false;
+
+  function handleSponsorPaidMessage(event) {
+    const data = event?.data;
+    if (!data || data.type !== 'efhs-sponsor-paid') return;
+    if (!sponsorSignupState?.application) return;
+    if (String(data.application_id || '') !== String(sponsorSignupState.application.id || '')) return;
+    window.removeEventListener('message', handleSponsorPaidMessage);
+    checkoutMessageBound = false;
+    if (!data.ok) {
+      if (payStatus) payStatus.textContent = data.detail || 'Payment could not be confirmed.';
+      return;
+    }
+    finishSponsorSignupSuccess(data.sponsor, data.detail);
+  }
+
+  function finishSponsorSignupSuccess(sponsor, detail) {
+    closeSponsorSignupModal({ immediate: true });
+    const note = detail || (sponsor?.name
+      ? `${sponsor.name} is now listed as ${sponsor.level || 'a sponsor'}.`
+      : 'Sponsorship activated. Thank you!');
+    const toast = document.createElement('div');
+    toast.className = 'sponsor-signup-toast';
+    toast.setAttribute('role', 'status');
+    toast.textContent = note;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => toast.remove(), 280);
+    }, 4200);
+    loadSponsorMarquee();
+  }
+
+  function embedCheckout(url, { mock = false } = {}) {
+    if (!payBody || !url) return;
+    modal.classList.add('is-checkout');
+    const headCopy = modal.querySelector('[data-signup-head-copy]');
+    if (headCopy) {
+      headCopy.innerHTML = mock
+        ? 'Test checkout — completing a simulated payment.'
+        : `Complete payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong> below.`;
+    }
+    payBody.innerHTML = `
+      <iframe
+        class="sponsor-signup-checkout-frame"
+        title="${mock ? 'Test sponsorship payment' : 'Square checkout'}"
+        src="${escapeHtml(url)}"
+        allow="payment *"
+      ></iframe>
+      <p class="status" data-pay-status>${mock ? 'Running test payment…' : 'Complete payment in the form above.'}</p>
+    `;
+    const payContinue = modal.querySelector('[data-pay-continue]');
+    if (payContinue) payContinue.hidden = true;
+    if (mockWrap) mockWrap.hidden = true;
+    if (!checkoutMessageBound) {
+      window.addEventListener('message', handleSponsorPaidMessage);
+      checkoutMessageBound = true;
+    }
+  }
+
+  async function ensureApplication() {
+    const draft = sponsorSignupState?.draft;
+    if (!draft) throw new Error('Business details are required.');
+    if (sponsorSignupState.application?.id && sponsorSignupState.application.completion_token) {
+      return sponsorSignupState.application;
+    }
+    const body = new FormData();
+    body.set('business_name', draft.businessName);
+    body.set('address', draft.address);
+    body.set('phone', draft.phone);
+    body.set('tier', pkg.tier);
+    body.set('amount_display', pkg.amountDisplay);
+    body.set('amount_cents', String(pkg.amountCents));
+    if (draft.logo) body.set('logo', draft.logo, draft.logo.name || 'logo.png');
+    const response = await fetch('/api/sponsor-applications', { method: 'POST', body });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || 'Could not save application');
+    sponsorSignupState.application = result;
+    return result;
+  }
 
   modal.querySelectorAll('[data-signup-cancel]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (paymentStep && !paymentStep.hidden) {
-        showSponsorSignupConfirm(modal);
-        return;
-      }
-      showSponsorSignupConfirm(modal);
-    });
+    button.addEventListener('click', () => showSponsorSignupConfirm(modal));
   });
   modal.querySelector('[data-confirm-no]')?.addEventListener('click', () => hideSponsorSignupConfirm(modal));
-  modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => closeSponsorSignupModal());
-  modal.querySelector('[data-pay-back]')?.addEventListener('click', () => {
-    paymentStep.hidden = true;
-    detailsStep.hidden = false;
-    if (payStatus) payStatus.textContent = '';
-    form?.querySelector('input[name="business_name"]')?.focus();
+  modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => {
+    if (checkoutMessageBound) window.removeEventListener('message', handleSponsorPaidMessage);
+    closeSponsorSignupModal();
   });
 
   logoInput?.addEventListener('change', () => {
@@ -773,35 +851,28 @@ function openSponsorSignupModal(pkg) {
     if (payNote) {
       payNote.textContent = 'Your package amount is locked. Continue to Square to complete payment.';
     }
+    fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config) => {
+        if (mockWrap) mockWrap.hidden = !(config && config.mock_enabled);
+      })
+      .catch(() => {
+        if (mockWrap) mockWrap.hidden = true;
+      });
     modal.querySelector('[data-pay-continue]')?.focus();
   });
 
   modal.querySelector('[data-pay-continue]')?.addEventListener('click', async () => {
-    const draft = sponsorSignupState?.draft;
     const payButton = modal.querySelector('[data-pay-continue]');
-    if (!draft || !sponsorSignupState) return;
     if (payStatus) payStatus.textContent = 'Saving application…';
     if (payButton) payButton.disabled = true;
     try {
-      const body = new FormData();
-      body.set('business_name', draft.businessName);
-      body.set('address', draft.address);
-      body.set('phone', draft.phone);
-      body.set('tier', pkg.tier);
-      body.set('amount_display', pkg.amountDisplay);
-      body.set('amount_cents', String(pkg.amountCents));
-      if (draft.logo) body.set('logo', draft.logo, draft.logo.name || 'logo.png');
-      const response = await fetch('/api/sponsor-applications', { method: 'POST', body });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || 'Could not save application');
-      sponsorSignupState.application = result;
+      const result = await ensureApplication();
       if (result.payment_ready && result.checkout_url) {
-        if (payStatus) payStatus.textContent = 'Opening Square checkout…';
-        const openCheckout = window.openSquareCheckoutWindow || ((url) => window.open(url, '_blank', 'noopener,noreferrer'));
-        const checkoutWindow = openCheckout(result.checkout_url);
-        if (!checkoutWindow) window.open(result.checkout_url, '_blank', 'noopener,noreferrer');
-        if (payStatus) payStatus.textContent = 'Square checkout opened. Complete payment there to finish.';
-        if (payNote) payNote.textContent = `Amount due remains ${pkg.amountDisplay}.`;
+        if (payStatus) payStatus.textContent = 'Loading Square checkout…';
+        embedCheckout(result.checkout_url);
+      } else if (result.mock_enabled && result.mock_checkout_url) {
+        if (payStatus) payStatus.textContent = 'Square is unavailable — use the test payment option below, or try again later.';
       } else {
         if (payStatus) {
           payStatus.textContent = result.detail
@@ -811,6 +882,20 @@ function openSponsorSignupModal(pkg) {
     } catch (error) {
       if (payStatus) payStatus.textContent = error.message || 'Could not continue to payment.';
     } finally {
+      if (payButton) payButton.disabled = false;
+    }
+  });
+
+  modal.querySelector('[data-mock-pay]')?.addEventListener('click', async () => {
+    const payButton = modal.querySelector('[data-pay-continue]');
+    if (payStatus) payStatus.textContent = 'Starting test payment…';
+    if (payButton) payButton.disabled = true;
+    try {
+      const result = await ensureApplication();
+      if (!result.mock_checkout_url) throw new Error('Test payments are not enabled.');
+      embedCheckout(result.mock_checkout_url, { mock: true });
+    } catch (error) {
+      if (payStatus) payStatus.textContent = error.message || 'Could not start test payment.';
       if (payButton) payButton.disabled = false;
     }
   });
