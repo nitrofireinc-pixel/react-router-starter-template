@@ -56,13 +56,14 @@ header.site-header nav a:focus{background:#eef3fa;outline:none}
     width:100%;
     max-width:none;
     margin:0;
-    padding:10px max(20px, calc(50% - (var(--max) / 2) + 20px));
+    padding:3px max(20px, calc(50% - (var(--max) / 2) + 20px));
     border-top:0;
     border-radius:0;
     background:var(--navy);
     box-shadow:none;
   }
   header.site-header nav a{
+    padding:4px 10px;
     color:var(--gold);
     text-shadow:
       -1px -1px 0 rgba(0,0,0,.85),
@@ -118,8 +119,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 /* Mid-width desktops (e.g. 1024x768): slightly tighter nav pills so more links fit per row. */
 @media(max-width:1100px) and (min-width:761px){
-  header.site-header nav{gap:2px;padding-top:8px;padding-bottom:8px}
-  header.site-header nav a{font-size:.8rem;padding:7px 8px}
+  header.site-header nav{gap:2px;padding-top:2px;padding-bottom:2px}
+  header.site-header nav a{font-size:.8rem;padding:3px 8px}
 }
 @media(max-width:900px){.sponsor-directory{grid-template-columns:1fr}.sponsor-intro,.sponsor-cta{align-items:flex-start;flex-direction:column}.cms-shell{display:block;padding:20px}.cms-shell .admin-top{border-radius:18px 18px 0 0}.cms-shell .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));border-radius:0 0 18px 18px}.cms-shell .cms-panel{margin:20px 0}.hero .wrap{grid-template-columns:1fr;padding-top:56px}.cards,.two,.directory,.footer .wrap,.gallery,.admin-grid{grid-template-columns:1fr}.admin-grid .admin-card:first-child{grid-column:auto}.section-head{display:block}.admin-top{display:block}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr}.hero:before{background:linear-gradient(90deg,rgba(0,33,66,.62),rgba(0,33,66,.92)),url('assets/efhs-photo-2.png') center/cover no-repeat}}
 
