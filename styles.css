@@ -32,14 +32,31 @@ header.site-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,
   top:auto;
   z-index:2;
 }
-.header-inner{max-width:var(--max);margin:auto;padding:12px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;column-gap:26px;row-gap:0}.brand{display:flex;align-items:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:max-content}.brand img{width:50px;height:50px;object-fit:contain}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1}
+.header-inner{max-width:var(--max);margin:auto;padding:12px 20px;display:flex;flex-wrap:wrap;align-items:center;column-gap:26px;row-gap:0}.brand{display:flex;align-items:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:max-content}.brand img{width:50px;height:50px;object-fit:contain}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1}
 /* Keep logo/title on the first row; put every nav link on a full-width row beneath. */
-nav{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start;align-items:center;flex:1 1 100%;width:100%;margin:8px 0 0;padding:8px 0 2px;border-top:1px solid rgba(0,33,66,.1)}nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}nav a:hover,nav a:focus{background:#eef3fa;outline:none}.menu-button{display:none;margin-left:auto;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
-/* Desktop nav bar: utility-navy field, gold links with black glow */
+header.site-header nav{
+  display:flex;
+  gap:4px;
+  flex-wrap:wrap;
+  justify-content:flex-start;
+  align-items:center;
+  width:100%;
+  margin:0;
+  padding:8px 20px 10px;
+  border-top:1px solid rgba(0,33,66,.1);
+  box-sizing:border-box;
+}
+header.site-header nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}
+header.site-header nav a:hover,
+header.site-header nav a:focus{background:#eef3fa;outline:none}
+.menu-button{display:none;margin-left:auto;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
+/* Desktop nav bar: full-bleed utility navy, gold links with black glow */
 @media(min-width:761px){
   header.site-header nav{
-    margin:10px 0 0;
-    padding:8px 10px;
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding:10px max(20px, calc(50% - (var(--max) / 2) + 20px));
     border-top:0;
     border-radius:0;
     background:var(--navy);
@@ -101,8 +118,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 /* Mid-width desktops (e.g. 1024x768): slightly tighter nav pills so more links fit per row. */
 @media(max-width:1100px) and (min-width:761px){
-  nav{gap:2px;margin-top:6px;padding-top:6px}
-  nav a{font-size:.8rem;padding:7px 8px}
+  header.site-header nav{gap:2px;padding-top:8px;padding-bottom:8px}
+  header.site-header nav a{font-size:.8rem;padding:7px 8px}
 }
 @media(max-width:900px){.sponsor-directory{grid-template-columns:1fr}.sponsor-intro,.sponsor-cta{align-items:flex-start;flex-direction:column}.cms-shell{display:block;padding:20px}.cms-shell .admin-top{border-radius:18px 18px 0 0}.cms-shell .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));border-radius:0 0 18px 18px}.cms-shell .cms-panel{margin:20px 0}.hero .wrap{grid-template-columns:1fr;padding-top:56px}.cards,.two,.directory,.footer .wrap,.gallery,.admin-grid{grid-template-columns:1fr}.admin-grid .admin-card:first-child{grid-column:auto}.section-head{display:block}.admin-top{display:block}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr}.hero:before{background:linear-gradient(90deg,rgba(0,33,66,.62),rgba(0,33,66,.92)),url('assets/efhs-photo-2.png') center/cover no-repeat}}
 
