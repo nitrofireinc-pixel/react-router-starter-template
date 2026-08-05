@@ -1893,7 +1893,14 @@ body.sponsor-signup-open{overflow:hidden}
   width:min(760px,100%);
   max-height:min(94vh,900px);
 }
-.sponsor-signup-checkout-frame{
+.sponsor-signup-card-box{
+  margin:4px 0 10px;
+  padding:14px;
+  border-radius:14px;
+  border:1px solid #d7e0ea;
+  background:#f8fbfe;
+}
+.sponsor-signup-card-host{min-height:90px}
   display:block;
   width:100%;
   height:min(68vh,640px);

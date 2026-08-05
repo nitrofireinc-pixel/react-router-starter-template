@@ -660,6 +660,7 @@ function openSponsorSignupModal(pkg) {
           <p class="sponsor-signup-logo-name" data-logo-name hidden></p>
           <p class="status" data-signup-status></p>
           <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
             <button class="btn primary" type="submit">Next</button>
           </div>
         </form>
@@ -745,23 +746,108 @@ function openSponsorSignupModal(pkg) {
     loadSponsorMarquee();
   }
 
-  function embedCheckout(url, { mock = false } = {}) {
-    if (!payBody || !url) return;
+  function loadSquareWebSdk(environment = 'production') {
+    const existing = document.querySelector('script[data-square-web-sdk]');
+    if (existing && window.Square) return Promise.resolve(window.Square);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.dataset.squareWebSdk = '1';
+      script.src = environment === 'sandbox'
+        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+        : 'https://web.squarecdn.com/v1/square.js';
+      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+      script.onerror = () => reject(new Error('Could not load Square payment form'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function embedCardCheckout(application, config) {
+    if (!payBody) return;
     modal.classList.add('is-checkout');
     const headCopy = modal.querySelector('[data-signup-head-copy]');
     if (headCopy) {
-      headCopy.innerHTML = mock
-        ? 'Test checkout — completing a simulated payment.'
-        : `Complete payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong> below.`;
+      headCopy.innerHTML = `Enter card details to pay <strong>${escapeHtml(pkg.amountDisplay)}</strong>.`;
     }
+    payBody.innerHTML = `
+      <div class="sponsor-signup-summary">
+        <p><span>Business</span><strong>${escapeHtml(application.business_name || sponsorSignupState.draft?.businessName || '')}</strong></p>
+        <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        <p><span>Amount</span><strong>${escapeHtml(pkg.amountDisplay)}</strong></p>
+      </div>
+      <div class="sponsor-signup-card-box">
+        <div id="sponsor-square-card" class="sponsor-signup-card-host"></div>
+      </div>
+      <p class="status" data-pay-status>Loading secure card form…</p>
+    `;
+    const liveStatus = payBody.querySelector('[data-pay-status]');
+    const payContinue = modal.querySelector('[data-pay-continue]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = true;
+      payContinue.textContent = `Pay ${pkg.amountDisplay}`;
+    }
+    if (mockWrap) mockWrap.hidden = !config?.mock_enabled;
+
+    const Square = await loadSquareWebSdk(config.environment || 'production');
+    const payments = Square.payments(config.application_id, config.location_id);
+    const card = await payments.card();
+    await card.attach('#sponsor-square-card');
+    if (liveStatus) liveStatus.textContent = 'Card form ready.';
+    if (payContinue) {
+      payContinue.disabled = false;
+      payContinue.onclick = async () => {
+        payContinue.disabled = true;
+        if (liveStatus) liveStatus.textContent = 'Processing payment…';
+        try {
+          const verificationDetails = {
+            amount: (Number(application.amount_cents || pkg.amountCents) / 100).toFixed(2),
+            currencyCode: 'USD',
+            intent: 'CHARGE',
+            customerInitiated: true,
+            sellerKeyedIn: false,
+            billingContact: {
+              givenName: String(application.business_name || sponsorSignupState.draft?.businessName || 'Sponsor').slice(0, 100),
+              phone: String(sponsorSignupState.draft?.phone || '').replace(/\D/g, '').slice(0, 20),
+              addressLines: [String(sponsorSignupState.draft?.address || '').slice(0, 200)],
+              countryCode: 'US',
+            },
+          };
+          const result = await card.tokenize(verificationDetails);
+          if (result.status !== 'OK' || !result.token) {
+            const message = result.errors?.[0]?.message || 'Card could not be processed.';
+            throw new Error(message);
+          }
+          const response = await fetch(`/api/sponsor-applications/${encodeURIComponent(application.id)}/pay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: application.completion_token,
+              source_id: result.token,
+            }),
+          });
+          const paid = await response.json().catch(() => ({}));
+          if (!response.ok || !paid.ok) throw new Error(paid.detail || 'Payment failed');
+          finishSponsorSignupSuccess(paid.sponsor, paid.detail);
+        } catch (error) {
+          if (liveStatus) liveStatus.textContent = error.message || 'Payment failed.';
+          payContinue.disabled = false;
+        }
+      };
+    }
+  }
+
+  function embedMockCheckout(url) {
+    if (!payBody || !url) return;
+    modal.classList.add('is-checkout');
+    const headCopy = modal.querySelector('[data-signup-head-copy]');
+    if (headCopy) headCopy.textContent = 'Test checkout — completing a simulated payment.';
     payBody.innerHTML = `
       <iframe
         class="sponsor-signup-checkout-frame"
-        title="${mock ? 'Test sponsorship payment' : 'Square checkout'}"
+        title="Test sponsorship payment"
         src="${escapeHtml(url)}"
-        allow="payment *"
       ></iframe>
-      <p class="status" data-pay-status>${mock ? 'Running test payment…' : 'Complete payment in the form above.'}</p>
+      <p class="status" data-pay-status>Running test payment…</p>
     `;
     const payContinue = modal.querySelector('[data-pay-continue]');
     if (payContinue) payContinue.hidden = true;
@@ -770,6 +856,10 @@ function openSponsorSignupModal(pkg) {
       window.addEventListener('message', handleSponsorPaidMessage);
       checkoutMessageBound = true;
     }
+  }
+
+  function embedCheckout(url, { mock = false } = {}) {
+    if (mock) embedMockCheckout(url);
   }
 
   async function ensureApplication() {
@@ -862,40 +952,57 @@ function openSponsorSignupModal(pkg) {
     modal.querySelector('[data-pay-continue]')?.focus();
   });
 
-  modal.querySelector('[data-pay-continue]')?.addEventListener('click', async () => {
+  async function startSquarePayment() {
     const payButton = modal.querySelector('[data-pay-continue]');
-    if (payStatus) payStatus.textContent = 'Saving application…';
+    const statusEl = modal.querySelector('[data-pay-status]');
+    if (statusEl) statusEl.textContent = 'Saving application…';
     if (payButton) payButton.disabled = true;
     try {
-      const result = await ensureApplication();
-      if (result.payment_ready && result.checkout_url) {
-        if (payStatus) payStatus.textContent = 'Loading Square checkout…';
-        embedCheckout(result.checkout_url);
-      } else if (result.mock_enabled && result.mock_checkout_url) {
-        if (payStatus) payStatus.textContent = 'Square is unavailable — use the test payment option below, or try again later.';
-      } else {
-        if (payStatus) {
-          payStatus.textContent = result.detail
-            || 'Application saved. Square payment is not connected yet — the band will follow up.';
-        }
+      const [result, config] = await Promise.all([
+        ensureApplication(),
+        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
+          .then((response) => (response.ok ? response.json() : null))
+          .catch(() => null),
+      ]);
+      if (mockWrap) mockWrap.hidden = !(config && config.mock_enabled);
+      if (config?.web_payments) {
+        await embedCardCheckout(result, config);
+        return;
       }
+      if (result.mock_enabled && result.mock_checkout_url) {
+        if (statusEl) {
+          statusEl.textContent = 'In-popup Square card checkout needs SQUARE_APPLICATION_ID. You can still use the test payment option below.';
+        }
+        if (payButton) payButton.disabled = false;
+        return;
+      }
+      if (statusEl) {
+        statusEl.textContent = result.detail
+          || 'Application saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      }
+      if (payButton) payButton.disabled = false;
     } catch (error) {
-      if (payStatus) payStatus.textContent = error.message || 'Could not continue to payment.';
-    } finally {
+      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
       if (payButton) payButton.disabled = false;
     }
+  }
+
+  modal.querySelector('[data-pay-continue]')?.addEventListener('click', () => {
+    if (modal.classList.contains('is-checkout')) return;
+    startSquarePayment();
   });
 
   modal.querySelector('[data-mock-pay]')?.addEventListener('click', async () => {
     const payButton = modal.querySelector('[data-pay-continue]');
-    if (payStatus) payStatus.textContent = 'Starting test payment…';
+    const statusEl = modal.querySelector('[data-pay-status]');
+    if (statusEl) statusEl.textContent = 'Starting test payment…';
     if (payButton) payButton.disabled = true;
     try {
       const result = await ensureApplication();
       if (!result.mock_checkout_url) throw new Error('Test payments are not enabled.');
-      embedCheckout(result.mock_checkout_url, { mock: true });
+      embedMockCheckout(result.mock_checkout_url);
     } catch (error) {
-      if (payStatus) payStatus.textContent = error.message || 'Could not start test payment.';
+      if (statusEl) statusEl.textContent = error.message || 'Could not start test payment.';
       if (payButton) payButton.disabled = false;
     }
   });

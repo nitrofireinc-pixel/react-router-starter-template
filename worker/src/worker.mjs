@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-38';
+const ASSET_VERSION = 'admin-cms-20260805-39';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -724,8 +724,65 @@ export function squareAccessToken(env = {}) {
     .trim();
 }
 
+export function squareApplicationId(env = {}) {
+  return String(env.SQUARE_APPLICATION_ID || env.SQUARE_APP_ID || '').trim();
+}
+
 export function squareCheckoutConfigured(env = {}) {
   return Boolean(squareAccessToken(env));
+}
+
+export function squareWebPaymentsConfigured(env = {}) {
+  return Boolean(squareAccessToken(env) && squareApplicationId(env));
+}
+
+export async function createSquareCardPayment(env, {
+  sourceId,
+  amountCents,
+  locationId = '',
+  referenceId = '',
+  note = '',
+} = {}) {
+  const token = squareAccessToken(env);
+  if (!token) return { ok: false, detail: 'Square is not configured' };
+  const cents = Math.round(Number(amountCents) || 0);
+  if (cents < 100) return { ok: false, detail: 'Payment amount must be at least $1' };
+  const source = String(sourceId || '').trim();
+  if (!source) return { ok: false, detail: 'Payment card token is required' };
+  let resolvedLocationId = String(locationId || env.SQUARE_LOCATION_ID || '').trim();
+  if (!resolvedLocationId) {
+    const location = await resolveSquareLocationId(env);
+    if (!location.ok || !location.location_id) {
+      return { ok: false, detail: location.detail || 'Square location could not be determined' };
+    }
+    resolvedLocationId = location.location_id;
+  }
+  const body = {
+    idempotency_key: crypto.randomUUID(),
+    source_id: source,
+    amount_money: { amount: cents, currency: 'USD' },
+    location_id: resolvedLocationId,
+    autocomplete: true,
+  };
+  if (referenceId) body.reference_id = String(referenceId).slice(0, 40);
+  if (note) body.note = String(note).slice(0, 500);
+  const response = await fetch(`${squareApiBase(env)}/v2/payments`, {
+    method: 'POST',
+    headers: squareApiHeaders(env),
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, detail: formatSquareError(payload, response.status) };
+  }
+  const payment = payload?.payment || {};
+  return {
+    ok: true,
+    payment_id: String(payment.id || ''),
+    status: String(payment.status || ''),
+    receipt_url: String(payment.receipt_url || ''),
+    location_id: resolvedLocationId,
+  };
 }
 
 export function squareApiBase(env = {}) {
@@ -3767,12 +3824,15 @@ async function handleApi(request, env, url) {
     const environment = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'
       ? 'sandbox'
       : 'production';
+    const applicationId = squareApplicationId(env);
     if (!configured) {
       return jsonResponse({
         configured: false,
         environment,
+        application_id: '',
         location_ready: false,
         location_id: '',
+        web_payments: false,
         mock_enabled: squareMockPayEnabled(env),
         detail: 'Add SQUARE_ACCESS_TOKEN in Cloudflare Pages settings.',
       });
@@ -3781,11 +3841,15 @@ async function handleApi(request, env, url) {
     return jsonResponse({
       configured: true,
       environment,
+      application_id: applicationId,
       location_ready: Boolean(location.ok && location.location_id),
       location_id: location.ok ? location.location_id : '',
+      web_payments: Boolean(applicationId && location.ok && location.location_id),
       mock_enabled: squareMockPayEnabled(env),
       detail: location.ok
-        ? 'Square access token is connected. Location will be selected automatically.'
+        ? (applicationId
+          ? 'Square card payments are ready in the signup popup.'
+          : 'Square access token is connected. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.')
         : (location.detail || 'Square location could not be determined'),
     });
   }
@@ -3953,6 +4017,68 @@ async function handleApi(request, env, url) {
       });
     } catch (error) {
       return jsonResponse({ detail: error.message || 'Could not activate sponsorship' }, 422);
+    }
+  }
+  const sponsorApplicationPayMatch = url.pathname.match(/^\/api\/sponsor-applications\/(\d+)\/pay$/);
+  if (sponsorApplicationPayMatch && request.method === 'POST') {
+    const applicationId = Number(sponsorApplicationPayMatch[1]);
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    const sourceId = String(payload.source_id || payload.sourceId || '').trim();
+    if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
+    if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
+    const application = await env.DB.prepare(
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+       FROM sponsor_applications WHERE id = ?`,
+    ).bind(applicationId).first();
+    if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
+    if (!token || token !== String(application.completion_token || '')) {
+      return jsonResponse({ detail: 'Invalid payment completion token' }, 403);
+    }
+    if (application.sponsor_id) {
+      const existing = await env.DB.prepare(
+        'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+      ).bind(application.sponsor_id).first();
+      return jsonResponse({
+        ok: true,
+        created: false,
+        sponsor: existing ? hydrateSponsor(existing) : null,
+        application_id: applicationId,
+        detail: 'Sponsorship was already activated.',
+      });
+    }
+    if (!squareCheckoutConfigured(env)) {
+      return jsonResponse({ detail: 'Square payment is not connected yet' }, 503);
+    }
+    const payment = await createSquareCardPayment(env, {
+      sourceId,
+      amountCents: application.amount_cents,
+      referenceId: `sponsor-${applicationId}`,
+      note: `EFHS Band ${String(application.tier || '').toUpperCase()} sponsor — ${application.business_name}`,
+    });
+    if (!payment.ok) {
+      return jsonResponse({ detail: payment.detail || 'Square payment failed' }, 422);
+    }
+    try {
+      const result = await activatePaidSponsorApplication(env, application, { mock: false });
+      await env.DB.prepare(
+        `UPDATE sponsor_applications
+         SET square_payment_link_id = ?, status = 'paid', updated_at = ?
+         WHERE id = ?`,
+      ).bind(payment.payment_id || '', new Date().toISOString(), applicationId).run();
+      return jsonResponse({
+        ok: true,
+        created: result.created,
+        sponsor: result.sponsor,
+        application_id: applicationId,
+        payment_id: payment.payment_id,
+        detail: result.created
+          ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
+          : 'Sponsorship was already activated.',
+      });
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Payment succeeded but sponsorship activation failed' }, 500);
     }
   }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
