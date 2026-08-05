@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-07';
+const ASSET_VERSION = 'admin-cms-20260805-08';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -1268,11 +1268,10 @@ async function handleZernioFacebookConnect(request, env) {
     const profileId = await ensureZernioProfileId(env);
     // Always return to the public custom domain so session cookies match the CMS the admin uses.
     const redirectUrl = zernioFacebookCallbackUrl(request, env);
+    // Standard mode: Zernio hosts the Page picker after Meta OAuth (clearer when Pages must be chosen).
     const query = new URLSearchParams({
       profileId,
       redirect_url: redirectUrl,
-      // Headless gives our CMS the Page picker; Zernio still supports hosted UI if this is omitted.
-      headless: 'true',
     });
     const data = await zernioApi(env, `/connect/facebook?${query.toString()}`);
     const authUrl = String(data?.authUrl || data?.url || '').trim();
@@ -1285,13 +1284,26 @@ async function handleZernioFacebookConnect(request, env) {
   }
 }
 
+function describeZernioFacebookOAuthError(error = '') {
+  const code = String(error || '').trim();
+  const lower = code.toLowerCase();
+  if (!code) return 'Facebook connect failed.';
+  if (lower.includes('no_facebook_pages') || lower.includes('no pages')) {
+    return 'Facebook logged in, but Meta did not share any Pages. On the Meta permission screens: (1) select your Business if asked, (2) turn ON / check the East Forsyth Band Page, (3) allow Pages access. You must be a Page Admin or Editor. Then click Connect Facebook again.';
+  }
+  if (lower.includes('access_denied') || lower.includes('user_denied')) {
+    return 'Facebook permission was declined. Click Connect Facebook again and allow Page access.';
+  }
+  return code;
+}
+
 async function handleZernioFacebookCallback(request, env) {
   await initDb(env);
   const url = new URL(request.url);
   const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
   if (error) {
     await rememberZernioFacebookDebug(env, { keys: [...url.searchParams.keys()], note: `oauth_error:${error}` });
-    return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(error)}`);
+    return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(describeZernioFacebookOAuthError(error))}`);
   }
 
   let nextPath = '/admin?tab=social&zernio=facebook_pending';

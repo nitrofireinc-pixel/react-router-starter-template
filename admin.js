@@ -2116,7 +2116,13 @@ function applyZernioQueryFeedback() {
     } else if (zernio === 'facebook_pending') {
       messageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
     } else if (zernio === 'facebook_error') {
-      messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
+      const detail = params.get('detail') || 'Facebook connect failed.';
+      messageEl.textContent = detail;
+      const statusEl = document.querySelector('#zernio-facebook-status');
+      if (statusEl && /no_facebook_pages|did not share any Pages/i.test(detail)) {
+        statusEl.textContent = detail;
+        statusEl.classList.remove('ok');
+      }
     }
   }
   if (zernio === 'facebook_connected' || zernio === 'facebook_pending' || zernio === 'facebook_select') {
