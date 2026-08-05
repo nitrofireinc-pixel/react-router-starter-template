@@ -618,6 +618,15 @@ async function initDb(env) {
         .run();
     }
   }
+  const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
+  if (fundraisingPageRow?.body_html) {
+    const nextFundraisingHtml = ensureFundraisingDonateSlot(fundraisingPageRow.body_html);
+    if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextFundraisingHtml, fundraisingPageRow.id)
+        .run();
+    }
+  }
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
     const previousHash = await env.DB.prepare("SELECT value FROM auth_settings WHERE key = 'admin_password_hash'").first();

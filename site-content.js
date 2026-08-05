@@ -766,7 +766,7 @@ function openSponsorSignupModal(pkg) {
       <div class="sponsor-signup-confirm" data-signup-confirm hidden>
         <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="sponsor-signup-confirm-title" aria-describedby="sponsor-signup-confirm-copy">
           <h4 id="sponsor-signup-confirm-title">Are you sure?</h4>
-          <p id="sponsor-signup-confirm-copy">Canceling returns you to the sponsor page and discards this form.</p>
+          <p id="sponsor-signup-confirm-copy">Canceling returns you to the sponsor/donation page and discards this form.</p>
           <div class="sponsor-signup-actions">
             <button class="btn outline" type="button" data-confirm-no>No</button>
             <button class="btn primary" type="button" data-confirm-yes>Yes</button>
@@ -1352,7 +1352,7 @@ function openDonateModal() {
       <div class="sponsor-signup-confirm" data-donate-confirm hidden>
         <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="donate-confirm-title" aria-describedby="donate-confirm-copy">
           <h4 id="donate-confirm-title">Are you sure?</h4>
-          <p id="donate-confirm-copy">Canceling returns you to the sponsors page and discards this donation.</p>
+          <p id="donate-confirm-copy">Canceling returns you to the sponsor/donation page and discards this donation.</p>
           <div class="sponsor-signup-actions">
             <button class="btn outline" type="button" data-confirm-no>No</button>
             <button class="btn primary" type="button" data-confirm-yes>Yes</button>
