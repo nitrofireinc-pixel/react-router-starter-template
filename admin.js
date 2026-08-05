@@ -32,7 +32,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -1658,6 +1658,7 @@ function activateTab(name) {
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
+    if (name !== 'ensembles') closeEnsemblesBodyEditor();
     document.querySelectorAll('.cms-panel').forEach(panel => { panel.hidden = true; });
     document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
     markAdminNavActive({ tab: name });
@@ -1670,6 +1671,11 @@ function activateTab(name) {
     }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
+    }
+    if (name === 'ensembles') {
+      loadEnsemblesBody()
+        .then(() => openEnsemblesBodyEditor())
+        .catch(() => {});
     }
     if (name === 'mail') {
       loadMailRecipients().catch(() => {});
@@ -1825,6 +1831,7 @@ function showAllowedPanels() {
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
+    ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
     contact: canEditContact(),
@@ -1869,13 +1876,6 @@ function showAllowedPanels() {
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
   }
   bindSponsorsMenu();
-  const ensemblesNav = document.querySelector('[data-page-nav="ensembles"]');
-  if (ensemblesNav) {
-    const canEnsembles = canEditPage('ensembles');
-    ensemblesNav.hidden = !canEnsembles;
-    if (canEnsembles) manageVisible = true;
-    ensemblesNav.onclick = () => editPage('ensembles');
-  }
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
@@ -2259,7 +2259,7 @@ function renderDashboard() {
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
-    canEditPage('ensembles') && ['Ensembles', 'Edit ensemble cards and program descriptions on the public Ensembles page.', 'ensembles', 'Program', 'page'],
+    canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
@@ -3816,7 +3816,7 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesViewOpen() || isMinutesEditorOpen();
+  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
@@ -4078,6 +4078,131 @@ async function loadMinutes() {
   showMinutesIdle();
 }
 
+function canEditEnsemblesBody() {
+  return canEditPage('ensembles');
+}
+
+function isEnsemblesBodyEditorOpen() {
+  const modal = document.querySelector('#ensembles-editor-modal');
+  return Boolean(modal && !modal.hasAttribute('hidden'));
+}
+
+function syncEnsemblesFrameBodyLock() {
+  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
+}
+
+function closeEnsemblesBodyEditor() {
+  const modal = document.querySelector('#ensembles-editor-modal');
+  if (modal) modal.toggleAttribute('hidden', true);
+  syncEnsemblesFrameBodyLock();
+  syncMinutesFrameBodyLock();
+}
+
+function renderEnsemblesBodyPreview() {
+  const preview = document.querySelector('#ensembles-body-preview');
+  if (!preview) return;
+  const html = String(state.ensemblesBodyHtml || '').trim();
+  preview.innerHTML = html || '<p class="draft">No ensemble body content yet. Click Edit Body to create it.</p>';
+}
+
+function populateEnsemblesBodyForm() {
+  const form = document.querySelector('#ensembles-body-form');
+  if (!form) return;
+  setFormRichEditorValue(form, 'body_html', state.ensemblesBodyHtml || '');
+}
+
+function openEnsemblesBodyEditor({ statusText = '' } = {}) {
+  if (!canEditEnsemblesBody()) return;
+  const modal = document.querySelector('#ensembles-editor-modal');
+  const form = document.querySelector('#ensembles-body-form');
+  if (!modal || !form) return;
+  populateEnsemblesBodyForm();
+  modal.toggleAttribute('hidden', false);
+  syncEnsemblesFrameBodyLock();
+  const status = document.querySelector('#ensembles-body-status');
+  if (status) {
+    status.textContent = statusText || 'Edit the Ensembles page body only. Save to close the editor.';
+  }
+  window.setTimeout(() => {
+    form.querySelector('[data-rich-input="body_html"]')?.focus();
+  }, 30);
+}
+
+function readEnsemblesBodyHtml(form) {
+  syncFormRichEditors(form);
+  const control = formControl(form, 'body_html');
+  let html = String(control?.value || '').trim();
+  if (!html.replace(/<[^>]+>/g, '').trim()) {
+    const editor = form?.querySelector('[data-rich-input="body_html"]');
+    const fromEditor = String(editor?.innerHTML || '').trim();
+    if (fromEditor.replace(/<[^>]+>/g, '').trim()) {
+      html = fromEditor;
+      if (control) control.value = fromEditor;
+    }
+  }
+  return html;
+}
+
+async function saveEnsemblesBodyForm(form) {
+  const status = document.querySelector('#ensembles-body-status');
+  if (!canEditEnsemblesBody()) {
+    if (status) status.textContent = 'You do not have permission to edit Ensemble Body.';
+    return;
+  }
+  const bodyHtml = readEnsemblesBodyHtml(form);
+  if (!bodyHtml.replace(/<[^>]+>/g, '').trim()) {
+    if (status) status.textContent = 'Ensemble body content is required.';
+    form.querySelector('[data-rich-input="body_html"]')?.focus();
+    return;
+  }
+  if (status) status.textContent = 'Saving ensemble body…';
+  try {
+    const saved = await jsonFetch('/api/admin/ensembles/body', {
+      method: 'PUT',
+      body: JSON.stringify({ body_html: bodyHtml }),
+    });
+    state.ensemblesBodyHtml = String(saved?.body_html || bodyHtml);
+    renderEnsemblesBodyPreview();
+    closeEnsemblesBodyEditor();
+    const panelStatus = document.querySelector('#ensembles-body-panel-status');
+    if (panelStatus) panelStatus.textContent = 'Ensemble body saved.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save ensemble body.';
+  }
+}
+
+async function loadEnsemblesBody() {
+  if (!canEditEnsemblesBody()) return;
+  try {
+    const result = await jsonFetch('/api/admin/ensembles/body');
+    state.ensemblesBodyHtml = String(result?.body_html || '');
+    renderEnsemblesBodyPreview();
+    const panelStatus = document.querySelector('#ensembles-body-panel-status');
+    if (panelStatus) panelStatus.textContent = '';
+  } catch (error) {
+    const panelStatus = document.querySelector('#ensembles-body-panel-status');
+    if (panelStatus) panelStatus.textContent = error.message || 'Could not load ensemble body.';
+  }
+}
+
+function bindEnsemblesBodyPanel() {
+  document.querySelector('#edit-ensembles-body')?.addEventListener('click', () => {
+    if (!canEditEnsemblesBody()) return;
+    openEnsemblesBodyEditor();
+  });
+  document.querySelectorAll('[data-ensembles-editor-dismiss], #cancel-ensembles-edit').forEach((button) => {
+    button.addEventListener('click', () => closeEnsemblesBodyEditor());
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isEnsemblesBodyEditorOpen()) return;
+    closeEnsemblesBodyEditor();
+  });
+  document.querySelector('#ensembles-body-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await saveEnsemblesBodyForm(event.currentTarget);
+  });
+}
+
 function bindMinutesPanel() {
   const toggle = document.querySelector('.minutes-nav-toggle');
   if (toggle && toggle.dataset.bound !== '1') {
@@ -4180,7 +4305,7 @@ function bindMinutesPanel() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
 }
 
 function bindForms() {
@@ -4833,6 +4958,7 @@ bindPageEditorResizer();
 bindForms();
 bindMailComposer();
 bindMinutesPanel();
+bindEnsemblesBodyPanel();
 refreshAll()
   .then(() => {
     applyZernioQueryFeedback();

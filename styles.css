@@ -2021,6 +2021,25 @@ body.sponsor-map-open{overflow:hidden}
   line-height:1.1;
 }
 .minutes-editor-form{gap:14px}
+.ensembles-editor-modal{z-index:85}
+.ensembles-editor-dialog{width:min(100%,860px)}
+.ensembles-body-editor{
+  min-height:min(52vh,420px);
+  max-height:min(60vh,560px);
+  overflow:auto;
+}
+.ensembles-body-preview{
+  border:1px solid #e1e8f1;
+  border-radius:14px;
+  padding:16px;
+  background:#f7f9fc;
+  min-height:160px;
+}
+.ensembles-body-preview .grid.cards{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+}
 body.minutes-frame-open{overflow:hidden}
 .minutes-empty{text-align:center;padding:42px 28px;min-height:280px;display:grid;align-content:center;gap:8px}
 .minutes-empty h2{margin:0;color:#10233c;font-size:clamp(1.4rem,2.5vw,1.9rem)}

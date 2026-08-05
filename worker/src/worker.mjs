@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-16';
+const ASSET_VERSION = 'admin-cms-20260805-17';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2673,6 +2673,48 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
   throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
 }
 
+export function sanitizePageSectionHtml(dirty = '') {
+  return String(dirty || '')
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '')
+    .trim();
+}
+
+export function extractEnsemblesBodyHtml(pageHtml = '') {
+  const source = String(pageHtml || '');
+  const marked = source.match(/<section\b[^>]*data-ensembles-body[^>]*>([\s\S]*?)<\/section>/i);
+  if (marked) {
+    const wrap = marked[1].match(/<div\b[^>]*class="[^"]*\bwrap\b[^"]*"[^>]*>([\s\S]*)<\/div>\s*$/i);
+    return (wrap ? wrap[1] : marked[1]).trim();
+  }
+  const content = source.match(/<section\b[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>([\s\S]*?)<\/section>/i);
+  if (content) {
+    const wrap = content[1].match(/<div\b[^>]*class="[^"]*\bwrap\b[^"]*"[^>]*>([\s\S]*)<\/div>\s*$/i);
+    return (wrap ? wrap[1] : content[1]).trim();
+  }
+  return source.replace(/<section\b[^>]*class="[^"]*\bpage-hero\b[\s\S]*?<\/section>/i, '').trim();
+}
+
+export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
+  const cleanInner = sanitizePageSectionHtml(bodyInnerHtml);
+  const wrapped = `<section class="content" data-ensembles-body><div class="wrap">${cleanInner}</div></section>`;
+  const source = String(pageHtml || '');
+  if (/data-ensembles-body/i.test(source)) {
+    return source.replace(/<section\b[^>]*data-ensembles-body[^>]*>[\s\S]*?<\/section>/i, wrapped);
+  }
+  if (/<section\b[^>]*class="[^"]*\bcontent\b/i.test(source)) {
+    return source.replace(/<section\b[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>[\s\S]*?<\/section>/i, wrapped);
+  }
+  const hero = source.match(/<section\b[^>]*class="[^"]*\bpage-hero\b[\s\S]*?<\/section>/i);
+  if (hero) {
+    const withoutHero = source.replace(hero[0], '').trim();
+    return withoutHero ? `${hero[0]}${wrapped}${withoutHero}` : `${hero[0]}${wrapped}`;
+  }
+  return source ? `${source}${wrapped}` : wrapped;
+}
+
 function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
@@ -3767,6 +3809,39 @@ async function handleApi(request, env, url) {
   }
 
 
+  if (url.pathname === '/api/admin/ensembles/body' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditPage(auth.user, 'ensembles')) {
+      return jsonResponse({ detail: 'Permission required: page:ensembles' }, 403);
+    }
+    const page = await getPageBySlug(env, 'ensembles', true);
+    if (!page) return jsonResponse({ detail: 'Ensembles page not found' }, 404);
+    return jsonResponse({
+      body_html: extractEnsemblesBodyHtml(page.body_html || ''),
+      updated_at: page.updated_at || null,
+    });
+  }
+  if (url.pathname === '/api/admin/ensembles/body' && request.method === 'PUT') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditPage(auth.user, 'ensembles')) {
+      return jsonResponse({ detail: 'Permission required: page:ensembles' }, 403);
+    }
+    const page = await getPageBySlug(env, 'ensembles', true);
+    if (!page) return jsonResponse({ detail: 'Ensembles page not found' }, 404);
+    const payload = await request.json().catch(() => ({}));
+    const nextBody = applyEnsemblesBodyHtml(page.body_html || '', payload.body_html || '');
+    await env.DB.prepare(
+      'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(nextBody, page.id).run();
+    const updated = await getPageBySlug(env, 'ensembles', true);
+    return jsonResponse({
+      body_html: extractEnsemblesBodyHtml(updated?.body_html || nextBody),
+      updated_at: updated?.updated_at || null,
+    });
+  }
+
   if (url.pathname === '/api/admin/sponsors/settings' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -4618,7 +4693,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-page-nav="ensembles" hidden>Ensembles</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble Body</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"><form id="password-form" class="dashboard-password-card"><span>Account</span><b>Change password</b><label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label><label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label><label>Confirm new<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn primary" type="submit">Update password</button><p class="status" id="password-status"></p></form></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -4748,6 +4823,28 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 <div class="admin-card"><h2>Topics</h2><p class="muted">Topics are listed A–Z. Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
+</div>
+</section>
+<section id="tab-ensembles" class="cms-panel ensembles-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Ensemble Body</h1><p>Edit only the Ensembles page body content in a floating editor. The page hero and page settings stay under Pages for site admins.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-ensembles-body">Edit Body</button></div></div><div class="admin-card stack ensembles-body-card"><h2>Current body</h2><p class="muted">Open the editor to create or update the ensemble cards and body copy shown below the page hero.</p><div id="ensembles-body-preview" class="cms-content ensembles-body-preview"></div><p class="status" id="ensembles-body-panel-status"></p></div>
+<div id="ensembles-editor-modal" class="minutes-frame-modal ensembles-editor-modal" hidden>
+  <button type="button" class="minutes-frame-backdrop" data-ensembles-editor-dismiss aria-label="Close ensemble body editor"></button>
+  <div class="minutes-editor-dialog ensembles-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="ensembles-editor-title">
+    <div class="minutes-editor-head">
+      <div>
+        <p class="kicker">Program</p>
+        <h2 id="ensembles-editor-title">Edit Ensemble Body</h2>
+      </div>
+      <button class="btn outline" type="button" data-ensembles-editor-dismiss>Close</button>
+    </div>
+    <form id="ensembles-body-form" class="stack minutes-editor-form ensembles-editor-form" novalidate>
+      <label class="full form-rich-label"><span>Ensemble body</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich ensembles-body-editor" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter ensemble cards and body content…" aria-label="Ensemble body content"></div><input type="hidden" name="body_html"></label>
+      <div class="panel-actions minutes-form-actions">
+        <button class="btn primary" data-ensembles-submit type="submit">Save body</button>
+        <button class="btn outline" type="button" id="cancel-ensembles-edit">Cancel</button>
+      </div>
+      <p class="status" id="ensembles-body-status"></p>
+    </form>
+  </div>
 </div>
 </section>
 <section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>View booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. View-only users can open and print. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.</p></div></div></div>
