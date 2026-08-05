@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-32';
+const ASSET_VERSION = 'admin-cms-20260805-33';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -673,6 +673,19 @@ export function parseSponsorAmountCents(value) {
   const dollars = Number(cleaned);
   if (!Number.isFinite(dollars) || dollars <= 0) return 0;
   return Math.round(dollars * 100);
+}
+
+export function resolveSponsorAmountCents({ amountCents, amountDisplay } = {}) {
+  const raw = amountCents;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    // Pure integer values are already cents from the client/form.
+    if (/^\s*\d+\s*$/.test(String(raw))) {
+      const cents = Math.round(Number(raw));
+      return Number.isFinite(cents) && cents > 0 ? cents : 0;
+    }
+    return parseSponsorAmountCents(raw);
+  }
+  return parseSponsorAmountCents(amountDisplay);
 }
 
 export function formatSponsorAmountDisplay(cents) {
@@ -3577,7 +3590,10 @@ async function handleApi(request, env, url) {
       phone = String(form.get('phone') || '').trim();
       tier = normalizeSponsorTierKey(form.get('tier'));
       amountDisplay = String(form.get('amount_display') || '').trim();
-      amountCents = parseSponsorAmountCents(form.get('amount_cents') || form.get('amount_display') || amountDisplay);
+      amountCents = resolveSponsorAmountCents({
+        amountCents: form.get('amount_cents'),
+        amountDisplay: form.get('amount_display') || amountDisplay,
+      });
       const rawLogo = form.get('logo');
       if (rawLogo && typeof rawLogo !== 'string' && Number(rawLogo.size || 0) > 0) logoFile = rawLogo;
     } else {
@@ -3587,7 +3603,10 @@ async function handleApi(request, env, url) {
       phone = String(payload.phone || '').trim();
       tier = normalizeSponsorTierKey(payload.tier);
       amountDisplay = String(payload.amount_display || '').trim();
-      amountCents = parseSponsorAmountCents(payload.amount_cents || payload.amount_display || amountDisplay);
+      amountCents = resolveSponsorAmountCents({
+        amountCents: payload.amount_cents,
+        amountDisplay: payload.amount_display || amountDisplay,
+      });
     }
     if (!tier) return jsonResponse({ detail: 'Choose a Bronze, Silver, or Gold package' }, 422);
     if (!businessName || businessName.length > 160) {
