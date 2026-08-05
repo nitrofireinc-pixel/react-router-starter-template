@@ -2228,8 +2228,11 @@ body.sponsor-signup-open{overflow:hidden}
   align-items:center;
   gap:10px;
   width:max-content;
+  max-width:none;
   animation:sponsorMarquee 36s linear infinite;
   will-change:transform;
+  /* Never become a manual scrollbar strip */
+  overflow:visible;
 }
 @media(hover:hover){
   .sponsor-marquee:hover .sponsor-marquee-track{animation-play-state:paused}
@@ -2321,16 +2324,14 @@ body.sponsor-signup-open{overflow:hidden}
   .sponsor-marquee{mask-image:linear-gradient(90deg,transparent,#000 3%,#000 90%,transparent)}
 }
 @media(prefers-reduced-motion:reduce){
+  /* Keep the continuous marquee (decorative). Do not swap it for a
+     horizontal scrollbar — that reads as a broken “slide bar”. */
   .sponsor-marquee-track{
-    animation:none;
-    width:auto;
-    max-width:100%;
-    overflow-x:auto;
-    overscroll-behavior-x:contain;
-    -webkit-overflow-scrolling:touch;
-    padding-bottom:2px;
+    animation:sponsorMarquee 54s linear infinite;
+    width:max-content;
+    max-width:none;
+    overflow:visible;
   }
-  .sponsor-marquee{mask-image:none}
 }
 
 /* Admin sponsor tier badges + announcer list */
