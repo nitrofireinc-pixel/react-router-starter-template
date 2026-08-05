@@ -175,8 +175,11 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260804-21';
+const ASSET_VERSION = 'admin-cms-20260805-01';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
+const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
+const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -821,6 +824,181 @@ async function getSite(env) {
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   return payload;
+}
+
+async function getSiteContentValue(env, key) {
+  const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?').bind(key).first();
+  return row?.value == null ? '' : String(row.value);
+}
+
+async function setSiteContentValue(env, key, value) {
+  await env.DB.prepare(
+    'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+  ).bind(key, String(value ?? '')).run();
+}
+
+export function parseZernioFacebookConnection(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || 'null') : value;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const accountId = String(parsed.accountId || parsed._id || '').trim();
+    if (!accountId) return null;
+    return {
+      accountId,
+      profileId: String(parsed.profileId || '').trim(),
+      platform: 'facebook',
+      name: String(parsed.name || parsed.displayName || parsed.username || 'Facebook Page').trim(),
+      username: String(parsed.username || '').trim(),
+      connectedAt: String(parsed.connectedAt || '').trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function zernioConfigured(env) {
+  return Boolean(String(env.ZERNIO_API_KEY || '').trim());
+}
+
+async function zernioApi(env, path, options = {}) {
+  const apiKey = String(env.ZERNIO_API_KEY || '').trim();
+  if (!apiKey) throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets.');
+  const response = await fetch(`${ZERNIO_API_BASE}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+  if (!response.ok) {
+    const detail = data?.message || data?.error || data?.detail || data?.raw || `Zernio request failed (${response.status})`;
+    throw new Error(String(detail));
+  }
+  return data;
+}
+
+async function ensureZernioProfileId(env) {
+  const existing = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+  if (existing) return existing;
+  const created = await zernioApi(env, '/profiles', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'East Forsyth Band',
+      description: 'EFHS Band CMS social publishing profile',
+    }),
+  });
+  const profileId = String(created?.profile?._id || created?._id || created?.id || '').trim();
+  if (!profileId) throw new Error('Zernio profile was created but no profile id was returned.');
+  await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+  return profileId;
+}
+
+async function getZernioFacebookStatus(env) {
+  const configured = zernioConfigured(env);
+  const stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
+  return {
+    configured,
+    connected: Boolean(stored?.accountId),
+    profileId: String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim(),
+    account: stored,
+    detail: configured
+      ? (stored?.accountId ? `Connected: ${stored.name || stored.accountId}` : 'Ready to connect a Facebook Page via OAuth.')
+      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
+  };
+}
+
+async function syncZernioFacebookConnection(env, profileId = '') {
+  const data = await zernioApi(env, '/accounts');
+  const accounts = Array.isArray(data?.accounts) ? data.accounts : (Array.isArray(data) ? data : []);
+  const facebook = accounts.find((account) => String(account?.platform || '').toLowerCase() === 'facebook');
+  if (!facebook) return null;
+  const connection = {
+    accountId: String(facebook._id || facebook.accountId || facebook.id || '').trim(),
+    profileId: String(profileId || facebook.profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim(),
+    platform: 'facebook',
+    name: String(facebook.displayName || facebook.name || facebook.username || 'Facebook Page').trim(),
+    username: String(facebook.username || '').trim(),
+    connectedAt: new Date().toISOString(),
+  };
+  if (!connection.accountId) return null;
+  await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify(connection));
+  if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
+  return connection;
+}
+
+async function handleZernioFacebookConnect(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  if (!zernioConfigured(env)) {
+    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
+  }
+  try {
+    const profileId = await ensureZernioProfileId(env);
+    const redirectUrl = new URL('/admin/zernio/facebook/callback', request.url).toString();
+    const query = new URLSearchParams({
+      profileId,
+      redirect_url: redirectUrl,
+    });
+    const data = await zernioApi(env, `/connect/facebook?${query.toString()}`);
+    const authUrl = String(data?.authUrl || data?.url || '').trim();
+    if (!authUrl) throw new Error('Zernio did not return an OAuth URL.');
+    return redirect(authUrl);
+  } catch (error) {
+    const message = escapeHtml(error?.message || 'Could not start Facebook OAuth');
+    return htmlResponse(`<!doctype html><title>Facebook connect failed</title><p>${message}</p><p><a href="/admin">Back to CMS</a></p>`, 502);
+  }
+}
+
+async function handleZernioFacebookCallback(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  const url = new URL(request.url);
+  const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
+  if (error) {
+    return redirect(`/admin?tab=site&zernio=facebook_error&detail=${encodeURIComponent(error)}`);
+  }
+  try {
+    const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+    if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+    const connection = await syncZernioFacebookConnection(env, profileId);
+    if (!connection) {
+      // Standard Zernio flow may still be connecting; store callback hints if present.
+      const hintedId = String(url.searchParams.get('accountId') || url.searchParams.get('account_id') || '').trim();
+      const hintedName = String(url.searchParams.get('username') || url.searchParams.get('name') || 'Facebook Page').trim();
+      if (hintedId) {
+        await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify({
+          accountId: hintedId,
+          profileId,
+          platform: 'facebook',
+          name: hintedName,
+          username: hintedName,
+          connectedAt: new Date().toISOString(),
+        }));
+      } else {
+        return redirect('/admin?tab=site&zernio=facebook_pending');
+      }
+    }
+    return redirect('/admin?tab=site&zernio=facebook_connected');
+  } catch (error) {
+    return redirect(`/admin?tab=site&zernio=facebook_error&detail=${encodeURIComponent(error?.message || 'Facebook connect failed')}`);
+  }
 }
 
 
@@ -2797,6 +2975,26 @@ async function handleApi(request, env, url) {
     return jsonResponse({ social_links: links });
   }
 
+  if (url.pathname === '/api/admin/zernio/facebook' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    return jsonResponse(await getZernioFacebookStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/facebook' && request.method === 'DELETE') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const status = await getZernioFacebookStatus(env);
+    if (status.account?.accountId && zernioConfigured(env)) {
+      try {
+        await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
+      } catch {
+        // Local disconnect still proceeds if Zernio revoke fails.
+      }
+    }
+    await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, '');
+    return jsonResponse(await getZernioFacebookStatus(env));
+  }
+
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
@@ -3742,6 +3940,8 @@ export default {
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
     if (url.pathname === '/admin/logout') return logout();
+    if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
+    if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
@@ -3802,7 +4002,20 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="submit">Save social links</button>
   </div>
   <p class="status" id="social-links-status"></p>
-</form><form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+</form>
+<div class="admin-card stack zernio-facebook-card">
+  <div class="utility-links-head">
+    <h2>Facebook Page (Zernio)</h2>
+    <p class="muted">Connect the band Facebook Page with Meta OAuth through Zernio. Requires a Facebook Page admin login in the browser.</p>
+  </div>
+  <p class="notice" id="zernio-facebook-status">Checking Facebook connection…</p>
+  <div class="panel-actions">
+    <a class="btn primary" id="zernio-facebook-connect" href="/admin/zernio/facebook/connect">Connect Facebook</a>
+    <button class="btn outline" type="button" id="zernio-facebook-disconnect" hidden>Disconnect</button>
+  </div>
+  <p class="status" id="zernio-facebook-message"></p>
+</div>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-contact" class="cms-panel">
 <div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p><p class="notice" id="contact-delivery-status">Checking email delivery…</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
 <div class="editor-layout">

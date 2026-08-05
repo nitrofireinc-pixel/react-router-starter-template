@@ -1870,12 +1870,59 @@ async function loadMe() {
   showAllowedPanels();
 }
 
+async function loadZernioFacebookStatus() {
+  const statusEl = document.querySelector('#zernio-facebook-status');
+  const messageEl = document.querySelector('#zernio-facebook-message');
+  const connectBtn = document.querySelector('#zernio-facebook-connect');
+  const disconnectBtn = document.querySelector('#zernio-facebook-disconnect');
+  if (!statusEl || !hasPermission('site')) return null;
+  try {
+    const status = await jsonFetch('/api/admin/zernio/facebook');
+    statusEl.textContent = status.detail || (status.connected ? 'Facebook connected.' : 'Facebook not connected.');
+    statusEl.classList.toggle('ok', Boolean(status.connected));
+    if (connectBtn) {
+      connectBtn.hidden = !status.configured;
+      connectBtn.textContent = status.connected ? 'Reconnect Facebook' : 'Connect Facebook';
+    }
+    if (disconnectBtn) disconnectBtn.hidden = !status.connected;
+    return status;
+  } catch (error) {
+    statusEl.textContent = error.message || 'Could not check Facebook connection.';
+    if (connectBtn) connectBtn.hidden = true;
+    if (disconnectBtn) disconnectBtn.hidden = true;
+    if (messageEl) messageEl.textContent = '';
+    return null;
+  }
+}
+
+function applyZernioQueryFeedback() {
+  const params = new URLSearchParams(window.location.search);
+  const tab = String(params.get('tab') || '').trim();
+  if (tab) activateTab(tab);
+  const zernio = String(params.get('zernio') || '').trim();
+  if (!zernio) return;
+  const messageEl = document.querySelector('#zernio-facebook-message');
+  if (!messageEl) return;
+  if (zernio === 'facebook_connected') {
+    messageEl.textContent = 'Facebook Page connected successfully.';
+  } else if (zernio === 'facebook_pending') {
+    messageEl.textContent = 'Facebook OAuth finished. If the Page is not listed yet, click Connect Facebook again or refresh in a moment.';
+  } else if (zernio === 'facebook_error') {
+    messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
+  }
+  params.delete('zernio');
+  params.delete('detail');
+  const next = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash || ''}`;
+  window.history.replaceState({}, '', next);
+}
+
 async function loadSite() {
   if (!hasPermission('site')) return;
   state.site = await jsonFetch('/api/site');
   fillForm(document.querySelector('#site-form'), state.site);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
+  await loadZernioFacebookStatus();
 }
 
 async function loadPages() {
@@ -3864,6 +3911,19 @@ function bindForms() {
     }
   });
 
+  document.querySelector('#zernio-facebook-disconnect')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-facebook-message');
+    if (!confirm('Disconnect the Facebook Page from Zernio?')) return;
+    if (messageEl) messageEl.textContent = 'Disconnecting…';
+    try {
+      await jsonFetch('/api/admin/zernio/facebook', { method: 'DELETE' });
+      await loadZernioFacebookStatus();
+      if (messageEl) messageEl.textContent = 'Facebook Page disconnected.';
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not disconnect Facebook.';
+    }
+  });
+
   document.querySelector('#new-page')?.addEventListener('click', async () => {
     if (!(await confirmLeavePageEditor())) return;
     const form = document.querySelector('#page-form');
@@ -4314,7 +4374,11 @@ bindPageEditorResizer();
 bindForms();
 bindMailComposer();
 bindMinutesPanel();
-refreshAll().catch(error => {
+refreshAll()
+  .then(() => {
+    applyZernioQueryFeedback();
+  })
+  .catch(error => {
   console.error(error);
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
