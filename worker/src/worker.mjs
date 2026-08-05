@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-33';
+const ASSET_VERSION = 'admin-cms-20260805-34';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -702,7 +702,7 @@ export function normalizeSponsorTierKey(value) {
 }
 
 export function squareCheckoutConfigured(env = {}) {
-  return Boolean(String(env.SQUARE_ACCESS_TOKEN || '').trim() && String(env.SQUARE_LOCATION_ID || '').trim());
+  return Boolean(String(env.SQUARE_ACCESS_TOKEN || '').trim());
 }
 
 export function squareApiBase(env = {}) {
@@ -710,6 +710,68 @@ export function squareApiBase(env = {}) {
   return mode === 'sandbox'
     ? 'https://connect.squareupsandbox.com'
     : 'https://connect.squareup.com';
+}
+
+export function squareApiHeaders(env = {}) {
+  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    'Square-Version': '2025-01-16',
+  };
+}
+
+export function pickSquareLocationId(locations = [], preferredId = '') {
+  const preferred = String(preferredId || '').trim();
+  const list = Array.isArray(locations) ? locations : [];
+  if (preferred) {
+    const match = list.find((location) => String(location?.id || '') === preferred);
+    if (match?.id) return String(match.id);
+    // Allow an explicit override even if ListLocations failed/was empty.
+    if (!list.length) return preferred;
+  }
+  const active = list.find((location) => String(location?.status || '').toUpperCase() === 'ACTIVE' && location?.id);
+  if (active?.id) return String(active.id);
+  const first = list.find((location) => location?.id);
+  return first?.id ? String(first.id) : '';
+}
+
+export async function resolveSquareLocationId(env = {}) {
+  const configured = String(env.SQUARE_LOCATION_ID || '').trim();
+  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
+  if (!token) {
+    return { ok: false, location_id: '', detail: 'Square access token is not configured' };
+  }
+  try {
+    const response = await fetch(`${squareApiBase(env)}/v2/locations`, {
+      method: 'GET',
+      headers: squareApiHeaders(env),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload?.errors?.[0]?.detail
+        || payload?.message
+        || `Could not load Square locations (${response.status})`;
+      if (configured) return { ok: true, location_id: configured, detail: '' };
+      return { ok: false, location_id: '', detail: String(detail) };
+    }
+    const locationId = pickSquareLocationId(payload?.locations || [], configured);
+    if (!locationId) {
+      return {
+        ok: false,
+        location_id: '',
+        detail: 'No Square location found on this account. Create a location in Square, then try again.',
+      };
+    }
+    return { ok: true, location_id: locationId, detail: '' };
+  } catch (error) {
+    if (configured) return { ok: true, location_id: configured, detail: '' };
+    return {
+      ok: false,
+      location_id: '',
+      detail: error?.message || 'Could not reach Square to look up a location',
+    };
+  }
 }
 
 export async function createSquarePaymentLink(env, {
@@ -720,10 +782,14 @@ export async function createSquarePaymentLink(env, {
   redirectUrl = '',
 } = {}) {
   const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
-  const locationId = String(env.SQUARE_LOCATION_ID || '').trim();
-  if (!token || !locationId) {
+  if (!token) {
     return { ok: false, detail: 'Square is not configured' };
   }
+  const location = await resolveSquareLocationId(env);
+  if (!location.ok || !location.location_id) {
+    return { ok: false, detail: location.detail || 'Square location could not be determined' };
+  }
+  const locationId = location.location_id;
   const cents = Math.round(Number(amountCents) || 0);
   if (cents < 100) {
     return { ok: false, detail: 'Payment amount must be at least $1' };
@@ -747,11 +813,7 @@ export async function createSquarePaymentLink(env, {
   }
   const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'Square-Version': '2025-01-16',
-    },
+    headers: squareApiHeaders(env),
     body: JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({}));
@@ -769,6 +831,7 @@ export async function createSquarePaymentLink(env, {
     id: String(link.id || ''),
     url,
     order_id: String(link.order_id || ''),
+    location_id: locationId,
   };
 }
 
@@ -3567,11 +3630,28 @@ async function handleApi(request, env, url) {
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/sponsor-checkout/config' && request.method === 'GET') {
+    const configured = squareCheckoutConfigured(env);
+    const environment = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'
+      ? 'sandbox'
+      : 'production';
+    if (!configured) {
+      return jsonResponse({
+        configured: false,
+        environment,
+        location_ready: false,
+        location_id: '',
+        detail: 'Add SQUARE_ACCESS_TOKEN in Cloudflare Pages settings.',
+      });
+    }
+    const location = await resolveSquareLocationId(env);
     return jsonResponse({
-      configured: squareCheckoutConfigured(env),
-      environment: String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'
-        ? 'sandbox'
-        : 'production',
+      configured: true,
+      environment,
+      location_ready: Boolean(location.ok && location.location_id),
+      location_id: location.ok ? location.location_id : '',
+      detail: location.ok
+        ? 'Square access token is connected. Location will be selected automatically.'
+        : (location.detail || 'Square location could not be determined'),
     });
   }
   if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
