@@ -1574,7 +1574,8 @@ function renderMobileAdminMenu() {
     const tab = button.dataset.tab || '';
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}">${escapeHtml(label)}</button>`);
+    const pageNav = button.dataset.pageNav || '';
+    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
   };
 
   const pushLabel = (text) => {
@@ -1642,10 +1643,14 @@ function renderMobileAdminMenu() {
 
 function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
   document.querySelectorAll('.admin-menu button').forEach((button) => {
-    const isTab = Boolean(tab) && button.dataset.tab === tab && !button.dataset.editShortcut && !button.dataset.sponsorNav;
+    const isTab = Boolean(tab) && button.dataset.tab === tab
+      && !button.dataset.editShortcut
+      && !button.dataset.sponsorNav
+      && !button.dataset.pageNav;
     const isPage = Boolean(pageSlug) && button.dataset.editShortcut === pageSlug;
     const isSponsorNav = Boolean(sponsorNav) && button.dataset.sponsorNav === sponsorNav;
-    button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav));
+    const isPageNav = Boolean(pageSlug) && button.dataset.pageNav === pageSlug;
+    button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav || isPageNav));
   });
 }
 
@@ -1711,7 +1716,23 @@ function pageShortcutLabel(page) {
 
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
 
+function canManageSitePages() {
+  // Pages nav is for site admins (global `pages` permission / Super Admin).
+  // Editors with only page:{slug} use Manage shortcuts instead.
+  return hasPermission('pages');
+}
+
+function syncPageSettingsAccess() {
+  const siteAdmin = canManageSitePages();
+  document.querySelectorAll('.page-meta-grid, .page-active-line, #add-page-callout').forEach((node) => {
+    node.hidden = !siteAdmin;
+  });
+  const settingsTitle = document.querySelector('#page-form h2');
+  if (settingsTitle) settingsTitle.textContent = siteAdmin ? 'Page settings' : 'Publish';
+}
+
 function editablePages() {
+  if (!canManageSitePages()) return [];
   return (state.pages || [])
     .filter((page) => canEditPage(page) && !SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug))
     .slice()
@@ -1800,6 +1821,7 @@ function showAllowedPanels() {
   const panels = {
     dashboard: true,
     mail: true,
+    // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some(canEditPage),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
@@ -1847,11 +1869,19 @@ function showAllowedPanels() {
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
   }
   bindSponsorsMenu();
+  const ensemblesNav = document.querySelector('[data-page-nav="ensembles"]');
+  if (ensemblesNav) {
+    const canEnsembles = canEditPage('ensembles');
+    ensemblesNav.hidden = !canEnsembles;
+    if (canEnsembles) manageVisible = true;
+    ensemblesNav.onclick = () => editPage('ensembles');
+  }
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
   const newPageButton = document.querySelector('#new-page');
-  if (newPageButton) newPageButton.hidden = !hasPermission('pages');
+  if (newPageButton) newPageButton.hidden = !canManageSitePages();
+  syncPageSettingsAccess();
   const editCalendarPage = document.querySelector('#edit-calendar-page');
   if (editCalendarPage) {
     editCalendarPage.hidden = !canEditPage('calendar');
@@ -2229,6 +2259,7 @@ function renderDashboard() {
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
+    canEditPage('ensembles') && ['Ensembles', 'Edit ensemble cards and program descriptions on the public Ensembles page.', 'ensembles', 'Program', 'page'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
@@ -2243,7 +2274,7 @@ function renderDashboard() {
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
     }).join('')
-    : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use the page shortcuts in the left navigation.</p>';
+    : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
   if (passwordForm) dashboard.appendChild(passwordForm);
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
     activateTab(button.dataset.dashTarget);
@@ -2280,8 +2311,11 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
+    const ensemblesHint = form.querySelector('[data-ensembles-hint]');
+    if (ensemblesHint) ensemblesHint.hidden = page.slug !== 'ensembles';
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
+    syncPageSettingsAccess();
     if (form.elements.layout) {
       const fields = structuredPageFields(page);
       form.elements.layout.value = isHomePage ? 'home' : (fields.layout || form.elements.layout.value || 'standard');
