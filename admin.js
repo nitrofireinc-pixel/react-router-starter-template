@@ -56,10 +56,139 @@ function showSavedToast(message = 'Saved.') {
   }, 3000);
 }
 
+function formDataHasFiles(formData) {
+  if (!(formData instanceof FormData)) return false;
+  for (const value of formData.values()) {
+    if (typeof File !== 'undefined' && value instanceof File && value.size > 0) return true;
+  }
+  return false;
+}
+
+function ensureUploadToast() {
+  let root = document.querySelector('#admin-upload-toast');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'admin-upload-toast';
+    root.className = 'admin-upload-toast';
+    root.setAttribute('role', 'status');
+    root.setAttribute('aria-live', 'assertive');
+    root.innerHTML = `
+      <div class="admin-upload-toast-backdrop" aria-hidden="true"></div>
+      <div class="admin-upload-toast-panel">
+        <div class="admin-upload-toast-card">
+          <strong class="admin-upload-toast-title">Uploading</strong>
+          <div class="admin-upload-toast-slashes" data-upload-slashes aria-hidden="true">//////</div>
+          <div class="admin-upload-toast-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress" data-upload-progress>
+            <div class="admin-upload-toast-bar" data-upload-bar></div>
+          </div>
+          <span class="admin-upload-toast-pct" data-upload-pct>0%</span>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+function setUploadProgress(percent) {
+  const root = document.querySelector('#admin-upload-toast');
+  if (!root) return;
+  const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  const bar = root.querySelector('[data-upload-bar]');
+  const track = root.querySelector('[data-upload-progress]');
+  const label = root.querySelector('[data-upload-pct]');
+  const slashes = root.querySelector('[data-upload-slashes]');
+  if (bar) bar.style.width = `${pct}%`;
+  if (track) track.setAttribute('aria-valuenow', String(pct));
+  if (label) label.textContent = `${pct}%`;
+  if (slashes) {
+    const filled = Math.max(1, Math.round((pct / 100) * 12));
+    slashes.textContent = `${'/'.repeat(filled)}${'·'.repeat(Math.max(0, 12 - filled))}`;
+  }
+}
+
+function showUploadingOverlay() {
+  const root = ensureUploadToast();
+  root.classList.remove('is-leaving');
+  setUploadProgress(0);
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  document.body.classList.add('admin-upload-open');
+}
+
+function hideUploadingOverlay() {
+  const root = document.querySelector('#admin-upload-toast');
+  document.body.classList.remove('admin-upload-open');
+  if (!root) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    setUploadProgress(0);
+  }, 380);
+}
+
+function jsonFetchViaXhr(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const method = String(options.method || 'POST').toUpperCase();
+    const showUpload = formDataHasFiles(options.body);
+    xhr.open(method, url);
+    xhr.withCredentials = true;
+    if (showUpload) showUploadingOverlay();
+
+    xhr.upload.onprogress = (event) => {
+      if (!showUpload) return;
+      if (event.lengthComputable && event.total > 0) {
+        setUploadProgress(Math.min(95, Math.round((event.loaded / event.total) * 100)));
+      }
+    };
+    xhr.upload.onload = () => {
+      if (showUpload) setUploadProgress(96);
+    };
+    xhr.onerror = () => {
+      if (showUpload) hideUploadingOverlay();
+      reject(new Error('Upload failed. Check your connection and try again.'));
+    };
+    xhr.onabort = () => {
+      if (showUpload) hideUploadingOverlay();
+      reject(new Error('Upload canceled.'));
+    };
+    xhr.onload = () => {
+      const text = xhr.responseText || '';
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = null;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        if (showUpload) hideUploadingOverlay();
+        reject(new Error(data?.detail || data?.error || text || xhr.statusText || 'Request failed'));
+        return;
+      }
+      if (showUpload) {
+        setUploadProgress(100);
+        window.setTimeout(() => {
+          hideUploadingOverlay();
+          resolve(data || {});
+        }, 160);
+        return;
+      }
+      resolve(data || {});
+    };
+    xhr.send(options.body);
+  });
+}
+
 async function jsonFetch(url, options = {}) {
+  if (options.body instanceof FormData) {
+    const data = await jsonFetchViaXhr(url, options);
+    if (shouldShowSavedToast(url, options)) showSavedToast('Saved.');
+    return data;
+  }
   const response = await fetch(url, {
     credentials: 'same-origin',
-    headers: options.body instanceof FormData ? { ...(options.headers || {}) } : { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     cache: 'no-store',
     ...options,
   });
