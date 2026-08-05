@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-64';
+const ASSET_VERSION = 'admin-cms-20260805-65';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -460,7 +460,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -524,6 +524,16 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN paid_at TEXT').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN email TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN invoice_sent_at TEXT').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -2610,6 +2620,131 @@ export function squareMockPayEnabled(env = {}) {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
+export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
+export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
+
+export function formatSponsorInvoiceDate(value = '') {
+  const raw = String(value || '').trim();
+  const date = raw ? new Date(raw) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: 'America/New_York',
+    });
+  }
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'America/New_York',
+  });
+}
+
+export function buildSponsorDonationInvoice(application = {}) {
+  const tier = normalizeSponsorTierKey(application.tier);
+  const tierLabel = tier
+    ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`
+    : 'Sponsor package';
+  const amountDisplay = String(application.amount_display || '').trim()
+    || formatSponsorAmountDisplay(application.amount_cents)
+    || '$0';
+  const businessName = String(application.business_name || '').trim() || 'Sponsor';
+  const address = String(application.address || '').trim() || '—';
+  const phone = String(application.phone || '').trim() || '—';
+  const email = String(application.email || '').trim().toLowerCase();
+  const invoiceNumber = `SP-${Number(application.id || 0) || 'pending'}`;
+  const paidLabel = formatSponsorInvoiceDate(application.paid_at);
+  const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
+  const text = [
+    'Thank you for your donation to the East Forsyth Band Boosters.',
+    '',
+    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
+    '',
+    'Invoice details',
+    `Invoice number: ${invoiceNumber}`,
+    `Date: ${paidLabel}`,
+    `Business / organization: ${businessName}`,
+    `Address: ${address}`,
+    `Phone: ${phone}`,
+    `Email: ${email || '—'}`,
+    `Package: ${tierLabel}`,
+    `Amount: ${amountDisplay}`,
+    'Payment status: Paid',
+    '',
+    'East Forsyth Band Boosters',
+    'East Forsyth High School Band',
+    'https://efhsband.org',
+  ].join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
+      <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
+      <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
+        <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Business / organization</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(businessName)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Address</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(address)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Phone</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(phone)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Package</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+      </table>
+      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+    </div>
+  `.trim();
+  return {
+    to: email,
+    subject,
+    text,
+    html,
+    invoice_number: invoiceNumber,
+    from_email: SPONSOR_INVOICE_FROM_EMAIL,
+    from_name: SPONSOR_INVOICE_FROM_NAME,
+  };
+}
+
+export async function sendSponsorDonationInvoice(env, application = {}) {
+  const invoice = buildSponsorDonationInvoice(application);
+  if (!isValidEmail(invoice.to)) {
+    return { ok: false, detail: 'Invoice email is missing or invalid' };
+  }
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, detail: 'Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.' };
+  }
+  try {
+    await sendViaResend(env, {
+      to: invoice.to,
+      subject: invoice.subject,
+      text: invoice.text,
+      html: invoice.html,
+      fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
+      fromName: SPONSOR_INVOICE_FROM_NAME,
+    });
+    const id = Number(application.id || 0);
+    if (id) {
+      const sentAt = new Date().toISOString();
+      await env.DB.prepare(
+        'UPDATE sponsor_applications SET invoice_sent_at = ?, updated_at = ? WHERE id = ?',
+      ).bind(sentAt, sentAt, id).run();
+    }
+    return { ok: true, detail: 'Invoice emailed', invoice_number: invoice.invoice_number };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Could not send invoice email' };
+  }
+}
+
+async function maybeSendSponsorInvoice(env, application, { force = false } = {}) {
+  if (!application) return { ok: false, detail: 'Application missing' };
+  if (!force && application.invoice_sent_at) {
+    return { ok: true, detail: 'Invoice already sent', skipped: true };
+  }
+  return sendSponsorDonationInvoice(env, application);
+}
+
 export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
   const row = application || {};
   const id = Number(row.id || 0);
@@ -4099,6 +4234,7 @@ async function handleApi(request, env, url) {
     let businessName = '';
     let address = '';
     let phone = '';
+    let email = '';
     let tier = '';
     let amountDisplay = '';
     let amountCents = 0;
@@ -4108,6 +4244,7 @@ async function handleApi(request, env, url) {
       businessName = String(form.get('business_name') || '').trim();
       address = String(form.get('address') || '').trim();
       phone = String(form.get('phone') || '').trim();
+      email = String(form.get('email') || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(form.get('tier'));
       amountDisplay = String(form.get('amount_display') || '').trim();
       amountCents = resolveSponsorAmountCents({
@@ -4121,6 +4258,7 @@ async function handleApi(request, env, url) {
       businessName = String(payload.business_name || '').trim();
       address = String(payload.address || '').trim();
       phone = String(payload.phone || '').trim();
+      email = String(payload.email || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(payload.tier);
       amountDisplay = String(payload.amount_display || '').trim();
       amountCents = resolveSponsorAmountCents({
@@ -4130,13 +4268,16 @@ async function handleApi(request, env, url) {
     }
     if (!tier) return jsonResponse({ detail: 'Choose a Bronze, Silver, or Gold package' }, 422);
     if (!businessName || businessName.length > 160) {
-      return jsonResponse({ detail: 'Business name is required' }, 422);
+      return jsonResponse({ detail: 'Business or organization name is required' }, 422);
     }
     if (!address || address.length > 400) {
       return jsonResponse({ detail: 'Business address is required' }, 422);
     }
     if (!phone || phone.length > 40) {
       return jsonResponse({ detail: 'Phone number is required' }, 422);
+    }
+    if (!isValidEmail(email) || email.length > 160) {
+      return jsonResponse({ detail: 'A valid invoice email address is required' }, 422);
     }
     if (!amountCents || amountCents < 100) {
       return jsonResponse({ detail: 'A valid package amount is required' }, 422);
@@ -4161,9 +4302,9 @@ async function handleApi(request, env, url) {
     const completionToken = crypto.randomUUID().replace(/-/g, '');
     const insert = await env.DB.prepare(
       `INSERT INTO sponsor_applications
-        (tier, amount_cents, amount_display, business_name, address, phone, logo_url, status, completion_token, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
-    ).bind(tier, amountCents, display, businessName, address, phone, logoUrl, completionToken, now, now).run();
+        (tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(tier, amountCents, display, businessName, address, phone, email, logoUrl, completionToken, now, now).run();
     const applicationId = insert.meta.last_row_id;
     const tierLabel = `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`;
     const origin = publicSiteOrigin(request, env);
@@ -4211,6 +4352,7 @@ async function handleApi(request, env, url) {
       amount_cents: amountCents,
       amount_display: display,
       business_name: businessName,
+      email,
       logo_url: logoUrl,
       completion_token: completionToken,
       payment_ready: paymentReady,
@@ -4233,8 +4375,8 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
     }
     const application = await env.DB.prepare(
-      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4246,12 +4388,18 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await activatePaidSponsorApplication(env, application, { mock });
+      const invoice = await maybeSendSponsorInvoice(env, {
+        ...application,
+        ...result.application,
+      });
       return jsonResponse({
         ok: true,
         mock: result.mock,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
+        invoice_sent: Boolean(invoice.ok && !invoice.skipped),
+        invoice_detail: invoice.detail || '',
         detail: result.created
           ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
           : 'Sponsorship was already activated.',
@@ -4269,8 +4417,8 @@ async function handleApi(request, env, url) {
     if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
     if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
     const application = await env.DB.prepare(
-      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4308,12 +4456,18 @@ async function handleApi(request, env, url) {
          SET square_payment_link_id = ?, status = 'paid', updated_at = ?
          WHERE id = ?`,
       ).bind(payment.payment_id || '', new Date().toISOString(), applicationId).run();
+      const invoice = await maybeSendSponsorInvoice(env, {
+        ...application,
+        ...result.application,
+      });
       return jsonResponse({
         ok: true,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
         payment_id: payment.payment_id,
+        invoice_sent: Boolean(invoice.ok && !invoice.skipped),
+        invoice_detail: invoice.detail || '',
         detail: result.created
           ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
           : 'Sponsorship was already activated.',

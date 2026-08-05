@@ -720,7 +720,7 @@ function openSponsorSignupModal(pkg) {
       </div>
       <div class="sponsor-signup-step" data-signup-step="details">
         <form class="sponsor-signup-form" data-signup-form novalidate>
-          <label>Business name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
           <label class="sponsor-signup-address">Address
             <span class="sponsor-signup-address-wrap">
               <input name="address" type="text" required maxlength="400" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Start typing street address…" data-address-input aria-autocomplete="list" aria-expanded="false" aria-controls="sponsor-address-suggest">
@@ -729,6 +729,8 @@ function openSponsorSignupModal(pkg) {
             <span class="sponsor-signup-address-hint" data-address-hint>Pick a suggestion to verify the address.</span>
           </label>
           <label>Phone<input name="phone" type="tel" required autocomplete="tel" maxlength="40" placeholder="(336) 555-0100"></label>
+          <label>Invoice email<input name="email" type="email" required autocomplete="email" maxlength="160" placeholder="billing@example.com"></label>
+          <p class="sponsor-signup-pay-note">Required so we can email your donation invoice from the East Forsyth Band Boosters.</p>
           <label class="sponsor-signup-logo">Company logo <span>(optional, image under 2 MB)</span>
             <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
           </label>
@@ -745,11 +747,12 @@ function openSponsorSignupModal(pkg) {
           <div class="sponsor-signup-summary">
             <p><span>Business</span><strong data-pay-business></strong></p>
             <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+            <p><span>Invoice email</span><strong data-pay-email></strong></p>
           </div>
           <label class="sponsor-signup-amount-lock">Amount due
             <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
           </label>
-          <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
+          <p class="sponsor-signup-pay-note" data-pay-note>Your donation invoice will be emailed from no-reply@efhsband.org after payment. Thank you for supporting East Forsyth Band Boosters.</p>
           <p class="status" data-pay-status></p>
         </div>
         <div class="sponsor-signup-actions sponsor-signup-actions-split" data-pay-actions>
@@ -1056,6 +1059,7 @@ function openSponsorSignupModal(pkg) {
     body.set('business_name', draft.businessName);
     body.set('address', draft.address);
     body.set('phone', draft.phone);
+    body.set('email', draft.email);
     body.set('tier', pkg.tier);
     body.set('amount_display', pkg.amountDisplay);
     body.set('amount_cents', String(pkg.amountCents));
@@ -1107,9 +1111,15 @@ function openSponsorSignupModal(pkg) {
     const businessName = String(form.elements.business_name?.value || '').trim();
     const address = String(form.elements.address?.value || '').trim();
     const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim().toLowerCase();
     const logo = form.elements.logo?.files?.[0] || null;
-    if (!businessName || !address || !phone) {
-      if (status) status.textContent = 'Business name, address, and phone are required.';
+    if (!businessName || !address || !phone || !email) {
+      if (status) status.textContent = 'Business / organization name, address, phone, and invoice email are required.';
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (status) status.textContent = 'Enter a valid invoice email address.';
+      form.elements.email?.focus();
       return;
     }
     if (!addressVerified) {
@@ -1121,7 +1131,7 @@ function openSponsorSignupModal(pkg) {
       if (status) status.textContent = 'Logo must be an image under 2 MB.';
       return;
     }
-    sponsorSignupState.draft = { businessName, address, phone, logo };
+    sponsorSignupState.draft = { businessName, address, phone, email, logo };
     sponsorSignupState.application = null;
     resetPaymentStepPreview(businessName);
     detailsStep.hidden = true;
@@ -1141,11 +1151,12 @@ function openSponsorSignupModal(pkg) {
         <div class="sponsor-signup-summary">
           <p><span>Business</span><strong data-pay-business>${escapeHtml(name)}</strong></p>
           <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+          <p><span>Invoice email</span><strong>${escapeHtml(sponsorSignupState.draft?.email || '')}</strong></p>
         </div>
         <label class="sponsor-signup-amount-lock">Amount due
           <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
         </label>
-        <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
+        <p class="sponsor-signup-pay-note" data-pay-note>Your donation invoice will be emailed from no-reply@efhsband.org after payment. Thank you for supporting East Forsyth Band Boosters.</p>
         <p class="status" data-pay-status></p>
       `;
     }
