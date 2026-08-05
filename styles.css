@@ -1988,6 +1988,48 @@ body.sponsor-signup-open{overflow:hidden}
   background:#fff;
 }
 .sponsor-signup-form textarea{resize:vertical;min-height:72px}
+.sponsor-signup-address{position:relative}
+.sponsor-signup-address-wrap{display:block;position:relative}
+.sponsor-signup-address input.is-verified{
+  border-color:#7aa58a;
+  box-shadow:0 0 0 3px rgba(46,125,72,.12);
+}
+.sponsor-signup-address-hint{
+  margin:6px 0 0;
+  font-size:.86rem;
+  font-weight:650;
+  color:var(--muted);
+  line-height:1.35;
+}
+.sponsor-signup-address-hint.is-verified{color:#2e7d48}
+.sponsor-signup-address-suggest{
+  position:absolute;
+  left:0;
+  right:0;
+  top:calc(100% + 4px);
+  z-index:5;
+  margin:0;
+  padding:6px;
+  list-style:none;
+  max-height:220px;
+  overflow:auto;
+  border:1px solid #d5deea;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 12px 28px rgba(15,36,64,.14);
+}
+.sponsor-signup-address-suggest[hidden]{display:none!important}
+.sponsor-signup-address-suggest li{
+  padding:10px 12px;
+  border-radius:8px;
+  color:var(--navy);
+  cursor:pointer;
+  line-height:1.35;
+}
+.sponsor-signup-address-suggest li[aria-selected="true"],
+.sponsor-signup-address-suggest li:hover{
+  background:#eef4fb;
+}
 .sponsor-signup-logo span{font-weight:650;color:var(--muted)}
 .sponsor-signup-logo-name{
   margin:-4px 0 0;

@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-40';
+const ASSET_VERSION = 'admin-cms-20260805-41';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2297,7 +2297,10 @@ export function parseLegacySponsorAddress(raw) {
   if (!text) return { address: '', city: 'Kernersville', state: 'NC' };
   const parts = text.split(',').map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 2) {
-    const maybeState = normalizeStateCode(parts[parts.length - 1], '');
+    const stateTail = String(parts[parts.length - 1] || '')
+      .replace(/\s+\d{5}(?:-\d{4})?\s*$/, '')
+      .trim();
+    const maybeState = normalizeStateCode(stateTail, '');
     if (maybeState && isUsStateCode(maybeState)) {
       if (parts.length >= 3) {
         return {
@@ -2341,6 +2344,168 @@ export function sponsorMapsUrls(formattedAddress) {
     directionsUrl: `https://www.google.com/maps/dir/?api=1&destination=${query}`,
     searchUrl: `https://www.google.com/maps/search/?api=1&query=${query}`,
   };
+}
+
+const ADDRESS_SUGGEST_BIAS = { lat: 36.1199, lon: -80.0736, city: 'Kernersville', state: 'NC' };
+
+export function googleMapsApiKey(env = {}) {
+  return String(env.GOOGLE_MAPS_API_KEY || env.GOOGLE_PLACES_API_KEY || '').trim();
+}
+
+export function formatSuggestedAddress({
+  street = '',
+  city = '',
+  state = '',
+  postcode = '',
+  label = '',
+} = {}) {
+  const line = titleCaseAddressPart(street);
+  const town = titleCaseAddressPart(city);
+  const region = normalizeStateCode(state, '');
+  const zip = String(postcode || '').trim().match(/^\d{5}(?:-\d{4})?$/)?.[0] || '';
+  const pieces = [];
+  if (line) pieces.push(line);
+  if (town) pieces.push(town);
+  if (region) pieces.push(zip ? `${region} ${zip}` : region);
+  if (pieces.length) return pieces.join(', ');
+  return String(label || '').trim().replace(/,?\s*United States$/i, '').trim();
+}
+
+function uniqueAddressSuggestions(items = []) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const description = String(item?.description || '').trim();
+    if (!description || seen.has(description.toLowerCase())) continue;
+    seen.add(description.toLowerCase());
+    out.push({
+      id: String(item.id || `addr-${out.length + 1}`),
+      description,
+      verified: true,
+    });
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+async function suggestAddressesGoogle(query, env) {
+  const key = googleMapsApiKey(env);
+  if (!key) return null;
+  const params = new URLSearchParams({
+    input: query,
+    key,
+    types: 'address',
+    components: 'country:us',
+    language: 'en',
+    location: `${ADDRESS_SUGGEST_BIAS.lat},${ADDRESS_SUGGEST_BIAS.lon}`,
+    radius: '80000',
+  });
+  const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?${params}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.status === 'REQUEST_DENIED' || payload.status === 'INVALID_REQUEST') {
+    return null;
+  }
+  const predictions = Array.isArray(payload.predictions) ? payload.predictions : [];
+  return uniqueAddressSuggestions(predictions.map((item, index) => ({
+    id: String(item.place_id || `google-${index}`),
+    description: String(item.description || '')
+      .replace(/,?\s*USA$/i, '')
+      .replace(/,?\s*United States$/i, '')
+      .trim(),
+  })));
+}
+
+async function suggestAddressesNominatim(query) {
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    addressdetails: '1',
+    limit: '6',
+    countrycodes: 'us',
+    viewbox: '-80.35,36.35,-79.75,35.90',
+    bounded: '0',
+  });
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'efhsband-address-suggest/1.0 (https://efhsband.org)',
+    },
+  });
+  if (!response.ok) return [];
+  const payload = await response.json().catch(() => []);
+  const rows = Array.isArray(payload) ? payload : [];
+  return uniqueAddressSuggestions(rows.map((row, index) => {
+    const addr = row.address || {};
+    const street = [addr.house_number, addr.road || addr.pedestrian || addr.residential]
+      .filter(Boolean)
+      .join(' ');
+    const city = addr.city || addr.town || addr.village || addr.hamlet || addr.municipality || '';
+    const state = addr.state || addr['ISO3166-2-lvl4'] || '';
+    const description = formatSuggestedAddress({
+      street,
+      city,
+      state,
+      postcode: addr.postcode,
+      label: row.display_name,
+    });
+    return { id: String(row.place_id || `nominatim-${index}`), description };
+  }).filter((item) => item.description));
+}
+
+async function suggestAddressesPhoton(query) {
+  const params = new URLSearchParams({
+    q: query,
+    lat: String(ADDRESS_SUGGEST_BIAS.lat),
+    lon: String(ADDRESS_SUGGEST_BIAS.lon),
+    limit: '6',
+    lang: 'en',
+  });
+  const response = await fetch(`https://photon.komoot.io/api/?${params}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return [];
+  const payload = await response.json().catch(() => ({}));
+  const features = Array.isArray(payload.features) ? payload.features : [];
+  return uniqueAddressSuggestions(features.map((feature, index) => {
+    const props = feature?.properties || {};
+    if (props.countrycode && String(props.countrycode).toUpperCase() !== 'US') return null;
+    const street = [props.housenumber, props.street || props.name]
+      .filter(Boolean)
+      .join(' ');
+    const description = formatSuggestedAddress({
+      street: street || props.name,
+      city: props.city || props.town || props.village || props.district || '',
+      state: props.state,
+      postcode: props.postcode,
+      label: [props.name, props.street, props.city, props.state, props.postcode].filter(Boolean).join(', '),
+    });
+    return description ? { id: `photon-${props.osm_id || index}`, description } : null;
+  }).filter(Boolean));
+}
+
+export async function suggestAddresses(query, env = {}) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return { suggestions: [], provider: 'none' };
+  try {
+    const google = await suggestAddressesGoogle(q, env);
+    if (google && google.length) return { suggestions: google, provider: 'google' };
+  } catch {
+    // Fall through to open geocoders.
+  }
+  try {
+    const nominatim = await suggestAddressesNominatim(q);
+    if (nominatim.length) return { suggestions: nominatim, provider: 'nominatim' };
+  } catch {
+    // Fall through to Photon.
+  }
+  try {
+    const photon = await suggestAddressesPhoton(q);
+    return { suggestions: photon, provider: photon.length ? 'photon' : 'none' };
+  } catch {
+    return { suggestions: [], provider: 'none' };
+  }
 }
 
 export function hydrateSponsor(sponsor) {
@@ -3819,6 +3984,21 @@ async function handleApi(request, env, url) {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
+  if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
+    const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
+    if (query.length < 3) {
+      return jsonResponse({ suggestions: [], provider: 'none', detail: 'Type at least 3 characters' });
+    }
+    if (query.length > 120) {
+      return jsonResponse({ detail: 'Search query is too long' }, 422);
+    }
+    const result = await suggestAddresses(query, env);
+    return jsonResponse({
+      suggestions: result.suggestions,
+      provider: result.provider,
+      verified_source: Boolean(googleMapsApiKey(env)),
+    });
+  }
   if (url.pathname === '/api/sponsor-checkout/config' && request.method === 'GET') {
     const configured = squareCheckoutConfigured(env);
     const environment = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'

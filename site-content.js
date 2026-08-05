@@ -652,7 +652,13 @@ function openSponsorSignupModal(pkg) {
       <div class="sponsor-signup-step" data-signup-step="details">
         <form class="sponsor-signup-form" data-signup-form novalidate>
           <label>Business name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
-          <label>Address<textarea name="address" required rows="2" maxlength="400" autocomplete="street-address" placeholder="Street, city, state, ZIP"></textarea></label>
+          <label class="sponsor-signup-address">Address
+            <span class="sponsor-signup-address-wrap">
+              <input name="address" type="text" required maxlength="400" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Start typing street address…" data-address-input aria-autocomplete="list" aria-expanded="false" aria-controls="sponsor-address-suggest">
+              <ul class="sponsor-signup-address-suggest" id="sponsor-address-suggest" data-address-suggest role="listbox" hidden></ul>
+            </span>
+            <span class="sponsor-signup-address-hint" data-address-hint>Pick a suggestion to verify the address.</span>
+          </label>
           <label>Phone<input name="phone" type="tel" required autocomplete="tel" maxlength="40" placeholder="(336) 555-0100"></label>
           <label class="sponsor-signup-logo">Company logo <span>(optional, image under 2 MB)</span>
             <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
@@ -712,7 +718,136 @@ function openSponsorSignupModal(pkg) {
   const logoName = modal.querySelector('[data-logo-name]');
   const logoInput = form?.querySelector('input[name="logo"]');
   const mockWrap = modal.querySelector('[data-mock-pay-wrap]');
+  const addressInput = form?.querySelector('[data-address-input]');
+  const addressSuggest = form?.querySelector('[data-address-suggest]');
+  const addressHint = form?.querySelector('[data-address-hint]');
+  let addressVerified = false;
+  let addressSuggestTimer = 0;
+  let addressSuggestController = null;
+  let addressActiveIndex = -1;
   let checkoutMessageBound = false;
+
+  function setAddressVerified(next, description = '') {
+    addressVerified = Boolean(next);
+    if (addressInput) {
+      addressInput.dataset.verified = addressVerified ? '1' : '0';
+      addressInput.classList.toggle('is-verified', addressVerified);
+    }
+    if (addressHint) {
+      addressHint.textContent = addressVerified
+        ? 'Verified address selected.'
+        : 'Pick a suggestion to verify the address.';
+      addressHint.classList.toggle('is-verified', addressVerified);
+    }
+    if (description && addressInput) addressInput.value = description;
+  }
+
+  function hideAddressSuggestions() {
+    if (!addressSuggest || !addressInput) return;
+    addressSuggest.hidden = true;
+    addressSuggest.innerHTML = '';
+    addressInput.setAttribute('aria-expanded', 'false');
+    addressActiveIndex = -1;
+  }
+
+  function renderAddressSuggestions(items = []) {
+    if (!addressSuggest || !addressInput) return;
+    if (!items.length) {
+      hideAddressSuggestions();
+      return;
+    }
+    addressSuggest.innerHTML = items.map((item, index) => `
+      <li role="option" id="sponsor-address-opt-${index}" data-address-option data-index="${index}" aria-selected="${index === 0 ? 'true' : 'false'}">
+        ${escapeHtml(item.description)}
+      </li>
+    `).join('');
+    addressSuggest.hidden = false;
+    addressInput.setAttribute('aria-expanded', 'true');
+    addressActiveIndex = 0;
+  }
+
+  function moveAddressActive(delta) {
+    if (!addressSuggest || addressSuggest.hidden) return;
+    const options = [...addressSuggest.querySelectorAll('[data-address-option]')];
+    if (!options.length) return;
+    addressActiveIndex = (addressActiveIndex + delta + options.length) % options.length;
+    options.forEach((option, index) => {
+      option.setAttribute('aria-selected', index === addressActiveIndex ? 'true' : 'false');
+    });
+    options[addressActiveIndex]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function chooseAddressOption(option) {
+    if (!option) return;
+    const description = String(option.textContent || '').trim();
+    if (!description) return;
+    setAddressVerified(true, description);
+    hideAddressSuggestions();
+  }
+
+  async function fetchAddressSuggestions(query) {
+    if (addressSuggestController) addressSuggestController.abort();
+    addressSuggestController = new AbortController();
+    try {
+      const response = await fetch(`/api/address-suggest?q=${encodeURIComponent(query)}`, {
+        cache: 'no-store',
+        signal: addressSuggestController.signal,
+      });
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({}));
+      if (String(addressInput?.value || '').trim() !== query) return;
+      renderAddressSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      hideAddressSuggestions();
+    }
+  }
+
+  addressInput?.addEventListener('input', () => {
+    const query = String(addressInput.value || '').trim();
+    setAddressVerified(false);
+    window.clearTimeout(addressSuggestTimer);
+    if (query.length < 3) {
+      hideAddressSuggestions();
+      return;
+    }
+    addressSuggestTimer = window.setTimeout(() => {
+      fetchAddressSuggestions(query);
+    }, 220);
+  });
+
+  addressInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveAddressActive(1);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveAddressActive(-1);
+      return;
+    }
+    if (event.key === 'Enter' && addressSuggest && !addressSuggest.hidden && addressActiveIndex >= 0) {
+      const option = addressSuggest.querySelector(`[data-address-option][data-index="${addressActiveIndex}"]`);
+      if (option) {
+        event.preventDefault();
+        chooseAddressOption(option);
+      }
+      return;
+    }
+    if (event.key === 'Escape') hideAddressSuggestions();
+  });
+
+  addressSuggest?.addEventListener('mousedown', (event) => {
+    const option = event.target.closest('[data-address-option]');
+    if (!option) return;
+    event.preventDefault();
+    chooseAddressOption(option);
+  });
+
+  addressInput?.addEventListener('blur', () => {
+    window.setTimeout(hideAddressSuggestions, 120);
+  });
 
   function handleSponsorPaidMessage(event) {
     const data = event?.data;
@@ -926,6 +1061,11 @@ function openSponsorSignupModal(pkg) {
     const logo = form.elements.logo?.files?.[0] || null;
     if (!businessName || !address || !phone) {
       if (status) status.textContent = 'Business name, address, and phone are required.';
+      return;
+    }
+    if (!addressVerified) {
+      if (status) status.textContent = 'Select a verified address from the suggestions while typing.';
+      addressInput?.focus();
       return;
     }
     if (logo && logo.size > 1_900_000) {
