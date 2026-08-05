@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-41';
+const ASSET_VERSION = 'admin-cms-20260805-42';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2577,8 +2577,8 @@ export function sponsorLevelFromTierKey(tier = '') {
 }
 
 export function squareMockPayEnabled(env = {}) {
-  const raw = String(env.SQUARE_ALLOW_MOCK_PAY ?? '1').trim().toLowerCase();
-  return !(raw === '0' || raw === 'false' || raw === 'no' || raw === 'off');
+  const raw = String(env.SQUARE_ALLOW_MOCK_PAY ?? '0').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
 export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {

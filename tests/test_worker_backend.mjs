@@ -559,7 +559,8 @@ test('sponsor amount helpers parse display currency into cents', () => {
   assert.equal(sponsorBenefitsFromLevel('Silver Sponsor').show_flyin, true);
   assert.equal(sponsorBenefitsFromLevel('Bronze Sponsor').show_flyin, false);
   assert.equal(sponsorBenefitsFromLevel('Gold Sponsor').show_game_announcement, true);
-  assert.equal(squareMockPayEnabled({}), true);
+  assert.equal(squareMockPayEnabled({}), false);
+  assert.equal(squareMockPayEnabled({ SQUARE_ALLOW_MOCK_PAY: '1' }), true);
   assert.equal(squareMockPayEnabled({ SQUARE_ALLOW_MOCK_PAY: '0' }), false);
 });
 
