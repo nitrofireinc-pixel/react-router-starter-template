@@ -22,6 +22,16 @@ img{max-width:100%;display:block}
 .skip-link{position:absolute;left:-999px;top:auto;width:1px;height:1px;overflow:hidden}.skip-link:focus{left:16px;top:16px;width:auto;height:auto;background:#fff;color:#000;padding:10px 14px;border-radius:8px;z-index:99}
 .utility{background:var(--navy);color:#fff;font-size:.9rem}.utility .wrap{max-width:var(--max);margin:auto;padding:8px 20px;display:flex;gap:18px;justify-content:flex-end;flex-wrap:wrap}.utility a{text-decoration:underline;text-underline-offset:3px}
 header.site-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.96);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,33,66,.12)}
+.site-chrome{
+  position:sticky;
+  top:0;
+  z-index:50;
+}
+.site-chrome header.site-header{
+  position:relative;
+  top:auto;
+  z-index:2;
+}
 .header-inner{max-width:var(--max);margin:auto;padding:12px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;column-gap:26px;row-gap:0}.brand{display:flex;align-items:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:max-content}.brand img{width:50px;height:50px;object-fit:contain}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1}
 /* Keep logo/title on the first row; put every nav link on a full-width row beneath. */
 nav{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start;align-items:center;flex:1 1 100%;width:100%;margin:8px 0 0;padding:8px 0 2px;border-top:1px solid rgba(0,33,66,.1)}nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}nav a:hover,nav a:focus{background:#eef3fa;outline:none}.menu-button{display:none;margin-left:auto;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
@@ -50,6 +60,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
   /* Keep the mobile menu above the sponsor marquee strip. */
+  .site-chrome .sponsor-marquee-section,
   .sponsor-marquee-section{position:relative;z-index:1}
 }
 /* Mid-width desktops (e.g. 1024x768): slightly tighter nav pills so more links fit per row. */
@@ -2094,12 +2105,13 @@ body.sponsor-signup-open{overflow:hidden}
   align-items:start;
 }
 
-/* Sitewide sponsor marquee under the header */
+/* Sitewide sponsor marquee under the header — locked with the sticky chrome */
 .sponsor-marquee-section{
   padding:7px 0;
   background:linear-gradient(180deg,#f4f7fb,#eef3f9);
   border-bottom:1px solid #dbe4ef;
   overflow:hidden;
+  z-index:1;
 }
 .sponsor-marquee-section[hidden]{display:none!important}
 .sponsor-marquee-bar{

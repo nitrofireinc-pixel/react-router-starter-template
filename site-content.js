@@ -252,19 +252,36 @@ async function maybeShowHomepageSponsorAd() {
   }
 }
 
+function ensureSiteChrome(header, mount) {
+  if (!header) return null;
+  let chrome = document.querySelector('[data-site-chrome]');
+  if (!chrome) {
+    chrome = document.createElement('div');
+    chrome.className = 'site-chrome';
+    chrome.setAttribute('data-site-chrome', '');
+    header.parentNode?.insertBefore(chrome, header);
+  }
+  if (header.parentElement !== chrome) chrome.appendChild(header);
+  if (mount && mount.parentElement !== chrome) chrome.appendChild(mount);
+  return chrome;
+}
+
 function ensureSponsorMarqueeMount() {
   const header = document.querySelector('header.site-header');
   let mount = document.querySelector('header.site-header + [data-sponsor-marquee], [data-sponsor-marquee]');
   if (header) {
     // Keep a single marquee directly under the site header on every page.
-    if (!mount || mount.previousElementSibling !== header) {
-      mount = document.createElement('section');
-      mount.className = 'sponsor-marquee-section';
-      mount.setAttribute('data-sponsor-marquee', '');
-      mount.setAttribute('aria-label', 'Sponsor marquee');
-      mount.hidden = true;
+    if (!mount || (mount.previousElementSibling !== header && mount.parentElement?.querySelector('header.site-header') !== header)) {
+      if (!mount || !document.contains(mount)) {
+        mount = document.createElement('section');
+        mount.className = 'sponsor-marquee-section';
+        mount.setAttribute('data-sponsor-marquee', '');
+        mount.setAttribute('aria-label', 'Sponsor marquee');
+        mount.hidden = true;
+      }
       header.insertAdjacentElement('afterend', mount);
     }
+    ensureSiteChrome(header, mount);
     document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
       if (node !== mount) node.remove();
     });
