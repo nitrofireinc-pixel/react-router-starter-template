@@ -818,28 +818,14 @@ export async function createSquarePaymentLink(env, {
     body.checkout_options = { redirect_url: String(redirectUrl).slice(0, 2048) };
   }
   if (referenceId) body.payment_note = String(referenceId).slice(0, 500);
-  const phone = normalizeSquareBuyerPhone(buyerPhone);
-  if (phone) {
-    body.pre_populated_data = { buyer_phone_number: phone };
-  }
-  const postLink = async (payloadBody) => {
-    const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
-      method: 'POST',
-      headers: squareApiHeaders(env),
-      body: JSON.stringify(payloadBody),
-    });
-    const payload = await response.json().catch(() => ({}));
-    return { response, payload };
-  };
-  let { response, payload } = await postLink(body);
-  // If Square rejects a prefilled phone, retry without it so checkout still works.
-  if (!response.ok && body.pre_populated_data) {
-    const phoneError = String(payload?.errors?.[0]?.detail || payload?.message || '').toLowerCase();
-    if (phoneError.includes('phone')) {
-      delete body.pre_populated_data;
-      ({ response, payload } = await postLink(body));
-    }
-  }
+  // Do not prefill Square with phone: many US formats are rejected and block checkout.
+  void buyerPhone;
+  const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
+    method: 'POST',
+    headers: squareApiHeaders(env),
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload?.errors?.[0]?.detail
       || payload?.message
