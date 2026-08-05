@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-20';
+const ASSET_VERSION = 'admin-cms-20260805-21';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -4825,7 +4825,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
-<section id="tab-ensembles" class="cms-panel ensembles-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Ensemble Body</h1><p>Edit only the Ensembles page body content in a floating editor. The page hero and page settings stay under Pages for site admins.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-ensembles-body">Edit Body</button></div></div><div class="admin-card stack ensembles-body-card"><h2>Current body</h2><p class="muted">Open the editor to create or update the ensemble cards and body copy shown below the page hero.</p><div id="ensembles-body-preview" class="cms-content ensembles-body-preview"></div><p class="status" id="ensembles-body-panel-status"></p></div>
+<section id="tab-ensembles" class="cms-panel ensembles-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Ensemble Body</h1><p>To edit this page. Please click the red edit button in the top right.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-ensembles-body">Edit Body</button></div></div><div class="admin-card stack ensembles-body-card"><h2>Current body</h2><p class="muted">Open the editor to create or update the ensemble cards and body copy shown below the page hero.</p><div id="ensembles-body-preview" class="cms-content ensembles-body-preview"></div><p class="status" id="ensembles-body-panel-status"></p></div>
 <div id="ensembles-editor-modal" class="minutes-frame-modal ensembles-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-ensembles-editor-dismiss aria-label="Close ensemble body editor"></button>
   <div class="minutes-editor-dialog ensembles-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="ensembles-editor-title">
