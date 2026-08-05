@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-65';
+const ASSET_VERSION = 'admin-cms-20260805-66';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -3313,8 +3313,8 @@ export function resolveAdminMailSender(user = {}) {
 }
 
 async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments, fromName }) {
-  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
-  const senderName = String(fromName || env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const senderName = String(fromName || env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
   if (!isValidEmail(to)) throw new Error('Recipient email is invalid');
   if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
   if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
@@ -3361,7 +3361,7 @@ async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
     },
     body: JSON.stringify({
       name: name || 'Website visitor',
-      email: replyTo || 'noreply@efhsband.org',
+      email: replyTo || SPONSOR_INVOICE_FROM_EMAIL,
       _subject: subject,
       message: text,
       _template: 'table',
@@ -3382,8 +3382,8 @@ async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
 }
 
 async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
-  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
-  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
   if (!isValidEmail(to)) throw new Error('Topic email is invalid');
 
   const provider = resolveContactEmailProvider(env);
@@ -5244,8 +5244,8 @@ async function handleApi(request, env, url) {
     const provider = resolveContactEmailProvider(env);
     return jsonResponse({
       ...describeContactEmailProvider(provider),
-      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
-      from_name: String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      from_email: String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL),
+      from_name: String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME),
     });
   }
   if (url.pathname === '/api/admin/contact/messages' && request.method === 'GET') {
@@ -5369,11 +5369,12 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     return jsonResponse({
       ...describeContactEmailProvider(provider),
-      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
-      from_name: sender.ok ? sender.fromName : String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      from_email: String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim(),
+      from_name: sender.ok ? sender.fromName : String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME),
       reply_to: sender.ok ? sender.replyTo : '',
       sender_ready: sender.ok,
       requires_resend: true,
+      invoice_from_email: SPONSOR_INVOICE_FROM_EMAIL,
       detail: provider !== 'resend'
         ? 'Mail requires Resend. Add a Cloudflare Pages secret named RESEND_API_KEY, verify efhsband.org in Resend, then redeploy.'
         : sender.ok
@@ -5381,6 +5382,85 @@ async function handleApi(request, env, url) {
           : sender.detail,
       configured: provider === 'resend' && sender.ok,
     });
+  }
+  if (url.pathname === '/api/admin/mail/resend-status' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    if (!env.RESEND_API_KEY) {
+      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
+    }
+    const response = await fetch('https://api.resend.com/domains', {
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Accept: 'application/json',
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return jsonResponse({
+        ok: false,
+        detail: payload?.message || `Resend domains request failed (${response.status})`,
+      }, 502);
+    }
+    const domains = Array.isArray(payload?.data) ? payload.data : [];
+    const efhs = domains.find((domain) => String(domain?.name || '').toLowerCase() === 'efhsband.org');
+    return jsonResponse({
+      ok: true,
+      contact_from_email: String(env.CONTACT_FROM_EMAIL || '').trim(),
+      invoice_from_email: SPONSOR_INVOICE_FROM_EMAIL,
+      note: 'Resend does not require creating individual sender addresses. Any address at a verified domain can send.',
+      efhsband_org: efhs
+        ? {
+          id: efhs.id,
+          name: efhs.name,
+          status: efhs.status,
+          region: efhs.region,
+          sending: efhs?.capabilities?.sending || '',
+        }
+        : null,
+      domains: domains.map((domain) => ({
+        id: domain.id,
+        name: domain.name,
+        status: domain.status,
+        region: domain.region,
+      })),
+      can_send_no_reply: Boolean(efhs && String(efhs.status || '').toLowerCase() === 'verified'),
+    });
+  }
+  if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    if (!env.RESEND_API_KEY) {
+      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const to = String(payload.to || auth.user?.username || '').trim().toLowerCase();
+    if (!isValidEmail(to)) {
+      return jsonResponse({ detail: 'Provide a valid test recipient email' }, 422);
+    }
+    try {
+      await sendViaResend(env, {
+        to,
+        subject: 'Test: no-reply@efhsband.org sender',
+        text: [
+          'This is a test email confirming Resend can send from no-reply@efhsband.org.',
+          '',
+          'East Forsyth Band Boosters',
+          'https://efhsband.org',
+        ].join('\n'),
+        html: '<p>This is a test email confirming Resend can send from <strong>no-reply@efhsband.org</strong>.</p><p>East Forsyth Band Boosters</p>',
+        fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
+        fromName: SPONSOR_INVOICE_FROM_NAME,
+      });
+      return jsonResponse({
+        ok: true,
+        from: `${SPONSOR_INVOICE_FROM_NAME} <${SPONSOR_INVOICE_FROM_EMAIL}>`,
+        to,
+        detail: `Test email sent to ${to} from ${SPONSOR_INVOICE_FROM_EMAIL}.`,
+      });
+    } catch (error) {
+      return jsonResponse({ ok: false, detail: error?.message || 'Could not send test email' }, 502);
+    }
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
