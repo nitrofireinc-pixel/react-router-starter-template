@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-31';
+const ASSET_VERSION = 'admin-cms-20260805-32';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -206,7 +206,8 @@ const MAIL_ATTACHMENT_EXTENSIONS = new Set([
   '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip',
 ]);
 const IMAGE_UPLOAD_MAX_BYTES = 1_900_000;
-const IMAGE_UPLOAD_MAX_LABEL = '1.9 MB';
+const IMAGE_UPLOAD_MAX_LABEL = '2 MB';
+const SPONSOR_APPLICATION_LOGO_SORT = -410;
 const IMAGE_UPLOAD_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
 const IMAGE_UPLOAD_EXT_BY_TYPE = {
   'image/jpeg': '.jpg',
@@ -459,6 +460,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -661,6 +663,100 @@ export function normalizeSponsorAdSeconds(value, fallback = 6) {
   const base = Number.isFinite(raw) ? raw : Number(fallback);
   const seconds = Math.round(Number.isFinite(base) ? base : 6);
   return Math.min(30, Math.max(2, seconds));
+}
+
+export function parseSponsorAmountCents(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+  const cleaned = text.replace(/[^0-9.]/g, '');
+  if (!cleaned) return 0;
+  const dollars = Number(cleaned);
+  if (!Number.isFinite(dollars) || dollars <= 0) return 0;
+  return Math.round(dollars * 100);
+}
+
+export function formatSponsorAmountDisplay(cents) {
+  const amount = Number(cents);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const dollars = amount / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+}
+
+export function normalizeSponsorTierKey(value) {
+  const tier = String(value || '').trim().toLowerCase();
+  if (tier === 'bronze' || tier === 'silver' || tier === 'gold') return tier;
+  return '';
+}
+
+export function squareCheckoutConfigured(env = {}) {
+  return Boolean(String(env.SQUARE_ACCESS_TOKEN || '').trim() && String(env.SQUARE_LOCATION_ID || '').trim());
+}
+
+export function squareApiBase(env = {}) {
+  const mode = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase();
+  return mode === 'sandbox'
+    ? 'https://connect.squareupsandbox.com'
+    : 'https://connect.squareup.com';
+}
+
+export async function createSquarePaymentLink(env, {
+  name,
+  amountCents,
+  referenceId = '',
+  buyerPhone = '',
+  redirectUrl = '',
+} = {}) {
+  const token = String(env.SQUARE_ACCESS_TOKEN || '').trim();
+  const locationId = String(env.SQUARE_LOCATION_ID || '').trim();
+  if (!token || !locationId) {
+    return { ok: false, detail: 'Square is not configured' };
+  }
+  const cents = Math.round(Number(amountCents) || 0);
+  if (cents < 100) {
+    return { ok: false, detail: 'Payment amount must be at least $1' };
+  }
+  const itemName = String(name || 'Sponsor package').trim().slice(0, 255) || 'Sponsor package';
+  const body = {
+    idempotency_key: crypto.randomUUID(),
+    quick_pay: {
+      name: itemName,
+      price_money: { amount: cents, currency: 'USD' },
+      location_id: locationId,
+    },
+  };
+  if (redirectUrl) {
+    body.checkout_options = { redirect_url: String(redirectUrl).slice(0, 2048) };
+  }
+  if (referenceId) body.payment_note = String(referenceId).slice(0, 500);
+  const phone = String(buyerPhone || '').replace(/[^\d+]/g, '');
+  if (phone.length >= 10) {
+    body.pre_populated_data = { buyer_phone_number: phone.slice(0, 17) };
+  }
+  const response = await fetch(`${squareApiBase(env)}/v2/online-checkout/payment-links`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Square-Version': '2025-01-16',
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = payload?.errors?.[0]?.detail
+      || payload?.message
+      || `Square checkout failed (${response.status})`;
+    return { ok: false, detail: String(detail) };
+  }
+  const link = payload?.payment_link || {};
+  const url = String(link.url || link.long_url || '').trim();
+  if (!url) return { ok: false, detail: 'Square did not return a checkout URL' };
+  return {
+    ok: true,
+    id: String(link.id || ''),
+    url,
+    order_id: String(link.order_id || ''),
+  };
 }
 
 export function normalizeUtilityLinks(value) {
@@ -3457,6 +3553,129 @@ async function handleApi(request, env, url) {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
+  if (url.pathname === '/api/sponsor-checkout/config' && request.method === 'GET') {
+    return jsonResponse({
+      configured: squareCheckoutConfigured(env),
+      environment: String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'
+        ? 'sandbox'
+        : 'production',
+    });
+  }
+  if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
+    const contentType = String(request.headers.get('content-type') || '');
+    let businessName = '';
+    let address = '';
+    let phone = '';
+    let tier = '';
+    let amountDisplay = '';
+    let amountCents = 0;
+    let logoFile = null;
+    if (/multipart\/form-data/i.test(contentType)) {
+      const form = await request.formData();
+      businessName = String(form.get('business_name') || '').trim();
+      address = String(form.get('address') || '').trim();
+      phone = String(form.get('phone') || '').trim();
+      tier = normalizeSponsorTierKey(form.get('tier'));
+      amountDisplay = String(form.get('amount_display') || '').trim();
+      amountCents = parseSponsorAmountCents(form.get('amount_cents') || form.get('amount_display') || amountDisplay);
+      const rawLogo = form.get('logo');
+      if (rawLogo && typeof rawLogo !== 'string' && Number(rawLogo.size || 0) > 0) logoFile = rawLogo;
+    } else {
+      const payload = await request.json().catch(() => ({}));
+      businessName = String(payload.business_name || '').trim();
+      address = String(payload.address || '').trim();
+      phone = String(payload.phone || '').trim();
+      tier = normalizeSponsorTierKey(payload.tier);
+      amountDisplay = String(payload.amount_display || '').trim();
+      amountCents = parseSponsorAmountCents(payload.amount_cents || payload.amount_display || amountDisplay);
+    }
+    if (!tier) return jsonResponse({ detail: 'Choose a Bronze, Silver, or Gold package' }, 422);
+    if (!businessName || businessName.length > 160) {
+      return jsonResponse({ detail: 'Business name is required' }, 422);
+    }
+    if (!address || address.length > 400) {
+      return jsonResponse({ detail: 'Business address is required' }, 422);
+    }
+    if (!phone || phone.length > 40) {
+      return jsonResponse({ detail: 'Phone number is required' }, 422);
+    }
+    if (!amountCents || amountCents < 100) {
+      return jsonResponse({ detail: 'A valid package amount is required' }, 422);
+    }
+    const display = amountDisplay || formatSponsorAmountDisplay(amountCents);
+    let logoUrl = '';
+    if (logoFile) {
+      try {
+        const stored = await storeImageUpload(
+          env,
+          logoFile,
+          `${businessName} logo`,
+          'Sponsor application logo',
+          SPONSOR_APPLICATION_LOGO_SORT,
+        );
+        logoUrl = stored.url || '';
+      } catch (error) {
+        return jsonResponse({ detail: error.message || 'Could not upload logo' }, 422);
+      }
+    }
+    const now = new Date().toISOString();
+    const insert = await env.DB.prepare(
+      `INSERT INTO sponsor_applications
+        (tier, amount_cents, amount_display, business_name, address, phone, logo_url, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?)`,
+    ).bind(tier, amountCents, display, businessName, address, phone, logoUrl, now, now).run();
+    const applicationId = insert.meta.last_row_id;
+    const tierLabel = `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`;
+    const redirectUrl = `${publicSiteOrigin(request, env)}/become-a-sponsor.html?sponsored=1`;
+    let checkoutUrl = '';
+    let paymentLinkId = '';
+    let paymentReady = false;
+    let paymentDetail = '';
+    if (squareCheckoutConfigured(env)) {
+      const link = await createSquarePaymentLink(env, {
+        name: `EFHS Band ${tierLabel}`,
+        amountCents,
+        referenceId: `sponsor-app-${applicationId}`,
+        buyerPhone: phone,
+        redirectUrl,
+      });
+      if (link.ok) {
+        checkoutUrl = link.url;
+        paymentLinkId = link.id;
+        paymentReady = true;
+        await env.DB.prepare(
+          `UPDATE sponsor_applications
+           SET square_payment_link_id = ?, square_checkout_url = ?, status = 'checkout_ready', updated_at = ?
+           WHERE id = ?`,
+        ).bind(paymentLinkId, checkoutUrl, new Date().toISOString(), applicationId).run();
+      } else {
+        paymentDetail = link.detail || 'Could not start Square checkout';
+        await env.DB.prepare(
+          `UPDATE sponsor_applications SET status = 'payment_setup_needed', updated_at = ? WHERE id = ?`,
+        ).bind(new Date().toISOString(), applicationId).run();
+      }
+    } else {
+      paymentDetail = 'Square payment is not connected yet. Your application was saved.';
+      await env.DB.prepare(
+        `UPDATE sponsor_applications SET status = 'payment_setup_needed', updated_at = ? WHERE id = ?`,
+      ).bind(new Date().toISOString(), applicationId).run();
+    }
+    return jsonResponse({
+      ok: true,
+      id: applicationId,
+      tier,
+      tier_label: tierLabel,
+      amount_cents: amountCents,
+      amount_display: display,
+      business_name: businessName,
+      logo_url: logoUrl,
+      payment_ready: paymentReady,
+      checkout_url: checkoutUrl,
+      detail: paymentReady
+        ? 'Application saved. Continue to Square to pay the package amount.'
+        : paymentDetail,
+    });
+  }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));
   if (url.pathname === '/api/contact/topics' && request.method === 'GET') {

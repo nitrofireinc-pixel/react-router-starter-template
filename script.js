@@ -43,6 +43,7 @@ function openSquareCheckoutWindow(url) {
     `scrollbars=yes,width=${w / systemZoom},height=${h / systemZoom},top=${top},left=${left}`,
   );
 }
+window.openSquareCheckoutWindow = openSquareCheckoutWindow;
 
 document.querySelectorAll('[data-square-checkout]').forEach((button) => {
   button.addEventListener('click', (event) => {

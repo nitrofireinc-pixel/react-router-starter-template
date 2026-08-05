@@ -1824,9 +1824,186 @@ body.sponsor-map-open{overflow:hidden}
   color:#1a1400;
 }
 .sponsor-tier-gold li:before{background:var(--gold);opacity:1;box-shadow:none;width:8px;height:8px;top:.55em;left:3px}
+.sponsor-tier-clickable{
+  cursor:pointer;
+  transition:transform .2s ease, box-shadow .2s ease;
+}
+.sponsor-tier-clickable:hover{
+  transform:translateY(-3px);
+  box-shadow:0 18px 40px rgba(0,33,66,.14);
+}
+.sponsor-tier-clickable:focus-visible{
+  outline:3px solid rgba(231,19,33,.55);
+  outline-offset:3px;
+}
+.sponsor-tier-gold.sponsor-tier-clickable:hover{
+  box-shadow:0 22px 46px rgba(0,33,66,.28);
+}
 @media(max-width:900px){
   .sponsor-tiers-grid{grid-template-columns:1fr}
   .sponsor-tier-gold{transform:none}
+  .sponsor-tier-clickable:hover{transform:none}
+}
+
+/* Become-a-sponsor signup modal */
+body.sponsor-signup-open{overflow:hidden}
+.sponsor-signup-modal{
+  position:fixed;
+  inset:0;
+  z-index:96;
+  display:grid;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  pointer-events:none;
+}
+.sponsor-signup-modal.is-visible{pointer-events:auto}
+.sponsor-signup-backdrop{
+  position:absolute;
+  inset:0;
+  border:0;
+  margin:0;
+  padding:0;
+  background:rgba(2,16,32,.62);
+  backdrop-filter:blur(3px);
+  opacity:0;
+  transition:opacity .28s ease;
+  cursor:pointer;
+}
+.sponsor-signup-modal.is-visible .sponsor-signup-backdrop{opacity:1}
+.sponsor-signup-modal.is-leaving .sponsor-signup-backdrop{opacity:0}
+.sponsor-signup-panel{
+  position:relative;
+  z-index:1;
+  width:min(520px,100%);
+  max-height:min(92vh,760px);
+  overflow:auto;
+  background:#fff;
+  border-radius:22px;
+  border:1px solid #e1e8f1;
+  box-shadow:0 24px 60px rgba(0,16,32,.4);
+  padding:24px 24px 20px;
+  transform:translate3d(0,36px,0) scale(.96);
+  opacity:0;
+  transition:transform .4s cubic-bezier(.22,1,.36,1),opacity .28s ease;
+}
+.sponsor-signup-modal.is-visible .sponsor-signup-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.sponsor-signup-modal.is-leaving .sponsor-signup-panel{transform:translate3d(0,24px,0) scale(.97);opacity:0}
+.sponsor-signup-head{margin:0 0 18px;padding-right:8px}
+.sponsor-signup-kicker{
+  display:block;
+  color:var(--red);
+  font-size:.72rem;
+  font-weight:900;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+.sponsor-signup-head h3{
+  margin:6px 0 8px;
+  color:var(--navy);
+  font-size:clamp(1.35rem,3vw,1.75rem);
+  line-height:1.15;
+  letter-spacing:-.03em;
+}
+.sponsor-signup-head p{margin:0;color:var(--muted);line-height:1.45}
+.sponsor-signup-form,
+.sponsor-signup-step{display:grid;gap:12px}
+.sponsor-signup-form label,
+.sponsor-signup-amount-lock{
+  display:grid;
+  gap:6px;
+  color:var(--navy);
+  font-size:.84rem;
+  font-weight:800;
+}
+.sponsor-signup-form input,
+.sponsor-signup-form textarea,
+.sponsor-signup-amount-lock input{
+  width:100%;
+  border:1px solid #d5deea;
+  border-radius:12px;
+  padding:12px 14px;
+  font:inherit;
+  color:var(--navy);
+  background:#fff;
+}
+.sponsor-signup-form textarea{resize:vertical;min-height:72px}
+.sponsor-signup-logo span{font-weight:650;color:var(--muted)}
+.sponsor-signup-logo-name{
+  margin:-4px 0 0;
+  color:var(--muted);
+  font-size:.86rem;
+  font-weight:700;
+}
+.sponsor-signup-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:flex-end;
+  margin-top:6px;
+}
+.sponsor-signup-summary{
+  display:grid;
+  gap:10px;
+  margin:0 0 4px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:#f4f7fb;
+  border:1px solid #e1e8f1;
+}
+.sponsor-signup-summary p{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  margin:0;
+  color:var(--muted);
+  font-size:.9rem;
+  font-weight:700;
+}
+.sponsor-signup-summary strong{color:var(--navy);text-align:right}
+.sponsor-signup-amount-lock input{
+  font-size:1.45rem;
+  font-weight:950;
+  letter-spacing:-.03em;
+  color:var(--navy);
+  background:#eef3f8;
+  border-color:#cfd9e6;
+  cursor:default;
+}
+.sponsor-signup-pay-note{margin:0;color:var(--muted);line-height:1.4}
+.sponsor-signup-confirm{
+  position:absolute;
+  inset:0;
+  z-index:3;
+  display:grid;
+  place-items:center;
+  padding:18px;
+  background:rgba(2,16,32,.42);
+  border-radius:22px;
+}
+.sponsor-signup-confirm[hidden]{display:none!important}
+.sponsor-signup-confirm-card{
+  width:min(360px,100%);
+  padding:20px 18px 16px;
+  border-radius:16px;
+  background:#fff;
+  border:1px solid #e1e8f1;
+  box-shadow:0 16px 36px rgba(0,16,32,.28);
+}
+.sponsor-signup-confirm-card h4{
+  margin:0 0 8px;
+  color:var(--navy);
+  font-size:1.15rem;
+}
+.sponsor-signup-confirm-card p{margin:0 0 14px;color:var(--muted);line-height:1.4}
+@media(max-width:640px){
+  .sponsor-signup-panel{padding:18px 16px 16px;border-radius:18px}
+  .sponsor-signup-actions{justify-content:stretch}
+  .sponsor-signup-actions .btn{flex:1 1 auto}
+}
+@media(prefers-reduced-motion:reduce){
+  .sponsor-signup-backdrop,
+  .sponsor-signup-panel,
+  .sponsor-tier-clickable{transition:none}
 }
 .become-sponsor-panel{
   margin:8px 0 10px;

@@ -478,6 +478,7 @@ async function loadPublicContent() {
   });
 
   bindSponsorMapCards();
+  bindSponsorTierSignup();
   await Promise.all([loadSponsorMarquee(), maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
@@ -550,7 +551,307 @@ async function loadContactForms() {
   });
 }
 
+function isCmsAdminPreviewContext(root = document) {
+  return Boolean(
+    document.body?.classList?.contains('admin-body')
+    || root.closest?.('#page-preview, .cms-shell, .image-admin-shell')
+  );
+}
+
+function parseSponsorAmountCents(value) {
+  const cleaned = String(value || '').replace(/[^0-9.]/g, '');
+  if (!cleaned) return 0;
+  const dollars = Number(cleaned);
+  if (!Number.isFinite(dollars) || dollars <= 0) return 0;
+  return Math.round(dollars * 100);
+}
+
+function formatSponsorAmountDisplay(cents) {
+  const amount = Number(cents);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const dollars = amount / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+}
+
+function readTierPackageFromCard(card) {
+  const tier = String(card?.dataset?.tier || '').trim().toLowerCase();
+  if (!['bronze', 'silver', 'gold'].includes(tier)) return null;
+  const title = (card.querySelector('[data-cms-field$="_title"], h3')?.textContent || `${tier} Sponsor`)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const amountText = (card.querySelector('[data-cms-field$="_amount"], .sponsor-tier-amount')?.textContent || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const amountCents = parseSponsorAmountCents(amountText);
+  if (!amountCents) return null;
+  return {
+    tier,
+    title,
+    amountCents,
+    amountDisplay: formatSponsorAmountDisplay(amountCents) || amountText,
+  };
+}
+
+let sponsorSignupState = null;
+
+function closeSponsorSignupModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.sponsor-signup-modal');
+  if (!modal) {
+    document.body.classList.remove('sponsor-signup-open');
+    sponsorSignupState = null;
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    document.body.classList.remove('sponsor-signup-open');
+    sponsorSignupState = null;
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    if (!document.querySelector('.sponsor-signup-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    sponsorSignupState = null;
+  }, 280);
+}
+
+function showSponsorSignupConfirm(modal) {
+  const confirm = modal.querySelector('[data-signup-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-confirm-yes]')?.focus();
+}
+
+function hideSponsorSignupConfirm(modal) {
+  const confirm = modal.querySelector('[data-signup-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function openSponsorSignupModal(pkg) {
+  closeSponsorMapModal();
+  closeSponsorSignupModal({ immediate: true });
+  sponsorSignupState = { ...pkg, draft: null, application: null };
+
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', `Become a ${pkg.title}`);
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-signup-cancel aria-label="Cancel signup"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head">
+        <span class="sponsor-signup-kicker">Become a sponsor</span>
+        <h3>${escapeHtml(pkg.title)}</h3>
+        <p>Tell us about your business, then continue to payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong>.</p>
+      </div>
+      <div class="sponsor-signup-step" data-signup-step="details">
+        <form class="sponsor-signup-form" data-signup-form novalidate>
+          <label>Business name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Address<textarea name="address" required rows="2" maxlength="400" autocomplete="street-address" placeholder="Street, city, state, ZIP"></textarea></label>
+          <label>Phone<input name="phone" type="tel" required autocomplete="tel" maxlength="40" placeholder="(336) 555-0100"></label>
+          <label class="sponsor-signup-logo">Company logo <span>(optional, image under 2 MB)</span>
+            <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
+          </label>
+          <p class="sponsor-signup-logo-name" data-logo-name hidden></p>
+          <p class="status" data-signup-status></p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
+            <button class="btn primary" type="submit">Next</button>
+          </div>
+        </form>
+      </div>
+      <div class="sponsor-signup-step" data-signup-step="payment" hidden>
+        <div class="sponsor-signup-summary">
+          <p><span>Business</span><strong data-pay-business></strong></p>
+          <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        </div>
+        <label class="sponsor-signup-amount-lock">Amount due
+          <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
+        </label>
+        <p class="sponsor-signup-pay-note" data-pay-note>Your package amount is locked. Continue to Square to complete payment.</p>
+        <p class="status" data-pay-status></p>
+        <div class="sponsor-signup-actions">
+          <button class="btn outline" type="button" data-pay-back>Back</button>
+          <button class="btn primary" type="button" data-pay-continue>Pay with Square</button>
+        </div>
+      </div>
+      <div class="sponsor-signup-confirm" data-signup-confirm hidden>
+        <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="sponsor-signup-confirm-title" aria-describedby="sponsor-signup-confirm-copy">
+          <h4 id="sponsor-signup-confirm-title">Are you sure?</h4>
+          <p id="sponsor-signup-confirm-copy">Canceling returns you to the sponsor page and discards this form.</p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-confirm-no>No</button>
+            <button class="btn primary" type="button" data-confirm-yes>Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+
+  const form = modal.querySelector('[data-signup-form]');
+  const detailsStep = modal.querySelector('[data-signup-step="details"]');
+  const paymentStep = modal.querySelector('[data-signup-step="payment"]');
+  const status = modal.querySelector('[data-signup-status]');
+  const payStatus = modal.querySelector('[data-pay-status]');
+  const payNote = modal.querySelector('[data-pay-note]');
+  const logoName = modal.querySelector('[data-logo-name]');
+  const logoInput = form?.querySelector('input[name="logo"]');
+
+  modal.querySelectorAll('[data-signup-cancel]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (paymentStep && !paymentStep.hidden) {
+        showSponsorSignupConfirm(modal);
+        return;
+      }
+      showSponsorSignupConfirm(modal);
+    });
+  });
+  modal.querySelector('[data-confirm-no]')?.addEventListener('click', () => hideSponsorSignupConfirm(modal));
+  modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => closeSponsorSignupModal());
+  modal.querySelector('[data-pay-back]')?.addEventListener('click', () => {
+    paymentStep.hidden = true;
+    detailsStep.hidden = false;
+    if (payStatus) payStatus.textContent = '';
+    form?.querySelector('input[name="business_name"]')?.focus();
+  });
+
+  logoInput?.addEventListener('change', () => {
+    const file = logoInput.files?.[0];
+    if (!file) {
+      if (logoName) {
+        logoName.hidden = true;
+        logoName.textContent = '';
+      }
+      return;
+    }
+    if (file.size > 1_900_000) {
+      logoInput.value = '';
+      if (status) status.textContent = 'Logo must be an image under 2 MB.';
+      if (logoName) {
+        logoName.hidden = true;
+        logoName.textContent = '';
+      }
+      return;
+    }
+    if (status) status.textContent = '';
+    if (logoName) {
+      logoName.hidden = false;
+      logoName.textContent = file.name;
+    }
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (status) status.textContent = '';
+    const businessName = String(form.elements.business_name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const phone = String(form.elements.phone?.value || '').trim();
+    const logo = form.elements.logo?.files?.[0] || null;
+    if (!businessName || !address || !phone) {
+      if (status) status.textContent = 'Business name, address, and phone are required.';
+      return;
+    }
+    if (logo && logo.size > 1_900_000) {
+      if (status) status.textContent = 'Logo must be an image under 2 MB.';
+      return;
+    }
+    sponsorSignupState.draft = { businessName, address, phone, logo };
+    modal.querySelector('[data-pay-business]').textContent = businessName;
+    modal.querySelector('[data-pay-amount]').value = pkg.amountDisplay;
+    detailsStep.hidden = true;
+    paymentStep.hidden = false;
+    if (payStatus) payStatus.textContent = '';
+    if (payNote) {
+      payNote.textContent = 'Your package amount is locked. Continue to Square to complete payment.';
+    }
+    modal.querySelector('[data-pay-continue]')?.focus();
+  });
+
+  modal.querySelector('[data-pay-continue]')?.addEventListener('click', async () => {
+    const draft = sponsorSignupState?.draft;
+    const payButton = modal.querySelector('[data-pay-continue]');
+    if (!draft || !sponsorSignupState) return;
+    if (payStatus) payStatus.textContent = 'Saving application…';
+    if (payButton) payButton.disabled = true;
+    try {
+      const body = new FormData();
+      body.set('business_name', draft.businessName);
+      body.set('address', draft.address);
+      body.set('phone', draft.phone);
+      body.set('tier', pkg.tier);
+      body.set('amount_display', pkg.amountDisplay);
+      body.set('amount_cents', String(pkg.amountCents));
+      if (draft.logo) body.set('logo', draft.logo, draft.logo.name || 'logo.png');
+      const response = await fetch('/api/sponsor-applications', { method: 'POST', body });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not save application');
+      sponsorSignupState.application = result;
+      if (result.payment_ready && result.checkout_url) {
+        if (payStatus) payStatus.textContent = 'Opening Square checkout…';
+        const openCheckout = window.openSquareCheckoutWindow || ((url) => window.open(url, '_blank', 'noopener,noreferrer'));
+        const checkoutWindow = openCheckout(result.checkout_url);
+        if (!checkoutWindow) window.open(result.checkout_url, '_blank', 'noopener,noreferrer');
+        if (payStatus) payStatus.textContent = 'Square checkout opened. Complete payment there to finish.';
+        if (payNote) payNote.textContent = `Amount due remains ${pkg.amountDisplay}.`;
+      } else {
+        if (payStatus) {
+          payStatus.textContent = result.detail
+            || 'Application saved. Square payment is not connected yet — the band will follow up.';
+        }
+      }
+    } catch (error) {
+      if (payStatus) payStatus.textContent = error.message || 'Could not continue to payment.';
+    } finally {
+      if (payButton) payButton.disabled = false;
+    }
+  });
+
+  form?.querySelector('input[name="business_name"]')?.focus();
+}
+
+function bindSponsorTierSignup(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('.sponsor-tiers [data-tier].sponsor-tier, .sponsor-tier[data-tier]').forEach((card) => {
+    if (card.dataset.signupBound === '1') return;
+    if (card.closest('#page-preview, .cms-shell, .admin-body')) return;
+    card.dataset.signupBound = '1';
+    card.classList.add('sponsor-tier-clickable');
+    if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '0');
+    if (!card.getAttribute('role')) card.setAttribute('role', 'button');
+    const open = (event) => {
+      event.preventDefault();
+      const pkg = readTierPackageFromCard(card);
+      if (!pkg) return;
+      openSponsorSignupModal(pkg);
+    };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') open(event);
+    });
+  });
+}
+
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeSponsorMapModal();
+  if (event.key !== 'Escape') return;
+  const signup = document.querySelector('.sponsor-signup-modal');
+  if (signup) {
+    const confirm = signup.querySelector('[data-signup-confirm]');
+    if (confirm && !confirm.hidden) {
+      hideSponsorSignupConfirm(signup);
+      return;
+    }
+    showSponsorSignupConfirm(signup);
+    return;
+  }
+  closeSponsorMapModal();
 });
