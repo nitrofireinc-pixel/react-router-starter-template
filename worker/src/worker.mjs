@@ -90,14 +90,17 @@ export const SPONSOR_TIER_FIELD_DEFAULTS = {
   bronze_title: 'Bronze Sponsor',
   bronze_blurb: 'Put your brand in front of families online.',
   bronze_benefits: '<ul><li>Logo featured on the website sponsor marquee</li></ul>',
+  bronze_amount: '$100',
   silver_label: 'Silver',
   silver_title: 'Silver Sponsor',
   silver_blurb: 'Stand out across the site experience.',
   silver_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul>',
+  silver_amount: '$250',
   gold_label: 'Gold',
   gold_title: 'Gold Sponsor',
   gold_blurb: 'Our top package for game-day and digital impact.',
   gold_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul>',
+  gold_amount: '$500',
 };
 
 export const SPONSOR_TIER_FIELD_KEYS = Object.keys(SPONSOR_TIER_FIELD_DEFAULTS);
@@ -160,14 +163,23 @@ export function extractSponsorTierFields(html = '') {
     bronze_title: matchInner(bronze, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
     bronze_blurb: matchInner(bronze, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
     bronze_benefits: benefitsOf(bronze),
+    bronze_amount: matchInner(bronze, /data-cms-field="bronze_amount"[^>]*>([\s\S]*?)<\//i)
+      || matchInner(bronze, /class="[^"]*sponsor-tier-amount[^"]*"[^>]*>([\s\S]*?)<\//i)
+      || undefined,
     silver_label: matchInner(silver, /class="[^"]*sponsor-tier-label[^"]*"[^>]*>([\s\S]*?)<\//i) || undefined,
     silver_title: matchInner(silver, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
     silver_blurb: matchInner(silver, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
     silver_benefits: benefitsOf(silver),
+    silver_amount: matchInner(silver, /data-cms-field="silver_amount"[^>]*>([\s\S]*?)<\//i)
+      || matchInner(silver, /class="[^"]*sponsor-tier-amount[^"]*"[^>]*>([\s\S]*?)<\//i)
+      || undefined,
     gold_label: matchInner(gold, /class="[^"]*sponsor-tier-label[^"]*"[^>]*>([\s\S]*?)<\//i) || undefined,
     gold_title: matchInner(gold, /<h3[^>]*>([\s\S]*?)<\/h3>/i) || undefined,
     gold_blurb: matchInner(gold, /<h3[^>]*>[\s\S]*?<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/i) || undefined,
     gold_benefits: benefitsOf(gold),
+    gold_amount: matchInner(gold, /data-cms-field="gold_amount"[^>]*>([\s\S]*?)<\//i)
+      || matchInner(gold, /class="[^"]*sponsor-tier-amount[^"]*"[^>]*>([\s\S]*?)<\//i)
+      || undefined,
   });
 }
 
@@ -2158,13 +2170,14 @@ export function renderSponsorsDirectory(sponsors = []) {
 
 export function renderSponsorTiersHtml(payload = {}) {
   const fields = normalizeSponsorTierFields(payload);
-  const card = (id, labelKey, titleKey, blurbKey, benefitsKey) => {
+  const card = (id, labelKey, titleKey, blurbKey, benefitsKey, amountKey) => {
     const benefits = sponsorTierBenefitsHtml(fields[benefitsKey], SPONSOR_TIER_FIELD_DEFAULTS[benefitsKey]);
     return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}">
       <span class="sponsor-tier-label" data-cms-field="${escapeAttr(labelKey)}">${formatInlineRichText(fields[labelKey])}</span>
       <h3 data-cms-field="${escapeAttr(titleKey)}">${formatInlineRichText(fields[titleKey])}</h3>
       <p data-cms-field="${escapeAttr(blurbKey)}">${formatInlineRichText(fields[blurbKey])}</p>
       <div data-cms-field="${escapeAttr(benefitsKey)}">${benefits}</div>
+      <p class="sponsor-tier-amount" data-cms-field="${escapeAttr(amountKey)}">${formatInlineRichText(fields[amountKey])}</p>
     </article>`;
   };
   return `<section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages">
@@ -2174,16 +2187,20 @@ export function renderSponsorTiersHtml(payload = {}) {
       <p data-cms-field="tiers_intro">${formatInlineRichText(fields.tiers_intro)}</p>
     </div>
     <div class="sponsor-tiers-grid">
-      ${card('bronze', 'bronze_label', 'bronze_title', 'bronze_blurb', 'bronze_benefits')}
-      ${card('silver', 'silver_label', 'silver_title', 'silver_blurb', 'silver_benefits')}
-      ${card('gold', 'gold_label', 'gold_title', 'gold_blurb', 'gold_benefits')}
+      ${card('bronze', 'bronze_label', 'bronze_title', 'bronze_blurb', 'bronze_benefits', 'bronze_amount')}
+      ${card('silver', 'silver_label', 'silver_title', 'silver_blurb', 'silver_benefits', 'silver_amount')}
+      ${card('gold', 'gold_label', 'gold_title', 'gold_blurb', 'gold_benefits', 'gold_amount')}
     </div>
   </section>`;
 }
 
 export function ensureSponsorTiersSection(html) {
   const source = String(html || '');
-  if (/data-sponsor-tiers/i.test(source)) return source;
+  if (/data-sponsor-tiers/i.test(source)) {
+    // Rebuild from stored fields so new tier fields (like amounts) appear with defaults.
+    const tiers = renderSponsorTiersHtml(extractSponsorTierFields(source));
+    return source.replace(/<section\b[^>]*data-sponsor-tiers[^>]*>[\s\S]*?<\/section>/i, tiers);
+  }
   const tiers = renderSponsorTiersHtml();
   if (/become-sponsor-panel|data-contact-form-slot/i.test(source)) {
     return source.replace(/(<div[^>]*(?:become-sponsor-panel|data-contact-form-slot)[^>]*>)/i, `${tiers}$1`);

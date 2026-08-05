@@ -490,7 +490,11 @@ test('become-sponsor layout includes packages and contact form slot', () => {
   assert.match(html, /data-cms-layout="become-sponsor"/);
   assert.match(html, /data-sponsor-tiers/);
   assert.match(html, /data-cms-field="bronze_title"/);
+  assert.match(html, /data-cms-field="bronze_amount"/);
   assert.match(html, /Custom Bronze/);
+  assert.match(html, /\$100/);
+  assert.match(html, /\$250/);
+  assert.match(html, /\$500/);
   assert.match(html, /Top package for &lt;partners&gt;\./);
   assert.match(html, /Silver Sponsor/);
   assert.match(html, /become-sponsor-panel/);
@@ -498,6 +502,7 @@ test('become-sponsor layout includes packages and contact form slot', () => {
   assert.doesNotMatch(html, /data-sponsors/);
   const extracted = extractSponsorTierFields(html);
   assert.equal(normalizeSponsorTierFields(extracted).bronze_title, 'Custom Bronze');
+  assert.equal(normalizeSponsorTierFields(extracted).bronze_amount, '$100');
   assert.match(extracted.gold_blurb, /Top package for/);
 });
 
@@ -506,6 +511,8 @@ test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () =>
   assert.match(tiers, /home football games/);
   assert.match(tiers, /Homepage fly-in advert/);
   assert.match(tiers, /website sponsor marquee/);
+  assert.match(tiers, /sponsor-tier-amount/);
+  assert.match(tiers, /\$100/);
   const bare = '<div class="wrap"><div class="sponsor-intro"></div><div class="sponsor-directory" data-sponsors></div></div>';
   const injected = ensureSponsorTiersSection(bare);
   assert.match(injected, /data-sponsor-tiers/);

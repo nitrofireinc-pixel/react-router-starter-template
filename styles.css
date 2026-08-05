@@ -1745,6 +1745,18 @@ body.sponsor-map-open{overflow:hidden}
 }
 .sponsor-tier [data-cms-field$="_benefits"]{
   margin:6px 0 0;
+  flex:1 1 auto;
+}
+.sponsor-tier-amount,
+.sponsor-tier [data-cms-field$="_amount"]{
+  margin:auto 0 0;
+  padding-top:14px;
+  border-top:1px solid rgba(15,34,58,.12);
+  color:var(--navy);
+  font-size:1.35rem;
+  font-weight:950;
+  letter-spacing:-.03em;
+  line-height:1.15;
 }
 .sponsor-tier ul{
   margin:6px 0 0;
@@ -1802,6 +1814,11 @@ body.sponsor-map-open{overflow:hidden}
 .sponsor-tier-gold > p,
 .sponsor-tier-gold li{color:#fff}
 .sponsor-tier-gold > p{color:#d7e5f5}
+.sponsor-tier-gold .sponsor-tier-amount,
+.sponsor-tier-gold [data-cms-field$="_amount"]{
+  color:var(--gold);
+  border-top-color:rgba(255,255,255,.18);
+}
 .sponsor-tier-gold .sponsor-tier-label{
   background:var(--gold);
   color:#1a1400;

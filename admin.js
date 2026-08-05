@@ -233,14 +233,17 @@ const DEFAULT_SPONSOR_TIER_FIELDS = {
   bronze_title: 'Bronze Sponsor',
   bronze_blurb: 'Put your brand in front of families online.',
   bronze_benefits: '<ul><li>Logo featured on the website sponsor marquee</li></ul>',
+  bronze_amount: '$100',
   silver_label: 'Silver',
   silver_title: 'Silver Sponsor',
   silver_blurb: 'Stand out across the site experience.',
   silver_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li></ul>',
+  silver_amount: '$250',
   gold_label: 'Gold',
   gold_title: 'Gold Sponsor',
   gold_blurb: 'Our top package for game-day and digital impact.',
   gold_benefits: '<ul><li>Logo featured on the website sponsor marquee</li><li>Homepage fly-in advert for your business</li><li>Announcement recognition at home football games</li></ul>',
+  gold_amount: '$500',
 };
 
 const SPONSOR_TIER_FIELD_KEYS = Object.keys(DEFAULT_SPONSOR_TIER_FIELDS);
@@ -767,14 +770,17 @@ function extractSponsorTierFieldsFromHtml(html = '') {
     bronze_title: inlineOf(bronze?.querySelector('[data-cms-field="bronze_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_title,
     bronze_blurb: inlineOf(bronze?.querySelector('[data-cms-field="bronze_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_blurb,
     bronze_benefits: benefitsOf(bronze) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_benefits,
+    bronze_amount: inlineOf(bronze?.querySelector('[data-cms-field="bronze_amount"], .sponsor-tier-amount')) || DEFAULT_SPONSOR_TIER_FIELDS.bronze_amount,
     silver_label: inlineOf(silver?.querySelector('[data-cms-field="silver_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_label,
     silver_title: inlineOf(silver?.querySelector('[data-cms-field="silver_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_title,
     silver_blurb: inlineOf(silver?.querySelector('[data-cms-field="silver_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_blurb,
     silver_benefits: benefitsOf(silver) || DEFAULT_SPONSOR_TIER_FIELDS.silver_benefits,
+    silver_amount: inlineOf(silver?.querySelector('[data-cms-field="silver_amount"], .sponsor-tier-amount')) || DEFAULT_SPONSOR_TIER_FIELDS.silver_amount,
     gold_label: inlineOf(gold?.querySelector('[data-cms-field="gold_label"], .sponsor-tier-label')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_label,
     gold_title: inlineOf(gold?.querySelector('[data-cms-field="gold_title"], h3')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_title,
     gold_blurb: inlineOf(gold?.querySelector('[data-cms-field="gold_blurb"], h3 + p')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_blurb,
     gold_benefits: benefitsOf(gold) || DEFAULT_SPONSOR_TIER_FIELDS.gold_benefits,
+    gold_amount: inlineOf(gold?.querySelector('[data-cms-field="gold_amount"], .sponsor-tier-amount')) || DEFAULT_SPONSOR_TIER_FIELDS.gold_amount,
   };
 }
 
@@ -891,14 +897,17 @@ const PAGE_FIELD_LABELS = {
   bronze_title: 'Bronze title',
   bronze_blurb: 'Bronze description',
   bronze_benefits: 'Bronze benefits',
+  bronze_amount: 'Bronze amount',
   silver_label: 'Silver badge',
   silver_title: 'Silver title',
   silver_blurb: 'Silver description',
   silver_benefits: 'Silver benefits',
+  silver_amount: 'Silver amount',
   gold_label: 'Gold badge',
   gold_title: 'Gold title',
   gold_blurb: 'Gold description',
   gold_benefits: 'Gold benefits',
+  gold_amount: 'Gold amount',
 };
 
 function homeFieldLabel(el) {
@@ -1058,7 +1067,7 @@ function buildEditablePagePreview(payload = {}) {
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
     const benefitsField = (key) => editableRichField(key, tier(key) || DEFAULT_SPONSOR_TIER_FIELDS[key], PAGE_FIELD_LABELS[key]);
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages"><div class="sponsor-tiers-head">${editableField('tiers_kicker', 'span', tier('tiers_kicker'), 'Packages label', 'kicker')}${editableField('tiers_heading', 'h2', tier('tiers_heading'), 'Packages heading')}${editableField('tiers_intro', 'p', tier('tiers_intro'), 'Packages intro')}</div><div class="sponsor-tiers-grid"><article class="sponsor-tier sponsor-tier-bronze" data-tier="bronze">${editableField('bronze_label', 'span', tier('bronze_label'), 'Bronze badge', 'sponsor-tier-label')}${editableField('bronze_title', 'h3', tier('bronze_title'), 'Bronze title')}${editableField('bronze_blurb', 'p', tier('bronze_blurb'), 'Bronze description')}${benefitsField('bronze_benefits')}</article><article class="sponsor-tier sponsor-tier-silver" data-tier="silver">${editableField('silver_label', 'span', tier('silver_label'), 'Silver badge', 'sponsor-tier-label')}${editableField('silver_title', 'h3', tier('silver_title'), 'Silver title')}${editableField('silver_blurb', 'p', tier('silver_blurb'), 'Silver description')}${benefitsField('silver_benefits')}</article><article class="sponsor-tier sponsor-tier-gold" data-tier="gold">${editableField('gold_label', 'span', tier('gold_label'), 'Gold badge', 'sponsor-tier-label')}${editableField('gold_title', 'h3', tier('gold_title'), 'Gold title')}${editableField('gold_blurb', 'p', tier('gold_blurb'), 'Gold description')}${benefitsField('gold_benefits')}</article></div></section><div class="become-sponsor-panel grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p>', 'Sponsor inquiry intro')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab. Choose Sponsor inquiry when available.</p></div></div>${showCallout ? callout : ''}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><section class="sponsor-tiers" data-sponsor-tiers aria-label="Sponsor packages"><div class="sponsor-tiers-head">${editableField('tiers_kicker', 'span', tier('tiers_kicker'), 'Packages label', 'kicker')}${editableField('tiers_heading', 'h2', tier('tiers_heading'), 'Packages heading')}${editableField('tiers_intro', 'p', tier('tiers_intro'), 'Packages intro')}</div><div class="sponsor-tiers-grid"><article class="sponsor-tier sponsor-tier-bronze" data-tier="bronze">${editableField('bronze_label', 'span', tier('bronze_label'), 'Bronze badge', 'sponsor-tier-label')}${editableField('bronze_title', 'h3', tier('bronze_title'), 'Bronze title')}${editableField('bronze_blurb', 'p', tier('bronze_blurb'), 'Bronze description')}${benefitsField('bronze_benefits')}${editableField('bronze_amount', 'p', tier('bronze_amount'), 'Bronze amount', 'sponsor-tier-amount')}</article><article class="sponsor-tier sponsor-tier-silver" data-tier="silver">${editableField('silver_label', 'span', tier('silver_label'), 'Silver badge', 'sponsor-tier-label')}${editableField('silver_title', 'h3', tier('silver_title'), 'Silver title')}${editableField('silver_blurb', 'p', tier('silver_blurb'), 'Silver description')}${benefitsField('silver_benefits')}${editableField('silver_amount', 'p', tier('silver_amount'), 'Silver amount', 'sponsor-tier-amount')}</article><article class="sponsor-tier sponsor-tier-gold" data-tier="gold">${editableField('gold_label', 'span', tier('gold_label'), 'Gold badge', 'sponsor-tier-label')}${editableField('gold_title', 'h3', tier('gold_title'), 'Gold title')}${editableField('gold_blurb', 'p', tier('gold_blurb'), 'Gold description')}${benefitsField('gold_benefits')}${editableField('gold_amount', 'p', tier('gold_amount'), 'Gold amount', 'sponsor-tier-amount')}</article></div></section><div class="become-sponsor-panel grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">Next step</span><h3>Ready to partner with Eagle Pride?</h3><p>Pick Bronze, Silver, or Gold above, then send a sponsor inquiry.</p>', 'Sponsor inquiry intro')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab. Choose Sponsor inquiry when available.</p></div></div>${showCallout ? callout : ''}</div></section>`;
   }
   return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add the page information here.', 'Main page content')}</div>${callout}</div></section>`;
 }
