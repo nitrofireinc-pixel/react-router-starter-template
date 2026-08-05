@@ -1901,6 +1901,15 @@ body.sponsor-signup-open{overflow:hidden}
   background:#f8fbfe;
 }
 .sponsor-signup-card-host{min-height:90px}
+.sponsor-signup-checkout-frame{
+  display:block;
+  width:100%;
+  height:min(68vh,640px);
+  border:0;
+  border-radius:14px;
+  background:#f4f7fb;
+  box-shadow:inset 0 0 0 1px #d7e0ea;
+}
   display:block;
   width:100%;
   height:min(68vh,640px);
