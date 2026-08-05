@@ -698,9 +698,9 @@ function openSponsorSignupModal(pkg) {
           <p class="status" data-pay-status></p>
         </div>
         <div class="sponsor-signup-actions sponsor-signup-actions-split" data-pay-actions>
-          <button class="btn outline" type="button" data-signup-back>Back</button>
+          <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
           <div class="sponsor-signup-actions-end">
-            <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
+            <button class="btn outline" type="button" data-signup-back>Back</button>
             <button class="btn primary" type="button" data-pay-continue>Pay with Square</button>
           </div>
         </div>
