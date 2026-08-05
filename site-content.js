@@ -978,6 +978,7 @@ function openSponsorSignupModal(pkg) {
       <div class="sponsor-signup-summary">
         <p><span>Business</span><strong>${escapeHtml(application.business_name || sponsorSignupState.draft?.businessName || '')}</strong></p>
         <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        <p><span>Invoice email</span><strong>${escapeHtml(application.email || sponsorSignupState.draft?.email || '')}</strong></p>
         <p><span>Amount</span><strong>${escapeHtml(pkg.amountDisplay)}</strong></p>
       </div>
       <div class="sponsor-signup-card-box">
