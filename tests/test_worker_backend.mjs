@@ -811,7 +811,8 @@ test('meeting minutes dates and secretary edit window', () => {
   const stale = { created_at: new Date(Date.now() - (11 * 24 * 60 * 60 * 1000)).toISOString() };
   assert.equal(canViewMeetingMinutes(secretary), true);
   assert.equal(canViewMeetingMinutes(viewer), true);
-  assert.equal(canViewMeetingMinutes(outsider), false);
+  assert.equal(canViewMeetingMinutes(outsider), true);
+  assert.equal(canViewMeetingMinutes(null), false);
   assert.equal(canManageMeetingMinutes(secretary), true);
   assert.equal(canManageMeetingMinutes(viewer), false);
   assert.equal(canEditMeetingMinutes(secretary, fresh), true);

@@ -2874,10 +2874,8 @@ export function minutesEditableUntil(createdAt) {
 }
 
 export function canViewMeetingMinutes(user) {
-  if (!user) return false;
-  return isSuperAdmin(user)
-    || hasPermission(user, 'minutes')
-    || hasPermission(user, 'minutes:view');
+  // Any logged-in CMS user can view/print meeting minutes.
+  return Boolean(user);
 }
 
 export function canManageMeetingMinutes(user) {
