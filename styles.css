@@ -936,6 +936,60 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .sponsor-ad-settings-card label{display:grid;gap:6px}
 
+/* Admin save confirmation — centered fly-in (not tied to sponsor ads) */
+.admin-saved-toast{
+  position:fixed;
+  inset:0;
+  z-index:120;
+  display:grid;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  pointer-events:none;
+}
+.admin-saved-toast-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(2,16,32,.42);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity .3s ease;
+}
+.admin-saved-toast.is-visible .admin-saved-toast-backdrop{opacity:1}
+.admin-saved-toast.is-leaving .admin-saved-toast-backdrop{opacity:0}
+.admin-saved-toast-panel{
+  position:relative;
+  z-index:1;
+  width:min(320px,100%);
+  transform:translate3d(0,36px,0) scale(.94);
+  opacity:0;
+  transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
+}
+.admin-saved-toast.is-visible .admin-saved-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.admin-saved-toast.is-leaving .admin-saved-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
+.admin-saved-toast-card{
+  display:grid;
+  place-items:center;
+  min-height:108px;
+  padding:28px 32px;
+  border-radius:22px;
+  background:linear-gradient(145deg,#001c38 0%,#063362 58%,#0a4478 100%);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 24px 60px rgba(0,16,32,.45);
+  text-align:center;
+}
+.admin-saved-toast-card strong{
+  color:#fff;
+  font-size:clamp(1.45rem,4vw,1.85rem);
+  font-weight:900;
+  letter-spacing:-.02em;
+  line-height:1.1;
+}
+@media (prefers-reduced-motion:reduce){
+  .admin-saved-toast-backdrop,
+  .admin-saved-toast-panel{transition:none}
+}
+
 /* Homepage sponsor fly-in ad — centered modal */
 body.sponsor-flyin-open{overflow:hidden}
 .sponsor-flyin{

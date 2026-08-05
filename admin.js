@@ -4,6 +4,58 @@ function escapeHtml(value) {
   }[char]));
 }
 
+const SAVE_TOAST_EXCLUDE = [
+  '/api/admin/mail',
+  '/api/admin/zernio/facebook/events/publish',
+  '/api/admin/zernio/posts',
+  '/api/admin/zernio/facebook/connect',
+  '/api/admin/zernio/facebook/disconnect',
+  '/api/admin/zernio/facebook/pages',
+];
+
+let savedToastTimer = null;
+let savedToastLeaveTimer = null;
+
+function shouldShowSavedToast(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  if (!['POST', 'PUT', 'PATCH'].includes(method)) return false;
+  const path = String(url || '');
+  if (!path.includes('/api/admin/')) return false;
+  return !SAVE_TOAST_EXCLUDE.some((prefix) => path.includes(prefix));
+}
+
+function showSavedToast(message = 'Saved.') {
+  let root = document.querySelector('#admin-saved-toast');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'admin-saved-toast';
+    root.className = 'admin-saved-toast';
+    root.setAttribute('role', 'status');
+    root.setAttribute('aria-live', 'polite');
+    root.innerHTML = `
+      <div class="admin-saved-toast-backdrop" aria-hidden="true"></div>
+      <div class="admin-saved-toast-panel">
+        <div class="admin-saved-toast-card"><strong data-saved-toast-message>Saved.</strong></div>
+      </div>`;
+    document.body.appendChild(root);
+  }
+  const msg = root.querySelector('[data-saved-toast-message]');
+  if (msg) msg.textContent = message;
+  window.clearTimeout(savedToastTimer);
+  window.clearTimeout(savedToastLeaveTimer);
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  savedToastTimer = window.setTimeout(() => {
+    root.classList.add('is-leaving');
+    root.classList.remove('is-visible');
+    savedToastLeaveTimer = window.setTimeout(() => {
+      root.classList.remove('is-leaving');
+    }, 380);
+  }, 3000);
+}
+
 async function jsonFetch(url, options = {}) {
   const response = await fetch(url, {
     credentials: 'same-origin',
@@ -21,7 +73,9 @@ async function jsonFetch(url, options = {}) {
       throw error;
     }
   }
-  return response.json();
+  const data = await response.json();
+  if (shouldShowSavedToast(url, options)) showSavedToast('Saved.');
+  return data;
 }
 
 const SOCIAL_PLATFORMS = [
