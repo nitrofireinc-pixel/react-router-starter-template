@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-61';
+const ASSET_VERSION = 'admin-cms-20260805-62';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -461,6 +461,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -600,7 +601,7 @@ async function initDb(env) {
   }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html));
+    const nextSponsorsHtml = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html)));
     if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextSponsorsHtml, sponsorsPageRow.id)
@@ -2775,16 +2776,36 @@ export function rewriteBecomeSponsorLinks(html) {
     .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html\1(?=[^>]*>\s*(?:Become a sponsor|Ask about sponsoring))/gi, 'href="/become-a-sponsor.html"');
 }
 
+export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
+
+export function ensureSponsorDonateButton(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  if (/data-donate-open/i.test(source)) return source;
+  if (/sponsor-intro-actions/i.test(source)) return source;
+  // Wrap the primary Become a sponsor control in the intro with a Donate button.
+  const wrapped = source.replace(
+    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
+    `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
+  );
+  if (wrapped !== source) return wrapped;
+  // Fallback: insert actions before the sponsor directory when intro link was already removed/customized.
+  return source.replace(
+    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
+    `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
+  );
+}
+
 function renderSponsorPageBody(page, sponsors) {
   const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
-  let html = rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || ''));
+  let html = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || '')));
   if (html.includes('data-sponsors')) {
     return replaceMarkedDirectory(html, 'data-sponsors', directory) || `${html}${directory}`;
   }
   if (html.includes('class="sponsor-directory"')) {
     return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
   }
-  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
+  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
 }
 
 function renderBecomeSponsorPageBody(page) {
@@ -3952,7 +3973,7 @@ export function generateStructuredPageHtml(payload = {}) {
     const sponsorCallout = calloutTitle || calloutText
       ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside>`
       : '';
-    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
+    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div>${SPONSOR_INTRO_ACTIONS_HTML}</div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
   }
 
   if (layout === 'become-sponsor') {
@@ -4300,6 +4321,131 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: error.message || 'Payment succeeded but sponsorship activation failed' }, 500);
     }
+  }
+  if (url.pathname === '/api/donations' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    const donorName = String(payload.donor_name || payload.name || '').trim();
+    const amountDisplay = String(payload.amount_display || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || amountDisplay || payload.amount,
+    });
+    if (!donorName || donorName.length > 160) {
+      return jsonResponse({ detail: 'Donor name is required' }, 422);
+    }
+    if (!amountCents || amountCents < 100) {
+      return jsonResponse({ detail: 'Enter a donation amount of at least $1' }, 422);
+    }
+    if (amountCents > 2_500_000) {
+      return jsonResponse({ detail: 'Donation amount cannot exceed $25,000' }, 422);
+    }
+    const display = amountDisplay || formatSponsorAmountDisplay(amountCents);
+    const now = new Date().toISOString();
+    const completionToken = crypto.randomUUID().replace(/-/g, '');
+    const insert = await env.DB.prepare(
+      `INSERT INTO donations
+        (donor_name, amount_cents, amount_display, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(donorName, amountCents, display, completionToken, now, now).run();
+    const donationId = insert.meta.last_row_id;
+    const configured = squareCheckoutConfigured(env);
+    const applicationId = squareApplicationId(env);
+    const location = configured ? await resolveSquareLocationId(env) : { ok: false, location_id: '' };
+    const webPayments = Boolean(configured && applicationId && location.ok && location.location_id);
+    return jsonResponse({
+      ok: true,
+      id: donationId,
+      donor_name: donorName,
+      amount_cents: amountCents,
+      amount_display: display,
+      completion_token: completionToken,
+      payment_ready: webPayments,
+      web_payments: webPayments,
+      mock_enabled: squareMockPayEnabled(env),
+      detail: webPayments
+        ? 'Donation saved. Continue to Square to pay.'
+        : (configured
+          ? 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.'
+          : 'Donation saved. Square payment is not connected yet.'),
+    });
+  }
+  const donationPayMatch = url.pathname.match(/^\/api\/donations\/(\d+)\/pay$/);
+  if (donationPayMatch && request.method === 'POST') {
+    const donationId = Number(donationPayMatch[1]);
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    const sourceId = String(payload.source_id || payload.sourceId || '').trim();
+    const mock = Boolean(payload.mock);
+    if (!donationId) return jsonResponse({ detail: 'Donation not found' }, 404);
+    const donation = await env.DB.prepare(
+      `SELECT id, donor_name, amount_cents, amount_display, status, square_payment_id, completion_token, paid_at
+       FROM donations WHERE id = ?`,
+    ).bind(donationId).first();
+    if (!donation) return jsonResponse({ detail: 'Donation not found' }, 404);
+    if (!token || token !== String(donation.completion_token || '')) {
+      return jsonResponse({ detail: 'Invalid payment completion token' }, 403);
+    }
+    if (['paid', 'paid_mock'].includes(String(donation.status || '')) || donation.paid_at) {
+      return jsonResponse({
+        ok: true,
+        created: false,
+        donation_id: donationId,
+        donor_name: donation.donor_name,
+        amount_cents: donation.amount_cents,
+        amount_display: donation.amount_display,
+        detail: 'This donation was already paid. Thank you!',
+      });
+    }
+    if (mock) {
+      if (!squareMockPayEnabled(env)) {
+        return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
+      }
+      const paidAt = new Date().toISOString();
+      await env.DB.prepare(
+        `UPDATE donations
+         SET status = 'paid_mock', paid_at = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(paidAt, paidAt, donationId).run();
+      return jsonResponse({
+        ok: true,
+        mock: true,
+        created: true,
+        donation_id: donationId,
+        donor_name: donation.donor_name,
+        amount_cents: donation.amount_cents,
+        amount_display: donation.amount_display,
+        detail: `Thank you, ${donation.donor_name}! Your ${donation.amount_display} donation was recorded.`,
+      });
+    }
+    if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
+    if (!squareCheckoutConfigured(env)) {
+      return jsonResponse({ detail: 'Square payment is not connected yet' }, 503);
+    }
+    const payment = await createSquareCardPayment(env, {
+      sourceId,
+      amountCents: donation.amount_cents,
+      referenceId: `donate-${donationId}`,
+      note: `EFHS Band donation — ${donation.donor_name}`,
+    });
+    if (!payment.ok) {
+      return jsonResponse({ detail: payment.detail || 'Square payment failed' }, 422);
+    }
+    const paidAt = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE donations
+       SET square_payment_id = ?, status = 'paid', paid_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).bind(payment.payment_id || '', paidAt, paidAt, donationId).run();
+    return jsonResponse({
+      ok: true,
+      created: true,
+      donation_id: donationId,
+      donor_name: donation.donor_name,
+      amount_cents: donation.amount_cents,
+      amount_display: donation.amount_display,
+      payment_id: payment.payment_id,
+      detail: `Thank you, ${donation.donor_name}! Your ${donation.amount_display} donation was received.`,
+    });
   }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));
