@@ -175,13 +175,14 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-08';
+const ASSET_VERSION = 'admin-cms-20260805-09';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
 const ZERNIO_FACEBOOK_PENDING_KEY = 'zernio_facebook_pending';
 const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
+const ZERNIO_FACEBOOK_EVENTS_KEY = 'zernio_facebook_events';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
@@ -1162,16 +1163,27 @@ export function normalizeZernioPostPayload(payload = {}, account = null) {
   return body;
 }
 
+function zernioAccountProfileId(account = null) {
+  const profile = account?.profileId;
+  if (profile && typeof profile === 'object') return String(profile._id || profile.id || '').trim();
+  return String(profile || '').trim();
+}
+
 async function syncZernioFacebookConnection(env, profileId = '') {
+  const preferredProfileId = String(profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
   const data = await zernioApi(env, '/accounts');
   const accounts = Array.isArray(data?.accounts) ? data.accounts : (Array.isArray(data) ? data : []);
-  const facebook = accounts.find((account) => String(account?.platform || '').toLowerCase() === 'facebook');
+  const facebookAccounts = accounts.filter((account) => String(account?.platform || '').toLowerCase() === 'facebook');
+  const facebook = facebookAccounts.find((account) => zernioAccountProfileId(account) === preferredProfileId)
+    || facebookAccounts.find((account) => String(account?.profileId?.name || '').trim().toLowerCase() === 'east forsyth band')
+    || facebookAccounts[facebookAccounts.length - 1]
+    || null;
   if (!facebook) return null;
   const connection = {
     accountId: String(facebook._id || facebook.accountId || facebook.id || '').trim(),
-    profileId: String(profileId || facebook.profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim(),
+    profileId: preferredProfileId || zernioAccountProfileId(facebook),
     platform: 'facebook',
-    name: String(facebook.displayName || facebook.name || facebook.username || 'Facebook Page').trim(),
+    name: String(facebook.selectedPageName || facebook.displayName || facebook.name || facebook.username || 'Facebook Page').trim(),
     username: String(facebook.username || '').trim(),
     connectedAt: new Date().toISOString(),
   };
@@ -1179,6 +1191,221 @@ async function syncZernioFacebookConnection(env, profileId = '') {
   await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify(connection));
   if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
   return connection;
+}
+
+function emptyFacebookEventSyncState() {
+  return {
+    posted: {},
+    pending: {},
+    lastPublishedAt: '',
+    lastPostId: '',
+    seeded: false,
+  };
+}
+
+export function parseFacebookEventSyncState(raw) {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '') : raw;
+    if (!parsed || typeof parsed !== 'object') return emptyFacebookEventSyncState();
+    return {
+      posted: parsed.posted && typeof parsed.posted === 'object' ? parsed.posted : {},
+      pending: parsed.pending && typeof parsed.pending === 'object' ? parsed.pending : {},
+      lastPublishedAt: String(parsed.lastPublishedAt || '').trim(),
+      lastPostId: String(parsed.lastPostId || '').trim(),
+      seeded: Boolean(parsed.seeded),
+    };
+  } catch {
+    return emptyFacebookEventSyncState();
+  }
+}
+
+export function eventFacebookFingerprint(event = {}) {
+  const title = htmlToPlainText(event.title || '').trim();
+  const description = htmlToPlainText(event.description || '').trim();
+  const date = Number(event.repeat_enabled)
+    ? `repeat:${formatRepeatSummary(event)}`
+    : `${eventYearValue(event)}|${String(event.date_label || '').trim()}|${String(event.date_detail || '').trim()}`;
+  return `${date}||${title}||${description}`;
+}
+
+async function getFacebookEventSyncState(env) {
+  return parseFacebookEventSyncState(await getSiteContentValue(env, ZERNIO_FACEBOOK_EVENTS_KEY));
+}
+
+async function saveFacebookEventSyncState(env, state) {
+  const next = parseFacebookEventSyncState(state);
+  await setSiteContentValue(env, ZERNIO_FACEBOOK_EVENTS_KEY, JSON.stringify(next));
+  return next;
+}
+
+function formatEventDateForFacebook(event = {}) {
+  if (Number(event.repeat_enabled)) {
+    return formatRepeatSummary(event) || 'Repeating event';
+  }
+  const label = String(event.date_label || '').trim();
+  const detail = String(event.date_detail || '').trim();
+  const year = eventYearValue(event);
+  const datePart = [label, detail].filter(Boolean).join(' ');
+  return datePart ? `${datePart}, ${year}` : String(year);
+}
+
+export function formatFacebookCalendarDigest(events = [], { calendarUrl = '' } = {}) {
+  const lines = ['East Forsyth Band — calendar updates', ''];
+  for (const event of events) {
+    const title = htmlToPlainText(event.title || '').trim() || 'Untitled event';
+    const when = formatEventDateForFacebook(event);
+    const description = htmlToPlainText(event.description || '').trim();
+    lines.push(`• ${when} — ${title}`);
+    if (description) {
+      const short = description.length > 220 ? `${description.slice(0, 217).trim()}…` : description;
+      lines.push(`  ${short}`);
+    }
+    lines.push('');
+  }
+  if (calendarUrl) {
+    lines.push(`Full calendar: ${calendarUrl}`);
+  }
+  return lines.join('\n').trim();
+}
+
+async function getCalendarPublicUrl(env) {
+  try {
+    const row = await env.DB.prepare('SELECT path, slug FROM pages WHERE slug = ? LIMIT 1').bind('calendar').first();
+    const path = String(row?.path || '/calendar.html').trim() || '/calendar.html';
+    return `${PUBLIC_SITE_ORIGIN_DEFAULT}${path.startsWith('/') ? path : `/${path}`}`;
+  } catch {
+    return `${PUBLIC_SITE_ORIGIN_DEFAULT}/calendar.html`;
+  }
+}
+
+async function pruneFacebookEventSyncState(env, state) {
+  const next = parseFacebookEventSyncState(state);
+  const rows = await env.DB.prepare('SELECT id FROM events').all();
+  const liveIds = new Set((rows.results || []).map((row) => String(row.id)));
+  for (const key of Object.keys(next.pending)) {
+    if (!liveIds.has(String(key))) delete next.pending[key];
+  }
+  for (const key of Object.keys(next.posted)) {
+    if (!liveIds.has(String(key))) delete next.posted[key];
+  }
+  return next;
+}
+
+async function seedFacebookEventPendingIfNeeded(env, state) {
+  const next = parseFacebookEventSyncState(state);
+  if (next.seeded || Object.keys(next.posted).length) {
+    next.seeded = true;
+    return next;
+  }
+  const upcoming = await getEvents(env, { upcomingOnly: true, expandRepeats: false });
+  const now = new Date().toISOString();
+  for (const event of upcoming) {
+    const id = String(event.id);
+    next.pending[id] = {
+      fingerprint: eventFacebookFingerprint(event),
+      queuedAt: now,
+      reason: 'seed',
+    };
+  }
+  next.seeded = true;
+  return next;
+}
+
+async function queueEventForFacebook(env, event, reason = 'updated') {
+  if (!event?.id) return null;
+  const state = await pruneFacebookEventSyncState(env, await getFacebookEventSyncState(env));
+  const id = String(event.id);
+  const fingerprint = eventFacebookFingerprint(event);
+  const posted = state.posted[id];
+  if (posted && posted.fingerprint === fingerprint) {
+    delete state.pending[id];
+    return saveFacebookEventSyncState(env, state);
+  }
+  if (state.pending[id]?.fingerprint === fingerprint) return state;
+  state.pending[id] = {
+    fingerprint,
+    queuedAt: new Date().toISOString(),
+    reason: posted ? 'updated' : (reason === 'seed' ? 'seed' : 'new'),
+  };
+  return saveFacebookEventSyncState(env, state);
+}
+
+async function unqueueEventForFacebook(env, eventId) {
+  const state = await getFacebookEventSyncState(env);
+  const id = String(eventId || '');
+  if (!id) return state;
+  delete state.pending[id];
+  delete state.posted[id];
+  return saveFacebookEventSyncState(env, state);
+}
+
+async function getFacebookEventQueueStatus(env) {
+  let state = await pruneFacebookEventSyncState(env, await getFacebookEventSyncState(env));
+  state = await seedFacebookEventPendingIfNeeded(env, state);
+  state = await saveFacebookEventSyncState(env, state);
+  const pendingIds = Object.keys(state.pending);
+  const events = [];
+  for (const id of pendingIds) {
+    const event = await getEventById(env, Number(id));
+    if (!event) continue;
+    events.push({
+      ...event,
+      queue_reason: state.pending[id]?.reason || 'new',
+      queued_at: state.pending[id]?.queuedAt || '',
+    });
+  }
+  events.sort(compareEventsByDate);
+  return {
+    pending_count: events.length,
+    pending_events: events,
+    last_published_at: state.lastPublishedAt || '',
+    last_post_id: state.lastPostId || '',
+    seeded: Boolean(state.seeded),
+    posted_count: Object.keys(state.posted).length,
+  };
+}
+
+async function publishFacebookEventQueue(env) {
+  const status = await getZernioFacebookStatus(env, { sync: true });
+  if (!status.connected || !status.account?.accountId) {
+    throw new Error('Connect a Facebook Page before posting calendar updates.');
+  }
+  const queue = await getFacebookEventQueueStatus(env);
+  if (!queue.pending_events.length) {
+    throw new Error('No new or updated calendar events are waiting to post.');
+  }
+  const calendarUrl = await getCalendarPublicUrl(env);
+  const content = formatFacebookCalendarDigest(queue.pending_events, { calendarUrl });
+  if (content.length > 60000) throw new Error('Calendar update post is too long. Post fewer events at once.');
+  const created = await zernioApi(env, '/posts', {
+    method: 'POST',
+    body: JSON.stringify({
+      content,
+      platforms: [{ platform: 'facebook', accountId: status.account.accountId }],
+      publishNow: true,
+    }),
+  });
+  const state = await getFacebookEventSyncState(env);
+  const postedAt = new Date().toISOString();
+  for (const event of queue.pending_events) {
+    const id = String(event.id);
+    state.posted[id] = {
+      fingerprint: state.pending[id]?.fingerprint || eventFacebookFingerprint(event),
+      postedAt,
+    };
+    delete state.pending[id];
+  }
+  state.lastPublishedAt = postedAt;
+  state.lastPostId = String(created?.post?._id || created?._id || created?.id || '').trim();
+  state.seeded = true;
+  await saveFacebookEventSyncState(env, state);
+  return {
+    ok: true,
+    post: created?.post || created,
+    published_count: queue.pending_events.length,
+    content,
+    ...(await getFacebookEventQueueStatus(env)),
+  };
 }
 
 async function rememberZernioFacebookDebug(env, info = {}) {
@@ -3355,6 +3582,26 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: error.message || 'Could not select Facebook Page' }, 502);
     }
   }
+  if (url.pathname === '/api/admin/zernio/facebook/events' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    try {
+      await getZernioFacebookStatus(env, { sync: true });
+      return jsonResponse(await getFacebookEventQueueStatus(env));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not load Facebook event queue' }, 502);
+    }
+  }
+  if (url.pathname === '/api/admin/zernio/facebook/events/publish' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    try {
+      return jsonResponse(await publishFacebookEventQueue(env), 201);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not publish calendar updates' }, 502);
+    }
+  }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
@@ -3984,7 +4231,9 @@ async function handleApi(request, env, url) {
       JSON.stringify(p.repeat_months),
       JSON.stringify(p.repeat_exceptions),
     ).run();
-    return jsonResponse(await getEventById(env, result.meta.last_row_id));
+    const created = await getEventById(env, result.meta.last_row_id);
+    try { await queueEventForFacebook(env, created, 'new'); } catch { /* queue is best-effort */ }
+    return jsonResponse(created);
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -3998,6 +4247,7 @@ async function handleApi(request, env, url) {
     }
     if (request.method === 'DELETE') {
       await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
+      try { await unqueueEventForFacebook(env, id); } catch { /* ignore */ }
       return jsonResponse({ ok: true });
     }
     const p = normalizeEventPayload(await request.json(), existing);
@@ -4025,7 +4275,9 @@ async function handleApi(request, env, url) {
       JSON.stringify(p.repeat_exceptions),
       id,
     ).run();
-    return jsonResponse(await getEventById(env, id));
+    const updated = await getEventById(env, id);
+    try { await queueEventForFacebook(env, updated, 'updated'); } catch { /* queue is best-effort */ }
+    return jsonResponse(updated);
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
@@ -4423,7 +4675,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack zernio-facebook-card">
   <div class="utility-links-head">
     <h2>Facebook connection</h2>
-    <p class="muted">Requires a Facebook Page admin login. After OAuth, choose the East Forsyth Band Page if prompted.</p>
+    <p class="muted">Log in as a Facebook Page Admin/Editor. On Meta’s permission screens, select your Business and turn on the East Forsyth Band Page — if no Page is shared, connect fails with “no Facebook pages”.</p>
   </div>
   <p class="notice" id="zernio-facebook-status">Checking Facebook connection…</p>
   <div class="panel-actions">
@@ -4440,6 +4692,18 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
   <div id="zernio-facebook-pages-list" class="admin-list zernio-pages-list"></div>
   <p class="status" id="zernio-facebook-pages-status"></p>
+</div>
+<div class="admin-card stack" id="zernio-facebook-events-card" hidden>
+  <div class="utility-links-head">
+    <h2>Calendar updates for Facebook</h2>
+    <p class="muted">Current upcoming events start in this queue. After you post them, only newly added or changed events accumulate here until you post again.</p>
+  </div>
+  <p class="notice" id="zernio-facebook-events-summary">Checking calendar queue…</p>
+  <div id="zernio-facebook-events-list" class="admin-list zernio-events-queue-list"></div>
+  <div class="panel-actions">
+    <button class="btn primary" type="button" id="zernio-facebook-events-publish" hidden>Post calendar updates to Facebook</button>
+  </div>
+  <p class="status" id="zernio-facebook-events-status"></p>
 </div>
 <form id="zernio-post-form" class="admin-card stack" hidden>
   <h2>Compose Facebook post</h2>

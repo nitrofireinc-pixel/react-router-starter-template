@@ -32,7 +32,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -1986,6 +1986,8 @@ function renderZernioFacebookStatus(status) {
   if (refreshBtn) refreshBtn.hidden = !status?.configured;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
   if (postForm) postForm.hidden = !status?.connected;
+  const eventsCard = document.querySelector('#zernio-facebook-events-card');
+  if (eventsCard) eventsCard.hidden = !status?.connected;
   if (!status?.needsPageSelection) state.zernioPages = [];
   renderZernioFacebookPages();
   syncZernioPublishModeUi();
@@ -2094,10 +2096,69 @@ async function loadZernioPosts() {
   }
 }
 
+function renderZernioEventQueue() {
+  const list = document.querySelector('#zernio-facebook-events-list');
+  const summary = document.querySelector('#zernio-facebook-events-summary');
+  const publishBtn = document.querySelector('#zernio-facebook-events-publish');
+  const queue = state.zernioEventQueue;
+  const events = Array.isArray(queue?.pending_events) ? queue.pending_events : [];
+  if (summary) {
+    if (!state.zernioFacebook?.connected) {
+      summary.textContent = 'Connect Facebook to queue and post calendar updates.';
+    } else if (!events.length) {
+      summary.textContent = queue?.last_published_at
+        ? `No new calendar updates waiting. Last posted ${new Date(queue.last_published_at).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET.`
+        : 'No upcoming calendar events are waiting to post.';
+    } else {
+      summary.textContent = `${events.length} calendar event${events.length === 1 ? '' : 's'} waiting to post to Facebook.`;
+    }
+  }
+  if (list) {
+    list.innerHTML = events.length
+      ? events.map((event) => {
+        const title = plainTextFromHtml(event.title || 'Untitled event') || 'Untitled event';
+        const when = Number(event.repeat_enabled)
+          ? (event.repeat_summary || 'Repeating event')
+          : `${event.date_label || ''} ${event.date_detail || ''} ${event.event_year || ''}`.trim();
+        const reason = event.queue_reason === 'updated' ? 'Updated' : (event.queue_reason === 'seed' ? 'Current' : 'New');
+        return `<article class="admin-row"><div><b>${escapeHtml(title)}</b><small>${escapeHtml(when)} · ${escapeHtml(reason)}</small></div></article>`;
+      }).join('')
+      : '<p class="muted">Queue is empty.</p>';
+  }
+  if (publishBtn) {
+    publishBtn.hidden = !state.zernioFacebook?.connected || !events.length;
+    publishBtn.disabled = !events.length;
+  }
+}
+
+async function loadZernioEventQueue() {
+  const statusEl = document.querySelector('#zernio-facebook-events-status');
+  if (!hasPermission('site') || !state.zernioFacebook?.connected) {
+    state.zernioEventQueue = null;
+    renderZernioEventQueue();
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Loading calendar queue…';
+  try {
+    state.zernioEventQueue = await jsonFetch('/api/admin/zernio/facebook/events');
+    renderZernioEventQueue();
+    if (statusEl) statusEl.textContent = '';
+  } catch (error) {
+    state.zernioEventQueue = { pending_events: [], pending_count: 0 };
+    renderZernioEventQueue();
+    if (statusEl) statusEl.textContent = error.message || 'Could not load calendar queue.';
+  }
+}
+
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
   await loadZernioFacebookStatus({ sync });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
+  if (state.zernioFacebook?.connected) await loadZernioEventQueue();
+  else {
+    state.zernioEventQueue = null;
+    renderZernioEventQueue();
+  }
   await loadZernioPosts();
 }
 
@@ -4144,6 +4205,23 @@ function bindForms() {
         : 'No Facebook Page connected yet. Use Connect Facebook to finish OAuth.';
     } catch (error) {
       if (messageEl) messageEl.textContent = error.message || 'Could not refresh Facebook status.';
+    }
+  });
+
+  document.querySelector('#zernio-facebook-events-publish')?.addEventListener('click', async () => {
+    const statusEl = document.querySelector('#zernio-facebook-events-status');
+    const count = Number(state.zernioEventQueue?.pending_count || 0);
+    if (!count) return;
+    if (!confirm(`Post ${count} calendar event${count === 1 ? '' : 's'} to the Facebook Page now?`)) return;
+    if (statusEl) statusEl.textContent = 'Posting calendar updates…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/facebook/events/publish', { method: 'POST', body: '{}' });
+      state.zernioEventQueue = result;
+      renderZernioEventQueue();
+      if (statusEl) statusEl.textContent = `Posted ${result.published_count || count} event${(result.published_count || count) === 1 ? '' : 's'} to Facebook.`;
+      await loadZernioPosts();
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not post calendar updates.';
     }
   });
 
