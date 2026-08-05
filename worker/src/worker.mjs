@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-66';
+const ASSET_VERSION = 'admin-cms-20260805-67';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2195,14 +2195,32 @@ export function renderSquareDonateCard() {
   <h3>Direct Support</h3>
   <p>Give securely online to support instruments, travel, meals, uniforms, and student opportunities.</p>
   <div class="square-donate">
-    <a class="btn primary" id="embedded-checkout-modal-checkout-button" data-square-checkout data-url="https://square.link/u/IIGMHqVQ?src=embd" href="https://square.link/u/IIGMHqVQ?src=embed" target="_blank" rel="noopener noreferrer">Donate</a>
+    <button type="button" class="btn primary" data-donate-open>Donate</button>
   </div>
 </article>`;
 }
 
+export function rewriteFundraisingDonateToPopup(html) {
+  let source = String(html || '');
+  if (!source.trim()) return source;
+  // Prefer the in-page donate popup over legacy Square payment-link popups.
+  source = source.replace(
+    /<a\b[^>]*(?:data-square-checkout|id=["']embedded-checkout-modal-checkout-button["'])[^>]*>\s*Donate\s*<\/a>/gi,
+    '<button type="button" class="btn primary" data-donate-open>Donate</button>',
+  );
+  source = source.replace(
+    /<a\b[^>]*href=["'][^"']*square\.link[^"']*["'][^>]*>\s*Donate\s*<\/a>/gi,
+    '<button type="button" class="btn primary" data-donate-open>Donate</button>',
+  );
+  return source;
+}
+
 export function ensureFundraisingDonateSlot(html) {
-  const source = String(html || '');
-  if (/data-square-checkout|data-square-donate/i.test(source)) return source;
+  let source = rewriteFundraisingDonateToPopup(html);
+  if (/data-donate-open/i.test(source) && /data-square-donate|Direct Support/i.test(source)) {
+    return source;
+  }
+  if (/data-square-donate/i.test(source)) return source;
   const donate = renderSquareDonateCard();
   if (/data-cms-field=["']body_text["']/i.test(source)) {
     const replaced = source.replace(

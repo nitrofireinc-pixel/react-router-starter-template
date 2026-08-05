@@ -404,14 +404,20 @@ test('ensureBoosterMeetingsSlot injects meetings list hook into Boosters card', 
   assert.equal(ensureBoosterMeetingsSlot(html), html);
 });
 
-test('ensureFundraisingDonateSlot injects Square donate button into CMS fundraising body', () => {
+test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraising body', () => {
   const liveStyle = `<section class="page-hero" data-cms-layout="standard"><div class="page-title"><h1>Fundraising</h1></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Buy a raffle ticket</p></div></div></section>`;
   const html = ensureFundraisingDonateSlot(liveStyle);
-  assert.match(html, /data-square-checkout/);
-  assert.match(html, /square\.link\/u\/IIGMHqVQ/);
-  assert.match(html, /Buy a raffle ticket/);
+  assert.match(html, /data-donate-open/);
   assert.match(html, /Direct Support/);
+  assert.doesNotMatch(html, /data-square-checkout/);
+  assert.doesNotMatch(html, /square\.link\/u\/IIGMHqVQ/);
+  assert.match(html, /Buy a raffle ticket/);
   assert.equal(ensureFundraisingDonateSlot(html), html);
+
+  const legacy = `<article class="card accent-card square-donate-card" data-square-donate><h3>Direct Support</h3><a class="btn primary" data-square-checkout data-url="https://square.link/u/IIGMHqVQ?src=embd" href="https://square.link/u/IIGMHqVQ?src=embed" target="_blank">Donate</a></article>`;
+  const rewritten = ensureFundraisingDonateSlot(legacy);
+  assert.match(rewritten, /data-donate-open/);
+  assert.doesNotMatch(rewritten, /data-square-checkout/);
 });
 
 test('isMaintenanceMode treats common truthy site setting values as enabled', () => {
