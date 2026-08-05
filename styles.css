@@ -2036,6 +2036,17 @@ body.sponsor-signup-open{overflow:hidden}
   justify-content:flex-end;
   margin-top:6px;
 }
+.sponsor-signup-actions-split{
+  justify-content:space-between;
+  align-items:center;
+}
+.sponsor-signup-actions-end{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:flex-end;
+  margin-left:auto;
+}
 .sponsor-signup-summary{
   display:grid;
   gap:10px;
@@ -2107,7 +2118,16 @@ body.sponsor-signup-open{overflow:hidden}
 @media(max-width:640px){
   .sponsor-signup-panel{padding:18px 16px 16px;border-radius:18px}
   .sponsor-signup-actions{justify-content:stretch}
-  .sponsor-signup-actions .btn{flex:1 1 auto}
+  .sponsor-signup-actions-split{
+    flex-direction:column-reverse;
+    align-items:stretch;
+  }
+  .sponsor-signup-actions-end{
+    margin-left:0;
+    width:100%;
+  }
+  .sponsor-signup-actions .btn,
+  .sponsor-signup-actions-end .btn{flex:1 1 auto}
 }
 @media(prefers-reduced-motion:reduce){
   .sponsor-signup-backdrop,

@@ -697,9 +697,12 @@ function openSponsorSignupModal(pkg) {
           <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
           <p class="status" data-pay-status></p>
         </div>
-        <div class="sponsor-signup-actions" data-pay-actions>
-          <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
-          <button class="btn primary" type="button" data-pay-continue>Pay with Square</button>
+        <div class="sponsor-signup-actions sponsor-signup-actions-split" data-pay-actions>
+          <button class="btn outline" type="button" data-signup-back>Back</button>
+          <div class="sponsor-signup-actions-end">
+            <button class="btn outline" type="button" data-signup-cancel>Cancel</button>
+            <button class="btn primary" type="button" data-pay-continue>Pay with Square</button>
+          </div>
         </div>
       </div>
       <div class="sponsor-signup-confirm" data-signup-confirm hidden>
@@ -1064,16 +1067,55 @@ function openSponsorSignupModal(pkg) {
       return;
     }
     sponsorSignupState.draft = { businessName, address, phone, logo };
-    modal.querySelector('[data-pay-business]').textContent = businessName;
-    modal.querySelector('[data-pay-amount]').value = pkg.amountDisplay;
+    sponsorSignupState.application = null;
+    resetPaymentStepPreview(businessName);
     detailsStep.hidden = true;
     paymentStep.hidden = false;
-    if (payStatus) payStatus.textContent = '';
-    if (payNote) {
-      payNote.textContent = 'Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:';
-    }
     modal.querySelector('[data-pay-continue]')?.focus();
   });
+
+  function resetPaymentStepPreview(businessName = '') {
+    modal.classList.remove('is-checkout');
+    if (checkoutMessageBound) {
+      window.removeEventListener('message', handleSponsorPaidMessage);
+      checkoutMessageBound = false;
+    }
+    const name = businessName || sponsorSignupState.draft?.businessName || '';
+    if (payBody) {
+      payBody.innerHTML = `
+        <div class="sponsor-signup-summary">
+          <p><span>Business</span><strong data-pay-business>${escapeHtml(name)}</strong></p>
+          <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        </div>
+        <label class="sponsor-signup-amount-lock">Amount due
+          <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
+        </label>
+        <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
+        <p class="status" data-pay-status></p>
+      `;
+    }
+    const payContinue = modal.querySelector('[data-pay-continue]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = false;
+      payContinue.textContent = 'Pay with Square';
+      payContinue.onclick = null;
+    }
+    const headCopy = modal.querySelector('[data-signup-head-copy]');
+    if (headCopy) {
+      headCopy.innerHTML = `Tell us about your business, then continue to payment for <strong>${escapeHtml(pkg.amountDisplay)}</strong>.`;
+    }
+  }
+
+  function goBackToDetails() {
+    resetPaymentStepPreview();
+    paymentStep.hidden = true;
+    detailsStep.hidden = false;
+    if (status) status.textContent = '';
+    form?.elements.business_name?.focus();
+  }
+
+  modal.querySelector('[data-signup-back]')?.addEventListener('click', goBackToDetails);
 
   async function startSquarePayment() {
     const payButton = modal.querySelector('[data-pay-continue]');
