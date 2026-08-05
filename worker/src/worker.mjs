@@ -175,7 +175,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-11';
+const ASSET_VERSION = 'admin-cms-20260805-12';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -4748,7 +4748,30 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>View booster meeting minutes by date. Secretaries can create and edit submissions for 10 days. View-only users can open and print minutes. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-minutes">New minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open below.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list above.</p></div><form id="minutes-form" class="admin-card stack" novalidate hidden><input type="hidden" name="minutes_id" value=""><label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"><small id="minutes-date-hint" class="field-hint">Defaults to today. Type digits and slashes are inserted for you.</small></label><label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label><div class="panel-actions minutes-form-actions"><button class="btn primary" data-minutes-submit type="submit">Save minutes</button><button class="btn outline" type="button" id="cancel-minutes-edit" hidden>Cancel</button></div><p class="status" id="minutes-status"></p></form><article id="minutes-view" class="admin-card stack minutes-view" hidden><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>View booster meeting minutes by date. Secretaries can add minutes in a separate editor. View-only users can open and print. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open below.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list above, or click Add Minutes to create a new entry.</p></div><article id="minutes-view" class="admin-card stack minutes-view" hidden><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div></div>
+<div id="minutes-editor-modal" class="minutes-editor-modal" hidden>
+  <button type="button" class="minutes-editor-backdrop" data-minutes-editor-dismiss aria-label="Close minutes editor"></button>
+  <div class="minutes-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
+    <div class="minutes-editor-head">
+      <div>
+        <p class="kicker">Boosters</p>
+        <h2 id="minutes-editor-title">Add Minutes</h2>
+      </div>
+      <button class="btn outline" type="button" data-minutes-editor-dismiss>Close</button>
+    </div>
+    <form id="minutes-form" class="stack minutes-editor-form" novalidate>
+      <input type="hidden" name="minutes_id" value="">
+      <label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"><small id="minutes-date-hint" class="field-hint">Defaults to today. Type digits and slashes are inserted for you.</small></label>
+      <label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label>
+      <div class="panel-actions minutes-form-actions">
+        <button class="btn primary" data-minutes-submit type="submit">Save minutes</button>
+        <button class="btn outline" type="button" id="cancel-minutes-edit">Cancel</button>
+      </div>
+      <p class="status" id="minutes-status"></p>
+    </form>
+  </div>
+</div>
+</section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
