@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-52';
+const ASSET_VERSION = 'admin-cms-20260805-53';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2568,6 +2568,27 @@ export function sponsorBenefitsFromLevel(level = '') {
     show_flyin: tier === 'silver' || tier === 'gold',
     show_game_announcement: tier === 'gold',
   };
+}
+
+export function sponsorShowsMarquee(sponsor = {}) {
+  if (Number(sponsor.active) === 0) return false;
+  if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
+  const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
+  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+}
+
+export function renderSponsorMarqueeSection(sponsors = []) {
+  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  if (!items.length) {
+    return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
+  }
+  const logos = items.map((sponsor) => {
+    const visual = sponsor.logo_url
+      ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
+      : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
+    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+  }).join('');
+  return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
 
 export function sponsorLevelFromTierKey(tier = '') {
@@ -5328,9 +5349,12 @@ function renderNav(pages) {
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = []) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
+  const marqueeHtml = renderSponsorMarqueeSection(
+    Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
+  );
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -5348,7 +5372,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
-<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>
+${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>
@@ -5463,10 +5487,15 @@ async function serveStaticOrCms(request, env, url) {
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
     if (page) {
-      const sponsors = page.slug === 'sponsors' ? await getSponsors(env) : [];
-      const staff = page.slug === 'directors' ? await getStaff(env) : [];
-      const boosterMembers = page.slug === 'boosters' ? await getBoosterMembers(env) : [];
-      return htmlResponse(renderCmsPage(page, await getSite(env), await getPages(env), sponsors, staff, boosterMembers));
+      const [site, pages, allSponsors, staff, boosterMembers] = await Promise.all([
+        getSite(env),
+        getPages(env),
+        getSponsors(env),
+        page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
+        page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
+      ]);
+      const sponsors = page.slug === 'sponsors' ? allSponsors : [];
+      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);

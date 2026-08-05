@@ -236,6 +236,45 @@ function sponsorShowsMarquee(sponsor = {}) {
   return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v1';
+
+function readMarqueeCache() {
+  try {
+    const raw = sessionStorage.getItem(MARQUEE_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMarqueeCache(sponsors = []) {
+  try {
+    sessionStorage.setItem(MARQUEE_CACHE_KEY, JSON.stringify(sponsors));
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
+}
+
+function buildSponsorMarqueeMarkup(sponsors = []) {
+  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  if (!items.length) return '';
+  const logos = items.map((sponsor) => {
+    const visual = sponsor.logo_url
+      ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
+      : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
+    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+  }).join('');
+  return `
+    <div class="wrap sponsor-marquee-bar">
+      <span class="sponsor-marquee-label">Sponsors</span>
+      <div class="sponsor-marquee" data-marquee-track>
+        <div class="sponsor-marquee-track">${logos}${logos}</div>
+      </div>
+    </div>
+  `;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
@@ -290,36 +329,44 @@ function ensureSponsorMarqueeMount() {
 function renderSponsorMarquee(sponsors = []) {
   const mount = ensureSponsorMarqueeMount();
   if (!mount) return;
-  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
-  if (!items.length) {
+  const markup = buildSponsorMarqueeMarkup(sponsors);
+  if (!markup) {
+    // Keep any server-rendered strip visible unless we know there are no sponsors.
+    if (!mount.dataset.marqueeReady) return;
     mount.hidden = true;
     mount.innerHTML = '';
     return;
   }
-  const logos = items.map((sponsor) => {
-    const visual = sponsor.logo_url
-      ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
-      : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
-  }).join('');
-  // Duplicate the track so the CSS loop can scroll seamlessly.
+  const nextHtml = markup.trim();
+  if (mount.dataset.marqueeHtml === nextHtml) {
+    mount.hidden = false;
+    mount.dataset.marqueeReady = '1';
+    return;
+  }
   mount.hidden = false;
-  mount.innerHTML = `
-    <div class="wrap sponsor-marquee-bar">
-      <span class="sponsor-marquee-label">Sponsors</span>
-      <div class="sponsor-marquee" data-marquee-track>
-        <div class="sponsor-marquee-track">${logos}${logos}</div>
-      </div>
-    </div>
-  `;
+  mount.dataset.marqueeReady = '1';
+  mount.dataset.marqueeHtml = nextHtml;
+  mount.innerHTML = nextHtml;
+}
+
+function hydrateMarqueeFromCache() {
+  const mount = ensureSponsorMarqueeMount();
+  if (mount && !mount.hidden && mount.querySelector('.sponsor-marquee-track')) {
+    mount.dataset.marqueeReady = '1';
+    mount.dataset.marqueeHtml = mount.innerHTML.trim();
+  }
+  const cached = readMarqueeCache();
+  if (cached?.length) renderSponsorMarquee(cached);
 }
 
 async function loadSponsorMarquee() {
   try {
     const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
-    renderSponsorMarquee(sponsors);
+    const list = Array.isArray(sponsors) ? sponsors : [];
+    writeMarqueeCache(list);
+    renderSponsorMarquee(list);
   } catch {
-    // Leave the page alone if sponsors cannot load.
+    // Keep any already-visible SSR/cache marquee in place.
   }
 }
 
@@ -414,6 +461,8 @@ function ensureBoosterMeetingsContainers() {
 }
 
 async function loadPublicContent() {
+  // Start marquee immediately so it does not wait on site/events/photos.
+  const marqueePromise = loadSponsorMarquee();
   const [site, events, photos] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
@@ -493,7 +542,7 @@ async function loadPublicContent() {
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
-  await Promise.all([loadSponsorMarquee(), maybeShowHomepageSponsorAd(), loadContactForms()]);
+  await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
 function buildContactFormHtml(topics = []) {
@@ -1174,6 +1223,7 @@ function bindSponsorTierSignup(root = document) {
   });
 }
 
+hydrateMarqueeFromCache();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
