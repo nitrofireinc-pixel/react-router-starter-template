@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-39';
+const ASSET_VERSION = 'admin-cms-20260805-40';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -3926,7 +3926,7 @@ async function handleApi(request, env, url) {
     const applicationId = insert.meta.last_row_id;
     const tierLabel = `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`;
     const origin = publicSiteOrigin(request, env);
-    const completePath = `/sponsor-payment-complete.html?app=${encodeURIComponent(String(applicationId))}&token=${encodeURIComponent(completionToken)}`;
+    const completePath = `/sponsor-payment-complete?app=${encodeURIComponent(String(applicationId))}&token=${encodeURIComponent(completionToken)}`;
     const redirectUrl = `${origin}${completePath}`;
     const mockCheckoutUrl = squareMockPayEnabled(env) ? `${completePath}&mock=1` : '';
     let checkoutUrl = '';

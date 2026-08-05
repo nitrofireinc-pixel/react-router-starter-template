@@ -1910,14 +1910,6 @@ body.sponsor-signup-open{overflow:hidden}
   background:#f4f7fb;
   box-shadow:inset 0 0 0 1px #d7e0ea;
 }
-  display:block;
-  width:100%;
-  height:min(68vh,640px);
-  border:0;
-  border-radius:14px;
-  background:#f4f7fb;
-  box-shadow:inset 0 0 0 1px #d7e0ea;
-}
 .sponsor-signup-mock{
   margin:8px 0 0;
   text-align:center;
