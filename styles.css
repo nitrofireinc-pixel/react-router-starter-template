@@ -495,7 +495,9 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   font-size:.86rem;
 }
 #zernio-post-form[hidden],
+#zernio-facebook-pages-card[hidden],
 #zernio-schedule-fields[hidden]{display:none!important}
+.zernio-pages-list{margin-top:0}
 .zernio-publish-mode{
   margin:0;
 }

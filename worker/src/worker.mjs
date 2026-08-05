@@ -175,11 +175,12 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-05';
+const ASSET_VERSION = 'admin-cms-20260805-06';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
+const ZERNIO_FACEBOOK_PENDING_KEY = 'zernio_facebook_pending';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
@@ -886,6 +887,123 @@ async function zernioApi(env, path, options = {}) {
   return data;
 }
 
+export function parseZernioUserProfile(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    try {
+      const parsed = JSON.parse(decodeURIComponent(text));
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function parseZernioFacebookPending(raw) {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '') : raw;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const profileId = String(parsed.profileId || '').trim();
+    const tempToken = String(parsed.tempToken || '').trim();
+    if (!profileId || !tempToken) return null;
+    return {
+      profileId,
+      tempToken,
+      connectToken: String(parsed.connectToken || parsed.connect_token || '').trim(),
+      userProfile: parsed.userProfile && typeof parsed.userProfile === 'object' ? parsed.userProfile : null,
+      createdAt: String(parsed.createdAt || '').trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getZernioFacebookPending(env) {
+  return parseZernioFacebookPending(await getSiteContentValue(env, ZERNIO_FACEBOOK_PENDING_KEY));
+}
+
+async function setZernioFacebookPending(env, pending) {
+  if (!pending) {
+    await setSiteContentValue(env, ZERNIO_FACEBOOK_PENDING_KEY, '');
+    return null;
+  }
+  const value = {
+    profileId: String(pending.profileId || '').trim(),
+    tempToken: String(pending.tempToken || '').trim(),
+    connectToken: String(pending.connectToken || '').trim(),
+    userProfile: pending.userProfile && typeof pending.userProfile === 'object' ? pending.userProfile : null,
+    createdAt: String(pending.createdAt || new Date().toISOString()).trim(),
+  };
+  await setSiteContentValue(env, ZERNIO_FACEBOOK_PENDING_KEY, JSON.stringify(value));
+  return value;
+}
+
+function zernioConnectHeaders(pending = null) {
+  const token = String(pending?.connectToken || '').trim();
+  return token ? { 'X-Connect-Token': token } : {};
+}
+
+async function listZernioFacebookPages(env, pending) {
+  if (!pending?.profileId || !pending?.tempToken) throw new Error('Facebook page selection is not ready. Connect Facebook again.');
+  const query = new URLSearchParams({
+    profileId: pending.profileId,
+    tempToken: pending.tempToken,
+  });
+  const data = await zernioApi(env, `/connect/facebook/select-page?${query.toString()}`, {
+    headers: zernioConnectHeaders(pending),
+  });
+  const pages = Array.isArray(data?.pages) ? data.pages : [];
+  return pages.map((page) => ({
+    id: String(page?.id || page?.pageId || '').trim(),
+    name: String(page?.name || page?.displayName || page?.username || 'Facebook Page').trim(),
+    username: String(page?.username || '').trim(),
+    category: String(page?.category || '').trim(),
+  })).filter((page) => page.id);
+}
+
+async function selectZernioFacebookPage(env, pending, pageId, requestUrl = '') {
+  const selectedPageId = String(pageId || '').trim();
+  if (!selectedPageId) throw new Error('Choose a Facebook Page to finish connecting.');
+  if (!pending?.profileId || !pending?.tempToken) throw new Error('Facebook page selection expired. Connect Facebook again.');
+  if (!pending.userProfile) throw new Error('Facebook user profile missing from OAuth. Connect Facebook again.');
+  const redirectUrl = requestUrl
+    ? new URL('/admin?tab=social&zernio=facebook_connected', requestUrl).toString()
+    : undefined;
+  const data = await zernioApi(env, '/connect/facebook/select-page', {
+    method: 'POST',
+    headers: zernioConnectHeaders(pending),
+    body: JSON.stringify({
+      profileId: pending.profileId,
+      pageId: selectedPageId,
+      tempToken: pending.tempToken,
+      userProfile: pending.userProfile,
+      ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
+    }),
+  });
+  await setZernioFacebookPending(env, null);
+  const account = data?.account || {};
+  const connection = {
+    accountId: String(account.accountId || account._id || account.id || '').trim(),
+    profileId: pending.profileId,
+    platform: 'facebook',
+    name: String(account.selectedPageName || account.displayName || account.username || 'Facebook Page').trim(),
+    username: String(account.username || '').trim(),
+    connectedAt: new Date().toISOString(),
+  };
+  if (!connection.accountId) {
+    const synced = await syncZernioFacebookConnection(env, pending.profileId);
+    if (synced) return synced;
+    throw new Error('Facebook Page was selected but no account id was returned.');
+  }
+  await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify(connection));
+  await setSiteContentValue(env, ZERNIO_PROFILE_KEY, pending.profileId);
+  return connection;
+}
+
 async function ensureZernioProfileId(env) {
   const existing = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
   if (existing) return existing;
@@ -914,13 +1032,19 @@ async function ensureZernioProfileId(env) {
 async function getZernioFacebookStatus(env, { sync = false } = {}) {
   const configured = zernioConfigured(env);
   let stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
-  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim();
+  let pending = await getZernioFacebookPending(env);
+  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || pending?.profileId || '').trim();
   if (configured && sync) {
     try {
       profileId = await ensureZernioProfileId(env);
       const live = await syncZernioFacebookConnection(env, profileId);
-      if (live) stored = live;
-      else if (stored?.accountId) {
+      if (live) {
+        stored = live;
+        if (pending) {
+          await setZernioFacebookPending(env, null);
+          pending = null;
+        }
+      } else if (stored?.accountId) {
         // Stored account no longer present remotely.
         const data = await zernioApi(env, '/accounts');
         const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
@@ -934,23 +1058,32 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
       return {
         configured,
         connected: Boolean(stored?.accountId),
+        needsPageSelection: Boolean(pending && !stored?.accountId),
         profileId,
         account: stored,
         detail: stored?.accountId
           ? `Connected: ${stored.name || stored.accountId}`
-          : `Could not refresh Zernio status: ${error.message}`,
+          : (pending
+            ? 'Facebook login finished. Choose which Page to connect below.'
+            : `Could not refresh Zernio status: ${error.message}`),
         error: error.message,
       };
     }
   }
+  const needsPageSelection = Boolean(pending && !stored?.accountId);
   return {
     configured,
     connected: Boolean(stored?.accountId),
+    needsPageSelection,
     profileId,
     account: stored,
     connectPath: '/admin/zernio/facebook/connect',
     detail: configured
-      ? (stored?.accountId ? `Connected: ${stored.name || stored.accountId}` : 'Ready to connect a Facebook Page via OAuth.')
+      ? (stored?.accountId
+        ? `Connected: ${stored.name || stored.accountId}`
+        : (needsPageSelection
+          ? 'Facebook login finished. Choose which Page to connect below.'
+          : 'Ready to connect a Facebook Page via OAuth.'))
       : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
   };
 }
@@ -1014,6 +1147,7 @@ async function handleZernioFacebookConnect(request, env) {
     const query = new URLSearchParams({
       profileId,
       redirect_url: redirectUrl,
+      headless: 'true',
     });
     const data = await zernioApi(env, `/connect/facebook?${query.toString()}`);
     const authUrl = String(data?.authUrl || data?.url || '').trim();
@@ -1040,9 +1174,37 @@ async function handleZernioFacebookCallback(request, env) {
   try {
     const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
     if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+
+    const tempToken = String(url.searchParams.get('tempToken') || url.searchParams.get('temp_token') || '').trim();
+    const step = String(url.searchParams.get('step') || '').trim().toLowerCase();
+    const userProfile = parseZernioUserProfile(url.searchParams.get('userProfile') || url.searchParams.get('user_profile') || '');
+    const connectToken = String(url.searchParams.get('connect_token') || url.searchParams.get('connectToken') || '').trim();
+
+    if (tempToken && (step === 'select_page' || userProfile || connectToken)) {
+      const pending = await setZernioFacebookPending(env, {
+        profileId,
+        tempToken,
+        connectToken,
+        userProfile,
+        createdAt: new Date().toISOString(),
+      });
+      try {
+        const pages = await listZernioFacebookPages(env, pending);
+        if (pages.length === 1) {
+          await selectZernioFacebookPage(env, pending, pages[0].id, request.url);
+          return redirect('/admin?tab=social&zernio=facebook_connected');
+        }
+        if (!pages.length) {
+          return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent('No Facebook Pages were returned. Make sure you are a Page admin and select the Page/business in the Meta dialog, then connect again.')}`);
+        }
+      } catch (listError) {
+        return redirect(`/admin?tab=social&zernio=facebook_error&detail=${encodeURIComponent(listError?.message || 'Could not list Facebook Pages')}`);
+      }
+      return redirect('/admin?tab=social&zernio=facebook_select');
+    }
+
     const connection = await syncZernioFacebookConnection(env, profileId);
     if (!connection) {
-      // Standard Zernio flow may still be connecting; store callback hints if present.
       const hintedId = String(url.searchParams.get('accountId') || url.searchParams.get('account_id') || '').trim();
       const hintedName = String(url.searchParams.get('username') || url.searchParams.get('name') || 'Facebook Page').trim();
       if (hintedId) {
@@ -1054,6 +1216,7 @@ async function handleZernioFacebookCallback(request, env) {
           username: hintedName,
           connectedAt: new Date().toISOString(),
         }));
+        await setZernioFacebookPending(env, null);
       } else {
         return redirect('/admin?tab=social&zernio=facebook_pending');
       }
@@ -3056,7 +3219,45 @@ async function handleApi(request, env, url) {
       }
     }
     await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, '');
+    await setZernioFacebookPending(env, null);
     return jsonResponse(await getZernioFacebookStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/facebook/pages' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    const pending = await getZernioFacebookPending(env);
+    if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.', pages: [] }, 400);
+    try {
+      const pages = await listZernioFacebookPages(env, pending);
+      return jsonResponse({ pages, pending: true });
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not list Facebook Pages', pages: [] }, 502);
+    }
+  }
+  if (url.pathname === '/api/admin/zernio/facebook/select-page' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    const pending = await getZernioFacebookPending(env);
+    if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.' }, 400);
+    let pageId = '';
+    try {
+      const payload = await request.json();
+      pageId = String(payload?.pageId || payload?.page_id || '').trim();
+    } catch {
+      return jsonResponse({ detail: 'Invalid JSON body' }, 400);
+    }
+    try {
+      const connection = await selectZernioFacebookPage(env, pending, pageId, request.url);
+      return jsonResponse({
+        ok: true,
+        account: connection,
+        ...(await getZernioFacebookStatus(env)),
+      });
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not select Facebook Page' }, 502);
+    }
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
@@ -4124,6 +4325,14 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn outline" type="button" id="zernio-facebook-disconnect" hidden>Disconnect</button>
   </div>
   <p class="status" id="zernio-facebook-message"></p>
+</div>
+<div class="admin-card stack" id="zernio-facebook-pages-card" hidden>
+  <div class="utility-links-head">
+    <h2>Choose Facebook Page</h2>
+    <p class="muted">Facebook login succeeded. Select the East Forsyth Band Page to finish connecting.</p>
+  </div>
+  <div id="zernio-facebook-pages-list" class="admin-list zernio-pages-list"></div>
+  <p class="status" id="zernio-facebook-pages-status"></p>
 </div>
 <form id="zernio-post-form" class="admin-card stack" hidden>
   <h2>Compose Facebook post</h2>

@@ -32,7 +32,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPosts: [], homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -1928,6 +1928,31 @@ function syncZernioPublishModeUi() {
   if (submit) submit.textContent = scheduled ? 'Schedule Facebook post' : 'Publish to Facebook';
 }
 
+function renderZernioFacebookPages() {
+  const card = document.querySelector('#zernio-facebook-pages-card');
+  const list = document.querySelector('#zernio-facebook-pages-list');
+  if (!card || !list) return;
+  const needsSelect = Boolean(state.zernioFacebook?.needsPageSelection);
+  card.hidden = !needsSelect;
+  if (!needsSelect) {
+    list.innerHTML = '';
+    return;
+  }
+  const pages = Array.isArray(state.zernioPages) ? state.zernioPages : [];
+  if (!pages.length) {
+    list.innerHTML = '<p class="muted">No Pages found yet. Make sure you selected the Page in Meta, then connect again.</p>';
+    return;
+  }
+  list.innerHTML = pages.map((page) => {
+    const label = page.name || page.username || page.id;
+    const meta = [page.username, page.category].filter(Boolean).join(' · ');
+    return `<article class="admin-row zernio-page-row"><div><b>${escapeHtml(label)}</b>${meta ? `<small>${escapeHtml(meta)}</small>` : ''}</div><div class="row-actions"><button type="button" class="btn primary" data-zernio-page-id="${escapeAttr(page.id)}">Use this Page</button></div></article>`;
+  }).join('');
+  list.querySelectorAll('[data-zernio-page-id]').forEach((button) => {
+    button.addEventListener('click', () => selectZernioFacebookPage(button.dataset.zernioPageId));
+  });
+}
+
 function renderZernioFacebookStatus(status) {
   state.zernioFacebook = status || null;
   const statusEl = document.querySelector('#zernio-facebook-status');
@@ -1947,12 +1972,58 @@ function renderZernioFacebookStatus(status) {
   }
   if (connectBtn) {
     connectBtn.hidden = !status?.configured;
-    connectBtn.textContent = status?.connected ? 'Reconnect Facebook' : 'Connect Facebook';
+    connectBtn.textContent = status?.connected
+      ? 'Reconnect Facebook'
+      : (status?.needsPageSelection ? 'Restart Facebook connect' : 'Connect Facebook');
   }
   if (refreshBtn) refreshBtn.hidden = !status?.configured;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
   if (postForm) postForm.hidden = !status?.connected;
+  if (!status?.needsPageSelection) state.zernioPages = [];
+  renderZernioFacebookPages();
   syncZernioPublishModeUi();
+}
+
+async function loadZernioFacebookPages() {
+  const statusEl = document.querySelector('#zernio-facebook-pages-status');
+  if (!hasPermission('site') || !state.zernioFacebook?.needsPageSelection) {
+    state.zernioPages = [];
+    renderZernioFacebookPages();
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Loading Facebook Pages…';
+  try {
+    const result = await jsonFetch('/api/admin/zernio/facebook/pages');
+    state.zernioPages = Array.isArray(result.pages) ? result.pages : [];
+    renderZernioFacebookPages();
+    if (statusEl) {
+      statusEl.textContent = state.zernioPages.length
+        ? `Select 1 of ${state.zernioPages.length} Page${state.zernioPages.length === 1 ? '' : 's'}.`
+        : (result.detail || 'No Pages available.');
+    }
+  } catch (error) {
+    state.zernioPages = [];
+    renderZernioFacebookPages();
+    if (statusEl) statusEl.textContent = error.message || 'Could not load Facebook Pages.';
+  }
+}
+
+async function selectZernioFacebookPage(pageId) {
+  const statusEl = document.querySelector('#zernio-facebook-pages-status');
+  const messageEl = document.querySelector('#zernio-facebook-message');
+  if (!pageId) return;
+  if (statusEl) statusEl.textContent = 'Connecting Page…';
+  try {
+    await jsonFetch('/api/admin/zernio/facebook/select-page', {
+      method: 'POST',
+      body: JSON.stringify({ pageId }),
+    });
+    if (messageEl) messageEl.textContent = 'Facebook Page connected successfully.';
+    await loadSocialPanel({ sync: true });
+    if (statusEl) statusEl.textContent = '';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not connect that Page.';
+  }
 }
 
 async function loadZernioFacebookStatus({ sync = false } = {}) {
@@ -2019,6 +2090,7 @@ async function loadZernioPosts() {
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
   await loadZernioFacebookStatus({ sync });
+  if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   await loadZernioPosts();
 }
 
@@ -2032,13 +2104,15 @@ function applyZernioQueryFeedback() {
   if (messageEl) {
     if (zernio === 'facebook_connected') {
       messageEl.textContent = 'Facebook Page connected successfully.';
+    } else if (zernio === 'facebook_select') {
+      messageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
     } else if (zernio === 'facebook_pending') {
-      messageEl.textContent = 'Facebook OAuth finished. Click Refresh status if the Page is not listed yet.';
+      messageEl.textContent = 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
     } else if (zernio === 'facebook_error') {
       messageEl.textContent = params.get('detail') || 'Facebook connect failed.';
     }
   }
-  if (zernio === 'facebook_connected' || zernio === 'facebook_pending') {
+  if (zernio === 'facebook_connected' || zernio === 'facebook_pending' || zernio === 'facebook_select') {
     loadSocialPanel({ sync: true }).catch(() => {});
   }
   params.delete('zernio');
