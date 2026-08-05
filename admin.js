@@ -2810,11 +2810,14 @@ function bindBoosterMemberDragAndDrop(list) {
 }
 
 function formatAdminSponsorAddress(sponsor = {}) {
-  if (sponsor.formatted_address) return sponsor.formatted_address;
+  if (sponsor.formatted_address) return String(sponsor.formatted_address).trim();
   const street = String(sponsor.address || '').trim();
   const city = String(sponsor.city || '').trim();
   const state = String(sponsor.state || '').trim().toUpperCase();
-  return [street, city, state].filter(Boolean).join(', ');
+  const zip = String(sponsor.postal_code || sponsor.zip || '').trim();
+  const cityState = [city, state].filter(Boolean).join(', ');
+  const cityStateZip = [cityState, zip].filter(Boolean).join(' ');
+  return [street, cityStateZip].filter(Boolean).join(', ');
 }
 
 function sponsorPreviewCard(sponsor, index = 0) {
@@ -2878,10 +2881,14 @@ function renderGoldSponsorsPrintPreview() {
     const logo = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
       : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    const address = formatAdminSponsorAddress(sponsor);
     return `
       <article class="gold-sponsor-print-row">
         <div class="gold-sponsor-print-logo">${logo}</div>
-        <b>${escapeHtml(sponsor.name)}</b>
+        <div class="gold-sponsor-print-copy">
+          <b>${escapeHtml(sponsor.name)}</b>
+          <span class="gold-sponsor-print-address">${escapeHtml(address || 'No address on file')}</span>
+        </div>
       </article>
     `;
   }).join('');
@@ -3007,6 +3014,9 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     const logo = await logoDataUrlForPdf(sponsor.logo_url || '');
     const nameX = margin + 12 + 96 + 16;
     const textWidth = contentWidth - 96 - 40;
+    const nameLineH = 16;
+    const addressLineH = 13;
+    const nameAddressGap = 4;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
@@ -3014,9 +3024,11 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     const addressLines = doc.splitTextToSize(address, textWidth);
-    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const nameBlockH = Math.max(nameLineH, nameLines.length * nameLineH);
+    const addressBlockH = Math.max(addressLineH, addressLines.length * addressLineH);
+    const textBlockHeight = nameBlockH + nameAddressGap + addressBlockH;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
-    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
+    const rowHeight = Math.max(72, logoBasedHeight, textBlockHeight + 28);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -3046,16 +3058,19 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
       doc.text(mark, logoBoxX + logoBoxW / 2, logoBoxY + logoBoxH / 2 + 4, { align: 'center' });
     }
 
-    const textTop = y + (rowHeight - textBlockHeight) / 2 + 12;
+    const textTop = y + Math.max(12, (rowHeight - textBlockHeight) / 2);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.setTextColor(16, 35, 60);
-    doc.text(nameLines, nameX, textTop);
+    doc.text(nameLines, nameX, textTop, { baseline: 'top', maxWidth: textWidth });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    doc.setTextColor(91, 111, 136);
-    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
+    doc.setTextColor(51, 65, 85);
+    doc.text(addressLines, nameX, textTop + nameBlockH + nameAddressGap, {
+      baseline: 'top',
+      maxWidth: textWidth,
+    });
 
     y += rowHeight + 10;
   }
@@ -3073,9 +3088,22 @@ function createGoldSponsorsPrintFrame(title = 'Gold sponsors print') {
   frame.id = 'gold-sponsors-print-frame';
   frame.setAttribute('title', title);
   frame.setAttribute('aria-hidden', 'true');
-  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+  // Keep the frame off-screen but sized — zero-size PDF iframes often print blank/missing text.
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:850px;height:1100px;border:0;opacity:0;pointer-events:none;';
   document.body.appendChild(frame);
   return frame;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function printPdfBlobInPage(blob) {
@@ -3093,9 +3121,10 @@ function printPdfBlobInPage(blob) {
     };
     const timeoutId = window.setTimeout(() => {
       finish(new Error('Timed out waiting for the print dialog.'));
-    }, 12000);
+    }, 15000);
 
     const triggerPrint = () => {
+      // Give the PDF viewer a moment to paint text before print().
       window.setTimeout(() => {
         try {
           const win = frame.contentWindow;
@@ -3106,7 +3135,7 @@ function printPdfBlobInPage(blob) {
         } catch (error) {
           finish(error);
         }
-      }, 250);
+      }, 600);
     };
 
     frame.addEventListener('load', triggerPrint, { once: true });
@@ -3123,7 +3152,8 @@ function printGoldSponsorsHtmlFallback(sponsors) {
       const logo = sponsor.logo_url
         ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
         : `<span class="mark">${mark}</span>`;
-      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+      const address = escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address on file');
+      return `<li><div class="logo">${logo}</div><div class="copy"><strong>${escapeHtml(sponsor.name)}</strong><span class="addr">${address}</span></div></li>`;
     }).join('')
     : '<li><strong>No active Gold sponsors yet.</strong></li>';
   const html = `<!doctype html>
@@ -3140,7 +3170,9 @@ function printGoldSponsorsHtmlFallback(sponsors) {
     .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
     .logo img{max-width:100%;max-height:100%;object-fit:contain}
     .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    .copy{display:grid;gap:4px;min-width:0}
     strong{font-size:1.15rem}
+    .addr{font:400 .95rem/1.35 Helvetica,Arial,sans-serif;color:#334155}
     @media print{body{margin:.55in} li{break-inside:avoid}}
   </style>
 </head>
@@ -3197,8 +3229,16 @@ async function printGoldSponsorsPdf() {
   try {
     const blob = await buildGoldSponsorsPdfBlob(sponsors);
     if (status) status.textContent = 'Opening print dialog…';
-    await printPdfBlobInPage(blob);
-    if (status) status.textContent = 'Print dialog opened. Choose your printer or Save as PDF.';
+    try {
+      await printPdfBlobInPage(blob);
+      if (status) status.textContent = 'Print dialog opened. Choose your printer or Save as PDF.';
+    } catch (printError) {
+      console.error(printError);
+      downloadBlob(blob, 'east-forsyth-band-gold-sponsors.pdf');
+      if (status) status.textContent = 'Downloaded PDF with addresses. Opening on-page print as a backup…';
+      await printGoldSponsorsHtmlFallback(sponsors);
+      if (status) status.textContent = 'PDF downloaded. Print dialog opened from on-page list.';
+    }
   } catch (error) {
     console.error(error);
     try {

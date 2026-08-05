@@ -2399,9 +2399,19 @@ body.sponsor-signup-open{overflow:hidden}
   line-height:1.2;
   padding:4px;
 }
+.gold-sponsor-print-copy{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
 .gold-sponsor-print-row b{
   color:#10233c;
   font-size:.98rem;
+}
+.gold-sponsor-print-address{
+  color:#475569;
+  font-size:.86rem;
+  line-height:1.35;
 }
 
 /* Unsaved page-editor leave prompt */
