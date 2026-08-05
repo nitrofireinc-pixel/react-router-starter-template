@@ -1109,8 +1109,10 @@ body.admin-upload-open{overflow:hidden}
 .admin-saved-toast.is-visible .admin-saved-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
 .admin-saved-toast.is-leaving .admin-saved-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
 .admin-saved-toast-card{
-  display:grid;
-  place-items:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
   min-height:108px;
   padding:28px 32px;
   border-radius:22px;
@@ -1120,6 +1122,16 @@ body.admin-upload-open{overflow:hidden}
   box-shadow:0 24px 60px rgba(0,16,32,.45);
   text-align:center;
 }
+.admin-saved-toast-icon{
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  width:44px;
+  height:44px;
+  color:#fff;
+}
+.admin-saved-toast-icon[hidden]{display:none!important}
+.admin-saved-toast-icon svg{width:40px;height:40px;fill:currentColor;display:block}
 .admin-saved-toast-card strong{
   color:#fff;
   font-size:clamp(1.45rem,4vw,1.85rem);

@@ -24,7 +24,9 @@ function shouldShowSavedToast(url, options = {}) {
   return !SAVE_TOAST_EXCLUDE.some((prefix) => path.includes(prefix));
 }
 
-function showSavedToast(message = 'Saved.') {
+const SAVED_TOAST_ENVELOPE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 4-8 5L4 8V6l8 5 8-5v2Z"/></svg>`;
+
+function showSavedToast(message = 'Saved.', options = {}) {
   let root = document.querySelector('#admin-saved-toast');
   if (!root) {
     root = document.createElement('div');
@@ -35,12 +37,38 @@ function showSavedToast(message = 'Saved.') {
     root.innerHTML = `
       <div class="admin-saved-toast-backdrop" aria-hidden="true"></div>
       <div class="admin-saved-toast-panel">
-        <div class="admin-saved-toast-card"><strong data-saved-toast-message>Saved.</strong></div>
+        <div class="admin-saved-toast-card">
+          <span class="admin-saved-toast-icon" data-saved-toast-icon hidden aria-hidden="true"></span>
+          <strong data-saved-toast-message>Saved.</strong>
+        </div>
       </div>`;
     document.body.appendChild(root);
   }
   const msg = root.querySelector('[data-saved-toast-message]');
   if (msg) msg.textContent = message;
+  let icon = root.querySelector('[data-saved-toast-icon]');
+  if (!icon) {
+    const card = root.querySelector('.admin-saved-toast-card');
+    if (card) {
+      icon = document.createElement('span');
+      icon.className = 'admin-saved-toast-icon';
+      icon.dataset.savedToastIcon = '';
+      icon.hidden = true;
+      icon.setAttribute('aria-hidden', 'true');
+      card.prepend(icon);
+    }
+  }
+  const useEnvelope = options.icon === 'envelope';
+  root.classList.toggle('has-icon', useEnvelope);
+  if (icon) {
+    if (useEnvelope) {
+      icon.hidden = false;
+      icon.innerHTML = SAVED_TOAST_ENVELOPE_SVG;
+    } else {
+      icon.hidden = true;
+      icon.innerHTML = '';
+    }
+  }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
   root.classList.remove('is-leaving');
@@ -3473,10 +3501,17 @@ function bindMailComposer() {
     if (status) status.textContent = 'Sending…';
     try {
       const result = await jsonFetch('/api/admin/mail', { method: 'POST', body: payload });
-      if (status) status.textContent = result.detail || 'Email sent.';
       if (result.ok) {
+        if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
-        form.elements.attachments.value = '';
+        if (form.elements.attachments) form.elements.attachments.value = '';
+        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        const colorInput = document.querySelector('#mail-rich-color');
+        if (colorInput) colorInput.value = '#002142';
+        showSavedToast('Sent.', { icon: 'envelope' });
+        await loadMailDeliveryStatus();
+      } else if (status) {
+        status.textContent = result.detail || 'Email sent.';
       }
     } catch (error) {
       let message = error.message || 'Could not send email.';
