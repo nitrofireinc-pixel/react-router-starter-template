@@ -1312,7 +1312,7 @@ function openDonateModal() {
           <label>Donation amount
             <input name="amount" type="text" inputmode="decimal" required maxlength="12" placeholder="25.00" aria-describedby="donate-amount-hint">
           </label>
-          <p class="sponsor-signup-pay-note" id="donate-amount-hint">Enter any amount of $1 or more (USD).</p>
+          <p class="sponsor-signup-pay-note" id="donate-amount-hint">Enter any amount of $5 or more (USD).</p>
           <p class="status" data-donate-status></p>
           <div class="sponsor-signup-actions">
             <button class="btn outline" type="button" data-donate-cancel>Cancel</button>
@@ -1536,8 +1536,8 @@ function openDonateModal() {
       form.elements.donor_name?.focus();
       return;
     }
-    if (!amountCents || amountCents < 100) {
-      if (status) status.textContent = 'Enter a donation amount of at least $1.';
+    if (!amountCents || amountCents < 500) {
+      if (status) status.textContent = 'Enter a donation amount of at least $5.';
       form.elements.amount?.focus();
       return;
     }

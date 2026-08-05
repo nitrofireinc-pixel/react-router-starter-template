@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-62';
+const ASSET_VERSION = 'admin-cms-20260805-63';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -4333,8 +4333,8 @@ async function handleApi(request, env, url) {
     if (!donorName || donorName.length > 160) {
       return jsonResponse({ detail: 'Donor name is required' }, 422);
     }
-    if (!amountCents || amountCents < 100) {
-      return jsonResponse({ detail: 'Enter a donation amount of at least $1' }, 422);
+    if (!amountCents || amountCents < 500) {
+      return jsonResponse({ detail: 'Enter a donation amount of at least $5' }, 422);
     }
     if (amountCents > 2_500_000) {
       return jsonResponse({ detail: 'Donation amount cannot exceed $25,000' }, 422);
