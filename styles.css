@@ -35,14 +35,14 @@ header.site-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,
 .header-inner{max-width:var(--max);margin:auto;padding:12px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;column-gap:26px;row-gap:0}.brand{display:flex;align-items:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:max-content}.brand img{width:50px;height:50px;object-fit:contain}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1}
 /* Keep logo/title on the first row; put every nav link on a full-width row beneath. */
 nav{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start;align-items:center;flex:1 1 100%;width:100%;margin:8px 0 0;padding:8px 0 2px;border-top:1px solid rgba(0,33,66,.1)}nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}nav a:hover,nav a:focus{background:#eef3fa;outline:none}.menu-button{display:none;margin-left:auto;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
-/* Desktop nav bar: site-matching field, gold links with black glow */
+/* Desktop nav bar: utility-navy field, gold links with black glow */
 @media(min-width:761px){
   header.site-header nav{
     margin:10px 0 0;
     padding:8px 10px;
-    border-top:1px solid rgba(0,33,66,.1);
+    border-top:0;
     border-radius:0;
-    background:var(--paper);
+    background:var(--navy);
     box-shadow:none;
   }
   header.site-header nav a{
@@ -57,8 +57,8 @@ nav{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start;align-items:c
   }
   header.site-header nav a:hover,
   header.site-header nav a:focus-visible{
-    background:#eef3fa;
-    color:#e6c400;
+    background:rgba(255,255,255,.12);
+    color:#ffe566;
     outline:none;
   }
 }
