@@ -1970,6 +1970,7 @@ body.sponsor-map-open{overflow:hidden}
 #minutes-view-modal[hidden],
 #minutes-empty[hidden],
 #minutes-editor-modal[hidden],
+#ensembles-editor-modal[hidden],
 .minutes-document-frame[hidden],
 #print-minutes[hidden],
 #edit-minutes[hidden],
