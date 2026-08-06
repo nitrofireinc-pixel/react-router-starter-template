@@ -138,6 +138,7 @@ class SiteContent(BaseModel):
     hero_title: str = Field(min_length=1, max_length=160)
     hero_subtitle: str = Field(min_length=1, max_length=500)
     footer_note: str = Field(min_length=1, max_length=500)
+    staff_email: str = Field(default="", max_length=255)
 
 
 class EventPayload(BaseModel):
@@ -151,6 +152,25 @@ class EventPayload(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=200)
     new_password: str = Field(min_length=8, max_length=200)
+
+
+class UserProfile(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    display_name: str = Field(min_length=1, max_length=200)
+    email: str = Field(default="", max_length=255)
+    active: bool = True
+    password: str = Field(default="", max_length=200)
+    role: str = "editor"
+
+
+class SponsorPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    address: str = Field(default="", max_length=500)
+    level: str = Field(default="Community Sponsor", max_length=100)
+    logo_url: str = Field(default="", max_length=500)
+    mark_text: str = Field(default="★", max_length=50)
+    sort_order: int = 0
+    active: bool = True
 
 
 def init_db() -> None:
@@ -197,6 +217,47 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                email TEXT NOT NULL DEFAULT '',
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'editor',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                permission TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                UNIQUE(user_id, permission)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sponsors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                address TEXT NOT NULL DEFAULT '',
+                level TEXT NOT NULL DEFAULT 'Community Sponsor',
+                logo_url TEXT NOT NULL DEFAULT '',
+                mark_text TEXT NOT NULL DEFAULT '★',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        
         existing_site = conn.execute("SELECT COUNT(*) FROM site_content").fetchone()[0]
         existing_password = conn.execute("SELECT COUNT(*) FROM auth_settings WHERE key = 'admin_password_hash'").fetchone()[0]
         if existing_password == 0:
@@ -253,6 +314,14 @@ def get_photos() -> list[dict[str, Any]]:
     return photos
 
 
+def get_sponsors() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, address, level, logo_url, mark_text, sort_order, active FROM sponsors ORDER BY sort_order, id"
+        ).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
 def sign(value: str) -> str:
     digest = hmac.new(secret_key().encode(), value.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
@@ -263,23 +332,75 @@ def make_session(username: str) -> str:
     return f"{payload}.{sign(payload)}"
 
 
-def verify_session(cookie: str | None) -> bool:
+def verify_session(cookie: str | None) -> tuple[str | None, dict]:
     if not cookie or "." not in cookie:
-        return False
+        return None, {}
     payload, supplied = cookie.rsplit(".", 1)
     if not hmac.compare_digest(sign(payload), supplied):
-        return False
+        return None, {}
     try:
         decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
         data = json.loads(decoded)
     except Exception:
-        return False
-    return data.get("u") == admin_username()
+        return None, {}
+    return data.get("u"), data
 
 
-def require_admin(request: Request) -> None:
-    if not verify_session(request.cookies.get(SESSION_COOKIE)):
+def get_user_permissions(user_id: int) -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT permission FROM user_permissions WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+    return [row["permission"] for row in rows]
+
+
+def get_user_by_username(username: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, username, display_name, email, password_hash, role, active FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+    if row is None:
+        return None
+    user = row_to_dict(row)
+    user["permissions"] = get_user_permissions(user["id"])
+    return user
+
+
+def require_admin(request: Request) -> dict[str, Any]:
+    username, _ = verify_session(request.cookies.get(SESSION_COOKIE))
+    if not username:
         raise HTTPException(status_code=401, detail="Admin login required")
+    
+    user = get_user_by_username(username)
+    if not user or not user.get("active"):
+        raise HTTPException(status_code=401, detail="Admin login required")
+    
+    if user.get("role") != "admin" and "all" not in user.get("permissions", []):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return user
+
+
+def requires_permission(permission: str):
+    def dependency(request: Request) -> dict[str, Any]:
+        username, _ = verify_session(request.cookies.get(SESSION_COOKIE))
+        if not username:
+            raise HTTPException(status_code=401, detail="Login required")
+        
+        user = get_user_by_username(username)
+        if not user or not user.get("active"):
+            raise HTTPException(status_code=401, detail="Login required")
+        
+        if user.get("role") == "admin":
+            return user
+        
+        if permission not in user.get("permissions", []) and "all" not in user.get("permissions", []):
+            raise HTTPException(status_code=403, detail=f"Permission '{permission}' required")
+        
+        return user
+    return dependency
 
 
 def wants_html(request: Request) -> bool:
@@ -312,8 +433,13 @@ def api_photos() -> list[dict[str, Any]]:
     return get_photos()
 
 
+@app.get("/api/sponsors")
+def api_sponsors() -> list[dict[str, Any]]:
+    return get_sponsors()
+
+
 @app.post("/api/admin/site")
-def update_site(payload: SiteContent, _: None = Depends(require_admin)) -> dict[str, str]:
+def update_site(payload: SiteContent, user: dict = Depends(requires_permission("site"))) -> dict[str, str]:
     with connect() as conn:
         conn.executemany(
             "INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -323,15 +449,31 @@ def update_site(payload: SiteContent, _: None = Depends(require_admin)) -> dict[
 
 
 @app.post("/api/admin/password")
-def change_password(payload: PasswordChange, _: None = Depends(require_admin)) -> dict[str, bool]:
+def change_password(payload: PasswordChange, user: dict = Depends(requires_permission("profile"))) -> dict[str, bool]:
     if not verify_admin_password(payload.current_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     set_admin_password(payload.new_password)
     return {"ok": True}
 
 
+@app.get("/api/admin/me")
+def get_current_user(request: Request) -> dict[str, Any]:
+    username, _ = verify_session(request.cookies.get(SESSION_COOKIE))
+    if not username:
+        raise HTTPException(status_code=401, detail="Login required")
+    
+    user = get_user_by_username(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    
+    return {
+        "user": user,
+        "can_bypass_sponsor_payment": "sponsors:bypass_payment" in user.get("permissions", []) or user.get("role") == "admin"
+    }
+
+
 @app.post("/api/admin/events")
-def create_event(payload: EventPayload, _: None = Depends(require_admin)) -> dict[str, Any]:
+def create_event(payload: EventPayload, user: dict = Depends(requires_permission("events"))) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
             """
@@ -346,7 +488,7 @@ def create_event(payload: EventPayload, _: None = Depends(require_admin)) -> dic
 
 
 @app.put("/api/admin/events/{event_id}")
-def update_event(event_id: int, payload: EventPayload, _: None = Depends(require_admin)) -> dict[str, Any]:
+def update_event(event_id: int, payload: EventPayload, user: dict = Depends(requires_permission("events"))) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
             """
@@ -362,7 +504,7 @@ def update_event(event_id: int, payload: EventPayload, _: None = Depends(require
 
 
 @app.delete("/api/admin/events/{event_id}")
-def delete_event(event_id: int, _: None = Depends(require_admin)) -> dict[str, bool]:
+def delete_event(event_id: int, user: dict = Depends(requires_permission("events"))) -> dict[str, bool]:
     with connect() as conn:
         cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
         if cur.rowcount == 0:
@@ -376,7 +518,7 @@ def upload_photo(
     alt_text: str = Form(...),
     caption: str = Form(""),
     sort_order: int = Form(0),
-    _: None = Depends(require_admin),
+    user: dict = Depends(requires_permission("photos")),
 ) -> dict[str, Any]:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -398,7 +540,7 @@ def upload_photo(
 
 
 @app.delete("/api/admin/photos/{photo_id}")
-def delete_photo(photo_id: int, _: None = Depends(require_admin)) -> dict[str, bool]:
+def delete_photo(photo_id: int, user: dict = Depends(requires_permission("photos"))) -> dict[str, bool]:
     with connect() as conn:
         row = conn.execute("SELECT filename FROM photos WHERE id = ?", (photo_id,)).fetchone()
         if row is None:
@@ -408,6 +550,52 @@ def delete_photo(photo_id: int, _: None = Depends(require_admin)) -> dict[str, b
         (data_dir() / "uploads" / row["filename"]).unlink()
     except FileNotFoundError:
         pass
+    return {"ok": True}
+
+
+@app.post("/api/admin/sponsors")
+def create_sponsor(payload: SponsorPayload, user: dict = Depends(requires_permission("sponsors"))) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO sponsors (name, address, level, logo_url, mark_text, sort_order, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (payload.name, payload.address, payload.level, payload.logo_url, payload.mark_text, payload.sort_order, int(payload.active)),
+        )
+        sponsor_id = cur.lastrowid
+        row = conn.execute(
+            "SELECT id, name, address, level, logo_url, mark_text, sort_order, active FROM sponsors WHERE id = ?",
+            (sponsor_id,)
+        ).fetchone()
+    return row_to_dict(row)
+
+
+@app.put("/api/admin/sponsors/{sponsor_id}")
+def update_sponsor(sponsor_id: int, payload: SponsorPayload, user: dict = Depends(requires_permission("sponsors"))) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE sponsors SET name = ?, address = ?, level = ?, logo_url = ?, mark_text = ?, sort_order = ?, active = ?
+            WHERE id = ?
+            """,
+            (payload.name, payload.address, payload.level, payload.logo_url, payload.mark_text, payload.sort_order, int(payload.active), sponsor_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Sponsor not found")
+        row = conn.execute(
+            "SELECT id, name, address, level, logo_url, mark_text, sort_order, active FROM sponsors WHERE id = ?",
+            (sponsor_id,)
+        ).fetchone()
+    return row_to_dict(row)
+
+
+@app.delete("/api/admin/sponsors/{sponsor_id}")
+def delete_sponsor(sponsor_id: int, user: dict = Depends(requires_permission("sponsors"))) -> dict[str, bool]:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM sponsors WHERE id = ?", (sponsor_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Sponsor not found")
     return {"ok": True}
 
 
@@ -434,7 +622,8 @@ def logout() -> Response:
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
-    if not verify_session(request.cookies.get(SESSION_COOKIE)):
+    username, _ = verify_session(request.cookies.get(SESSION_COOKIE))
+    if not username:
         return RedirectResponse("/admin/login", status_code=303)
     return ADMIN_HTML
 
@@ -458,17 +647,11 @@ def static_page(filename: str, request: Request) -> Response:
 
 LOGIN_HTML = """
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"></head>
-<body class="admin-body"><main class="admin-shell small"><h1>East Forsyth Band Admin</h1><p>Log in to edit website information, events, and photos.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="btn primary" type="submit">Log in</button></form></main></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"><style>.admin-body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#edf3fa,#fff)}.admin-shell{max-width:400px;width:100%;padding:24px}.admin-card{background:#fff;border:1px solid #d9dee8;border-radius:24px;padding:28px;box-shadow:0 2px 8px rgba(0,0,0,.08)}.admin-card h1{margin:0 0 8px;font-size:24px;color:#002142}.admin-card p{color:#5b6472;margin:0 0 20px}.admin-card input{width:100%;padding:10px 12px;border:1px solid #d9dee8;border-radius:8px;font-size:14px;margin-bottom:12px}.admin-card button{width:100%;padding:12px;background:#002142;color:#fff;border:none;border-radius:8px;font-weight:900;cursor:pointer;font-size:14px}.admin-card button:hover{background:#014990}.admin-card .error{color:#e71321;font-size:14px;margin-bottom:12px}</style></head><body class="admin-body"><main class="admin-shell"><div class="admin-card"><h1>East Forsyth Band Admin</h1><p>Log in to edit website information, events, and photos.</p><form method="post" action="/admin/login"><input name="username" placeholder="Username" required><input name="password" type="password" placeholder="Password" required><button type="submit">Log In</button></form></div></main></body></html>
 """
 
 
 ADMIN_HTML = """
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Website Admin | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"></head>
-<body class="admin-body"><main class="admin-shell"><div class="admin-top"><div><p class="kicker">Custom backend</p><h1>Website Admin</h1><p>Edit the public site without touching code.</p></div><form method="post" action="/admin/logout"><button class="btn secondary">Log out</button></form></div>
-<section class="admin-grid"><form id="site-form" class="admin-card"><h2>Site text</h2><label>Site title<input name="title" required></label><label>Hero title<input name="hero_title" required></label><label>Hero subtitle<textarea name="hero_subtitle" required rows="4"></textarea></label><label>Footer note<textarea name="footer_note" required rows="3"></textarea></label><button class="btn primary">Save site text</button><p class="status" id="site-status"></p></form>
-<form id="password-form" class="admin-card"><h2>Change password</h2><p>Use this after logging in to replace the temporary password.</p><label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label><label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn primary">Update password</button><p class="status" id="password-status"></p></form>
-<div class="admin-card"><h2>Events</h2><form id="event-form" class="stack"><input type="hidden" name="id"><label>Month / label<input name="date_label" placeholder="Aug" required></label><label>Day / detail<input name="date_detail" placeholder="01 or TBD" required></label><label>Event title<input name="title" required></label><label>Description<textarea name="description" rows="3" required></textarea></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Save event</button><button class="btn outline" type="button" id="new-event">New event</button></form><div id="events-list" class="admin-list"></div></div>
-<div class="admin-card"><h2>Photos</h2><form id="photo-form" class="stack"><label>Photo<input name="file" type="file" accept="image/*" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label>Caption<input name="caption"></label><label>Sort order<input name="sort_order" type="number" value="0"></label><button class="btn primary">Upload photo</button></form><div id="photos-list" class="admin-list"></div></div></section></main><script src="/admin.js"></script></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Website Admin | East Forsyth Band</title><link rel="stylesheet" href="/styles.css"><style>.admin-body{background:linear-gradient(135deg,#edf3fa,#fff);min-height:100vh}.admin-shell{max-width:1180px;margin:0 auto;padding:36px 20px}.admin-top{margin-bottom:36px}.admin-top h1{margin:0;font-size:32px;color:#002142}.admin-top .kicker{color:#5b6472;font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:1px}.admin-card{background:#fff;border:1px solid #d9dee8;border-radius:24px;padding:28px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,.08)}.admin-card h2{margin:0 0 16px;color:#002142}.admin-card label{display:block;margin-bottom:12px;font-weight:700;color:#111827}.admin-card input,.admin-card textarea,.admin-card select{width:100%;padding:10px 12px;border:1px solid #d9dee8;border-radius:8px;font-size:14px;font-family:inherit;margin-bottom:12px}.admin-card textarea{resize:vertical;min-height:80px}.admin-card button{padding:10px 16px;background:#002142;color:#fff;border:none;border-radius:8px;font-weight:900;cursor:pointer;font-size:14px}.admin-card button:hover{background:#014990}.admin-status{margin-top:12px;font-size:14px;color:#014990}.admin-status.error{color:#e71321}.sponsor-preview{border:1px solid #d9dee8;border-radius:12px;padding:16px;margin-top:12px}.sponsor-card{display:flex;gap:12px;padding:12px;border:1px solid #d9dee8;border-radius:12px;align-items:center}.sponsor-logo{width:48px;height:48px;background:#f5f7fb;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}.sponsor-logo img{width:100%;height:100%;object-fit:cover}.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center}.modal.active{display:flex}.modal-content{background:#fff;border-radius:24px;padding:28px;max-width:500px;width:90%;box-shadow:0 24px 70px rgba(0,33,66,.16)}.modal-content h2{margin:0 0 16px}.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;font-size:24px;cursor:pointer;color:#5b6472}.sponsor-toast{position:fixed;bottom:20px;right:20px;background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:16px 20px;box-shadow:0 12px 30px rgba(0,0,0,.12);z-index:999;display:none}.sponsor-toast.active{display:block}</style></head><body class="admin-body"><main class="admin-shell"><div class="admin-top"><div class="kicker">Custom backend</div><h1>Website Admin</h1><p>Edit the public site without touching code.</p></div><div class="admin-card"><h2>Sponsors</h2><p>Add, edit, and reorder sponsors.</p><button id="add-sponsor-btn">+ Add Sponsor</button><div id="sponsors-list"></div></div><div id="sponsor-modal" class="modal"><div class="modal-content"><h2 id="sponsor-modal-title">Add Sponsor</h2><form id="sponsor-form"><input type="hidden" name="id"><label>Name<input name="name" required></label><label>Level<input name="level" placeholder="Community Sponsor"></label><label>Address<input name="address"></label><label>Logo URL<input name="logo_url"></label><label>Mark Text<input name="mark_text" value="★"></label><label><input type="checkbox" name="active"> Active</label><button type="submit">Save Sponsor</button></form><div id="sponsor-status" class="admin-status"></div></div></div></main><script src="/admin.js"></script></body></html>
 """
