@@ -367,7 +367,7 @@ for i in {1..100}; do
     -H "Content-Type: application/json" \
     -b cookies.txt \
     -d "{\"name\": \"Sponsor $i\", \"level\": \"Community\", \"address\": \"\", \"logo_url\": \"\", \"mark_text\": \"★\", \"sort_order\": $i, \"active\": true}" \
-    -w "Time: %{time_total}s\n" \
+    -w "Time: %{time_total}s\\n" \
     -o /dev/null -s
 done
 
