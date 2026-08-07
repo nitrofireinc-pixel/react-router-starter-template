@@ -4,6 +4,55 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function showTransientToast(message, { className = 'sponsor-signup-toast', ms = 4200, leaveMs = 280 } = {}) {
+  const toast = document.createElement('div');
+  toast.className = className;
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('is-visible'));
+  window.setTimeout(() => {
+    toast.classList.remove('is-visible');
+    window.setTimeout(() => toast.remove(), leaveMs);
+  }, ms);
+}
+
+function loadSquareWebSdk(environment = 'production') {
+  const existing = document.querySelector('script[data-square-web-sdk]');
+  if (existing && window.Square) return Promise.resolve(window.Square);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = environment === 'sandbox'
+      ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+      : 'https://web.squarecdn.com/v1/square.js';
+    script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+    script.onerror = () => reject(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 280, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+
 function decodeBasicHtmlEntities(value) {
   let text = String(value ?? '');
   for (let i = 0; i < 3; i += 1) {
@@ -537,13 +586,8 @@ function ensureCalendarDayToast() {
 function hideCalendarDayToast() {
   const root = document.querySelector('#calendar-day-toast');
   if (!root || root.hidden) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
   window.clearTimeout(calendarDayToastLeaveTimer);
-  calendarDayToastLeaveTimer = window.setTimeout(() => {
-    root.hidden = true;
-    root.classList.remove('is-leaving');
-  }, 280);
+  calendarDayToastLeaveTimer = playOverlayLeave(root, { ms: 280, hide: true });
 }
 
 function showCalendarDayToast(title, dayEvents) {
@@ -565,10 +609,7 @@ function showCalendarDayToast(title, dayEvents) {
   }
   window.clearTimeout(calendarDayToastLeaveTimer);
   root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   window.setTimeout(() => root.querySelector('[data-calendar-day-close]')?.focus(), 40);
 }
 
@@ -1176,32 +1217,8 @@ function openSponsorSignupModal(pkg) {
     const note = detail || (sponsor?.name
       ? `${sponsor.name} is now listed as ${sponsor.level || 'a sponsor'}.`
       : 'Sponsorship activated. Thank you!');
-    const toast = document.createElement('div');
-    toast.className = 'sponsor-signup-toast';
-    toast.setAttribute('role', 'status');
-    toast.textContent = note;
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('is-visible'));
-    window.setTimeout(() => {
-      toast.classList.remove('is-visible');
-      window.setTimeout(() => toast.remove(), 280);
-    }, 4200);
+    showTransientToast(note);
     loadSponsorMarquee();
-  }
-
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
   }
 
   async function embedCardCheckout(application, config) {
@@ -1612,31 +1629,7 @@ function openDonateModal() {
 
   function finishDonateSuccess(detail) {
     closeDonateModal({ immediate: true });
-    const toast = document.createElement('div');
-    toast.className = 'sponsor-signup-toast';
-    toast.setAttribute('role', 'status');
-    toast.textContent = detail || 'Thank you for your donation!';
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('is-visible'));
-    window.setTimeout(() => {
-      toast.classList.remove('is-visible');
-      window.setTimeout(() => toast.remove(), 280);
-    }, 4200);
-  }
-
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
+    showTransientToast(detail || 'Thank you for your donation!');
   }
 
   async function embedCardCheckout(donation, config) {

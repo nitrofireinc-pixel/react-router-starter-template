@@ -4,6 +4,163 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 380, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+function datasetKeyToAttr(key) {
+  return String(key || '').replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+}
+
+function bindAdminRowDragAndDrop(list, {
+  idAttr,
+  getOrdered,
+  applyLocalOrder,
+  saveOrder,
+  reload,
+  errorStatusSelector,
+  errorMessage,
+  successStatusSelector,
+  successMessage,
+} = {}) {
+  if (!list || !idAttr) return;
+  let dragId = null;
+  let allowRowDrag = false;
+  const attr = datasetKeyToAttr(idAttr);
+  const rowSelector = `[data-${attr}]`;
+
+  list.querySelectorAll(rowSelector).forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset[idAttr]);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset[idAttr]) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset[idAttr]);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = typeof getOrdered === 'function' ? getOrdered() : [];
+      const fromIndex = ordered.findIndex((item) => item.id === fromId);
+      const toIndex = ordered.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((item) => item.id);
+      applyLocalOrder?.(next);
+      try {
+        await saveOrder?.(ids);
+        if (successStatusSelector && successMessage) {
+          const status = document.querySelector(successStatusSelector);
+          if (status) status.textContent = successMessage;
+        }
+      } catch (error) {
+        console.error(error);
+        if (typeof reload === 'function') await reload();
+        if (errorStatusSelector) {
+          const status = document.querySelector(errorStatusSelector);
+          if (status) status.textContent = errorMessage || 'Could not save the new order.';
+        }
+      }
+    });
+  });
+}
+
+function wireEditPageButton(selector, slug, canEdit) {
+  const button = document.querySelector(selector);
+  if (!button) return;
+  button.hidden = !canEdit;
+  button.onclick = () => editPage(slug);
+}
+
+function setAdminSubmenuOpen(key, open) {
+  const menuSel = `[data-${key}-menu]`;
+  const toggleSel = `[data-${key}-toggle]`;
+  const subSel = `[data-${key}-sub]`;
+  document.querySelectorAll(menuSel).forEach((menu) => {
+    const toggle = menu.querySelector(toggleSel);
+    const sub = menu.querySelector(subSel);
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindAdminSubmenu(key, { onItemClick, itemSelector } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  const toggle = menu?.querySelector(`[data-${key}-toggle]`);
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setAdminSubmenuOpen(key, open);
+  });
+  if (typeof onItemClick !== 'function') return;
+  const nodes = itemSelector
+    ? menu.querySelectorAll(itemSelector)
+    : menu.querySelectorAll(`button:not([data-${key}-toggle])`);
+  nodes.forEach((button) => {
+    if (button.dataset.boundNav === '1') return;
+    button.dataset.boundNav = '1';
+    button.addEventListener('click', () => onItemClick(button));
+  });
+}
+
+function syncAdminSubmenuAccess(key, { canAccess, children = [] } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  if (!menu) return false;
+  menu.hidden = !canAccess;
+  const toggle = menu.querySelector(`[data-${key}-toggle]`);
+  if (toggle) toggle.hidden = !canAccess;
+  children.forEach(({ selector, visible }) => {
+    const node = menu.querySelector(selector);
+    if (node) node.hidden = !visible;
+  });
+  return Boolean(canAccess);
+}
+
+
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
@@ -78,18 +235,15 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   savedToastTimer = window.setTimeout(() => {
-    root.classList.add('is-leaving');
-    root.classList.remove('is-visible');
-    savedToastLeaveTimer = window.setTimeout(() => {
-      root.classList.remove('is-leaving');
-      root.classList.remove('is-password-success');
-      root.classList.remove('has-icon');
-    }, 380);
+    savedToastLeaveTimer = playOverlayLeave(root, {
+      ms: 380,
+      onDone: () => {
+        root.classList.remove('is-password-success');
+        root.classList.remove('has-icon');
+      },
+    });
   }, 3000);
 }
 
@@ -137,23 +291,15 @@ function showPasswordToast() {
   if (status) status.textContent = '';
   window.clearTimeout(passwordToastLeaveTimer);
   root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
 }
 
 function hidePasswordToast() {
   const root = document.querySelector('#admin-password-toast');
   if (!root || root.hidden) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
   window.clearTimeout(passwordToastLeaveTimer);
-  passwordToastLeaveTimer = window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    root.hidden = true;
-  }, 380);
+  passwordToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
 }
 
 function formDataHasFiles(formData) {
@@ -202,10 +348,8 @@ function setUploadProgress(percent) {
 
 function showUploadingOverlay() {
   const root = ensureUploadToast();
-  root.classList.remove('is-leaving');
   setUploadProgress(0);
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   document.body.classList.add('admin-upload-open');
 }
 
@@ -213,12 +357,10 @@ function hideUploadingOverlay() {
   const root = document.querySelector('#admin-upload-toast');
   document.body.classList.remove('admin-upload-open');
   if (!root) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
-  window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    setUploadProgress(0);
-  }, 380);
+  playOverlayLeave(root, {
+    ms: 380,
+    onDone: () => setUploadProgress(0),
+  });
 }
 
 function jsonFetchViaXhr(url, options = {}) {
@@ -2118,51 +2260,27 @@ function canAccessBoostersMenu() {
 }
 
 function setSponsorsMenuOpen(open) {
-  document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-sponsors-toggle]');
-    const sub = menu.querySelector('[data-sponsors-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('sponsors', open);
 }
 
 function setBoostersMenuOpen(open) {
-  document.querySelectorAll('[data-boosters-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-boosters-toggle]');
-    const sub = menu.querySelector('[data-boosters-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('boosters', open);
 }
 
 function bindSponsorsMenu() {
-  const menu = document.querySelector('[data-sponsors-menu]');
-  const toggle = menu?.querySelector('[data-sponsors-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setSponsorsMenuOpen(open);
-  });
-  menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
-    button.addEventListener('click', () => {
+  bindAdminSubmenu('sponsors', {
+    itemSelector: '[data-sponsor-nav]',
+    onItemClick: (button) => {
       const key = button.dataset.sponsorNav;
       setSponsorsMenuOpen(true);
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
-    });
+    },
   });
 }
 
 function bindBoostersMenu() {
-  const menu = document.querySelector('[data-boosters-menu]');
-  const toggle = menu?.querySelector('[data-boosters-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setBoostersMenuOpen(open);
-  });
+  bindAdminSubmenu('boosters');
 }
 
 function renderPageShortcuts() {
@@ -2207,35 +2325,25 @@ function showAllowedPanels() {
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
-  const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
-  if (boostersMenu) {
-    boostersMenu.hidden = !boostersAccess;
-    if (boostersAccess) manageVisible = true;
-    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
-    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
-    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
-    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
-    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
-  }
+  const boostersAccess = syncAdminSubmenuAccess('boosters', {
+    canAccess: canAccessBoostersMenu(),
+    children: [
+      { selector: '[data-tab="booster-members"]', visible: canEditBoosterMembers() },
+      { selector: '[data-tab="minutes"]', visible: canViewMinutes() },
+    ],
+  });
+  if (boostersAccess) manageVisible = true;
   bindBoostersMenu();
-  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
-  const sponsorsAccess = canAccessSponsorsMenu();
-  if (sponsorsMenu) {
-    sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
-    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
-    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
-    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
-    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
-    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
-    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
-    // Keep submenu closed until the parent is clicked (or a child route activates it).
-    if (!sponsorsAccess) setSponsorsMenuOpen(false);
-  }
+  const sponsorsAccess = syncAdminSubmenuAccess('sponsors', {
+    canAccess: canAccessSponsorsMenu(),
+    children: [
+      { selector: '[data-tab="sponsors"]', visible: canEditSponsors() },
+      { selector: '[data-sponsor-nav="sponsors-page"]', visible: canEditPage('sponsors') },
+      { selector: '[data-sponsor-nav="become-a-sponsor"]', visible: canEditPage('become-a-sponsor') },
+    ],
+  });
+  if (sponsorsAccess) manageVisible = true;
+  else setSponsorsMenuOpen(false);
   bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
@@ -2243,26 +2351,10 @@ function showAllowedPanels() {
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
-  const editCalendarPage = document.querySelector('#edit-calendar-page');
-  if (editCalendarPage) {
-    editCalendarPage.hidden = !canEditPage('calendar');
-    editCalendarPage.onclick = () => editPage('calendar');
-  }
-  const editDirectorsPage = document.querySelector('#edit-directors-page');
-  if (editDirectorsPage) {
-    editDirectorsPage.hidden = !canEditPage('directors');
-    editDirectorsPage.onclick = () => editPage('directors');
-  }
-  const editBoostersPage = document.querySelector('#edit-boosters-page');
-  if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditBoostersPage();
-    editBoostersPage.onclick = () => editPage('boosters');
-  }
-  const editContactPage = document.querySelector('#edit-contact-page');
-  if (editContactPage) {
-    editContactPage.hidden = !canEditPage('contact');
-    editContactPage.onclick = () => editPage('contact');
-  }
+  wireEditPageButton('#edit-calendar-page', 'calendar', canEditPage('calendar'));
+  wireEditPageButton('#edit-directors-page', 'directors', canEditPage('directors'));
+  wireEditPageButton('#edit-boosters-page', 'boosters', canEditBoostersPage());
+  wireEditPageButton('#edit-contact-page', 'contact', canEditPage('contact'));
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
@@ -2801,65 +2893,17 @@ async function saveStaffOrder(ids) {
 }
 
 function bindStaffDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-staff-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.staffId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.staffId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.staffId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedStaff();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'staffId',
+    getOrdered: orderedStaff,
+    applyLocalOrder: (next) => {
       state.staff = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderStaff();
-      try {
-        await saveStaffOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadStaff();
-        const status = document.querySelector('#staff-status');
-        if (status) status.textContent = 'Could not save the new staff order.';
-      }
-    });
+    },
+    saveOrder: saveStaffOrder,
+    reload: loadStaff,
+    errorStatusSelector: '#staff-status',
+    errorMessage: 'Could not save the new staff order.',
   });
 }
 
@@ -2920,65 +2964,17 @@ async function saveBoosterMemberOrder(ids) {
 }
 
 function bindBoosterMemberDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-booster-member-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.boosterMemberId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.boosterMemberId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.boosterMemberId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedBoosterMembers();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'boosterMemberId',
+    getOrdered: orderedBoosterMembers,
+    applyLocalOrder: (next) => {
       state.boosterMembers = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderBoosterMembers();
-      try {
-        await saveBoosterMemberOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadBoosterMembers();
-        const status = document.querySelector('#booster-member-status');
-        if (status) status.textContent = 'Could not save the new booster member order.';
-      }
-    });
+    },
+    saveOrder: saveBoosterMemberOrder,
+    reload: loadBoosterMembers,
+    errorStatusSelector: '#booster-member-status',
+    errorMessage: 'Could not save the new booster member order.',
   });
 }
 
@@ -3462,65 +3458,17 @@ async function saveSponsorOrder(ids) {
 }
 
 function bindSponsorDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-sponsor-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.sponsorId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.sponsorId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.sponsorId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedSponsors();
-      const fromIndex = ordered.findIndex((sponsor) => sponsor.id === fromId);
-      const toIndex = ordered.findIndex((sponsor) => sponsor.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((sponsor) => sponsor.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'sponsorId',
+    getOrdered: orderedSponsors,
+    applyLocalOrder: (next) => {
       state.sponsors = next.map((sponsor, index) => ({ ...sponsor, sort_order: index + 1 }));
       renderSponsors();
-      try {
-        await saveSponsorOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadSponsors();
-        const status = document.querySelector('#sponsor-status');
-        if (status) status.textContent = 'Could not save the new sponsor order.';
-      }
-    });
+    },
+    saveOrder: saveSponsorOrder,
+    reload: loadSponsors,
+    errorStatusSelector: '#sponsor-status',
+    errorMessage: 'Could not save the new sponsor order.',
   });
 }
 
@@ -4015,67 +3963,19 @@ async function savePhotoOrder(ids) {
 }
 
 function bindPhotoDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-photo-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.photoId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.photoId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.photoId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedPhotos();
-      const fromIndex = ordered.findIndex((photo) => photo.id === fromId);
-      const toIndex = ordered.findIndex((photo) => photo.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((photo) => photo.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'photoId',
+    getOrdered: orderedPhotos,
+    applyLocalOrder: (next) => {
       state.photos = next.map((photo, index) => ({ ...photo, sort_order: index + 1 }));
       renderPhotos();
-      try {
-        await savePhotoOrder(ids);
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Photo order saved.';
-      } catch (error) {
-        console.error(error);
-        await loadPhotos();
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Could not save the new photo order.';
-      }
-    });
+    },
+    saveOrder: savePhotoOrder,
+    reload: loadPhotos,
+    errorStatusSelector: '#photo-status',
+    errorMessage: 'Could not save the new photo order.',
+    successStatusSelector: '#photo-status',
+    successMessage: 'Photo order saved.',
   });
 }
 
