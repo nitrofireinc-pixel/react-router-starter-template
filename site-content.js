@@ -247,6 +247,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
+  if (tier) root.dataset.sponsorTier = tier;
   root.innerHTML = `
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">

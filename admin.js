@@ -219,8 +219,10 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
   const passwordSuccess = Boolean(options.passwordSuccess);
+  const isError = Boolean(options.error);
   root.classList.toggle('has-icon', Boolean(iconKind));
   root.classList.toggle('is-password-success', passwordSuccess);
+  root.classList.toggle('is-error', isError);
   if (icon) {
     if (iconKind === 'envelope') {
       icon.hidden = false;
@@ -241,10 +243,17 @@ function showSavedToast(message = 'Saved.', options = {}) {
       ms: 380,
       onDone: () => {
         root.classList.remove('is-password-success');
+        root.classList.remove('is-error');
         root.classList.remove('has-icon');
       },
     });
-  }, 3000);
+  }, isError ? 4200 : 3000);
+}
+
+function showFailedToast(detail = '') {
+  const reason = String(detail || 'Something went wrong.').trim();
+  const short = reason.length > 120 ? `${reason.slice(0, 117)}…` : reason;
+  showSavedToast(`Failed — ${short}`, { error: true });
 }
 
 let passwordToastLeaveTimer = null;
@@ -535,6 +544,10 @@ function canEditPage(pageOrSlug) {
 
 function canEditSponsors() {
   return hasPermission('sponsors') || canEditPage('sponsors');
+}
+
+function canBypassSponsorPayment() {
+  return hasPermission('sponsors:bypass-payment');
 }
 
 function canEditStaff() {
@@ -2795,17 +2808,7 @@ function renderPagePermissionBoxes() {
 }
 
 async function loadSponsorAdSettings() {
-  if (!canEditSponsors()) return;
-  const form = document.querySelector('#sponsor-ad-settings-form');
-  if (!form) return;
-  try {
-    const settings = await jsonFetch('/api/admin/sponsors/settings');
-    const input = formControl(form, 'sponsor_ad_seconds');
-    if (input) input.value = String(settings.sponsor_ad_seconds ?? 6);
-  } catch (error) {
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    if (status) status.textContent = `Could not load ad timing: ${error.message}`;
-  }
+  // Homepage fly-in duration is fixed at 6 seconds; settings UI removed.
 }
 
 async function loadSponsors() {
@@ -3025,18 +3028,180 @@ function orderedSponsors() {
   return [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 }
 
-function resetSponsorForm(form) {
-  if (!form) return;
-  form.reset();
-  formControl(form, 'id').value = '';
-  formControl(form, 'city').value = 'Kernersville';
-  setSelectValue(formControl(form, 'state'), 'NC');
-  form.elements.active.checked = true;
-  form.elements.level.value = 'Bronze Sponsor';
-  const file = formControl(form, 'logo_file');
-  if (file) file.value = '';
-  syncSponsorLogoPreview(form, '');
-  syncSponsorTierBenefits(form);
+const MANUAL_SPONSOR_TIER_AMOUNTS = {
+  bronze: { cents: 10000, display: '$100' },
+  silver: { cents: 25000, display: '$250' },
+  gold: { cents: 50000, display: '$500' },
+};
+
+let sponsorFormToastLeaveTimer = null;
+
+function ensureSponsorFormToast() {
+  let root = document.querySelector('#admin-sponsor-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-sponsor-form-toast';
+  root.className = 'admin-sponsor-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-sponsor-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-sponsor-form-dismiss aria-label="Close sponsor form"></button>
+    <div class="admin-sponsor-form-toast-panel">
+      <div class="admin-sponsor-form-toast-card">
+        <p class="admin-sponsor-form-edit-note" data-sponsor-edit-note hidden>Editing existing sponsor</p>
+        <h3 id="admin-sponsor-form-toast-title">Manual Add Sponsor</h3>
+        <form id="sponsor-manual-form" class="admin-sponsor-manual-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <input type="hidden" name="logo_url" value="">
+          <input type="hidden" name="active" value="1">
+          <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Address<input name="address" required maxlength="400" placeholder="Street, city, state" autocomplete="street-address"></label>
+          <label data-sponsor-phone-field>Phone<input name="phone" required maxlength="40" placeholder="(336) 555-0100" autocomplete="tel"></label>
+          <label data-sponsor-email-field>Invoice email<input name="email" type="email" required maxlength="160" placeholder="billing@business.com" autocomplete="email"></label>
+          <label>Sponsor package
+            <select name="tier" required>
+              <option value="bronze">Bronze — $100</option>
+              <option value="silver">Silver — $250</option>
+              <option value="gold" selected>Gold — $500</option>
+            </select>
+          </label>
+          <label class="admin-sponsor-manual-logo">Company logo <span data-logo-optional-label>(optional)</span>
+            <input name="logo" type="file" accept="image/*,.svg">
+          </label>
+          <p class="admin-sponsor-current-logo" data-current-logo hidden></p>
+          <label class="checkline admin-sponsor-bypass" data-bypass-payment-row hidden>
+            <input name="bypass_payment" type="checkbox" value="1"> Bypass payment (activate sponsor now)
+          </label>
+          <p class="admin-sponsor-form-toast-status" id="sponsor-manual-status" aria-live="polite"></p>
+          <div class="admin-sponsor-form-toast-actions">
+            <button class="btn outline" type="button" data-sponsor-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" data-sponsor-submit-label>Save Sponsor</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-sponsor-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideSponsorFormToast());
+  });
+  return root;
+}
+
+function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast'), { editing = false } = {}) {
+  const row = root?.querySelector('[data-bypass-payment-row]');
+  if (!row) return;
+  const allowed = !editing && canBypassSponsorPayment();
+  row.hidden = !allowed;
+  const input = row.querySelector('input[name="bypass_payment"]');
+  if (input && !allowed) input.checked = false;
+}
+
+function openSponsorFormToast() {
+  const root = ensureSponsorFormToast();
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  return root;
+}
+
+function showManualAddSponsorToast() {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  if (title) title.textContent = 'Manual Add Sponsor';
+  if (note) note.hidden = true;
+  if (submit) submit.textContent = 'Save Sponsor';
+  if (currentLogo) {
+    currentLogo.hidden = true;
+    currentLogo.textContent = '';
+  }
+  if (form) {
+    form.dataset.mode = 'add';
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.logo_url.value = '';
+    form.elements.active.value = '1';
+    if (form.elements.tier) form.elements.tier.value = 'gold';
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  syncBypassPaymentVisibility(root, { editing: false });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function showEditSponsorToast(sponsor) {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  const tier = sponsorTierFromLevel(sponsor.level || sponsor.tier) || 'bronze';
+  const address = String(sponsor.formatted_address || [
+    sponsor.address,
+    sponsor.city,
+    sponsor.state,
+  ].filter(Boolean).join(', ')).trim();
+  if (title) title.textContent = 'Edit Sponsor';
+  if (note) {
+    note.hidden = false;
+    note.textContent = 'Editing existing sponsor';
+  }
+  if (submit) submit.textContent = 'Save Changes';
+  if (form) {
+    form.dataset.mode = 'edit';
+    form.reset();
+    form.elements.id.value = String(sponsor.id || '');
+    form.elements.logo_url.value = String(sponsor.logo_url || '');
+    form.elements.active.value = Number(sponsor.active) === 0 ? '0' : '1';
+    form.elements.business_name.value = String(sponsor.name || '');
+    form.elements.address.value = address;
+    form.elements.phone.value = '';
+    form.elements.email.value = '';
+    form.elements.phone.required = false;
+    form.elements.email.required = false;
+    if (form.elements.tier) form.elements.tier.value = tier;
+    if (form.elements.logo) form.elements.logo.value = '';
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  if (currentLogo) {
+    if (sponsor.logo_url) {
+      currentLogo.hidden = false;
+      currentLogo.textContent = `Current logo: ${sponsor.logo_url}`;
+    } else {
+      currentLogo.hidden = true;
+      currentLogo.textContent = '';
+    }
+  }
+  syncBypassPaymentVisibility(root, { editing: true });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function hideSponsorFormToast() {
+  const root = document.querySelector('#admin-sponsor-form-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  sponsorFormToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
+function resetSponsorForm() {
+  // Legacy no-op kept for older call sites; form lives in the toast now.
 }
 
 function goldPrintSponsors() {
@@ -3440,30 +3605,8 @@ function renderSponsors() {
   renderGoldSponsorsPrintPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
-    const form = document.querySelector('#sponsor-form');
-    fillForm(form, {
-      ...sponsor,
-      city: sponsor.city || 'Kernersville',
-      state: sponsor.state || 'NC',
-    });
-    setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
-    const levelSelect = formControl(form, 'level');
-    if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
-      if (![...levelSelect.options].some((option) => option.value === level)) {
-        const option = document.createElement('option');
-        option.value = level;
-        option.textContent = level;
-        levelSelect.appendChild(option);
-      }
-      setSelectValue(levelSelect, level);
-    }
-    form.elements.active.checked = Boolean(Number(sponsor.active));
-    const file = formControl(form, 'logo_file');
-    if (file) file.value = '';
-    syncSponsorLogoPreview(form, sponsor.logo_url || '');
-    syncSponsorTierBenefits(form);
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!sponsor) return;
+    showEditSponsorToast(sponsor);
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this sponsor?')) return;
@@ -4974,97 +5117,77 @@ function bindForms() {
     formControl(form, 'name')?.focus();
   });
 
-  document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-status');
-    const payload = formPayload(form);
-    delete payload.homepage_ad;
-    payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
-    payload.state = String(payload.state || 'NC').trim() || 'NC';
-    const id = payload.id;
-    delete payload.id;
-    delete payload.logo_file;
-    delete payload.sort_order;
-    if (status) status.textContent = 'Saving…';
-    try {
-      const file = formControl(form, 'logo_file')?.files?.[0];
-      if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Sponsor logo');
-        upload.set('caption', payload.level || 'Sponsor');
-        // Negative sort keeps sponsor logos out of the public Photo gallery listing.
-        upload.set('sort_order', '-400');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
-        payload.logo_url = stored.url;
-        formControl(form, 'logo_url').value = stored.url;
-        syncSponsorLogoPreview(form, stored.url);
-      }
-      const saved = await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (status) {
-        if (!id && saved?.invoice_sent) {
-          status.textContent = `Sponsor saved. Invoice PDF emailed to ${saved.email || 'the sponsor'} (${saved.invoice_number || 'invoice'}).`;
-        } else if (!id && payload.email) {
-          status.textContent = `Sponsor saved. Invoice email note: ${saved?.invoice_detail || 'not sent'}.`;
-        } else {
-          status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
-        }
-      }
-      resetSponsorForm(form);
-      await loadSponsors();
-    } catch (error) {
-      if (status) status.textContent = `Could not save sponsor: ${error.message}`;
-    }
-  });
-
-  document.querySelector('#sponsor-form [name="logo_url"]')?.addEventListener('input', (event) => {
-    syncSponsorLogoPreview(event.currentTarget.form, event.currentTarget.value);
-  });
-  document.querySelector('#sponsor-form [name="logo_file"]')?.addEventListener('change', (event) => {
-    const form = event.currentTarget.form;
-    const file = event.currentTarget.files?.[0];
-    if (!file) {
-      syncSponsorLogoPreview(form);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(file);
-    syncSponsorLogoPreview(form, objectUrl);
-  });
-  document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
-    syncSponsorTierBenefits(event.currentTarget.form);
-  });
   document.querySelector('#print-gold-sponsors')?.addEventListener('click', () => {
     printGoldSponsorsPdf();
   });
-  syncSponsorTierBenefits();
-
-  document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    const seconds = Number(formControl(form, 'sponsor_ad_seconds')?.value);
-    if (!Number.isFinite(seconds)) {
-      if (status) status.textContent = 'Enter a valid number of seconds.';
-      return;
-    }
-    if (status) status.textContent = 'Saving…';
-    try {
-      const saved = await jsonFetch('/api/admin/sponsors/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ sponsor_ad_seconds: seconds }),
-      });
-      formControl(form, 'sponsor_ad_seconds').value = String(saved.sponsor_ad_seconds);
-      if (status) status.textContent = `Homepage fly-in will close after ${saved.sponsor_ad_seconds} seconds.`;
-    } catch (error) {
-      if (status) status.textContent = `Could not save ad timing: ${error.message}`;
-    }
-  });
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
-    resetSponsorForm(document.querySelector('#sponsor-form'));
-    document.querySelector('#sponsor-status').textContent = 'Creating a new sponsor.';
-    formControl(document.querySelector('#sponsor-form'), 'name')?.focus();
+    showManualAddSponsorToast();
+  });
+
+  const sponsorToast = ensureSponsorFormToast();
+  sponsorToast.querySelector('#sponsor-manual-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#sponsor-manual-status');
+    const mode = form.dataset.mode === 'edit' ? 'edit' : 'add';
+    const tier = String(form.elements.tier?.value || '').trim().toLowerCase();
+    const businessName = String(form.elements.business_name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim();
+    const logo = form.elements.logo?.files?.[0];
+    if (status) status.textContent = 'Saving…';
+    try {
+      if (mode === 'edit') {
+        const id = String(form.elements.id?.value || '').trim();
+        if (!id) {
+          showFailedToast('Missing sponsor id.');
+          return;
+        }
+        const level = tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor';
+        let logoUrl = String(form.elements.logo_url?.value || '').trim();
+        if (logo) {
+          const upload = new FormData();
+          upload.set('file', logo);
+          upload.set('alt_text', businessName || 'Sponsor logo');
+          upload.set('caption', level);
+          upload.set('sort_order', '-400');
+          const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+          logoUrl = stored.url || logoUrl;
+        }
+        await jsonFetch(`/api/admin/sponsors/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: businessName,
+            address,
+            logo_url: logoUrl,
+            level,
+            active: form.elements.active?.value !== '0',
+          }),
+        });
+      } else {
+        const amounts = MANUAL_SPONSOR_TIER_AMOUNTS[tier] || MANUAL_SPONSOR_TIER_AMOUNTS.gold;
+        const bypass = Boolean(form.elements.bypass_payment?.checked) && canBypassSponsorPayment();
+        const body = new FormData();
+        body.set('business_name', businessName);
+        body.set('address', address);
+        body.set('phone', phone);
+        body.set('email', email);
+        body.set('tier', tier);
+        body.set('amount_cents', String(amounts.cents));
+        body.set('amount_display', amounts.display);
+        if (bypass) body.set('bypass_payment', '1');
+        if (logo) body.set('logo', logo);
+        await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
+      }
+      hideSponsorFormToast();
+      await loadSponsors();
+    } catch (error) {
+      const detail = error?.message || 'Could not save sponsor.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+    }
   });
 
   document.querySelector('#contact-topic-form')?.addEventListener('submit', async (event) => {
