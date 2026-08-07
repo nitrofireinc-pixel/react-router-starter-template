@@ -3012,11 +3012,16 @@ body.sponsor-signup-open{overflow:hidden}
   inset:0;
   z-index:80;
   display:grid;
-  place-items:center;
-  padding:max(12px,2vh) 12px;
+  align-items:start;
+  justify-items:center;
+  overflow-x:hidden;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  padding:max(16px, env(safe-area-inset-top, 0px)) 12px max(24px, env(safe-area-inset-bottom, 0px));
 }
 .minutes-frame-backdrop{
-  position:absolute;
+  position:fixed;
   inset:0;
   border:0;
   padding:0;
@@ -3028,9 +3033,10 @@ body.sponsor-signup-open{overflow:hidden}
 .minutes-editor-dialog{
   position:relative;
   z-index:1;
-  max-height:min(94vh,980px);
-  overflow:auto;
-  margin:0;
+  width:min(100%,980px);
+  max-height:none;
+  overflow:visible;
+  margin:max(2vh, 8px) 0;
   box-shadow:0 28px 80px rgba(8,22,40,.28);
 }
 .minutes-view-dialog{
@@ -3046,6 +3052,12 @@ body.sponsor-signup-open{overflow:hidden}
   align-items:flex-start;
   justify-content:space-between;
   gap:14px;
+  position:sticky;
+  top:0;
+  z-index:2;
+  margin:-4px -4px 0;
+  padding:4px 4px 10px;
+  background:#fff;
 }
 .minutes-editor-head h2{
   margin:.1rem 0 0;
@@ -3054,6 +3066,13 @@ body.sponsor-signup-open{overflow:hidden}
   line-height:1.1;
 }
 .minutes-editor-form{gap:14px}
+.minutes-editor-form .form-rich-editor{
+  min-height:160px;
+  max-height:min(42vh,360px);
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+}
 .ensembles-editor-modal{z-index:85}
 .ensembles-editor-dialog{width:min(100%,860px)}
 .ensembles-body-editor{
@@ -3111,6 +3130,29 @@ body.minutes-frame-open{overflow:hidden}
   .minutes-footer-actions{
     margin-top:28px;
     padding:12px 0 max(56px, calc(40px + env(safe-area-inset-bottom, 0px)));
+  }
+  .minutes-frame-modal{
+    align-items:start;
+    justify-items:stretch;
+    padding:max(10px, env(safe-area-inset-top, 0px)) 10px max(28px, env(safe-area-inset-bottom, 0px));
+  }
+  .minutes-view-dialog,
+  .minutes-editor-dialog{
+    width:100%;
+    margin:0;
+    border-radius:18px;
+  }
+  .minutes-editor-form .form-rich-editor{
+    min-height:140px;
+    max-height:min(38vh,300px);
+  }
+  .minutes-form-actions{
+    position:sticky;
+    bottom:0;
+    z-index:2;
+    margin:0 -4px;
+    padding:12px 4px max(8px, env(safe-area-inset-bottom, 0px));
+    background:linear-gradient(180deg, rgba(255,255,255,0), #fff 28%);
   }
 }
 
