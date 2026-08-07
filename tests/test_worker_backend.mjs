@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -274,9 +274,19 @@ test('serializePagePayload turns structured CMS fields into generated HTML', () 
 
   assert.equal(page.slug, 'calendar');
   assert.equal(page.path, '/calendar.html');
-  assert.match(page.body_html, /data-events/);
+  assert.match(page.body_html, /data-month-calendar/);
+  assert.doesNotMatch(page.body_html, /data-events/);
   assert.match(page.body_html, /Use the Calendar tab/);
   assert.doesNotMatch(page.body_html, /<textarea/);
+});
+
+test('ensureCalendarMonthMount replaces nested event timelines with a month grid mount', () => {
+  const html = '<section class="content soft"><div class="wrap"><div class="timeline" data-events data-limit="5"><article class="event"><div class="datebox">Aug <span>01</span></div><div><h3>Band Camp</h3><p>Details</p></div></article></div></div></section>';
+  const next = ensureCalendarMonthMount(html);
+  assert.match(next, /data-month-calendar/);
+  assert.doesNotMatch(next, /data-events/);
+  assert.doesNotMatch(next, /Band Camp/);
+  assert.equal(ensureCalendarMonthMount(next), next);
 });
 
 test('events sort by year, month, and day instead of editor sort_order', () => {
@@ -751,6 +761,16 @@ test('sponsor tiers drive marquee, fly-in, and game-day benefits', () => {
   assert.equal(hydrated.show_game_announcement, true);
 });
 
+test('renderSponsorMarqueeSection applies tier background classes', () => {
+  const html = renderSponsorMarqueeSection([
+    { name: 'Nitrofire Computing', level: 'Gold Sponsor', logo_url: '', active: 1, mark_text: 'N' },
+    { name: 'Silver Shop', tier: 'silver', active: 1, mark_text: 'S' },
+  ]);
+  assert.match(html, /sponsor-marquee-item tier-gold/);
+  assert.match(html, /sponsor-marquee-item tier-silver/);
+  assert.match(html, /data-sponsor-tier="gold"/);
+});
+
 test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
   const gold = normalizeSponsorPayload({
     name: 'Eagle Financial Partners',
@@ -890,14 +910,20 @@ test('admin mail payload sanitizes rich html and builds plain text', () => {
     subject: '  Practice update  ',
     html: '<p>Hello <strong>team</strong></p><script>alert(1)</script><p>See you Thursday.</p>',
     userIds: ['3', 3, 7, 'nope'],
+    extraEmails: 'Parent@example.com, bad-email, parent@example.com; volunteer@efhsband.org',
   });
   assert.equal(mail.subject, 'Practice update');
   assert.deepEqual(mail.user_ids, [3, 7]);
+  assert.deepEqual(mail.extra_emails, ['parent@example.com', 'volunteer@efhsband.org']);
   assert.match(mail.html, /<strong>team<\/strong>/);
   assert.doesNotMatch(mail.html, /script/i);
   assert.match(mail.text, /Hello team/);
   assert.match(mail.text, /See you Thursday/);
   assert.equal(htmlToPlainText('<p>Line one</p><br>Line two'), 'Line one\n\nLine two');
+  assert.deepEqual(
+    normalizeAdminMailExtraEmails(['A@Band.org', 'not-email', 'a@band.org']),
+    ['a@band.org'],
+  );
 });
 
 test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
@@ -910,6 +936,7 @@ test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
   assert.match(missing.detail, /valid email/i);
   const fallback = resolveAdminMailSender({ username: 'admin@efhsband.org', display_name: '  ' });
   assert.equal(fallback.fromName, 'admin@efhsband.org');
+  assert.equal(fallback.replyTo, 'admin@efhsband.org');
 });
 
 test('meeting minutes dates and secretary edit window', () => {
@@ -1015,6 +1042,30 @@ test('sanitizeAdminReturnPath only allows admin return paths', () => {
   assert.equal(sanitizeAdminReturnPath('/admin?tab=social&zernio=facebook_select'), '/admin?tab=social&zernio=facebook_select');
   assert.equal(sanitizeAdminReturnPath('https://evil.example/admin'), '/admin');
   assert.equal(sanitizeAdminReturnPath('/api/admin/me'), '/admin');
+});
+
+test('admin sessions stay fresh for 24 hours and public nav reflects login state', () => {
+  assert.equal(SESSION_TTL_SECONDS, 24 * 60 * 60);
+  const now = 1_700_000_000;
+  assert.equal(isSessionFresh(now - 60, now), true);
+  assert.equal(isSessionFresh(now - SESSION_TTL_SECONDS, now), true);
+  assert.equal(isSessionFresh(now - SESSION_TTL_SECONDS - 1, now), false);
+  assert.equal(isSessionFresh(now + 120, now), false);
+  assert.match(sessionCookieHeader('abc.token'), /Max-Age=86400/);
+  assert.match(sessionCookieHeader('', { maxAge: 0 }), /Max-Age=0/);
+  assert.match(renderStaffAuthNavLink(false), /Login/);
+  assert.match(renderStaffAuthNavLink(false), /\/admin\/login/);
+  assert.match(renderStaffAuthNavLink(true), /Staff Menu/);
+  assert.match(renderStaffAuthNavLink(true), /href="\/admin"/);
+  const nav = renderNav([
+    { slug: 'home', path: '/', title: 'Home' },
+    { slug: 'become-a-sponsor', path: '/become-a-sponsor.html', title: 'Become a Sponsor' },
+    { slug: 'contact', path: '/contact.html', title: 'Contact' },
+  ], { loggedIn: true });
+  assert.match(nav, />Home</);
+  assert.match(nav, />Contact</);
+  assert.doesNotMatch(nav, /Become a Sponsor/);
+  assert.match(nav, /Staff Menu/);
 });
 
 test('formatFacebookCalendarDigest lists queued events for Facebook', () => {
