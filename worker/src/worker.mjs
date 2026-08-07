@@ -486,7 +486,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, square_payment_id TEXT NOT NULL DEFAULT \'\', square_auth_id TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -560,6 +560,16 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN invoice_sent_at TEXT').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN square_payment_id TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN square_auth_id TEXT NOT NULL DEFAULT ''").run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -859,13 +869,30 @@ export async function createSquareCardPayment(env, {
     return { ok: false, detail: formatSquareError(payload, response.status) };
   }
   const payment = payload?.payment || {};
+  const authId = resolveSquarePurchaseAuthId(payment);
   return {
     ok: true,
     payment_id: String(payment.id || ''),
+    auth_id: authId,
     status: String(payment.status || ''),
     receipt_url: String(payment.receipt_url || ''),
     location_id: resolvedLocationId,
   };
+}
+
+/** Square dashboard / receipt Auth ID: card auth code when present, otherwise payment id. */
+export function resolveSquarePurchaseAuthId(payment = {}, {
+  authId = '',
+  paymentId = '',
+} = {}) {
+  const fromCard = String(
+    payment?.card_details?.auth_result_code
+      || authId
+      || '',
+  ).trim();
+  if (fromCard) return fromCard.slice(0, 64);
+  const fromPayment = String(payment?.id || paymentId || '').trim();
+  return fromPayment.slice(0, 191);
 }
 
 export function squareApiBase(env = {}) {
@@ -2855,6 +2882,7 @@ export function buildSponsorInvoicePdfBase64({
   email = '',
   tierLabel = '',
   amountDisplay = '',
+  squareAuthId = '',
 } = {}) {
   const logoBytes = pdfBinaryFromBase64(INVOICE_LOGO_RGB_FLATE_BASE64);
   const logoW = Number(INVOICE_LOGO_WIDTH) || 120;
@@ -2891,6 +2919,7 @@ export function buildSponsorInvoicePdfBase64({
   ops.push('0 g');
 
   // Bill to / status
+  const authId = String(squareAuthId || '').trim();
   ops.push(pdfTextAt(left, 680, 'BILL TO', { font: 'F2', size: 9 }));
   ops.push(pdfTextAt(360, 680, 'PAYMENT STATUS', { font: 'F2', size: 9 }));
   ops.push(pdfTextAt(left, 662, businessName || 'Sponsor', { font: 'F2', size: 12 }));
@@ -2903,6 +2932,11 @@ export function buildSponsorInvoicePdfBase64({
     ops.push(pdfTextAt(left, y, line, { size: 10 }));
     ops.push('0 g');
     y -= 14;
+  }
+  if (authId) {
+    ops.push(`${slate} rg`);
+    ops.push(pdfTextAt(360, 644, `Square Auth ID: ${authId}`, { size: 9 }));
+    ops.push('0 g');
   }
 
   // Table header
@@ -3032,6 +3066,10 @@ export function buildSponsorDonationInvoice(application = {}) {
   const prefix = String(application.invoice_prefix || 'SP').trim().toUpperCase() || 'SP';
   const invoiceNumber = `${prefix}-${Number(application.id || 0) || 'pending'}`;
   const paidLabel = formatSponsorInvoiceDate(application.paid_at);
+  const squareAuthId = resolveSquarePurchaseAuthId({}, {
+    authId: application.square_auth_id || application.auth_id || '',
+    paymentId: application.square_payment_id || application.payment_id || '',
+  });
   const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
   const detailLines = [
     `Invoice number: ${invoiceNumber}`,
@@ -3044,6 +3082,7 @@ export function buildSponsorDonationInvoice(application = {}) {
     `Amount: ${amountDisplay}`,
     'Payment status: Paid',
   ];
+  if (squareAuthId) detailLines.push(`Square Auth ID: ${squareAuthId}`);
   const text = [
     'Thank you for your donation to the East Forsyth Band Boosters.',
     '',
@@ -3058,6 +3097,9 @@ export function buildSponsorDonationInvoice(application = {}) {
     'East Forsyth High School Band',
     'https://efhsband.org',
   ].join('\n');
+  const authIdRow = squareAuthId
+    ? `<tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Square Auth ID</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(squareAuthId)}</strong></td></tr>`
+    : '';
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#10233c;max-width:640px;margin:0 auto">
       <div style="display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-bottom:3px solid #102d5e">
@@ -3078,6 +3120,7 @@ export function buildSponsorDonationInvoice(application = {}) {
         <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Email</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(email || '—')}</strong></td></tr>
         <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Package</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
         <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Amount</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        ${authIdRow}
         <tr><td style="padding:10px 12px;color:#64748b">Payment status</td><td style="padding:10px 12px;text-align:right"><strong style="color:#102d5e">Paid</strong></td></tr>
       </table>
       <p style="margin:0;color:#64748b;font-size:13px">East Forsyth Band Boosters · <a href="https://efhsband.org" style="color:#102d5e">efhsband.org</a></p>
@@ -3092,6 +3135,7 @@ export function buildSponsorDonationInvoice(application = {}) {
     email: email || '—',
     tierLabel,
     amountDisplay,
+    squareAuthId,
   });
   return {
     to: email,
@@ -3099,6 +3143,7 @@ export function buildSponsorDonationInvoice(application = {}) {
     text,
     html,
     invoice_number: invoiceNumber,
+    square_auth_id: squareAuthId,
     from_email: SPONSOR_INVOICE_FROM_EMAIL,
     from_name: SPONSOR_INVOICE_FROM_NAME,
     pdf_filename: `${invoiceNumber}.pdf`,
@@ -4870,7 +4915,8 @@ async function handleApi(request, env, url) {
     if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
     const application = await env.DB.prepare(
       `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at,
+              square_payment_id, square_auth_id
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4903,21 +4949,26 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await activatePaidSponsorApplication(env, application, { mock: false });
+      const squarePaymentId = String(payment.payment_id || '').trim();
+      const squareAuthId = String(payment.auth_id || resolveSquarePurchaseAuthId({}, { paymentId: squarePaymentId })).trim();
       await env.DB.prepare(
         `UPDATE sponsor_applications
-         SET square_payment_link_id = ?, status = 'paid', updated_at = ?
+         SET square_payment_id = ?, square_auth_id = ?, status = 'paid', updated_at = ?
          WHERE id = ?`,
-      ).bind(payment.payment_id || '', new Date().toISOString(), applicationId).run();
+      ).bind(squarePaymentId, squareAuthId, new Date().toISOString(), applicationId).run();
       const invoice = await maybeSendSponsorInvoice(env, {
         ...application,
         ...result.application,
+        square_payment_id: squarePaymentId,
+        square_auth_id: squareAuthId,
       });
       return jsonResponse({
         ok: true,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
-        payment_id: payment.payment_id,
+        payment_id: squarePaymentId,
+        auth_id: squareAuthId,
         invoice_sent: Boolean(invoice.ok && !invoice.skipped),
         invoice_detail: invoice.detail || '',
         detail: result.created
