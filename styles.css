@@ -2005,7 +2005,6 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   font-weight:650;
   color:#5b6f88;
 }
-.mail-recipient-select-label select,
 .mail-extra-emails-label input{
   font:inherit;
   width:100%;
@@ -2016,10 +2015,51 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   background:#fff;
   color:#10233c;
 }
+.mail-recipient-picker{
+  display:grid;
+  gap:0;
+  border:1px solid #d5deea;
+  border-radius:12px;
+  overflow:hidden;
+  background:#fff;
+}
+.mail-toggle-all-users{
+  appearance:none;
+  border:0;
+  border-bottom:1px solid #d5deea;
+  margin:0;
+  padding:12px 14px;
+  background:#f4f7fb;
+  color:#10233c;
+  font:inherit;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+}
+.mail-toggle-all-users:hover{
+  background:#eaf1f8;
+}
+.mail-toggle-all-users.is-active{
+  background:#002142;
+  color:#fff;
+  border-bottom-color:#002142;
+}
+.mail-toggle-all-users:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
 .mail-recipient-select-label select[multiple]{
+  font:inherit;
+  width:100%;
+  max-width:100%;
   min-height:9.5rem;
+  margin:0;
+  border:0;
+  border-radius:0;
   padding:8px;
   line-height:1.45;
+  background:#fff;
+  color:#10233c;
 }
 .mail-recipient-select-label select[multiple] option{
   padding:8px 10px;
