@@ -2,7 +2,7 @@
 // Source: assets/efhs-blue-regiment-mark.png (composited on white for print).
 export const INVOICE_LOGO_WIDTH = 512;
 export const INVOICE_LOGO_HEIGHT = 512;
-export const INVOICE_LOGO_FLATE_B64 = [
+export const INVOICE_LOGO_RGB_FLATE_BASE64 = [
   'eNrsfQl4XNV59rl3FhvjRRotI2nmzp0ZyTved1vLaKTRLHeZ0WZbi/d9BdsYGzBgGwIkENIQAhQSCglOQoGkSchKmpK1pCGhSbP8',
   'SUqzNU3TpmmbJn/blKf/f76zj5ATJMss5p7nPnpkWZq5c+893/p+74v+n7e85S1veesNuZB3Cbx1CawXX3zxt7/9v7/613/7+T/+',
   '049/+rMfvPDj73zvhW9863vP/fW3n33um1989vnPfflrn/3CV5/+3Fc+9RfPfvKzf/nxz3wZHx97+kv4oN/jH+L/evqZr+Bfw7/8',
