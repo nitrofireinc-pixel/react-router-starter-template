@@ -1867,7 +1867,6 @@ function renderMobileAdminMenu() {
     || button?.hasAttribute('data-boosters-toggle')
   );
 
-  // Desktop accordion subs stay [hidden] until expanded. Mobile still needs those children.
   const isGroupActionButton = (button, group) => (
     Boolean(button)
     && !button.hidden
@@ -1884,11 +1883,7 @@ function renderMobileAdminMenu() {
     && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button, { allowCollapsedSubmenu = false, group = null } = {}) => {
-    const allowed = allowCollapsedSubmenu
-      ? isGroupActionButton(button, group)
-      : isVisibleButton(button);
-    if (!allowed) return;
+  const actionButtonHtml = (button) => {
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1896,13 +1891,33 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+  };
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    parts.push(actionButtonHtml(button));
   };
 
   const pushLabel = (text) => {
     const label = String(text || '').trim();
     if (!label) return;
     parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
+  };
+
+  const pushMenuGroup = (group) => {
+    if (!group || group.hidden) return;
+    const parent = group.querySelector('.admin-menu-parent');
+    const children = [...group.querySelectorAll('button')].filter((button) => isGroupActionButton(button, group));
+    if (!parent || parent.hidden || !children.length) return;
+    const expanded = parent.getAttribute('aria-expanded') === 'true';
+    const childHtml = children.map((button) => actionButtonHtml(button)).join('');
+    parts.push(
+      `<div class="admin-mobile-menu-group">`
+      + `<button type="button" class="admin-menu-parent admin-mobile-menu-parent" data-mobile-submenu-toggle aria-expanded="${expanded ? 'true' : 'false'}">${escapeHtml(parent.textContent.trim())}</button>`
+      + `<div class="admin-mobile-menu-sub" data-mobile-submenu ${expanded ? '' : 'hidden'}>${childHtml}</div>`
+      + `</div>`
+    );
   };
 
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
@@ -1924,7 +1939,6 @@ function renderMobileAdminMenu() {
         const shortcuts = document.querySelector('#admin-page-shortcuts');
         if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
       } else {
-        // Manage label: only show when at least one following manage control is visible.
         const following = [];
         let sibling = child.nextElementSibling;
         while (sibling) {
@@ -1942,13 +1956,7 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('.admin-menu-group')) {
-      if (child.hidden) return;
-      const groupButtons = [...child.querySelectorAll('button')]
-        .filter((button) => isGroupActionButton(button, child));
-      if (!groupButtons.length) return;
-      const parent = child.querySelector('.admin-menu-parent');
-      if (parent && !parent.hidden) pushLabel(parent.textContent);
-      groupButtons.forEach((button) => pushButton(button, { allowCollapsedSubmenu: true, group: child }));
+      pushMenuGroup(child);
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
@@ -1957,6 +1965,20 @@ function renderMobileAdminMenu() {
   menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
   <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
+
+  menu.querySelectorAll('[data-mobile-submenu-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const group = toggle.closest('.admin-mobile-menu-group');
+      const sub = group?.querySelector('[data-mobile-submenu]');
+      if (!sub) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      sub.hidden = !open;
+    });
+  });
+
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);

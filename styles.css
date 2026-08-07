@@ -319,6 +319,42 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     text-transform:uppercase;
   }
   .admin-mobile-menu-label:first-child{margin-top:2px}
+  .admin-mobile-menu-group{
+    display:grid;
+    gap:2px;
+  }
+  .admin-mobile-menu-parent{
+    position:relative;
+    padding-right:28px!important;
+  }
+  .admin-mobile-menu-parent:after{
+    content:"";
+    position:absolute;
+    right:12px;
+    top:50%;
+    width:7px;
+    height:7px;
+    border-right:2px solid rgba(220,233,248,.75);
+    border-bottom:2px solid rgba(220,233,248,.75);
+    transform:translateY(-65%) rotate(45deg);
+    transition:transform .16s ease;
+  }
+  .admin-mobile-menu-parent[aria-expanded="true"]:after{
+    transform:translateY(-25%) rotate(225deg);
+  }
+  .admin-mobile-menu-sub{
+    display:grid;
+    gap:2px;
+    margin:0 0 4px 10px;
+    padding:0 0 0 12px;
+    border-left:2px solid rgba(255,255,255,.12);
+  }
+  .admin-mobile-menu-sub[hidden]{display:none!important}
+  .admin-mobile-menu-sub button{
+    font-size:.92rem!important;
+    color:#c5d6ea!important;
+    padding-left:10px!important;
+  }
   .admin-workspace{padding:8px 16px 28px;width:100%;max-width:100%;min-width:0;box-sizing:border-box}
   .image-admin-shell .cms-panel,
   .image-admin-shell .editor-layout,
