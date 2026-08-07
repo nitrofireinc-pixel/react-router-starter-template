@@ -188,9 +188,10 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'remove-blue-regiment-logo-20260807-1';
-/** Reserved path for the Blue Regiment mark once a replacement asset is provided. */
-export const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
+const ASSET_VERSION = 'remove-blue-regiment-logo-20260807-2';
+const REMOVED_STATIC_ASSETS = new Set([
+  '/assets/efhs-blue-regiment-mark.png',
+]);
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -6721,6 +6722,15 @@ async function serveStaticOrCms(request, env, url) {
   if (url.pathname === '/') return env.ASSETS.fetch(request);
   const assetUrl = new URL(request.url);
   assetUrl.pathname = normalizeStaticPath(url.pathname);
+  if (REMOVED_STATIC_ASSETS.has(assetUrl.pathname)) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
+  }
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
