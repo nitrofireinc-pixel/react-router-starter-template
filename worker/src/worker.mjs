@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-56';
+const ASSET_VERSION = 'admin-cms-20260805-73';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -460,7 +460,8 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -523,6 +524,16 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN paid_at TEXT').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN email TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE sponsor_applications ADD COLUMN invoice_sent_at TEXT').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -600,10 +611,28 @@ async function initDb(env) {
   }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html));
+    const nextSponsorsHtml = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html)));
     if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextSponsorsHtml, sponsorsPageRow.id)
+        .run();
+    }
+  }
+  const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
+  if (fundraisingPageRow?.body_html) {
+    const nextFundraisingHtml = ensureFundraisingDonateSlot(fundraisingPageRow.body_html);
+    if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextFundraisingHtml, fundraisingPageRow.id)
+        .run();
+    }
+  }
+  const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
+  if (homePageRow?.body_html) {
+    const nextHomeHtml = refreshHomeStartHereSection(homePageRow.body_html);
+    if (nextHomeHtml !== homePageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextHomeHtml, homePageRow.id)
         .run();
     }
   }
@@ -2162,6 +2191,13 @@ export function ensureBoosterMeetingsSlot(html) {
       '$1<p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div>$3'
     );
   }
+  // Prefer inserting the meetings card into the main content wrap when present.
+  if (/<section[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>[\s\S]*?<div class="wrap">/i.test(source)) {
+    return source.replace(
+      /(<section[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>\s*<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2<article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div></article>$3`
+    );
+  }
   return `${source}<div class="timeline booster-meetings" data-booster-meetings></div>`;
 }
 
@@ -2177,14 +2213,59 @@ export function renderSquareDonateCard() {
   <h3>Direct Support</h3>
   <p>Give securely online to support instruments, travel, meals, uniforms, and student opportunities.</p>
   <div class="square-donate">
-    <a class="btn primary" id="embedded-checkout-modal-checkout-button" data-square-checkout data-url="https://square.link/u/IIGMHqVQ?src=embd" href="https://square.link/u/IIGMHqVQ?src=embed" target="_blank" rel="noopener noreferrer">Donate</a>
+    <button type="button" class="btn primary" data-donate-open>Donate</button>
   </div>
 </article>`;
 }
 
-export function ensureFundraisingDonateSlot(html) {
+export function rewriteFundraisingDonateToPopup(html) {
+  let source = String(html || '');
+  if (!source.trim()) return source;
+  // Prefer the in-page donate popup over legacy Square payment-link popups.
+  source = source.replace(
+    /<a\b[^>]*(?:data-square-checkout|id=["']embedded-checkout-modal-checkout-button["'])[^>]*>\s*Donate\s*<\/a>/gi,
+    '<button type="button" class="btn primary" data-donate-open>Donate</button>',
+  );
+  source = source.replace(
+    /<a\b[^>]*href=["'][^"']*square\.link[^"']*["'][^>]*>\s*Donate\s*<\/a>/gi,
+    '<button type="button" class="btn primary" data-donate-open>Donate</button>',
+  );
+  return source;
+}
+
+export function refreshHomeStartHereSection(html) {
   const source = String(html || '');
-  if (/data-square-checkout|data-square-donate/i.test(source)) return source;
+  if (!source.trim()) return source;
+  if (/Everything families need, all in one place\./i.test(source)) return source;
+  if (!/Start here/i.test(source) || !/Built around the pages families expect\./i.test(source)) {
+    return source;
+  }
+  return source
+    .replace(/Built around the pages families expect\./g, 'Everything families need, all in one place.')
+    .replace(
+      /Modeled after a full high-school band program site structure, with East Forsyth branding and easy paths for students, parents, sponsors, and visitors\./g,
+      'Designed to keep students, parents, alumni, sponsors, and the community connected with the East Forsyth Blue Regiment through quick access to important information, events, and resources.',
+    )
+    .replace(
+      /Marching band, concert bands, percussion, color guard, jazz, and chamber opportunities\./g,
+      "Explore our marching band, concert bands, percussion, color guard, jazz, and chamber ensembles, with information about each group's activities and expectations.",
+    )
+    .replace(
+      /Forms, handbook links, rehearsal expectations, fees, uniforms, and travel information\./g,
+      'Find forms, handbooks, rehearsal schedules, fees, uniform information, travel details, volunteer opportunities, and other essential family resources.',
+    )
+    .replace(
+      /A place for local businesses and alumni to support the program and be recognized\./g,
+      'Discover the businesses and community partners that support our program, learn about sponsorship opportunities, and help strengthen the Blue Regiment tradition.',
+    );
+}
+
+export function ensureFundraisingDonateSlot(html) {
+  let source = rewriteFundraisingDonateToPopup(html);
+  if (/data-donate-open/i.test(source) && /data-square-donate|Direct Support/i.test(source)) {
+    return source;
+  }
+  if (/data-square-donate/i.test(source)) return source;
   const donate = renderSquareDonateCard();
   if (/data-cms-field=["']body_text["']/i.test(source)) {
     const replaced = source.replace(
@@ -2602,6 +2683,131 @@ export function squareMockPayEnabled(env = {}) {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
+export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
+export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
+
+export function formatSponsorInvoiceDate(value = '') {
+  const raw = String(value || '').trim();
+  const date = raw ? new Date(raw) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: 'America/New_York',
+    });
+  }
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'America/New_York',
+  });
+}
+
+export function buildSponsorDonationInvoice(application = {}) {
+  const tier = normalizeSponsorTierKey(application.tier);
+  const tierLabel = tier
+    ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`
+    : 'Sponsor package';
+  const amountDisplay = String(application.amount_display || '').trim()
+    || formatSponsorAmountDisplay(application.amount_cents)
+    || '$0';
+  const businessName = String(application.business_name || '').trim() || 'Sponsor';
+  const address = String(application.address || '').trim() || '—';
+  const phone = String(application.phone || '').trim() || '—';
+  const email = String(application.email || '').trim().toLowerCase();
+  const invoiceNumber = `SP-${Number(application.id || 0) || 'pending'}`;
+  const paidLabel = formatSponsorInvoiceDate(application.paid_at);
+  const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
+  const text = [
+    'Thank you for your donation to the East Forsyth Band Boosters.',
+    '',
+    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
+    '',
+    'Invoice details',
+    `Invoice number: ${invoiceNumber}`,
+    `Date: ${paidLabel}`,
+    `Business / organization: ${businessName}`,
+    `Address: ${address}`,
+    `Phone: ${phone}`,
+    `Email: ${email || '—'}`,
+    `Package: ${tierLabel}`,
+    `Amount: ${amountDisplay}`,
+    'Payment status: Paid',
+    '',
+    'East Forsyth Band Boosters',
+    'East Forsyth High School Band',
+    'https://efhsband.org',
+  ].join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
+      <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
+      <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
+        <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Business / organization</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(businessName)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Address</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(address)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Phone</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(phone)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Package</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+      </table>
+      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+    </div>
+  `.trim();
+  return {
+    to: email,
+    subject,
+    text,
+    html,
+    invoice_number: invoiceNumber,
+    from_email: SPONSOR_INVOICE_FROM_EMAIL,
+    from_name: SPONSOR_INVOICE_FROM_NAME,
+  };
+}
+
+export async function sendSponsorDonationInvoice(env, application = {}) {
+  const invoice = buildSponsorDonationInvoice(application);
+  if (!isValidEmail(invoice.to)) {
+    return { ok: false, detail: 'Invoice email is missing or invalid' };
+  }
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, detail: 'Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.' };
+  }
+  try {
+    await sendViaResend(env, {
+      to: invoice.to,
+      subject: invoice.subject,
+      text: invoice.text,
+      html: invoice.html,
+      fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
+      fromName: SPONSOR_INVOICE_FROM_NAME,
+    });
+    const id = Number(application.id || 0);
+    if (id) {
+      const sentAt = new Date().toISOString();
+      await env.DB.prepare(
+        'UPDATE sponsor_applications SET invoice_sent_at = ?, updated_at = ? WHERE id = ?',
+      ).bind(sentAt, sentAt, id).run();
+    }
+    return { ok: true, detail: 'Invoice emailed', invoice_number: invoice.invoice_number };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Could not send invoice email' };
+  }
+}
+
+async function maybeSendSponsorInvoice(env, application, { force = false } = {}) {
+  if (!application) return { ok: false, detail: 'Application missing' };
+  if (!force && application.invoice_sent_at) {
+    return { ok: true, detail: 'Invoice already sent', skipped: true };
+  }
+  return sendSponsorDonationInvoice(env, application);
+}
+
 export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
   const row = application || {};
   const id = Number(row.id || 0);
@@ -2768,16 +2974,36 @@ export function rewriteBecomeSponsorLinks(html) {
     .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html\1(?=[^>]*>\s*(?:Become a sponsor|Ask about sponsoring))/gi, 'href="/become-a-sponsor.html"');
 }
 
+export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
+
+export function ensureSponsorDonateButton(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  if (/data-donate-open/i.test(source)) return source;
+  if (/sponsor-intro-actions/i.test(source)) return source;
+  // Wrap the primary Become a sponsor control in the intro with a Donate button.
+  const wrapped = source.replace(
+    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
+    `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
+  );
+  if (wrapped !== source) return wrapped;
+  // Fallback: insert actions before the sponsor directory when intro link was already removed/customized.
+  return source.replace(
+    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
+    `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
+  );
+}
+
 function renderSponsorPageBody(page, sponsors) {
   const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
-  let html = rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || ''));
+  let html = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || '')));
   if (html.includes('data-sponsors')) {
     return replaceMarkedDirectory(html, 'data-sponsors', directory) || `${html}${directory}`;
   }
   if (html.includes('class="sponsor-directory"')) {
     return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
   }
-  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
+  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
 }
 
 function renderBecomeSponsorPageBody(page) {
@@ -2956,7 +3182,7 @@ function renderContactPageBody(page) {
   const form = '<div data-contact-form-slot></div>';
   const html = page.body_html || '';
   if (!html.trim()) {
-    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>Contact details</h3><p>Add official phone, email, mailing address, social links, and response expectations here.</p></article>${form}</div></section>`;
+    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p></article>${form}</div></section>`;
   }
   let next = html;
   if (next.includes('data-contact-form-slot')) {
@@ -3150,8 +3376,8 @@ export function resolveAdminMailSender(user = {}) {
 }
 
 async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments, fromName }) {
-  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
-  const senderName = String(fromName || env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const senderName = String(fromName || env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
   if (!isValidEmail(to)) throw new Error('Recipient email is invalid');
   if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
   if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
@@ -3198,7 +3424,7 @@ async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
     },
     body: JSON.stringify({
       name: name || 'Website visitor',
-      email: replyTo || 'noreply@efhsband.org',
+      email: replyTo || SPONSOR_INVOICE_FROM_EMAIL,
       _subject: subject,
       message: text,
       _template: 'table',
@@ -3219,8 +3445,8 @@ async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
 }
 
 async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
-  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org').trim();
-  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website').trim();
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
   if (!isValidEmail(to)) throw new Error('Topic email is invalid');
 
   const provider = resolveContactEmailProvider(env);
@@ -3830,12 +4056,20 @@ export function sanitizeRichHtml(dirty) {
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
 
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
     if (match.startsWith('</')) return `</${tag}>`;
     if (tag === 'br') return '<br>';
+    if (tag === 'a') {
+      const hrefMatch = String(attrs || '').match(/href\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const href = String(hrefMatch?.[1] || hrefMatch?.[2] || '').trim();
+      if (!href || /^(javascript:|data:)/i.test(href)) return '';
+      if (!/^(https?:\/\/|\/|mailto:)/i.test(href)) return '';
+      const safeHref = href.replace(/"/g, '&quot;');
+      return `<a href="${safeHref}">`;
+    }
     if (tag === 'span') {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
@@ -3929,11 +4163,15 @@ export function generateStructuredPageHtml(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div><div class="directory" data-staff></div>${callout}</div></section>`;
   }
 
+  if (layout === 'boosters') {
+    return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div><article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers who support the East Forsyth Band program.</p></div><div class="directory" data-booster-members></div></div></section>`;
+  }
+
   if (layout === 'sponsors') {
     const sponsorCallout = calloutTitle || calloutText
       ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside>`
       : '';
-    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
+    return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div>${SPONSOR_INTRO_ACTIONS_HTML}</div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
   }
 
   if (layout === 'become-sponsor') {
@@ -4059,6 +4297,7 @@ async function handleApi(request, env, url) {
     let businessName = '';
     let address = '';
     let phone = '';
+    let email = '';
     let tier = '';
     let amountDisplay = '';
     let amountCents = 0;
@@ -4068,6 +4307,7 @@ async function handleApi(request, env, url) {
       businessName = String(form.get('business_name') || '').trim();
       address = String(form.get('address') || '').trim();
       phone = String(form.get('phone') || '').trim();
+      email = String(form.get('email') || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(form.get('tier'));
       amountDisplay = String(form.get('amount_display') || '').trim();
       amountCents = resolveSponsorAmountCents({
@@ -4081,6 +4321,7 @@ async function handleApi(request, env, url) {
       businessName = String(payload.business_name || '').trim();
       address = String(payload.address || '').trim();
       phone = String(payload.phone || '').trim();
+      email = String(payload.email || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(payload.tier);
       amountDisplay = String(payload.amount_display || '').trim();
       amountCents = resolveSponsorAmountCents({
@@ -4090,13 +4331,16 @@ async function handleApi(request, env, url) {
     }
     if (!tier) return jsonResponse({ detail: 'Choose a Bronze, Silver, or Gold package' }, 422);
     if (!businessName || businessName.length > 160) {
-      return jsonResponse({ detail: 'Business name is required' }, 422);
+      return jsonResponse({ detail: 'Business or organization name is required' }, 422);
     }
     if (!address || address.length > 400) {
       return jsonResponse({ detail: 'Business address is required' }, 422);
     }
     if (!phone || phone.length > 40) {
       return jsonResponse({ detail: 'Phone number is required' }, 422);
+    }
+    if (!isValidEmail(email) || email.length > 160) {
+      return jsonResponse({ detail: 'A valid invoice email address is required' }, 422);
     }
     if (!amountCents || amountCents < 100) {
       return jsonResponse({ detail: 'A valid package amount is required' }, 422);
@@ -4121,9 +4365,9 @@ async function handleApi(request, env, url) {
     const completionToken = crypto.randomUUID().replace(/-/g, '');
     const insert = await env.DB.prepare(
       `INSERT INTO sponsor_applications
-        (tier, amount_cents, amount_display, business_name, address, phone, logo_url, status, completion_token, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
-    ).bind(tier, amountCents, display, businessName, address, phone, logoUrl, completionToken, now, now).run();
+        (tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(tier, amountCents, display, businessName, address, phone, email, logoUrl, completionToken, now, now).run();
     const applicationId = insert.meta.last_row_id;
     const tierLabel = `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`;
     const origin = publicSiteOrigin(request, env);
@@ -4171,6 +4415,7 @@ async function handleApi(request, env, url) {
       amount_cents: amountCents,
       amount_display: display,
       business_name: businessName,
+      email,
       logo_url: logoUrl,
       completion_token: completionToken,
       payment_ready: paymentReady,
@@ -4193,8 +4438,8 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
     }
     const application = await env.DB.prepare(
-      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4206,12 +4451,18 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await activatePaidSponsorApplication(env, application, { mock });
+      const invoice = await maybeSendSponsorInvoice(env, {
+        ...application,
+        ...result.application,
+      });
       return jsonResponse({
         ok: true,
         mock: result.mock,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
+        invoice_sent: Boolean(invoice.ok && !invoice.skipped),
+        invoice_detail: invoice.detail || '',
         detail: result.created
           ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
           : 'Sponsorship was already activated.',
@@ -4229,8 +4480,8 @@ async function handleApi(request, env, url) {
     if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
     if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
     const application = await env.DB.prepare(
-      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4268,12 +4519,18 @@ async function handleApi(request, env, url) {
          SET square_payment_link_id = ?, status = 'paid', updated_at = ?
          WHERE id = ?`,
       ).bind(payment.payment_id || '', new Date().toISOString(), applicationId).run();
+      const invoice = await maybeSendSponsorInvoice(env, {
+        ...application,
+        ...result.application,
+      });
       return jsonResponse({
         ok: true,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
         payment_id: payment.payment_id,
+        invoice_sent: Boolean(invoice.ok && !invoice.skipped),
+        invoice_detail: invoice.detail || '',
         detail: result.created
           ? `${result.sponsor.level} activated for ${result.sponsor.name}.`
           : 'Sponsorship was already activated.',
@@ -4281,6 +4538,131 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: error.message || 'Payment succeeded but sponsorship activation failed' }, 500);
     }
+  }
+  if (url.pathname === '/api/donations' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    const donorName = String(payload.donor_name || payload.name || '').trim();
+    const amountDisplay = String(payload.amount_display || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || amountDisplay || payload.amount,
+    });
+    if (!donorName || donorName.length > 160) {
+      return jsonResponse({ detail: 'Donor name is required' }, 422);
+    }
+    if (!amountCents || amountCents < 500) {
+      return jsonResponse({ detail: 'Enter a donation amount of at least $5' }, 422);
+    }
+    if (amountCents > 2_500_000) {
+      return jsonResponse({ detail: 'Donation amount cannot exceed $25,000' }, 422);
+    }
+    const display = amountDisplay || formatSponsorAmountDisplay(amountCents);
+    const now = new Date().toISOString();
+    const completionToken = crypto.randomUUID().replace(/-/g, '');
+    const insert = await env.DB.prepare(
+      `INSERT INTO donations
+        (donor_name, amount_cents, amount_display, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(donorName, amountCents, display, completionToken, now, now).run();
+    const donationId = insert.meta.last_row_id;
+    const configured = squareCheckoutConfigured(env);
+    const applicationId = squareApplicationId(env);
+    const location = configured ? await resolveSquareLocationId(env) : { ok: false, location_id: '' };
+    const webPayments = Boolean(configured && applicationId && location.ok && location.location_id);
+    return jsonResponse({
+      ok: true,
+      id: donationId,
+      donor_name: donorName,
+      amount_cents: amountCents,
+      amount_display: display,
+      completion_token: completionToken,
+      payment_ready: webPayments,
+      web_payments: webPayments,
+      mock_enabled: squareMockPayEnabled(env),
+      detail: webPayments
+        ? 'Donation saved. Continue to Square to pay.'
+        : (configured
+          ? 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.'
+          : 'Donation saved. Square payment is not connected yet.'),
+    });
+  }
+  const donationPayMatch = url.pathname.match(/^\/api\/donations\/(\d+)\/pay$/);
+  if (donationPayMatch && request.method === 'POST') {
+    const donationId = Number(donationPayMatch[1]);
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    const sourceId = String(payload.source_id || payload.sourceId || '').trim();
+    const mock = Boolean(payload.mock);
+    if (!donationId) return jsonResponse({ detail: 'Donation not found' }, 404);
+    const donation = await env.DB.prepare(
+      `SELECT id, donor_name, amount_cents, amount_display, status, square_payment_id, completion_token, paid_at
+       FROM donations WHERE id = ?`,
+    ).bind(donationId).first();
+    if (!donation) return jsonResponse({ detail: 'Donation not found' }, 404);
+    if (!token || token !== String(donation.completion_token || '')) {
+      return jsonResponse({ detail: 'Invalid payment completion token' }, 403);
+    }
+    if (['paid', 'paid_mock'].includes(String(donation.status || '')) || donation.paid_at) {
+      return jsonResponse({
+        ok: true,
+        created: false,
+        donation_id: donationId,
+        donor_name: donation.donor_name,
+        amount_cents: donation.amount_cents,
+        amount_display: donation.amount_display,
+        detail: 'This donation was already paid. Thank you!',
+      });
+    }
+    if (mock) {
+      if (!squareMockPayEnabled(env)) {
+        return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
+      }
+      const paidAt = new Date().toISOString();
+      await env.DB.prepare(
+        `UPDATE donations
+         SET status = 'paid_mock', paid_at = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(paidAt, paidAt, donationId).run();
+      return jsonResponse({
+        ok: true,
+        mock: true,
+        created: true,
+        donation_id: donationId,
+        donor_name: donation.donor_name,
+        amount_cents: donation.amount_cents,
+        amount_display: donation.amount_display,
+        detail: `Thank you, ${donation.donor_name}! Your ${donation.amount_display} donation was recorded.`,
+      });
+    }
+    if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
+    if (!squareCheckoutConfigured(env)) {
+      return jsonResponse({ detail: 'Square payment is not connected yet' }, 503);
+    }
+    const payment = await createSquareCardPayment(env, {
+      sourceId,
+      amountCents: donation.amount_cents,
+      referenceId: `donate-${donationId}`,
+      note: `EFHS Band donation — ${donation.donor_name}`,
+    });
+    if (!payment.ok) {
+      return jsonResponse({ detail: payment.detail || 'Square payment failed' }, 422);
+    }
+    const paidAt = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE donations
+       SET square_payment_id = ?, status = 'paid', paid_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).bind(payment.payment_id || '', paidAt, paidAt, donationId).run();
+    return jsonResponse({
+      ok: true,
+      created: true,
+      donation_id: donationId,
+      donor_name: donation.donor_name,
+      amount_cents: donation.amount_cents,
+      amount_display: donation.amount_display,
+      payment_id: payment.payment_id,
+      detail: `Thank you, ${donation.donor_name}! Your ${donation.amount_display} donation was received.`,
+    });
   }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));
@@ -4616,7 +4998,12 @@ async function handleApi(request, env, url) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const pages = await getPages(env, true);
-    return jsonResponse(hasPermission(auth.user, 'pages') ? pages : pages.filter((page) => canEditPage(auth.user, page.slug)));
+    const canSee = (page) => (
+      hasPermission(auth.user, 'pages')
+      || canEditPage(auth.user, page.slug)
+      || (page.slug === 'boosters' && hasPermission(auth.user, 'boosters'))
+    );
+    return jsonResponse(hasPermission(auth.user, 'pages') ? pages : pages.filter(canSee));
   }
   if (url.pathname === '/api/admin/pages' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'pages');
@@ -4631,7 +5018,10 @@ async function handleApi(request, env, url) {
     if (auth.response) return auth.response;
     const existing = await getPageBySlug(env, pageMatch[1], true);
     if (!existing) return jsonResponse({ detail: 'Page not found' }, 404);
-    if (!canEditPage(auth.user, existing.slug)) return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
+    const mayEditBoosters = existing.slug === 'boosters' && hasPermission(auth.user, 'boosters');
+    if (!canEditPage(auth.user, existing.slug) && !mayEditBoosters) {
+      return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
+    }
     const page = serializePagePayload(await request.json(), existing);
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
@@ -4917,8 +5307,8 @@ async function handleApi(request, env, url) {
     const provider = resolveContactEmailProvider(env);
     return jsonResponse({
       ...describeContactEmailProvider(provider),
-      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
-      from_name: String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      from_email: String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL),
+      from_name: String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME),
     });
   }
   if (url.pathname === '/api/admin/contact/messages' && request.method === 'GET') {
@@ -5042,11 +5432,12 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     return jsonResponse({
       ...describeContactEmailProvider(provider),
-      from_email: String(env.CONTACT_FROM_EMAIL || 'noreply@efhsband.org'),
-      from_name: sender.ok ? sender.fromName : String(env.CONTACT_FROM_NAME || 'East Forsyth Band Website'),
+      from_email: String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim(),
+      from_name: sender.ok ? sender.fromName : String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME),
       reply_to: sender.ok ? sender.replyTo : '',
       sender_ready: sender.ok,
       requires_resend: true,
+      invoice_from_email: SPONSOR_INVOICE_FROM_EMAIL,
       detail: provider !== 'resend'
         ? 'Mail requires Resend. Add a Cloudflare Pages secret named RESEND_API_KEY, verify efhsband.org in Resend, then redeploy.'
         : sender.ok
@@ -5054,6 +5445,85 @@ async function handleApi(request, env, url) {
           : sender.detail,
       configured: provider === 'resend' && sender.ok,
     });
+  }
+  if (url.pathname === '/api/admin/mail/resend-status' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    if (!env.RESEND_API_KEY) {
+      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
+    }
+    const response = await fetch('https://api.resend.com/domains', {
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Accept: 'application/json',
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return jsonResponse({
+        ok: false,
+        detail: payload?.message || `Resend domains request failed (${response.status})`,
+      }, 502);
+    }
+    const domains = Array.isArray(payload?.data) ? payload.data : [];
+    const efhs = domains.find((domain) => String(domain?.name || '').toLowerCase() === 'efhsband.org');
+    return jsonResponse({
+      ok: true,
+      contact_from_email: String(env.CONTACT_FROM_EMAIL || '').trim(),
+      invoice_from_email: SPONSOR_INVOICE_FROM_EMAIL,
+      note: 'Resend does not require creating individual sender addresses. Any address at a verified domain can send.',
+      efhsband_org: efhs
+        ? {
+          id: efhs.id,
+          name: efhs.name,
+          status: efhs.status,
+          region: efhs.region,
+          sending: efhs?.capabilities?.sending || '',
+        }
+        : null,
+      domains: domains.map((domain) => ({
+        id: domain.id,
+        name: domain.name,
+        status: domain.status,
+        region: domain.region,
+      })),
+      can_send_no_reply: Boolean(efhs && String(efhs.status || '').toLowerCase() === 'verified'),
+    });
+  }
+  if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'mail');
+    if (auth.response) return auth.response;
+    if (!env.RESEND_API_KEY) {
+      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const to = String(payload.to || auth.user?.username || '').trim().toLowerCase();
+    if (!isValidEmail(to)) {
+      return jsonResponse({ detail: 'Provide a valid test recipient email' }, 422);
+    }
+    try {
+      await sendViaResend(env, {
+        to,
+        subject: 'Test: no-reply@efhsband.org sender',
+        text: [
+          'This is a test email confirming Resend can send from no-reply@efhsband.org.',
+          '',
+          'East Forsyth Band Boosters',
+          'https://efhsband.org',
+        ].join('\n'),
+        html: '<p>This is a test email confirming Resend can send from <strong>no-reply@efhsband.org</strong>.</p><p>East Forsyth Band Boosters</p>',
+        fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
+        fromName: SPONSOR_INVOICE_FROM_NAME,
+      });
+      return jsonResponse({
+        ok: true,
+        from: `${SPONSOR_INVOICE_FROM_NAME} <${SPONSOR_INVOICE_FROM_EMAIL}>`,
+        to,
+        detail: `Test email sent to ${to} from ${SPONSOR_INVOICE_FROM_EMAIL}.`,
+      });
+    } catch (error) {
+      return jsonResponse({ ok: false, detail: error?.message || 'Could not send test email' }, 502);
+    }
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
@@ -5541,12 +6011,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
-<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"><form id="password-form" class="dashboard-password-card"><span>Account</span><b>Change password</b><label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label><label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label><label>Confirm new<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn primary" type="submit">Update password</button><p class="status" id="password-status"></p></form></div></section>
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-tier-benefits-card">

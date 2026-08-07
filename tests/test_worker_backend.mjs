@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -404,14 +404,32 @@ test('ensureBoosterMeetingsSlot injects meetings list hook into Boosters card', 
   assert.equal(ensureBoosterMeetingsSlot(html), html);
 });
 
-test('ensureFundraisingDonateSlot injects Square donate button into CMS fundraising body', () => {
+test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraising body', () => {
   const liveStyle = `<section class="page-hero" data-cms-layout="standard"><div class="page-title"><h1>Fundraising</h1></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Buy a raffle ticket</p></div></div></section>`;
   const html = ensureFundraisingDonateSlot(liveStyle);
-  assert.match(html, /data-square-checkout/);
-  assert.match(html, /square\.link\/u\/IIGMHqVQ/);
-  assert.match(html, /Buy a raffle ticket/);
+  assert.match(html, /data-donate-open/);
   assert.match(html, /Direct Support/);
+  assert.doesNotMatch(html, /data-square-checkout/);
+  assert.doesNotMatch(html, /square\.link\/u\/IIGMHqVQ/);
+  assert.match(html, /Buy a raffle ticket/);
   assert.equal(ensureFundraisingDonateSlot(html), html);
+
+  const legacy = `<article class="card accent-card square-donate-card" data-square-donate><h3>Direct Support</h3><a class="btn primary" data-square-checkout data-url="https://square.link/u/IIGMHqVQ?src=embd" href="https://square.link/u/IIGMHqVQ?src=embed" target="_blank">Donate</a></article>`;
+  const rewritten = ensureFundraisingDonateSlot(legacy);
+  assert.match(rewritten, /data-donate-open/);
+  assert.doesNotMatch(rewritten, /data-square-checkout/);
+});
+
+test('refreshHomeStartHereSection updates outdated Start here copy', () => {
+  const stale = `<section><div class="wrap"><div class="section-head"><div><div class="kicker">Start here</div><h2>Built around the pages families expect.</h2></div><p>Modeled after a full high-school band program site structure, with East Forsyth branding and easy paths for students, parents, sponsors, and visitors.</p></div><div class="grid cards"><article class="card red-card"><span class="tag">Program</span><h3>Ensembles</h3><p>Marching band, concert bands, percussion, color guard, jazz, and chamber opportunities.</p></article><article class="card red-card"><span class="tag">Families</span><h3>Resources</h3><p>Forms, handbook links, rehearsal expectations, fees, uniforms, and travel information.</p></article><article class="card red-card"><span class="tag">Community</span><h3>Sponsors</h3><p>A place for local businesses and alumni to support the program and be recognized.</p></article></div></div></section>`;
+  const html = refreshHomeStartHereSection(stale);
+  assert.match(html, /Everything families need, all in one place\./);
+  assert.match(html, /East Forsyth Blue Regiment/);
+  assert.match(html, /Explore our marching band/);
+  assert.match(html, /Find forms, handbooks/);
+  assert.match(html, /Discover the businesses and community partners/);
+  assert.doesNotMatch(html, /Built around the pages families expect\./);
+  assert.equal(refreshHomeStartHereSection(html), html);
 });
 
 test('isMaintenanceMode treats common truthy site setting values as enabled', () => {
@@ -584,6 +602,49 @@ test('stripSponsorTiersSection removes packages and rewriteBecomeSponsorLinks up
   const rewritten = rewriteBecomeSponsorLinks(stripped);
   assert.match(rewritten, /href="\/become-a-sponsor\.html">Become a sponsor/);
   assert.match(rewritten, /href="\/become-a-sponsor\.html">Ask about sponsoring/);
+});
+
+test('ensureSponsorDonateButton adds Donate control beside Become a sponsor', () => {
+  const bare = '<div class="sponsor-intro"><div data-cms-field="body_text"><p>Thanks</p></div><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory" data-sponsors></div>';
+  const withDonate = ensureSponsorDonateButton(bare);
+  assert.match(withDonate, /data-donate-open/);
+  assert.match(withDonate, /sponsor-intro-actions/);
+  assert.equal(ensureSponsorDonateButton(withDonate), withDonate);
+  const structured = generateStructuredPageHtml({
+    layout: 'sponsors',
+    title: 'Sponsors',
+    kicker: 'Community',
+    heading: 'Our Sponsors',
+    intro: 'Support the band.',
+    body_text: '<p>Thanks</p>',
+    callout_title: 'Want your business here?',
+    callout_text: '<p>Packages available.</p>',
+  });
+  assert.match(structured, /data-donate-open/);
+  assert.match(structured, /Become a sponsor/);
+});
+
+test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
+  const invoice = buildSponsorDonationInvoice({
+    id: 42,
+    tier: 'gold',
+    amount_cents: 50000,
+    amount_display: '$500',
+    business_name: 'Acme Music',
+    address: '100 Band Way, Kernersville, NC',
+    phone: '(336) 555-0100',
+    email: 'billing@acme.example',
+    paid_at: '2026-08-05T15:00:00.000Z',
+  });
+  assert.equal(invoice.from_email, SPONSOR_INVOICE_FROM_EMAIL);
+  assert.equal(invoice.from_email, 'no-reply@efhsband.org');
+  assert.equal(invoice.to, 'billing@acme.example');
+  assert.match(invoice.subject, /East Forsyth Band Boosters/);
+  assert.match(invoice.text, /donation to the East Forsyth Band Boosters/i);
+  assert.match(invoice.text, /Acme Music/);
+  assert.match(invoice.text, /\$500/);
+  assert.match(invoice.html, /East Forsyth Band Boosters/);
+  assert.equal(invoice.invoice_number, 'SP-42');
 });
 
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {

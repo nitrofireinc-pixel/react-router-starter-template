@@ -542,6 +542,7 @@ async function loadPublicContent() {
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
+  bindDonateButtons();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
@@ -658,15 +659,19 @@ function readTierPackageFromCard(card) {
 let sponsorSignupState = null;
 
 function closeSponsorSignupModal({ immediate = false } = {}) {
-  const modal = document.querySelector('.sponsor-signup-modal');
+  const modal = document.querySelector('.sponsor-signup-modal:not(.donate-modal)');
   if (!modal) {
-    document.body.classList.remove('sponsor-signup-open');
+    if (!document.querySelector('.donate-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
     sponsorSignupState = null;
     return;
   }
   if (immediate) {
     modal.remove();
-    document.body.classList.remove('sponsor-signup-open');
+    if (!document.querySelector('.donate-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
     sponsorSignupState = null;
     return;
   }
@@ -674,7 +679,7 @@ function closeSponsorSignupModal({ immediate = false } = {}) {
   modal.classList.remove('is-visible');
   window.setTimeout(() => {
     if (document.body.contains(modal)) modal.remove();
-    if (!document.querySelector('.sponsor-signup-modal')) {
+    if (!document.querySelector('.sponsor-signup-modal:not(.donate-modal), .donate-modal')) {
       document.body.classList.remove('sponsor-signup-open');
     }
     sponsorSignupState = null;
@@ -696,6 +701,7 @@ function hideSponsorSignupConfirm(modal) {
 
 function openSponsorSignupModal(pkg) {
   closeSponsorMapModal();
+  closeDonateModal({ immediate: true });
   closeSponsorSignupModal({ immediate: true });
   sponsorSignupState = { ...pkg, draft: null, application: null };
 
@@ -714,7 +720,7 @@ function openSponsorSignupModal(pkg) {
       </div>
       <div class="sponsor-signup-step" data-signup-step="details">
         <form class="sponsor-signup-form" data-signup-form novalidate>
-          <label>Business name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
           <label class="sponsor-signup-address">Address
             <span class="sponsor-signup-address-wrap">
               <input name="address" type="text" required maxlength="400" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Start typing street address…" data-address-input aria-autocomplete="list" aria-expanded="false" aria-controls="sponsor-address-suggest">
@@ -723,6 +729,8 @@ function openSponsorSignupModal(pkg) {
             <span class="sponsor-signup-address-hint" data-address-hint>Pick a suggestion to verify the address.</span>
           </label>
           <label>Phone<input name="phone" type="tel" required autocomplete="tel" maxlength="40" placeholder="(336) 555-0100"></label>
+          <label>Invoice email<input name="email" type="email" required autocomplete="email" maxlength="160" placeholder="billing@example.com"></label>
+          <p class="sponsor-signup-pay-note">Required so we can email your donation invoice from the East Forsyth Band Boosters.</p>
           <label class="sponsor-signup-logo">Company logo <span>(optional, image under 2 MB)</span>
             <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
           </label>
@@ -739,11 +747,12 @@ function openSponsorSignupModal(pkg) {
           <div class="sponsor-signup-summary">
             <p><span>Business</span><strong data-pay-business></strong></p>
             <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+            <p><span>Invoice email</span><strong data-pay-email></strong></p>
           </div>
           <label class="sponsor-signup-amount-lock">Amount due
             <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
           </label>
-          <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
+          <p class="sponsor-signup-pay-note" data-pay-note>Your donation invoice will be emailed from no-reply@efhsband.org after payment. Thank you for supporting East Forsyth Band Boosters.</p>
           <p class="status" data-pay-status></p>
         </div>
         <div class="sponsor-signup-actions sponsor-signup-actions-split" data-pay-actions>
@@ -757,7 +766,7 @@ function openSponsorSignupModal(pkg) {
       <div class="sponsor-signup-confirm" data-signup-confirm hidden>
         <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="sponsor-signup-confirm-title" aria-describedby="sponsor-signup-confirm-copy">
           <h4 id="sponsor-signup-confirm-title">Are you sure?</h4>
-          <p id="sponsor-signup-confirm-copy">Canceling returns you to the sponsor page and discards this form.</p>
+          <p id="sponsor-signup-confirm-copy">Canceling returns you to the sponsor/donation page and discards this form.</p>
           <div class="sponsor-signup-actions">
             <button class="btn outline" type="button" data-confirm-no>No</button>
             <button class="btn primary" type="button" data-confirm-yes>Yes</button>
@@ -969,6 +978,7 @@ function openSponsorSignupModal(pkg) {
       <div class="sponsor-signup-summary">
         <p><span>Business</span><strong>${escapeHtml(application.business_name || sponsorSignupState.draft?.businessName || '')}</strong></p>
         <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+        <p><span>Invoice email</span><strong>${escapeHtml(application.email || sponsorSignupState.draft?.email || '')}</strong></p>
         <p><span>Amount</span><strong>${escapeHtml(pkg.amountDisplay)}</strong></p>
       </div>
       <div class="sponsor-signup-card-box">
@@ -1050,6 +1060,7 @@ function openSponsorSignupModal(pkg) {
     body.set('business_name', draft.businessName);
     body.set('address', draft.address);
     body.set('phone', draft.phone);
+    body.set('email', draft.email);
     body.set('tier', pkg.tier);
     body.set('amount_display', pkg.amountDisplay);
     body.set('amount_cents', String(pkg.amountCents));
@@ -1101,9 +1112,15 @@ function openSponsorSignupModal(pkg) {
     const businessName = String(form.elements.business_name?.value || '').trim();
     const address = String(form.elements.address?.value || '').trim();
     const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim().toLowerCase();
     const logo = form.elements.logo?.files?.[0] || null;
-    if (!businessName || !address || !phone) {
-      if (status) status.textContent = 'Business name, address, and phone are required.';
+    if (!businessName || !address || !phone || !email) {
+      if (status) status.textContent = 'Business / organization name, address, phone, and invoice email are required.';
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (status) status.textContent = 'Enter a valid invoice email address.';
+      form.elements.email?.focus();
       return;
     }
     if (!addressVerified) {
@@ -1115,7 +1132,7 @@ function openSponsorSignupModal(pkg) {
       if (status) status.textContent = 'Logo must be an image under 2 MB.';
       return;
     }
-    sponsorSignupState.draft = { businessName, address, phone, logo };
+    sponsorSignupState.draft = { businessName, address, phone, email, logo };
     sponsorSignupState.application = null;
     resetPaymentStepPreview(businessName);
     detailsStep.hidden = true;
@@ -1135,11 +1152,12 @@ function openSponsorSignupModal(pkg) {
         <div class="sponsor-signup-summary">
           <p><span>Business</span><strong data-pay-business>${escapeHtml(name)}</strong></p>
           <p><span>Package</span><strong>${escapeHtml(pkg.title)}</strong></p>
+          <p><span>Invoice email</span><strong>${escapeHtml(sponsorSignupState.draft?.email || '')}</strong></p>
         </div>
         <label class="sponsor-signup-amount-lock">Amount due
           <input data-pay-amount type="text" readonly tabindex="-1" value="${escapeHtml(pkg.amountDisplay)}">
         </label>
-        <p class="sponsor-signup-pay-note" data-pay-note>Your Sponsorship Is Greatly Appreciated! - East Forsyth High School Bands:</p>
+        <p class="sponsor-signup-pay-note" data-pay-note>Your donation invoice will be emailed from no-reply@efhsband.org after payment. Thank you for supporting East Forsyth Band Boosters.</p>
         <p class="status" data-pay-status></p>
       `;
     }
@@ -1223,11 +1241,414 @@ function bindSponsorTierSignup(root = document) {
   });
 }
 
+let donateModalState = null;
+
+function parseDonateAmountCents(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return 0;
+  const cleaned = text.replace(/[^0-9.]/g, '');
+  if (!cleaned) return 0;
+  const dollars = Number(cleaned);
+  if (!Number.isFinite(dollars) || dollars <= 0) return 0;
+  return Math.round(dollars * 100);
+}
+
+function formatDonateAmountDisplay(cents) {
+  const amount = Number(cents);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const dollars = amount / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+}
+
+function closeDonateModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.donate-modal');
+  if (!modal) {
+    document.body.classList.remove('sponsor-signup-open');
+    donateModalState = null;
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    if (!document.querySelector('.sponsor-signup-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    donateModalState = null;
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    donateModalState = null;
+  }, 280);
+}
+
+function showDonateConfirm(modal) {
+  const confirm = modal.querySelector('[data-donate-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-confirm-yes]')?.focus();
+}
+
+function hideDonateConfirm(modal) {
+  const confirm = modal.querySelector('[data-donate-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function openDonateModal() {
+  closeSponsorMapModal();
+  closeSponsorSignupModal({ immediate: true });
+  closeDonateModal({ immediate: true });
+  donateModalState = { draft: null, donation: null };
+
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal donate-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Donate to East Forsyth Band');
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-donate-cancel aria-label="Cancel donation"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head" data-donate-head>
+        <span class="sponsor-signup-kicker">Support the band</span>
+        <h3>Make a donation</h3>
+        <p data-donate-head-copy>Enter your name and a custom amount, then continue to secure Square checkout.</p>
+      </div>
+      <div class="sponsor-signup-step" data-donate-step="details">
+        <form class="sponsor-signup-form" data-donate-form novalidate>
+          <label>Your name<input name="donor_name" required autocomplete="name" maxlength="160" placeholder="Full name"></label>
+          <label>Donation amount
+            <input name="amount" type="text" inputmode="decimal" required maxlength="12" placeholder="25.00" aria-describedby="donate-amount-hint">
+          </label>
+          <p class="sponsor-signup-pay-note" id="donate-amount-hint">Enter any amount of $5 or more (USD).</p>
+          <p class="status" data-donate-status></p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-donate-cancel>Cancel</button>
+            <button class="btn primary" type="submit">Next</button>
+          </div>
+        </form>
+      </div>
+      <div class="sponsor-signup-step" data-donate-step="payment" hidden>
+        <div class="sponsor-signup-payment-body" data-donate-pay-body>
+          <div class="sponsor-signup-summary">
+            <p><span>Donor</span><strong data-donate-pay-name></strong></p>
+            <p><span>Amount</span><strong data-donate-pay-amount></strong></p>
+          </div>
+          <p class="sponsor-signup-pay-note">Your gift supports instruments, travel, meals, uniforms, and student opportunities.</p>
+          <p class="status" data-donate-pay-status></p>
+        </div>
+        <div class="sponsor-signup-actions sponsor-signup-actions-split" data-donate-pay-actions>
+          <button class="btn outline" type="button" data-donate-cancel>Cancel</button>
+          <div class="sponsor-signup-actions-end">
+            <button class="btn outline" type="button" data-donate-back>Back</button>
+            <button class="btn primary" type="button" data-donate-pay>Pay with Square</button>
+          </div>
+        </div>
+      </div>
+      <div class="sponsor-signup-confirm" data-donate-confirm hidden>
+        <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="donate-confirm-title" aria-describedby="donate-confirm-copy">
+          <h4 id="donate-confirm-title">Are you sure?</h4>
+          <p id="donate-confirm-copy">Canceling returns you to the sponsor/donation page and discards this donation.</p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-confirm-no>No</button>
+            <button class="btn primary" type="button" data-confirm-yes>Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+
+  const form = modal.querySelector('[data-donate-form]');
+  const detailsStep = modal.querySelector('[data-donate-step="details"]');
+  const paymentStep = modal.querySelector('[data-donate-step="payment"]');
+  const payBody = modal.querySelector('[data-donate-pay-body]');
+  const status = modal.querySelector('[data-donate-status]');
+  const payStatus = modal.querySelector('[data-donate-pay-status]');
+
+  function finishDonateSuccess(detail) {
+    closeDonateModal({ immediate: true });
+    const toast = document.createElement('div');
+    toast.className = 'sponsor-signup-toast';
+    toast.setAttribute('role', 'status');
+    toast.textContent = detail || 'Thank you for your donation!';
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => toast.remove(), 280);
+    }, 4200);
+  }
+
+  function loadSquareWebSdk(environment = 'production') {
+    const existing = document.querySelector('script[data-square-web-sdk]');
+    if (existing && window.Square) return Promise.resolve(window.Square);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.dataset.squareWebSdk = '1';
+      script.src = environment === 'sandbox'
+        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+        : 'https://web.squarecdn.com/v1/square.js';
+      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+      script.onerror = () => reject(new Error('Could not load Square payment form'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function embedCardCheckout(donation, config) {
+    if (!payBody) return;
+    modal.classList.add('is-checkout');
+    const headCopy = modal.querySelector('[data-donate-head-copy]');
+    const amountDisplay = donation.amount_display || formatDonateAmountDisplay(donation.amount_cents);
+    if (headCopy) {
+      headCopy.innerHTML = `Enter card details to donate <strong>${escapeHtml(amountDisplay)}</strong>.`;
+    }
+    payBody.innerHTML = `
+      <div class="sponsor-signup-summary">
+        <p><span>Donor</span><strong>${escapeHtml(donation.donor_name || donateModalState.draft?.donorName || '')}</strong></p>
+        <p><span>Amount</span><strong>${escapeHtml(amountDisplay)}</strong></p>
+      </div>
+      <div class="sponsor-signup-card-box">
+        <div id="donate-square-card" class="sponsor-signup-card-host"></div>
+      </div>
+      <p class="status" data-donate-pay-status>Loading secure card form…</p>
+    `;
+    const liveStatus = payBody.querySelector('[data-donate-pay-status]');
+    const payContinue = modal.querySelector('[data-donate-pay]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = true;
+      payContinue.textContent = `Donate ${amountDisplay}`;
+    }
+    const Square = await loadSquareWebSdk(config.environment || 'production');
+    const payments = Square.payments(config.application_id, config.location_id);
+    const card = await payments.card();
+    await card.attach('#donate-square-card');
+    if (liveStatus) {
+      liveStatus.innerHTML = `
+        <span class="sponsor-signup-square-status">
+          <svg class="sponsor-signup-square-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M4.5 0A4.5 4.5 0 0 0 0 4.5v15A4.5 4.5 0 0 0 4.5 24h15a4.5 4.5 0 0 0 4.5-4.5v-15A4.5 4.5 0 0 0 19.5 0h-15Zm2.036 7.536h4.928v4.928H6.536V7.536Zm6 0H17.464v4.928h-4.928V7.536Zm-6 6h4.928v4.928H6.536v-4.928Zm6 0H17.464v4.928h-4.928v-4.928Z"/>
+          </svg>
+          <span>Square Secure Payment Ready.</span>
+        </span>
+      `;
+    }
+    if (payContinue) {
+      payContinue.disabled = false;
+      payContinue.onclick = async () => {
+        payContinue.disabled = true;
+        if (liveStatus) liveStatus.textContent = 'Processing payment…';
+        try {
+          const verificationDetails = {
+            amount: (Number(donation.amount_cents) / 100).toFixed(2),
+            currencyCode: 'USD',
+            intent: 'CHARGE',
+            customerInitiated: true,
+            sellerKeyedIn: false,
+            billingContact: {
+              givenName: String(donation.donor_name || donateModalState.draft?.donorName || 'Donor').slice(0, 100),
+              countryCode: 'US',
+            },
+          };
+          const result = await card.tokenize(verificationDetails);
+          if (result.status !== 'OK' || !result.token) {
+            const message = result.errors?.[0]?.message || 'Card could not be processed.';
+            throw new Error(message);
+          }
+          const response = await fetch(`/api/donations/${encodeURIComponent(donation.id)}/pay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: donation.completion_token,
+              source_id: result.token,
+            }),
+          });
+          const paid = await response.json().catch(() => ({}));
+          if (!response.ok || !paid.ok) throw new Error(paid.detail || 'Payment failed');
+          finishDonateSuccess(paid.detail);
+        } catch (error) {
+          if (liveStatus) liveStatus.textContent = error.message || 'Payment failed.';
+          payContinue.disabled = false;
+        }
+      };
+    }
+  }
+
+  async function ensureDonation() {
+    const draft = donateModalState?.draft;
+    if (!draft) throw new Error('Donor details are required.');
+    if (donateModalState.donation?.id && donateModalState.donation.completion_token
+      && Number(donateModalState.donation.amount_cents) === Number(draft.amountCents)
+      && String(donateModalState.donation.donor_name || '') === draft.donorName) {
+      return donateModalState.donation;
+    }
+    const response = await fetch('/api/donations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        donor_name: draft.donorName,
+        amount_cents: draft.amountCents,
+        amount_display: draft.amountDisplay,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || 'Could not save donation');
+    donateModalState.donation = result;
+    return result;
+  }
+
+  function resetPaymentStepPreview() {
+    modal.classList.remove('is-checkout');
+    const draft = donateModalState?.draft;
+    if (payBody) {
+      payBody.innerHTML = `
+        <div class="sponsor-signup-summary">
+          <p><span>Donor</span><strong data-donate-pay-name>${escapeHtml(draft?.donorName || '')}</strong></p>
+          <p><span>Amount</span><strong data-donate-pay-amount>${escapeHtml(draft?.amountDisplay || '')}</strong></p>
+        </div>
+        <p class="sponsor-signup-pay-note">Your gift supports instruments, travel, meals, uniforms, and student opportunities.</p>
+        <p class="status" data-donate-pay-status></p>
+      `;
+    }
+    const payContinue = modal.querySelector('[data-donate-pay]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = false;
+      payContinue.textContent = 'Pay with Square';
+      payContinue.onclick = null;
+    }
+    const headCopy = modal.querySelector('[data-donate-head-copy]');
+    if (headCopy) {
+      headCopy.textContent = 'Enter your name and a custom amount, then continue to secure Square checkout.';
+    }
+  }
+
+  modal.querySelectorAll('[data-donate-cancel]').forEach((button) => {
+    button.addEventListener('click', () => showDonateConfirm(modal));
+  });
+  modal.querySelector('[data-confirm-no]')?.addEventListener('click', () => hideDonateConfirm(modal));
+  modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => closeDonateModal());
+
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (status) status.textContent = '';
+    const donorName = String(form.elements.donor_name?.value || '').trim();
+    const amountRaw = String(form.elements.amount?.value || '').trim();
+    const amountCents = parseDonateAmountCents(amountRaw);
+    if (!donorName) {
+      if (status) status.textContent = 'Please enter your name.';
+      form.elements.donor_name?.focus();
+      return;
+    }
+    if (!amountCents || amountCents < 500) {
+      if (status) status.textContent = 'Enter a donation amount of at least $5.';
+      form.elements.amount?.focus();
+      return;
+    }
+    if (amountCents > 2_500_000) {
+      if (status) status.textContent = 'Donation amount cannot exceed $25,000.';
+      form.elements.amount?.focus();
+      return;
+    }
+    const amountDisplay = formatDonateAmountDisplay(amountCents);
+    donateModalState.draft = { donorName, amountCents, amountDisplay };
+    donateModalState.donation = null;
+    resetPaymentStepPreview();
+    detailsStep.hidden = true;
+    paymentStep.hidden = false;
+    modal.querySelector('[data-donate-pay]')?.focus();
+  });
+
+  modal.querySelector('[data-donate-back]')?.addEventListener('click', () => {
+    resetPaymentStepPreview();
+    paymentStep.hidden = true;
+    detailsStep.hidden = false;
+    if (status) status.textContent = '';
+    form?.elements.donor_name?.focus();
+  });
+
+  async function startSquarePayment() {
+    const payButton = modal.querySelector('[data-donate-pay]');
+    const statusEl = modal.querySelector('[data-donate-pay-status]');
+    if (statusEl) statusEl.textContent = 'Saving donation…';
+    if (payButton) payButton.disabled = true;
+    try {
+      const [result, config] = await Promise.all([
+        ensureDonation(),
+        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
+          .then((response) => (response.ok ? response.json() : null))
+          .catch(() => null),
+      ]);
+      if (config?.web_payments) {
+        await embedCardCheckout(result, config);
+        return;
+      }
+      if (config?.mock_enabled) {
+        const paid = await fetch(`/api/donations/${encodeURIComponent(result.id)}/pay`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: result.completion_token, mock: true }),
+        }).then((response) => response.json().catch(() => ({})));
+        if (!paid.ok) throw new Error(paid.detail || 'Mock payment failed');
+        finishDonateSuccess(paid.detail);
+        return;
+      }
+      if (statusEl) {
+        statusEl.textContent = result.detail
+          || 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      }
+      if (payButton) payButton.disabled = false;
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
+      if (payButton) payButton.disabled = false;
+    }
+  }
+
+  modal.querySelector('[data-donate-pay]')?.addEventListener('click', () => {
+    if (modal.classList.contains('is-checkout')) return;
+    startSquarePayment();
+  });
+
+  form?.querySelector('input[name="donor_name"]')?.focus();
+}
+
+function bindDonateButtons(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('[data-donate-open]').forEach((button) => {
+    if (button.dataset.donateBound === '1') return;
+    if (button.closest('#page-preview, .cms-shell, .admin-body')) return;
+    if (button.hasAttribute('disabled')) return;
+    button.dataset.donateBound = '1';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      openDonateModal();
+    });
+  });
+}
+
 hydrateMarqueeFromCache();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
-  const signup = document.querySelector('.sponsor-signup-modal');
+  const donate = document.querySelector('.donate-modal');
+  if (donate) {
+    const confirm = donate.querySelector('[data-donate-confirm]');
+    if (confirm && !confirm.hidden) {
+      hideDonateConfirm(donate);
+      return;
+    }
+    showDonateConfirm(donate);
+    return;
+  }
+  const signup = document.querySelector('.sponsor-signup-modal:not(.donate-modal)');
   if (signup) {
     const confirm = signup.querySelector('[data-signup-confirm]');
     if (confirm && !confirm.hidden) {

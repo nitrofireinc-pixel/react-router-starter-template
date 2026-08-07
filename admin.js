@@ -6,6 +6,7 @@ function escapeHtml(value) {
 
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
+  '/api/admin/password',
   '/api/admin/zernio/facebook/events/publish',
   '/api/admin/zernio/posts',
   '/api/admin/zernio/facebook/connect',
@@ -24,7 +25,10 @@ function shouldShowSavedToast(url, options = {}) {
   return !SAVE_TOAST_EXCLUDE.some((prefix) => path.includes(prefix));
 }
 
-function showSavedToast(message = 'Saved.') {
+const SAVED_TOAST_ENVELOPE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 4-8 5L4 8V6l8 5 8-5v2Z"/></svg>`;
+const SAVED_TOAST_KEY_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"><circle cx="8.2" cy="9" r="3.4" stroke="currentColor" stroke-width="1.9"/><path d="M11.2 10.6 L20.4 19.8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.1 16.5 L17.1 19.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
+
+function showSavedToast(message = 'Saved.', options = {}) {
   let root = document.querySelector('#admin-saved-toast');
   if (!root) {
     root = document.createElement('div');
@@ -35,12 +39,43 @@ function showSavedToast(message = 'Saved.') {
     root.innerHTML = `
       <div class="admin-saved-toast-backdrop" aria-hidden="true"></div>
       <div class="admin-saved-toast-panel">
-        <div class="admin-saved-toast-card"><strong data-saved-toast-message>Saved.</strong></div>
+        <div class="admin-saved-toast-card">
+          <span class="admin-saved-toast-icon" data-saved-toast-icon hidden aria-hidden="true"></span>
+          <strong data-saved-toast-message>Saved.</strong>
+        </div>
       </div>`;
     document.body.appendChild(root);
   }
   const msg = root.querySelector('[data-saved-toast-message]');
   if (msg) msg.textContent = message;
+  let icon = root.querySelector('[data-saved-toast-icon]');
+  if (!icon) {
+    const card = root.querySelector('.admin-saved-toast-card');
+    if (card) {
+      icon = document.createElement('span');
+      icon.className = 'admin-saved-toast-icon';
+      icon.dataset.savedToastIcon = '';
+      icon.hidden = true;
+      icon.setAttribute('aria-hidden', 'true');
+      card.prepend(icon);
+    }
+  }
+  const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
+  const passwordSuccess = Boolean(options.passwordSuccess);
+  root.classList.toggle('has-icon', Boolean(iconKind));
+  root.classList.toggle('is-password-success', passwordSuccess);
+  if (icon) {
+    if (iconKind === 'envelope') {
+      icon.hidden = false;
+      icon.innerHTML = SAVED_TOAST_ENVELOPE_SVG;
+    } else if (iconKind === 'key') {
+      icon.hidden = false;
+      icon.innerHTML = SAVED_TOAST_KEY_SVG;
+    } else {
+      icon.hidden = true;
+      icon.innerHTML = '';
+    }
+  }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
   root.classList.remove('is-leaving');
@@ -52,8 +87,73 @@ function showSavedToast(message = 'Saved.') {
     root.classList.remove('is-visible');
     savedToastLeaveTimer = window.setTimeout(() => {
       root.classList.remove('is-leaving');
+      root.classList.remove('is-password-success');
+      root.classList.remove('has-icon');
     }, 380);
   }, 3000);
+}
+
+let passwordToastLeaveTimer = null;
+
+function ensurePasswordToast() {
+  let root = document.querySelector('#admin-password-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-password-toast';
+  root.className = 'admin-password-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-password-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-password-toast-backdrop" data-password-dismiss aria-label="Close change password"></button>
+    <div class="admin-password-toast-panel">
+      <div class="admin-password-toast-card">
+        <h3 id="admin-password-toast-title">Change Password</h3>
+        <form id="password-form">
+          <label>Current password<input name="current_password" type="password" required autocomplete="current-password"></label>
+          <label>New password<input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Confirm new password<input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <p class="admin-password-toast-status" id="password-status" aria-live="polite"></p>
+          <div class="admin-password-toast-actions">
+            <button class="btn outline" type="button" data-password-dismiss>Cancel</button>
+            <button class="btn primary" type="submit">Update Password</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePasswordToast());
+  });
+  return root;
+}
+
+function showPasswordToast() {
+  const root = ensurePasswordToast();
+  const form = root.querySelector('#password-form');
+  const status = root.querySelector('#password-status');
+  form?.reset();
+  if (status) status.textContent = '';
+  window.clearTimeout(passwordToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
+}
+
+function hidePasswordToast() {
+  const root = document.querySelector('#admin-password-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(passwordToastLeaveTimer);
+  passwordToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
 }
 
 function formDataHasFiles(formData) {
@@ -301,6 +401,10 @@ function canEditStaff() {
 
 function canEditBoosterMembers() {
   return hasPermission('boosters') || canEditPage('boosters');
+}
+
+function canEditBoostersPage() {
+  return canEditPage('boosters') || hasPermission('boosters');
 }
 
 function canEditContact() {
@@ -607,12 +711,20 @@ function sanitizeRichHtml(dirty) {
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
     if (match.startsWith('</')) return `</${tag}>`;
     if (tag === 'br') return '<br>';
+    if (tag === 'a') {
+      const hrefMatch = String(attrs || '').match(/href\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const href = String(hrefMatch?.[1] || hrefMatch?.[2] || '').trim();
+      if (!href || /^(javascript:|data:)/i.test(href)) return '';
+      if (!/^(https?:\/\/|\/|mailto:)/i.test(href)) return '';
+      const safeHref = href.replace(/"/g, '&quot;');
+      return `<a href="${safeHref}">`;
+    }
     if (tag === 'span') {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
@@ -817,6 +929,7 @@ function structuredPageFields(page) {
         : page.slug === 'directors' ? 'directory'
           : page.slug === 'sponsors' ? 'sponsors'
             : (page.slug === 'become-a-sponsor' || page.slug === 'become-sponsor') ? 'become-sponsor'
+              : page.slug === 'boosters' ? 'boosters'
               : 'standard');
   const tierFields = (inferredLayout === 'become-sponsor' || page.slug === 'become-a-sponsor')
     ? extractSponsorTierFieldsFromHtml(page.body_html || '')
@@ -872,6 +985,7 @@ function layoutChipLabel(layout) {
     directory: 'Staff directory layout',
     sponsors: 'Sponsors layout',
     'become-sponsor': 'Become a sponsor layout',
+    boosters: 'Boosters layout',
   })[layout] || 'Standard layout';
 }
 
@@ -1056,13 +1170,16 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
   }
   if (layout === 'contact') {
-    return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || 'Add contact details here.', 'Main contact content')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab.</p></div>${showCallout ? callout : ''}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p>', 'Main contact content')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab.</p></div>${showCallout ? callout : ''}</div></section>`;
   }
   if (layout === 'directory') {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
   }
+  if (layout === 'boosters') {
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
+  }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
@@ -1813,7 +1930,8 @@ function renderMobileAdminMenu() {
   });
 
   menu.innerHTML = `${parts.join('')}
-  <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>`;
+  <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
+  <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -1825,6 +1943,10 @@ function renderMobileAdminMenu() {
   menu.querySelector('[data-mobile-logout]')?.addEventListener('click', async () => {
     closeAdminNav();
     await submitAdminLogout();
+  });
+  menu.querySelector('[data-mobile-change-password]')?.addEventListener('click', () => {
+    closeAdminNav();
+    showPasswordToast();
   });
 }
 
@@ -1925,9 +2047,12 @@ function syncPageSettingsAccess() {
 }
 
 function editablePages() {
-  if (!canManageSitePages()) return [];
   return (state.pages || [])
-    .filter((page) => canEditPage(page) && !SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug))
+    .filter((page) => {
+      if (SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
+      if (page.slug === 'boosters') return canEditBoostersPage();
+      return canManageSitePages() && canEditPage(page);
+    })
     .slice()
     .sort((a, b) => {
       const orderA = Number(a.nav_order ?? 99);
@@ -2015,7 +2140,7 @@ function showAllowedPanels() {
     dashboard: true,
     mail: true,
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
-    pages: state.pages.some(canEditPage),
+    pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
@@ -2081,7 +2206,7 @@ function showAllowedPanels() {
   }
   const editBoostersPage = document.querySelector('#edit-boosters-page');
   if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditPage('boosters');
+    editBoostersPage.hidden = !canEditBoostersPage();
     editBoostersPage.onclick = () => editPage('boosters');
   }
   const editContactPage = document.querySelector('#edit-contact-page');
@@ -2454,15 +2579,12 @@ function renderDashboard() {
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
-  const passwordForm = dashboard.querySelector('#password-form');
-  passwordForm?.remove();
   dashboard.innerHTML = cards.length
     ? cards.map(([title, text, target, kicker, kind]) => {
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
-  if (passwordForm) dashboard.appendChild(passwordForm);
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
     activateTab(button.dataset.dashTarget);
   }));
@@ -2496,6 +2618,8 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (sponsorsHint) sponsorsHint.hidden = page.slug !== 'sponsors';
     const becomeSponsorHint = form.querySelector('[data-become-sponsor-hint]');
     if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
+    const boostersHint = form.querySelector('[data-boosters-hint]');
+    if (boostersHint) boostersHint.hidden = page.slug !== 'boosters';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
@@ -3491,10 +3615,17 @@ function bindMailComposer() {
     if (status) status.textContent = 'Sending…';
     try {
       const result = await jsonFetch('/api/admin/mail', { method: 'POST', body: payload });
-      if (status) status.textContent = result.detail || 'Email sent.';
       if (result.ok) {
+        if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
-        form.elements.attachments.value = '';
+        if (form.elements.attachments) form.elements.attachments.value = '';
+        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        const colorInput = document.querySelector('#mail-rich-color');
+        if (colorInput) colorInput.value = '#002142';
+        showSavedToast('Sent.', { icon: 'envelope' });
+        await loadMailDeliveryStatus();
+      } else if (status) {
+        status.textContent = result.detail || 'Email sent.';
       }
     } catch (error) {
       let message = error.message || 'Could not send email.';
@@ -4535,11 +4666,20 @@ async function refreshAll() {
   await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
 }
 
-function bindForms() {
-  document.querySelector('#password-form')?.addEventListener('submit', async (event) => {
+function bindPasswordControls() {
+  document.querySelectorAll('[data-open-password]').forEach((button) => {
+    if (button.dataset.boundOpenPassword === '1') return;
+    button.dataset.boundOpenPassword = '1';
+    button.addEventListener('click', () => showPasswordToast());
+  });
+
+  const toast = ensurePasswordToast();
+  const form = toast.querySelector('#password-form');
+  if (!form || form.dataset.boundPasswordSubmit === '1') return;
+  form.dataset.boundPasswordSubmit = '1';
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#password-status');
+    const status = toast.querySelector('#password-status');
     const currentPassword = String(form.elements.current_password?.value || '');
     const newPassword = String(form.elements.new_password?.value || '');
     const confirmPassword = String(form.elements.confirm_password?.value || '');
@@ -4566,11 +4706,17 @@ function bindForms() {
         }),
       });
       form.reset();
-      if (status) status.textContent = 'Password updated. Use your new password the next time you log in.';
+      if (status) status.textContent = '';
+      hidePasswordToast();
+      showSavedToast('Password Changed Successfully!', { icon: 'key', passwordSuccess: true });
     } catch (error) {
       if (status) status.textContent = error?.message || 'Could not update password.';
     }
   });
+}
+
+function bindForms() {
+  bindPasswordControls();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
