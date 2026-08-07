@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'restore-blue-regiment-logo-20260807-1';
+const ASSET_VERSION = 'minutes-page-layout-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -6948,7 +6948,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.</p></div></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div></div><div class="editor-layout minutes-layout"><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.</p><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></div></div></div><div class="minutes-footer-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div>
 <div id="minutes-view-modal" class="minutes-frame-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-view-dismiss aria-label="Close minutes document"></button>
   <div class="minutes-view-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-view-title">

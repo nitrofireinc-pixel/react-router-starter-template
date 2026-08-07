@@ -4625,7 +4625,7 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.'
     : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
@@ -4645,41 +4645,17 @@ function bindMinutesListClicks(root) {
   root?.querySelectorAll('[data-minutes-id]').forEach((button) => {
     button.addEventListener('click', () => {
       openMinutesView(Number(button.dataset.minutesId));
-      setMinutesNavOpen(false);
     });
   });
 }
 
-function syncMinutesNavToggleLabel() {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  if (!toggle) return;
-  const selected = selectedMinutes();
-  toggle.textContent = selected
-    ? (selected.meeting_date_display || selected.meeting_date || 'Minutes')
-    : 'Minutes';
-}
-
-function setMinutesNavOpen(open) {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  const menu = document.querySelector('#minutes-mobile-menu');
-  if (!toggle || !menu) return;
-  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  menu.hidden = !open;
-}
-
 function renderMinutesList() {
   const list = document.querySelector('#minutes-list');
-  const mobileMenu = document.querySelector('#minutes-mobile-menu');
   const markup = minutesListMarkup();
   if (list) {
     list.innerHTML = markup;
     bindMinutesListClicks(list);
   }
-  if (mobileMenu) {
-    mobileMenu.innerHTML = markup;
-    bindMinutesListClicks(mobileMenu);
-  }
-  syncMinutesNavToggleLabel();
 }
 
 function renderMinutesView(item) {
@@ -4775,7 +4751,7 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
@@ -4920,23 +4896,8 @@ function bindEnsemblesBodyPanel() {
 }
 
 function bindMinutesPanel() {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  if (toggle && toggle.dataset.bound !== '1') {
-    toggle.dataset.bound = '1';
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const open = toggle.getAttribute('aria-expanded') !== 'true';
-      setMinutesNavOpen(open);
-    });
-    document.addEventListener('click', (event) => {
-      const card = document.querySelector('.minutes-nav-card');
-      if (!card || card.contains(event.target)) return;
-      setMinutesNavOpen(false);
-    });
-  }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
-    setMinutesNavOpen(false);
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });

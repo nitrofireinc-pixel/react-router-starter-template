@@ -2985,17 +2985,17 @@ body.sponsor-signup-open{overflow:hidden}
   }
 }
 
-/* Booster meeting minutes — list always stacks above the document/iframe */
+/* Booster meeting minutes — archive card holds the scrollable list; Add Minutes stays at bottom */
 .minutes-layout{grid-template-columns:1fr;gap:18px;align-items:start}
-.minutes-nav-card{
-  order:0;
-  position:sticky;
-  top:12px;
-  z-index:5;
-  background:#fff;
-}
-.minutes-main{order:1;min-width:0;display:grid;justify-items:stretch;position:relative;z-index:1}
+.minutes-main{min-width:0;display:grid;justify-items:stretch;position:relative;z-index:1}
 .minutes-main > .minutes-empty{width:min(100%,980px);margin-inline:auto}
+.minutes-footer-actions{
+  display:flex;
+  justify-content:center;
+  margin-top:18px;
+  padding:4px 0 8px;
+}
+.minutes-footer-actions .btn{min-width:min(100%,220px)}
 #minutes-view-modal[hidden],
 #minutes-empty[hidden],
 #minutes-editor-modal[hidden],
@@ -3071,14 +3071,11 @@ body.sponsor-signup-open{overflow:hidden}
   gap:12px;
 }
 body.minutes-frame-open{overflow:hidden}
-.minutes-empty{text-align:center;padding:42px 28px;min-height:280px;display:grid;align-content:center;gap:8px}
+.minutes-empty{text-align:center;padding:28px 22px 22px;min-height:280px;display:grid;align-content:start;gap:8px}
 .minutes-empty h2{margin:0;color:#10233c;font-size:clamp(1.4rem,2.5vw,1.9rem)}
-.minutes-empty .muted{margin:0}
-.minutes-nav-desktop-head h2{margin:0 0 4px}
-.minutes-nav-desktop-head .muted{margin:0 0 10px}
-.minutes-mobile-bar{display:none}
-.minutes-mobile-menu{display:none}
-.minutes-nav{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:min(40vh,360px);overflow:auto}
+.minutes-empty .muted{margin:0 0 8px}
+.minutes-nav{display:flex;flex-direction:column;gap:8px;margin:8px auto 0;width:min(100%,520px);max-height:min(50vh,420px);overflow:auto;text-align:left}
+.minutes-nav .draft{margin:8px 0 0;text-align:center}
 .minutes-nav-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;border:1px solid #e1e8f1;border-radius:12px;background:#fff;padding:10px 12px;cursor:pointer;color:#10233c}
 .minutes-nav-item:hover,.minutes-nav-item:focus-visible{border-color:#014990;outline:none}
 .minutes-nav-item.active{background:#10233c;border-color:#10233c;color:#fff}
@@ -3103,63 +3100,9 @@ body.minutes-frame-open{overflow:hidden}
 .minutes-view-body p{margin:0 0 .75em}
 .minutes-form-actions{display:flex;flex-wrap:wrap;gap:10px}
 @media(max-width:900px){
-  .minutes-nav-card{padding:14px;top:8px}
-  .minutes-nav-desktop-head,
-  .minutes-nav{display:none!important}
-  .minutes-mobile-bar{display:block}
-  .minutes-nav-toggle{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    width:100%;
-    min-height:42px;
-    padding:10px 14px;
-    border:1px solid #d5deea;
-    border-radius:12px;
-    background:#fff;
-    color:#10233c;
-    font-weight:900;
-    box-shadow:0 10px 24px rgba(15,34,58,.08);
-    cursor:pointer;
-  }
-  .minutes-nav-toggle[aria-expanded="true"]{
-    background:#10233c;
-    border-color:#10233c;
-    color:#fff;
-  }
-  .minutes-mobile-menu{
-    display:grid;
-    gap:4px;
-    margin-top:10px;
-    padding:10px;
-    border:1px solid #d5deea;
-    border-radius:16px;
-    background:#071b34;
-    box-shadow:0 18px 40px rgba(15,34,58,.18);
-    max-height:min(50vh,360px);
-    overflow:auto;
-    position:relative;
-    z-index:6;
-  }
-  .minutes-mobile-menu[hidden]{display:none!important}
-  .minutes-mobile-menu .minutes-nav-item{
-    border:0;
-    border-radius:10px;
-    background:transparent;
-    color:#dce9f8;
-    padding:12px;
-  }
-  .minutes-mobile-menu .minutes-nav-item:hover,
-  .minutes-mobile-menu .minutes-nav-item:focus-visible{
-    background:rgba(255,255,255,.12);
-    border-color:transparent;
-    outline:none;
-  }
-  .minutes-mobile-menu .minutes-nav-item.active{
-    background:rgba(255,255,255,.16);
-    color:#fff;
-  }
-  .minutes-mobile-menu .draft{color:#9fb2c9;margin:4px}
+  .minutes-empty{padding:22px 16px 16px}
+  .minutes-nav{max-height:min(45vh,360px);width:100%}
+  .minutes-footer-actions{padding-bottom:16px}
 }
 
 /* Public month calendar */
