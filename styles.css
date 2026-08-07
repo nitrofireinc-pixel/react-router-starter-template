@@ -144,6 +144,11 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   display:grid;
   gap:3px;
 }
+.admin-menu-group[hidden]{display:none!important}
+.admin-menu-group-label{
+  margin-top:10px;
+  margin-bottom:2px;
+}
 .admin-menu-parent{
   position:relative;
   padding-right:28px!important;

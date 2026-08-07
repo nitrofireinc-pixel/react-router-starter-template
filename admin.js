@@ -1866,7 +1866,6 @@ function renderMobileAdminMenu() {
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
     && !button.hasAttribute('data-boosters-toggle')
   );
 
@@ -1923,6 +1922,10 @@ function renderMobileAdminMenu() {
     }
     if (child.matches('.admin-menu-group')) {
       if (child.hidden) return;
+      const groupLabel = child.querySelector('.admin-menu-group-label, [data-sponsors-label]');
+      if (groupLabel && !groupLabel.hidden && sectionHasVisibleButtons([child])) {
+        pushLabel(groupLabel.textContent);
+      }
       [...child.querySelectorAll('button')].forEach(pushButton);
       return;
     }
@@ -2070,12 +2073,11 @@ function canAccessBoostersMenu() {
   return canEditBoosterMembers() || canViewMinutes();
 }
 
-function setSponsorsMenuOpen(open) {
+function setSponsorsMenuOpen(_open) {
+  // Sponsorship is a static parent label with always-visible children.
   document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-sponsors-toggle]');
     const sub = menu.querySelector('[data-sponsors-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
+    if (sub) sub.hidden = false;
   });
 }
 
@@ -2090,17 +2092,11 @@ function setBoostersMenuOpen(open) {
 
 function bindSponsorsMenu() {
   const menu = document.querySelector('[data-sponsors-menu]');
-  const toggle = menu?.querySelector('[data-sponsors-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setSponsorsMenuOpen(open);
-  });
+  if (!menu || menu.dataset.bound === '1') return;
+  menu.dataset.bound = '1';
   menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
     button.addEventListener('click', () => {
       const key = button.dataset.sponsorNav;
-      setSponsorsMenuOpen(true);
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
     });
@@ -2177,9 +2173,12 @@ function showAllowedPanels() {
   const sponsorsAccess = canAccessSponsorsMenu();
   if (sponsorsMenu) {
     sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
+    if (sponsorsAccess) {
+      manageVisible = true;
+      setSponsorsMenuOpen(true);
+    }
+    const sponsorsLabel = sponsorsMenu.querySelector('[data-sponsors-label]');
+    if (sponsorsLabel) sponsorsLabel.hidden = !sponsorsAccess;
     const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
     if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
     const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
