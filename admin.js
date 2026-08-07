@@ -1098,6 +1098,7 @@ function structuredPageFields(page) {
   const calloutTitleNode = callout?.querySelector('[data-cms-field="callout_title"], h2, h3');
   const inferredLayout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout
     || (page.slug === 'calendar' ? 'calendar'
+      : page.slug === 'gallery' ? 'gallery'
       : page.slug === 'contact' ? 'contact'
         : page.slug === 'directors' ? 'directory'
           : page.slug === 'sponsors' ? 'sponsors'
@@ -1154,6 +1155,7 @@ function layoutChipLabel(layout) {
     home: 'Home layout',
     standard: 'Standard layout',
     calendar: 'Calendar layout',
+    gallery: 'Photo gallery layout',
     contact: 'Contact layout',
     directory: 'Staff directory layout',
     sponsors: 'Sponsors layout',
@@ -1218,13 +1220,17 @@ function markHomeHtmlEditable(html = '') {
   });
   root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
-    node.setAttribute('data-cms-dynamic-label', 'Managed in Photos');
+    node.setAttribute('data-cms-dynamic-label', 'Managed in Photos · 6 newest on Home');
+  });
+  root.querySelectorAll('.gallery-more').forEach((node) => {
+    node.classList.add('cms-home-dynamic');
+    node.setAttribute('data-cms-dynamic-label', 'Links to Gallery page');
   });
 
   const targets = root.querySelectorAll('.eyebrow, .kicker, .tag, h1, h2, h3, p, li, a.btn, figcaption');
   let index = 0;
   targets.forEach((el) => {
-    if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note')) return;
+    if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
     if (el.closest('.cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
@@ -1377,6 +1383,9 @@ function buildEditablePagePreview(payload = {}) {
 
   if (layout === 'calendar') {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
+  }
+  if (layout === 'gallery' || payload.slug === 'gallery' || payload.original_slug === 'gallery') {
+    return `${hero}<section class="content soft photo-gallery-section"><div class="wrap"><div class="photo-gallery cms-home-dynamic" data-photo-gallery data-sort="recent" data-cms-dynamic-label="Managed in Photos"><figure class="gallery-item"><img src="/assets/efhs-photo-1.png" alt=""><figcaption>Newest photos appear here on the public Gallery page.</figcaption></figure><figure class="gallery-item"><img src="/assets/efhs-photo-2.png" alt=""><figcaption>Click a photo on the public site to open the viewer.</figcaption></figure></div>${callout}</div></section>`;
   }
   if (layout === 'contact') {
     return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p>', 'Main contact content')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab.</p></div>${showCallout ? callout : ''}</div></section>`;
@@ -2835,6 +2844,8 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (boostersHint) boostersHint.hidden = page.slug !== 'boosters';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
+    const galleryHint = form.querySelector('[data-gallery-hint]');
+    if (galleryHint) galleryHint.hidden = page.slug !== 'gallery';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
     if (ensemblesHint) ensemblesHint.hidden = page.slug !== 'ensembles';
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
