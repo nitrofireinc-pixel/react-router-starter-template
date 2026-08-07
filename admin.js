@@ -3494,18 +3494,29 @@ async function loadMailDeliveryStatus() {
 }
 
 function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
+  const select = document.querySelector('#mail-recipient-select');
+  if (!select) return;
+  const previous = String(select.value || '');
+  const options = [
+    '<option value="">Select a recipient…</option>',
+    '<option value="__all__">All users</option>',
+    ...state.mailRecipients.map((user) => {
+      const name = String(user.display_name || user.email || 'User').trim();
+      const email = String(user.email || '').trim();
+      const label = email && email.toLowerCase() !== name.toLowerCase()
+        ? `${name}`
+        : name;
+      return `<option value="${escapeAttr(String(user.id))}" title="${escapeAttr(email)}">${escapeHtml(label)}</option>`;
+    }),
+  ];
+  select.innerHTML = options.join('');
+  if (previous && [...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
   }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
+  if (!state.mailRecipients.length) {
+    const allOption = select.querySelector('option[value="__all__"]');
+    if (allOption) allOption.disabled = true;
+  }
 }
 
 async function loadMailRecipients() {
@@ -3516,7 +3527,25 @@ async function loadMailRecipients() {
 }
 
 function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
+  const value = String(select?.value || '').trim();
+  if (!value) return [];
+  if (value === '__all__') {
+    return state.mailRecipients.map((user) => Number(user.id)).filter((id) => Number.isInteger(id) && id > 0);
+  }
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? [id] : [];
+}
+
+function selectedMailExtraEmails(form) {
+  const raw = String(form?.elements.extra_emails?.value || '').trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;\n]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )];
 }
 
 function bindMailComposer() {
@@ -3540,21 +3569,20 @@ function bindMailComposer() {
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
-  });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
     const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const extraEmails = selectedMailExtraEmails(form);
+    const rawExtra = String(form.elements.extra_emails?.value || '').trim();
+    if (!userIds.length && !extraEmails.length) {
+      if (status) {
+        status.textContent = rawExtra
+          ? 'Enter a valid email address, or choose a recipient from the list.'
+          : 'Choose a recipient or enter at least one email address.';
+      }
       return;
     }
     if (!subject) {
@@ -3570,6 +3598,7 @@ function bindMailComposer() {
     payload.set('subject', subject);
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
+    if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
     [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
 
     if (status) status.textContent = 'Sending…';
@@ -3579,7 +3608,8 @@ function bindMailComposer() {
         if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+        if (form.elements.recipient) form.elements.recipient.value = '';
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
         showSavedToast('Sent.', { icon: 'envelope' });

@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'sponsor-tier-colors-20260807-1';
+const ASSET_VERSION = 'staff-email-recipients-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -3374,7 +3374,18 @@ export async function normalizeMailAttachments(files = []) {
   return attachments;
 }
 
-export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
+export function normalizeAdminMailExtraEmails(value) {
+  const raw = Array.isArray(value)
+    ? value.flatMap((item) => String(item || '').split(/[,;\n]+/))
+    : String(value || '').split(/[,;\n]+/);
+  return [...new Set(
+    raw
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((email) => isValidEmail(email)),
+  )];
+}
+
+export function normalizeAdminMailPayload({ subject, html, userIds, extraEmails } = {}) {
   const cleanSubject = String(subject || '').trim();
   const cleanHtml = sanitizeRichHtml(html || '');
   const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
@@ -3385,6 +3396,7 @@ export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
     html: cleanHtml,
     text: htmlToPlainText(cleanHtml),
     user_ids: ids,
+    extra_emails: normalizeAdminMailExtraEmails(extraEmails),
   };
 }
 
@@ -3402,6 +3414,7 @@ async function parseAdminMailRequest(request) {
         subject: form.get('subject'),
         html: form.get('html'),
         userIds,
+        extraEmails: form.get('extra_emails') || form.get('manual_emails') || '',
       }),
       attachments: await normalizeMailAttachments(files),
     };
@@ -3412,6 +3425,7 @@ async function parseAdminMailRequest(request) {
       subject: payload.subject,
       html: payload.html || payload.body_html || payload.message,
       userIds: payload.user_ids || payload.userIds || [],
+      extraEmails: payload.extra_emails || payload.extraEmails || payload.manual_emails || [],
     }),
     attachments: [],
   };
@@ -5596,7 +5610,9 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (!mail.user_ids.length && !mail.extra_emails.length) {
+      return jsonResponse({ detail: 'Choose a recipient or enter at least one email address.' }, 422);
+    }
     if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
     if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
     if (resolveContactEmailProvider(env) !== 'resend') {
@@ -5605,19 +5621,36 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
-    const placeholders = mail.user_ids.map(() => '?').join(', ');
-    const rows = await env.DB.prepare(
-      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
-    ).bind(...mail.user_ids).all();
-    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
-
-    const results = [];
+    const users = [];
+    if (mail.user_ids.length) {
+      const placeholders = mail.user_ids.map(() => '?').join(', ');
+      const rows = await env.DB.prepare(
+        `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
+      ).bind(...mail.user_ids).all();
+      users.push(...(rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username)));
+    }
+    const seenEmails = new Set();
+    const recipients = [];
     for (const user of users) {
       const email = String(user.username).trim().toLowerCase();
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: user.id, email });
+    }
+    for (const email of mail.extra_emails) {
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: null, email });
+    }
+    if (!recipients.length) {
+      return jsonResponse({ detail: 'No valid recipient emails were found.' }, 422);
+    }
+
+    const results = [];
+    for (const recipient of recipients) {
       try {
         await sendAdminUserMail(env, {
-          to: email,
+          to: recipient.email,
           replyTo: sender.replyTo,
           fromName: sender.fromName,
           subject: mail.subject,
@@ -5625,9 +5658,14 @@ async function handleApi(request, env, url) {
           text: mail.text || htmlToPlainText(mail.html),
           attachments: mail.attachments,
         });
-        results.push({ user_id: user.id, email, ok: true });
+        results.push({ user_id: recipient.user_id, email: recipient.email, ok: true });
       } catch (error) {
-        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
+        results.push({
+          user_id: recipient.user_id,
+          email: recipient.email,
+          ok: false,
+          error: String(error?.message || error || 'Send failed'),
+        });
       }
     }
     const sent = results.filter((item) => item.ok).length;
@@ -5636,6 +5674,7 @@ async function handleApi(request, env, url) {
       ok: failed === 0,
       sent,
       failed,
+      reply_to: sender.replyTo,
       results,
       detail: failed
         ? `Sent ${sent} of ${results.length}. ${failed} failed.`
@@ -6272,20 +6311,21 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section><section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to CMS users or any email address. Reply-To is always set to the logged-in user’s email.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
 <div class="mail-recipients">
-  <div class="mail-recipients-head">
-    <h2>Recipients</h2>
-    <div class="panel-actions">
-      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
-      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
-    </div>
-  </div>
-  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
-  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+  <label class="mail-recipient-select-label">Send to
+    <select name="recipient" id="mail-recipient-select">
+      <option value="">Select a recipient…</option>
+      <option value="__all__">All users</option>
+    </select>
+  </label>
+  <label class="mail-extra-emails-label">Also send to <small>Optional · other people outside the CMS user list</small>
+    <input name="extra_emails" id="mail-extra-emails" type="text" maxlength="500" placeholder="name@example.com, another@example.com" autocomplete="email">
+  </label>
+  <p class="muted">CMS users are listed by name and emailed at their login username. Replies always return to your account email.</p>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
