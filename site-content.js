@@ -757,12 +757,13 @@ async function loadPublicContent() {
       }
       if (key === 'hero_subtitle' || key === 'footer_note') {
         const html = formatRichText(value);
-        if (element.tagName === 'P') {
-          const match = html.match(/^<p>([\s\S]*)<\/p>$/i);
-          element.innerHTML = match ? match[1] : sanitizeInlineRichHtml(html);
-        } else {
+        // Footer note is a div so rich <p> blocks can render once without nested-p duplication.
+        if (key === 'footer_note' || element.tagName !== 'P') {
           element.innerHTML = html;
+          return;
         }
+        const match = html.match(/^<p>([\s\S]*)<\/p>$/i);
+        element.innerHTML = match ? match[1] : sanitizeInlineRichHtml(html);
         return;
       }
       element.textContent = value;
