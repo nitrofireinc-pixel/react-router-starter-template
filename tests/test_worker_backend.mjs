@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import zlib from 'node:zlib';
 
 import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, MINUTES_LETTERHEAD_MARK, PUBLIC_BRAND_MARK, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
@@ -701,9 +702,18 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   assert.match(pdf, /East Forsyth Band Boosters/);
   assert.match(pdf, /\/Subtype \/Image/);
   assert.match(pdf, /Helvetica-Bold/);
-  // Logo uses the Blue Regiment mark and is Y-flipped for correct PDF orientation.
+  // Logo uses the Blue Regiment mark drawn upright as DeviceRGB (top-to-bottom samples).
   assert.match(pdf, /\/Im1 Do/);
-  assert.match(pdf, /0 -\d+(?:\.\d+)? \d+(?:\.\d+)? \d+(?:\.\d+)? cm \/Im1 Do/);
+  assert.match(pdf, /\d+(?:\.\d+)? 0 0 \d+(?:\.\d+)? \d+(?:\.\d+)? \d+(?:\.\d+)? cm \/Im1 Do/);
+  // Raw DeviceRGB payload size is width*height*3 (no PNG row-filter bytes).
+  const imgMatch = pdf.match(/\/Width (\d+)[\s\S]*?\/Height (\d+)[\s\S]*?\/Length (\d+) >>stream\n/);
+  assert.ok(imgMatch);
+  const width = Number(imgMatch[1]);
+  const height = Number(imgMatch[2]);
+  const streamStart = pdf.indexOf('stream\n', pdf.indexOf('/Subtype /Image')) + 'stream\n'.length;
+  const streamEnd = pdf.indexOf('endstream', streamStart);
+  const inflated = zlib.inflateSync(Buffer.from(pdf.slice(streamStart, streamEnd), 'latin1'));
+  assert.equal(inflated.length, width * height * 3);
 });
 
 test('applicationFromSponsorRecord builds manual-entry invoice source', () => {

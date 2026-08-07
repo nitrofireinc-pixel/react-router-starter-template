@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'blue-regiment-mark-transparent-20260807-1';
+const ASSET_VERSION = 'invoice-logo-rgb-fix-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -2872,10 +2872,10 @@ export function buildSponsorInvoicePdfBase64({
   // Letterhead bar
   ops.push(`${soft} rg ${left} ${headerBottom} ${right - left} ${headerTop - headerBottom} re f`);
   ops.push(`${navy} RG 1.5 w ${left} ${headerBottom} m ${right} ${headerBottom} l S`);
-  // Blue Regiment mark (same asset as public title). PDF images are bottom-up, so flip Y.
+  // Blue Regiment mark (same asset as public title). DeviceRGB samples are top-to-bottom; draw upright.
   const logoX = left + 8;
   const logoY = headerBottom + 6;
-  ops.push(`q ${drawLogo} 0 0 ${-drawLogo} ${logoX} ${logoY + drawLogo} cm /Im1 Do Q`);
+  ops.push(`q ${drawLogo} 0 0 ${drawLogo} ${logoX} ${logoY} cm /Im1 Do Q`);
   // Org block
   const textX = logoX + drawLogo + 12;
   ops.push(pdfTextAt(textX, 748, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
