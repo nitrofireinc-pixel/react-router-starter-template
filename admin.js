@@ -1160,7 +1160,7 @@ function buildEditablePagePreview(payload = {}) {
   const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
     : '';
   const sponsorsCallout = showCallout
     ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
@@ -1862,16 +1862,28 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
+  const isMenuParentToggle = (button) => (
+    button?.hasAttribute('data-sponsors-toggle')
+    || button?.hasAttribute('data-boosters-toggle')
+  );
+
+  const isGroupActionButton = (button, group) => (
+    Boolean(button)
+    && !button.hidden
+    && !isMenuParentToggle(button)
+    && Boolean(group)
+    && !group.hidden
+    && group.contains(button)
+  );
+
   const isVisibleButton = (button) => (
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
+    && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button) => {
-    if (!isVisibleButton(button)) return;
+  const actionButtonHtml = (button) => {
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1879,7 +1891,12 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+  };
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    parts.push(actionButtonHtml(button));
   };
 
   const pushLabel = (text) => {
@@ -1888,8 +1905,26 @@ function renderMobileAdminMenu() {
     parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
   };
 
+  const pushMenuGroup = (group) => {
+    if (!group || group.hidden) return;
+    const parent = group.querySelector('.admin-menu-parent');
+    const children = [...group.querySelectorAll('button')].filter((button) => isGroupActionButton(button, group));
+    if (!parent || parent.hidden || !children.length) return;
+    const expanded = parent.getAttribute('aria-expanded') === 'true';
+    const childHtml = children.map((button) => actionButtonHtml(button)).join('');
+    parts.push(
+      `<div class="admin-mobile-menu-group">`
+      + `<button type="button" class="admin-menu-parent admin-mobile-menu-parent" data-mobile-submenu-toggle aria-expanded="${expanded ? 'true' : 'false'}">${escapeHtml(parent.textContent.trim())}</button>`
+      + `<div class="admin-mobile-menu-sub" data-mobile-submenu ${expanded ? '' : 'hidden'}>${childHtml}</div>`
+      + `</div>`
+    );
+  };
+
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
     if (node.matches?.('button')) return isVisibleButton(node);
+    if (node.matches?.('.admin-menu-group') && !node.hidden) {
+      return [...node.querySelectorAll('button')].some((button) => isGroupActionButton(button, node));
+    }
     return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
   });
 
@@ -1904,7 +1939,6 @@ function renderMobileAdminMenu() {
         const shortcuts = document.querySelector('#admin-page-shortcuts');
         if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
       } else {
-        // Manage label: only show when at least one following manage control is visible.
         const following = [];
         let sibling = child.nextElementSibling;
         while (sibling) {
@@ -1922,8 +1956,7 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('.admin-menu-group')) {
-      if (child.hidden) return;
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      pushMenuGroup(child);
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
@@ -1932,6 +1965,20 @@ function renderMobileAdminMenu() {
   menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
   <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
+
+  menu.querySelectorAll('[data-mobile-submenu-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const group = toggle.closest('.admin-mobile-menu-group');
+      const sub = group?.querySelector('[data-mobile-submenu]');
+      if (!sub) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      sub.hidden = !open;
+    });
+  });
+
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -2186,6 +2233,8 @@ function showAllowedPanels() {
     if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
     const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
+    // Keep submenu closed until the parent is clicked (or a child route activates it).
+    if (!sponsorsAccess) setSponsorsMenuOpen(false);
   }
   bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
@@ -3494,18 +3543,29 @@ async function loadMailDeliveryStatus() {
 }
 
 function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
+  const select = document.querySelector('#mail-recipient-select');
+  if (!select) return;
+  const previous = String(select.value || '');
+  const options = [
+    '<option value="">Select a recipient…</option>',
+    '<option value="__all__">All users</option>',
+    ...state.mailRecipients.map((user) => {
+      const name = String(user.display_name || user.email || 'User').trim();
+      const email = String(user.email || '').trim();
+      const label = email && email.toLowerCase() !== name.toLowerCase()
+        ? `${name}`
+        : name;
+      return `<option value="${escapeAttr(String(user.id))}" title="${escapeAttr(email)}">${escapeHtml(label)}</option>`;
+    }),
+  ];
+  select.innerHTML = options.join('');
+  if (previous && [...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
   }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
+  if (!state.mailRecipients.length) {
+    const allOption = select.querySelector('option[value="__all__"]');
+    if (allOption) allOption.disabled = true;
+  }
 }
 
 async function loadMailRecipients() {
@@ -3516,7 +3576,25 @@ async function loadMailRecipients() {
 }
 
 function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
+  const value = String(select?.value || '').trim();
+  if (!value) return [];
+  if (value === '__all__') {
+    return state.mailRecipients.map((user) => Number(user.id)).filter((id) => Number.isInteger(id) && id > 0);
+  }
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? [id] : [];
+}
+
+function selectedMailExtraEmails(form) {
+  const raw = String(form?.elements.extra_emails?.value || '').trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;\n]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )];
 }
 
 function bindMailComposer() {
@@ -3540,21 +3618,20 @@ function bindMailComposer() {
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
-  });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
     const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const extraEmails = selectedMailExtraEmails(form);
+    const rawExtra = String(form.elements.extra_emails?.value || '').trim();
+    if (!userIds.length && !extraEmails.length) {
+      if (status) {
+        status.textContent = rawExtra
+          ? 'Enter a valid email address, or choose a recipient from the list.'
+          : 'Choose a recipient or enter at least one email address.';
+      }
       return;
     }
     if (!subject) {
@@ -3570,6 +3647,7 @@ function bindMailComposer() {
     payload.set('subject', subject);
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
+    if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
     [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
 
     if (status) status.textContent = 'Sending…';
@@ -3579,7 +3657,8 @@ function bindMailComposer() {
         if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+        if (form.elements.recipient) form.elements.recipient.value = '';
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
         showSavedToast('Sent.', { icon: 'envelope' });
@@ -4689,7 +4768,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. All public pages now redirect to maintenance.html.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });
