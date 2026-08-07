@@ -50,7 +50,7 @@ header.site-header nav{
 header.site-header nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}
 header.site-header nav a:hover,
 header.site-header nav a:focus{background:#eef3fa;outline:none}
-.menu-button{display:none;position:absolute;right:20px;top:50%;transform:translateY(-50%);margin:0;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy);z-index:2}
+.menu-button{display:none;margin:0;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
 /* Desktop nav bar: full-bleed utility navy, gold links centered */
 @media(min-width:761px){
   header.site-header nav{
@@ -100,12 +100,22 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 /* Phones/small tablets only: collapse into Menu. Keep full link row at 1024x768 and similar. */
 @media(max-width:760px){
   .utility{display:none}
-  .header-inner{flex-wrap:nowrap;align-items:center;justify-content:center;padding:12px 72px 12px 20px;row-gap:0;overflow-x:clip}
-  .brand{flex:0 1 auto;min-width:0;max-width:100%;gap:10px}
+  /* Row 1: centered brand. Row 2: Menu button on its own line (never over the mark). */
+  .header-inner{flex-wrap:wrap;align-items:center;justify-content:center;padding:12px 16px;row-gap:10px;overflow-x:clip}
+  .brand{flex:0 0 100%;width:100%;max-width:100%;min-width:0;gap:10px;justify-content:center;margin:0}
   .brand .brand-logo,.brand .brand-mark{width:44px;height:44px}
   .brand span{font-size:.95rem;min-width:0;overflow-wrap:anywhere}
-  .menu-button{display:inline-flex}
-  header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
+  .menu-button{
+    display:inline-flex;
+    position:static;
+    transform:none;
+    top:auto;
+    right:auto;
+    width:100%;
+    justify-content:center;
+    box-sizing:border-box;
+  }
+  header.site-header nav{display:none!important;position:absolute;left:16px;right:16px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
   header.site-header nav a{
     color:var(--navy);
