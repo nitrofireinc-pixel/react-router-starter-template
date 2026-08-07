@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'mail-html-multiselect-20260807-1';
+const ASSET_VERSION = 'mail-select-all-users-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -6881,7 +6881,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <label class="mail-extra-emails-label">Also send to <small>Optional · other people outside the CMS user list</small>
     <input name="extra_emails" id="mail-extra-emails" type="text" maxlength="500" placeholder="name@example.com, another@example.com" autocomplete="email">
   </label>
-  <p class="muted">CMS users are listed by name and emailed at their login username. Choose <strong>All users</strong> or one or more people — not both. Replies always return to your account email.</p>
+  <p class="muted">CMS users are listed by name and emailed at their login username. Choose <strong>All users</strong> to select everyone, or pick individual people. Replies always return to your account email.</p>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
