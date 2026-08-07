@@ -3690,49 +3690,61 @@ async function loadMailDeliveryStatus() {
   }
 }
 
+function mailRecipientInputs(list) {
+  return [...(list?.querySelectorAll?.('input[type="checkbox"][name="recipient"]') || [])];
+}
+
 function renderMailRecipients() {
-  const select = document.querySelector('#mail-recipient-select');
-  if (!select) return;
+  const list = document.querySelector('#mail-recipient-select');
+  if (!list) return;
   const previous = new Set(
-    [...select.selectedOptions].map((option) => String(option.value || '')).filter(Boolean),
+    mailRecipientInputs(list)
+      .filter((input) => input.checked)
+      .map((input) => String(input.value || ''))
+      .filter(Boolean),
   );
   const options = [
-    '<option value="__all__">All users</option>',
+    {
+      value: '__all__',
+      label: 'All users',
+      title: '',
+      disabled: !state.mailRecipients.length,
+    },
     ...state.mailRecipients.map((user) => {
       const name = String(user.display_name || user.email || 'User').trim();
       const email = String(user.email || '').trim();
-      const label = email && email.toLowerCase() !== name.toLowerCase()
-        ? `${name}`
-        : name;
-      return `<option value="${escapeAttr(String(user.id))}" title="${escapeAttr(email)}">${escapeHtml(label)}</option>`;
+      return {
+        value: String(user.id),
+        label: name,
+        title: email,
+        disabled: false,
+      };
     }),
   ];
-  select.innerHTML = options.join('');
-  [...select.options].forEach((option) => {
-    option.selected = previous.has(String(option.value || ''));
-  });
-  if (!state.mailRecipients.length) {
-    const allOption = select.querySelector('option[value="__all__"]');
-    if (allOption) allOption.disabled = true;
-  }
-  enforceMailRecipientSelection(select);
+  list.innerHTML = options.map((option) => `
+    <label class="mail-recipient-option${option.disabled ? ' is-disabled' : ''}"${option.title ? ` title="${escapeAttr(option.title)}"` : ''}>
+      <input type="checkbox" name="recipient" value="${escapeAttr(option.value)}"${previous.has(option.value) ? ' checked' : ''}${option.disabled ? ' disabled' : ''}>
+      <span>${escapeHtml(option.label)}</span>
+    </label>
+  `).join('');
+  enforceMailRecipientSelection(list);
 }
 
-function enforceMailRecipientSelection(select) {
-  if (!select) return;
-  const selected = [...select.selectedOptions];
+function enforceMailRecipientSelection(list) {
+  if (!list) return;
+  const selected = mailRecipientInputs(list).filter((input) => input.checked && !input.disabled);
   if (!selected.length) return;
-  const allSelected = selected.some((option) => option.value === '__all__');
-  const peopleSelected = selected.some((option) => option.value !== '__all__');
+  const allSelected = selected.some((input) => input.value === '__all__');
+  const peopleSelected = selected.some((input) => input.value !== '__all__');
   if (!(allSelected && peopleSelected)) return;
   // Prefer the most recent interaction: if All was just toggled on, keep only All;
   // otherwise keep individual users and clear All.
-  const keepAll = select.dataset.lastRecipientChoice === '__all__';
-  [...select.options].forEach((option) => {
+  const keepAll = list.dataset.lastRecipientChoice === '__all__';
+  mailRecipientInputs(list).forEach((input) => {
     if (keepAll) {
-      option.selected = option.value === '__all__';
+      input.checked = input.value === '__all__';
     } else {
-      option.selected = option.value !== '__all__' && option.selected;
+      input.checked = input.value !== '__all__' && input.checked;
     }
   });
 }
@@ -3745,9 +3757,11 @@ async function loadMailRecipients() {
 }
 
 function selectedMailUserIds(form) {
-  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
-  if (!select) return [];
-  const values = [...select.selectedOptions].map((option) => String(option.value || '').trim()).filter(Boolean);
+  const list = form?.querySelector('#mail-recipient-select');
+  const values = mailRecipientInputs(list)
+    .filter((input) => input.checked && !input.disabled)
+    .map((input) => String(input.value || '').trim())
+    .filter(Boolean);
   if (!values.length) return [];
   if (values.includes('__all__')) {
     // All users already covers every CMS account; ignore any leftover individual picks.
@@ -3778,29 +3792,16 @@ function bindMailComposer() {
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
 
-  const recipientSelect = form.querySelector('#mail-recipient-select');
-  if (recipientSelect) {
-    recipientSelect.dataset.previousSelection = '';
-    recipientSelect.addEventListener('mousedown', (event) => {
-      const option = event.target?.closest?.('option');
-      if (option?.value) recipientSelect.dataset.lastRecipientChoice = option.value;
-    });
-    recipientSelect.addEventListener('change', () => {
-      const previous = String(recipientSelect.dataset.previousSelection || '')
-        .split(',')
-        .filter(Boolean);
-      const current = [...recipientSelect.selectedOptions].map((option) => option.value);
-      const added = current.filter((value) => !previous.includes(value));
-      if (added.includes('__all__')) {
-        recipientSelect.dataset.lastRecipientChoice = '__all__';
-      } else if (added.some((value) => value !== '__all__')) {
-        recipientSelect.dataset.lastRecipientChoice =
-          added.find((value) => value !== '__all__') || 'user';
+  const recipientList = form.querySelector('#mail-recipient-select');
+  if (recipientList && !recipientList.dataset.boundRecipientGuard) {
+    recipientList.dataset.boundRecipientGuard = '1';
+    recipientList.addEventListener('change', (event) => {
+      const input = event.target?.closest?.('input[type="checkbox"][name="recipient"]');
+      if (!input) return;
+      if (input.checked) {
+        recipientList.dataset.lastRecipientChoice = input.value;
       }
-      enforceMailRecipientSelection(recipientSelect);
-      recipientSelect.dataset.previousSelection = [...recipientSelect.selectedOptions]
-        .map((option) => option.value)
-        .join(',');
+      enforceMailRecipientSelection(recipientList);
     });
   }
 
@@ -3858,10 +3859,10 @@ function bindMailComposer() {
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
         if (form.elements.extra_emails) form.elements.extra_emails.value = '';
-        const recipientSelectEl = form.querySelector('#mail-recipient-select');
-        if (recipientSelectEl) {
-          [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
-          delete recipientSelectEl.dataset.lastRecipientChoice;
+        const recipientListEl = form.querySelector('#mail-recipient-select');
+        if (recipientListEl) {
+          mailRecipientInputs(recipientListEl).forEach((input) => { input.checked = false; });
+          delete recipientListEl.dataset.lastRecipientChoice;
         }
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
