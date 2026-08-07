@@ -193,10 +193,13 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'sponsor-invoice-logo-fix-20260807-1';
-const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
-const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const ASSET_VERSION = 'minutes-watermark-logo-20260807-1';
+/** Shared Blue Regiment mark used by the public title and minutes letterhead. */
+const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
+const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
+export { BLUE_REGIMENT_MARK_PATH, MINUTES_LETTERHEAD_MARK, PUBLIC_BRAND_MARK };
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -4104,10 +4107,10 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
     }
     .letterhead-mark {
       display: block;
-      width: 1.55in;
-      height: 1.55in;
+      width: 1.45in;
+      height: 1.45in;
       object-fit: contain;
-      opacity: 1;
+      opacity: 0.28;
       -webkit-user-drag: none;
     }
     .doc-kicker {
@@ -4160,7 +4163,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
-      .letterhead-mark { opacity: 1; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
