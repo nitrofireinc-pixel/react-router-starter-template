@@ -4,6 +4,163 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 380, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+function datasetKeyToAttr(key) {
+  return String(key || '').replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+}
+
+function bindAdminRowDragAndDrop(list, {
+  idAttr,
+  getOrdered,
+  applyLocalOrder,
+  saveOrder,
+  reload,
+  errorStatusSelector,
+  errorMessage,
+  successStatusSelector,
+  successMessage,
+} = {}) {
+  if (!list || !idAttr) return;
+  let dragId = null;
+  let allowRowDrag = false;
+  const attr = datasetKeyToAttr(idAttr);
+  const rowSelector = `[data-${attr}]`;
+
+  list.querySelectorAll(rowSelector).forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset[idAttr]);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset[idAttr]) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset[idAttr]);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = typeof getOrdered === 'function' ? getOrdered() : [];
+      const fromIndex = ordered.findIndex((item) => item.id === fromId);
+      const toIndex = ordered.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((item) => item.id);
+      applyLocalOrder?.(next);
+      try {
+        await saveOrder?.(ids);
+        if (successStatusSelector && successMessage) {
+          const status = document.querySelector(successStatusSelector);
+          if (status) status.textContent = successMessage;
+        }
+      } catch (error) {
+        console.error(error);
+        if (typeof reload === 'function') await reload();
+        if (errorStatusSelector) {
+          const status = document.querySelector(errorStatusSelector);
+          if (status) status.textContent = errorMessage || 'Could not save the new order.';
+        }
+      }
+    });
+  });
+}
+
+function wireEditPageButton(selector, slug, canEdit) {
+  const button = document.querySelector(selector);
+  if (!button) return;
+  button.hidden = !canEdit;
+  button.onclick = () => editPage(slug);
+}
+
+function setAdminSubmenuOpen(key, open) {
+  const menuSel = `[data-${key}-menu]`;
+  const toggleSel = `[data-${key}-toggle]`;
+  const subSel = `[data-${key}-sub]`;
+  document.querySelectorAll(menuSel).forEach((menu) => {
+    const toggle = menu.querySelector(toggleSel);
+    const sub = menu.querySelector(subSel);
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindAdminSubmenu(key, { onItemClick, itemSelector } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  const toggle = menu?.querySelector(`[data-${key}-toggle]`);
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setAdminSubmenuOpen(key, open);
+  });
+  if (typeof onItemClick !== 'function') return;
+  const nodes = itemSelector
+    ? menu.querySelectorAll(itemSelector)
+    : menu.querySelectorAll(`button:not([data-${key}-toggle])`);
+  nodes.forEach((button) => {
+    if (button.dataset.boundNav === '1') return;
+    button.dataset.boundNav = '1';
+    button.addEventListener('click', () => onItemClick(button));
+  });
+}
+
+function syncAdminSubmenuAccess(key, { canAccess, children = [] } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  if (!menu) return false;
+  menu.hidden = !canAccess;
+  const toggle = menu.querySelector(`[data-${key}-toggle]`);
+  if (toggle) toggle.hidden = !canAccess;
+  children.forEach(({ selector, visible }) => {
+    const node = menu.querySelector(selector);
+    if (node) node.hidden = !visible;
+  });
+  return Boolean(canAccess);
+}
+
+
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
@@ -78,18 +235,15 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   savedToastTimer = window.setTimeout(() => {
-    root.classList.add('is-leaving');
-    root.classList.remove('is-visible');
-    savedToastLeaveTimer = window.setTimeout(() => {
-      root.classList.remove('is-leaving');
-      root.classList.remove('is-password-success');
-      root.classList.remove('has-icon');
-    }, 380);
+    savedToastLeaveTimer = playOverlayLeave(root, {
+      ms: 380,
+      onDone: () => {
+        root.classList.remove('is-password-success');
+        root.classList.remove('has-icon');
+      },
+    });
   }, 3000);
 }
 
@@ -137,23 +291,15 @@ function showPasswordToast() {
   if (status) status.textContent = '';
   window.clearTimeout(passwordToastLeaveTimer);
   root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
 }
 
 function hidePasswordToast() {
   const root = document.querySelector('#admin-password-toast');
   if (!root || root.hidden) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
   window.clearTimeout(passwordToastLeaveTimer);
-  passwordToastLeaveTimer = window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    root.hidden = true;
-  }, 380);
+  passwordToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
 }
 
 function formDataHasFiles(formData) {
@@ -202,10 +348,8 @@ function setUploadProgress(percent) {
 
 function showUploadingOverlay() {
   const root = ensureUploadToast();
-  root.classList.remove('is-leaving');
   setUploadProgress(0);
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   document.body.classList.add('admin-upload-open');
 }
 
@@ -213,12 +357,10 @@ function hideUploadingOverlay() {
   const root = document.querySelector('#admin-upload-toast');
   document.body.classList.remove('admin-upload-open');
   if (!root) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
-  window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    setUploadProgress(0);
-  }, 380);
+  playOverlayLeave(root, {
+    ms: 380,
+    onDone: () => setUploadProgress(0),
+  });
 }
 
 function jsonFetchViaXhr(url, options = {}) {
@@ -1160,7 +1302,7 @@ function buildEditablePagePreview(payload = {}) {
   const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
     : '';
   const sponsorsCallout = showCallout
     ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
@@ -1862,16 +2004,28 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
+  const isMenuParentToggle = (button) => (
+    button?.hasAttribute('data-sponsors-toggle')
+    || button?.hasAttribute('data-boosters-toggle')
+  );
+
+  const isGroupActionButton = (button, group) => (
+    Boolean(button)
+    && !button.hidden
+    && !isMenuParentToggle(button)
+    && Boolean(group)
+    && !group.hidden
+    && group.contains(button)
+  );
+
   const isVisibleButton = (button) => (
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
+    && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button) => {
-    if (!isVisibleButton(button)) return;
+  const actionButtonHtml = (button) => {
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1879,7 +2033,12 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+  };
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    parts.push(actionButtonHtml(button));
   };
 
   const pushLabel = (text) => {
@@ -1888,8 +2047,26 @@ function renderMobileAdminMenu() {
     parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
   };
 
+  const pushMenuGroup = (group) => {
+    if (!group || group.hidden) return;
+    const parent = group.querySelector('.admin-menu-parent');
+    const children = [...group.querySelectorAll('button')].filter((button) => isGroupActionButton(button, group));
+    if (!parent || parent.hidden || !children.length) return;
+    const expanded = parent.getAttribute('aria-expanded') === 'true';
+    const childHtml = children.map((button) => actionButtonHtml(button)).join('');
+    parts.push(
+      `<div class="admin-mobile-menu-group">`
+      + `<button type="button" class="admin-menu-parent admin-mobile-menu-parent" data-mobile-submenu-toggle aria-expanded="${expanded ? 'true' : 'false'}">${escapeHtml(parent.textContent.trim())}</button>`
+      + `<div class="admin-mobile-menu-sub" data-mobile-submenu ${expanded ? '' : 'hidden'}>${childHtml}</div>`
+      + `</div>`
+    );
+  };
+
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
     if (node.matches?.('button')) return isVisibleButton(node);
+    if (node.matches?.('.admin-menu-group') && !node.hidden) {
+      return [...node.querySelectorAll('button')].some((button) => isGroupActionButton(button, node));
+    }
     return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
   });
 
@@ -1904,7 +2081,6 @@ function renderMobileAdminMenu() {
         const shortcuts = document.querySelector('#admin-page-shortcuts');
         if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
       } else {
-        // Manage label: only show when at least one following manage control is visible.
         const following = [];
         let sibling = child.nextElementSibling;
         while (sibling) {
@@ -1922,8 +2098,7 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('.admin-menu-group')) {
-      if (child.hidden) return;
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      pushMenuGroup(child);
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
@@ -1932,6 +2107,20 @@ function renderMobileAdminMenu() {
   menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
   <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
+
+  menu.querySelectorAll('[data-mobile-submenu-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const group = toggle.closest('.admin-mobile-menu-group');
+      const sub = group?.querySelector('[data-mobile-submenu]');
+      if (!sub) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      sub.hidden = !open;
+    });
+  });
+
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -2071,51 +2260,27 @@ function canAccessBoostersMenu() {
 }
 
 function setSponsorsMenuOpen(open) {
-  document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-sponsors-toggle]');
-    const sub = menu.querySelector('[data-sponsors-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('sponsors', open);
 }
 
 function setBoostersMenuOpen(open) {
-  document.querySelectorAll('[data-boosters-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-boosters-toggle]');
-    const sub = menu.querySelector('[data-boosters-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('boosters', open);
 }
 
 function bindSponsorsMenu() {
-  const menu = document.querySelector('[data-sponsors-menu]');
-  const toggle = menu?.querySelector('[data-sponsors-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setSponsorsMenuOpen(open);
-  });
-  menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
-    button.addEventListener('click', () => {
+  bindAdminSubmenu('sponsors', {
+    itemSelector: '[data-sponsor-nav]',
+    onItemClick: (button) => {
       const key = button.dataset.sponsorNav;
       setSponsorsMenuOpen(true);
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
-    });
+    },
   });
 }
 
 function bindBoostersMenu() {
-  const menu = document.querySelector('[data-boosters-menu]');
-  const toggle = menu?.querySelector('[data-boosters-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setBoostersMenuOpen(open);
-  });
+  bindAdminSubmenu('boosters');
 }
 
 function renderPageShortcuts() {
@@ -2160,33 +2325,25 @@ function showAllowedPanels() {
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
-  const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
-  if (boostersMenu) {
-    boostersMenu.hidden = !boostersAccess;
-    if (boostersAccess) manageVisible = true;
-    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
-    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
-    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
-    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
-    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
-  }
+  const boostersAccess = syncAdminSubmenuAccess('boosters', {
+    canAccess: canAccessBoostersMenu(),
+    children: [
+      { selector: '[data-tab="booster-members"]', visible: canEditBoosterMembers() },
+      { selector: '[data-tab="minutes"]', visible: canViewMinutes() },
+    ],
+  });
+  if (boostersAccess) manageVisible = true;
   bindBoostersMenu();
-  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
-  const sponsorsAccess = canAccessSponsorsMenu();
-  if (sponsorsMenu) {
-    sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
-    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
-    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
-    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
-    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
-    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
-    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
-  }
+  const sponsorsAccess = syncAdminSubmenuAccess('sponsors', {
+    canAccess: canAccessSponsorsMenu(),
+    children: [
+      { selector: '[data-tab="sponsors"]', visible: canEditSponsors() },
+      { selector: '[data-sponsor-nav="sponsors-page"]', visible: canEditPage('sponsors') },
+      { selector: '[data-sponsor-nav="become-a-sponsor"]', visible: canEditPage('become-a-sponsor') },
+    ],
+  });
+  if (sponsorsAccess) manageVisible = true;
+  else setSponsorsMenuOpen(false);
   bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
@@ -2194,26 +2351,10 @@ function showAllowedPanels() {
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
-  const editCalendarPage = document.querySelector('#edit-calendar-page');
-  if (editCalendarPage) {
-    editCalendarPage.hidden = !canEditPage('calendar');
-    editCalendarPage.onclick = () => editPage('calendar');
-  }
-  const editDirectorsPage = document.querySelector('#edit-directors-page');
-  if (editDirectorsPage) {
-    editDirectorsPage.hidden = !canEditPage('directors');
-    editDirectorsPage.onclick = () => editPage('directors');
-  }
-  const editBoostersPage = document.querySelector('#edit-boosters-page');
-  if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditBoostersPage();
-    editBoostersPage.onclick = () => editPage('boosters');
-  }
-  const editContactPage = document.querySelector('#edit-contact-page');
-  if (editContactPage) {
-    editContactPage.hidden = !canEditPage('contact');
-    editContactPage.onclick = () => editPage('contact');
-  }
+  wireEditPageButton('#edit-calendar-page', 'calendar', canEditPage('calendar'));
+  wireEditPageButton('#edit-directors-page', 'directors', canEditPage('directors'));
+  wireEditPageButton('#edit-boosters-page', 'boosters', canEditBoostersPage());
+  wireEditPageButton('#edit-contact-page', 'contact', canEditPage('contact'));
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
@@ -2752,65 +2893,17 @@ async function saveStaffOrder(ids) {
 }
 
 function bindStaffDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-staff-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.staffId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.staffId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.staffId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedStaff();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'staffId',
+    getOrdered: orderedStaff,
+    applyLocalOrder: (next) => {
       state.staff = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderStaff();
-      try {
-        await saveStaffOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadStaff();
-        const status = document.querySelector('#staff-status');
-        if (status) status.textContent = 'Could not save the new staff order.';
-      }
-    });
+    },
+    saveOrder: saveStaffOrder,
+    reload: loadStaff,
+    errorStatusSelector: '#staff-status',
+    errorMessage: 'Could not save the new staff order.',
   });
 }
 
@@ -2871,65 +2964,17 @@ async function saveBoosterMemberOrder(ids) {
 }
 
 function bindBoosterMemberDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-booster-member-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.boosterMemberId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.boosterMemberId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.boosterMemberId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedBoosterMembers();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'boosterMemberId',
+    getOrdered: orderedBoosterMembers,
+    applyLocalOrder: (next) => {
       state.boosterMembers = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderBoosterMembers();
-      try {
-        await saveBoosterMemberOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadBoosterMembers();
-        const status = document.querySelector('#booster-member-status');
-        if (status) status.textContent = 'Could not save the new booster member order.';
-      }
-    });
+    },
+    saveOrder: saveBoosterMemberOrder,
+    reload: loadBoosterMembers,
+    errorStatusSelector: '#booster-member-status',
+    errorMessage: 'Could not save the new booster member order.',
   });
 }
 
@@ -2939,6 +2984,18 @@ function formatAdminSponsorAddress(sponsor = {}) {
   const city = String(sponsor.city || '').trim();
   const state = String(sponsor.state || '').trim().toUpperCase();
   return [street, city, state].filter(Boolean).join(', ');
+}
+
+
+function formatAdminSponsorContactLines(sponsor = {}) {
+  const address = formatAdminSponsorAddress(sponsor);
+  const phone = String(sponsor.phone || '').trim();
+  const email = String(sponsor.email || '').trim();
+  return [
+    address || 'No address on file',
+    phone ? `Phone: ${phone}` : 'Phone: —',
+    email ? `Email: ${email}` : 'Email: —',
+  ];
 }
 
 function sponsorPreviewCard(sponsor, index = 0) {
@@ -3002,10 +3059,16 @@ function renderGoldSponsorsPrintPreview() {
     const logo = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
       : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    const contact = formatAdminSponsorContactLines(sponsor)
+      .map((line) => `<span>${escapeHtml(line)}</span>`)
+      .join('');
     return `
       <article class="gold-sponsor-print-row">
         <div class="gold-sponsor-print-logo">${logo}</div>
-        <b>${escapeHtml(sponsor.name)}</b>
+        <div class="gold-sponsor-print-copy">
+          <b>${escapeHtml(sponsor.name)}</b>
+          ${contact}
+        </div>
       </article>
     `;
   }).join('');
@@ -3134,13 +3197,14 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
-    const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    const addressLines = doc.splitTextToSize(address, textWidth);
-    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const contactLines = formatAdminSponsorContactLines(sponsor).flatMap((line) => (
+      doc.splitTextToSize(String(line), textWidth)
+    ));
+    const textBlockHeight = nameLines.length * 18 + 4 + contactLines.length * 14;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
-    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
+    const rowHeight = Math.max(72, logoBasedHeight, textBlockHeight + 24);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -3179,7 +3243,7 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(91, 111, 136);
-    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
+    doc.text(contactLines, nameX, textTop + nameLines.length * 18 + 2);
 
     y += rowHeight + 10;
   }
@@ -3247,7 +3311,10 @@ function printGoldSponsorsHtmlFallback(sponsors) {
       const logo = sponsor.logo_url
         ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
         : `<span class="mark">${mark}</span>`;
-      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+      const contact = formatAdminSponsorContactLines(sponsor)
+        .map((line) => `<span>${escapeHtml(line)}</span>`)
+        .join('');
+      return `<li><div class="logo">${logo}</div><div class="copy"><strong>${escapeHtml(sponsor.name)}</strong>${contact}</div></li>`;
     }).join('')
     : '<li><strong>No active Gold sponsors yet.</strong></li>';
   const html = `<!doctype html>
@@ -3264,6 +3331,8 @@ function printGoldSponsorsHtmlFallback(sponsors) {
     .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
     .logo img{max-width:100%;max-height:100%;object-fit:contain}
     .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    .copy{display:grid;gap:4px}
+    .copy span{display:block;color:#445;font:400 .95rem/1.35 Helvetica,Arial,sans-serif}
     strong{font-size:1.15rem}
     @media print{body{margin:.55in} li{break-inside:avoid}}
   </style>
@@ -3413,65 +3482,17 @@ async function saveSponsorOrder(ids) {
 }
 
 function bindSponsorDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-sponsor-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.sponsorId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.sponsorId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.sponsorId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedSponsors();
-      const fromIndex = ordered.findIndex((sponsor) => sponsor.id === fromId);
-      const toIndex = ordered.findIndex((sponsor) => sponsor.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((sponsor) => sponsor.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'sponsorId',
+    getOrdered: orderedSponsors,
+    applyLocalOrder: (next) => {
       state.sponsors = next.map((sponsor, index) => ({ ...sponsor, sort_order: index + 1 }));
       renderSponsors();
-      try {
-        await saveSponsorOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadSponsors();
-        const status = document.querySelector('#sponsor-status');
-        if (status) status.textContent = 'Could not save the new sponsor order.';
-      }
-    });
+    },
+    saveOrder: saveSponsorOrder,
+    reload: loadSponsors,
+    errorStatusSelector: '#sponsor-status',
+    errorMessage: 'Could not save the new sponsor order.',
   });
 }
 
@@ -3494,18 +3515,29 @@ async function loadMailDeliveryStatus() {
 }
 
 function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
+  const select = document.querySelector('#mail-recipient-select');
+  if (!select) return;
+  const previous = String(select.value || '');
+  const options = [
+    '<option value="">Select a recipient…</option>',
+    '<option value="__all__">All users</option>',
+    ...state.mailRecipients.map((user) => {
+      const name = String(user.display_name || user.email || 'User').trim();
+      const email = String(user.email || '').trim();
+      const label = email && email.toLowerCase() !== name.toLowerCase()
+        ? `${name}`
+        : name;
+      return `<option value="${escapeAttr(String(user.id))}" title="${escapeAttr(email)}">${escapeHtml(label)}</option>`;
+    }),
+  ];
+  select.innerHTML = options.join('');
+  if (previous && [...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
   }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
+  if (!state.mailRecipients.length) {
+    const allOption = select.querySelector('option[value="__all__"]');
+    if (allOption) allOption.disabled = true;
+  }
 }
 
 async function loadMailRecipients() {
@@ -3516,7 +3548,25 @@ async function loadMailRecipients() {
 }
 
 function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
+  const value = String(select?.value || '').trim();
+  if (!value) return [];
+  if (value === '__all__') {
+    return state.mailRecipients.map((user) => Number(user.id)).filter((id) => Number.isInteger(id) && id > 0);
+  }
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? [id] : [];
+}
+
+function selectedMailExtraEmails(form) {
+  const raw = String(form?.elements.extra_emails?.value || '').trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;\n]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )];
 }
 
 function bindMailComposer() {
@@ -3540,21 +3590,20 @@ function bindMailComposer() {
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
-  });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
     const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const extraEmails = selectedMailExtraEmails(form);
+    const rawExtra = String(form.elements.extra_emails?.value || '').trim();
+    if (!userIds.length && !extraEmails.length) {
+      if (status) {
+        status.textContent = rawExtra
+          ? 'Enter a valid email address, or choose a recipient from the list.'
+          : 'Choose a recipient or enter at least one email address.';
+      }
       return;
     }
     if (!subject) {
@@ -3570,6 +3619,7 @@ function bindMailComposer() {
     payload.set('subject', subject);
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
+    if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
     [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
 
     if (status) status.textContent = 'Sending…';
@@ -3579,7 +3629,8 @@ function bindMailComposer() {
         if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+        if (form.elements.recipient) form.elements.recipient.value = '';
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
         showSavedToast('Sent.', { icon: 'envelope' });
@@ -3936,67 +3987,19 @@ async function savePhotoOrder(ids) {
 }
 
 function bindPhotoDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-photo-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.photoId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.photoId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.photoId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedPhotos();
-      const fromIndex = ordered.findIndex((photo) => photo.id === fromId);
-      const toIndex = ordered.findIndex((photo) => photo.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((photo) => photo.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'photoId',
+    getOrdered: orderedPhotos,
+    applyLocalOrder: (next) => {
       state.photos = next.map((photo, index) => ({ ...photo, sort_order: index + 1 }));
       renderPhotos();
-      try {
-        await savePhotoOrder(ids);
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Photo order saved.';
-      } catch (error) {
-        console.error(error);
-        await loadPhotos();
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Could not save the new photo order.';
-      }
-    });
+    },
+    saveOrder: savePhotoOrder,
+    reload: loadPhotos,
+    errorStatusSelector: '#photo-status',
+    errorMessage: 'Could not save the new photo order.',
+    successStatusSelector: '#photo-status',
+    successMessage: 'Photo order saved.',
   });
 }
 
@@ -4689,7 +4692,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. All public pages now redirect to maintenance.html.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });
@@ -4998,8 +5001,16 @@ function bindForms() {
         formControl(form, 'logo_url').value = stored.url;
         syncSponsorLogoPreview(form, stored.url);
       }
-      await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (status) status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+      const saved = await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      if (status) {
+        if (!id && saved?.invoice_sent) {
+          status.textContent = `Sponsor saved. Invoice PDF emailed to ${saved.email || 'the sponsor'} (${saved.invoice_number || 'invoice'}).`;
+        } else if (!id && payload.email) {
+          status.textContent = `Sponsor saved. Invoice email note: ${saved?.invoice_detail || 'not sent'}.`;
+        } else {
+          status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+        }
+      }
       resetSponsorForm(form);
       await loadSponsors();
     } catch (error) {
