@@ -260,10 +260,13 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
+    const tierRaw = String(sponsor.tier || sponsor.level || '').toLowerCase();
+    const tier = /\bgold\b/.test(tierRaw) ? 'gold' : /\bsilver\b/.test(tierRaw) ? 'silver' : /\bbronze\b/.test(tierRaw) ? 'bronze' : '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}"><span class="sponsor-marquee-logo">${visual}</span><span>${escapeHtml(sponsor.name)}</span></a>`;
   }).join('');
   return `
     <div class="wrap sponsor-marquee-bar">
