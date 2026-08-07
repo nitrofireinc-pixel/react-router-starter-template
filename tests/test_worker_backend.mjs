@@ -684,6 +684,9 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   assert.match(pdf, /East Forsyth Band Boosters/);
   assert.match(pdf, /\/Subtype \/Image/);
   assert.match(pdf, /Helvetica-Bold/);
+  // Logo uses the Blue Regiment mark and is Y-flipped for correct PDF orientation.
+  assert.match(pdf, /\/Im1 Do/);
+  assert.match(pdf, /0 -\d+(?:\.\d+)? \d+(?:\.\d+)? \d+(?:\.\d+)? cm \/Im1 Do/);
 });
 
 test('applicationFromSponsorRecord builds manual-entry invoice source', () => {

@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'minutes-letterhead-logo-20260807-1';
+const ASSET_VERSION = 'sponsor-invoice-logo-fix-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -2856,30 +2856,35 @@ export function buildSponsorInvoicePdfBase64({
   const logoBytes = pdfBinaryFromBase64(INVOICE_LOGO_RGB_FLATE_BASE64);
   const logoW = Number(INVOICE_LOGO_WIDTH) || 120;
   const logoH = Number(INVOICE_LOGO_HEIGHT) || 120;
-  const drawLogo = 72;
+  const drawLogo = 56;
   const left = 48;
   const right = 564;
+  const headerBottom = 702;
+  const headerTop = 770;
   const navy = '0.063 0.176 0.365';
   const slate = '0.392 0.455 0.545';
   const soft = '0.961 0.973 0.988';
 
   const ops = [];
   // Letterhead bar
-  ops.push(`${soft} rg ${left} 720 ${right - left} 48 re f`);
-  ops.push(`${navy} RG 1.5 w ${left} 720 m ${right} 720 l S`);
-  // Logo
-  ops.push(`q ${drawLogo} 0 0 ${drawLogo} ${left} 722 cm /Im1 Do Q`);
+  ops.push(`${soft} rg ${left} ${headerBottom} ${right - left} ${headerTop - headerBottom} re f`);
+  ops.push(`${navy} RG 1.5 w ${left} ${headerBottom} m ${right} ${headerBottom} l S`);
+  // Blue Regiment mark (same asset as public title). PDF images are bottom-up, so flip Y.
+  const logoX = left + 8;
+  const logoY = headerBottom + 6;
+  ops.push(`q ${drawLogo} 0 0 ${-drawLogo} ${logoX} ${logoY + drawLogo} cm /Im1 Do Q`);
   // Org block
-  ops.push(pdfTextAt(left + drawLogo + 14, 752, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
+  const textX = logoX + drawLogo + 12;
+  ops.push(pdfTextAt(textX, 748, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
   ops.push(`${slate} rg`);
-  ops.push(pdfTextAt(left + drawLogo + 14, 736, 'East Forsyth High School Band', { size: 10 }));
-  ops.push(pdfTextAt(left + drawLogo + 14, 722, 'efhsband.org', { size: 10 }));
+  ops.push(pdfTextAt(textX, 732, 'East Forsyth High School Band', { size: 10 }));
+  ops.push(pdfTextAt(textX, 718, 'efhsband.org', { size: 10 }));
   ops.push('0 g');
   // Invoice title block (right)
-  ops.push(pdfTextAt(430, 752, 'DONATION INVOICE', { font: 'F2', size: 13 }));
+  ops.push(pdfTextAt(430, 748, 'DONATION INVOICE', { font: 'F2', size: 13 }));
   ops.push(`${slate} rg`);
-  ops.push(pdfTextAt(430, 736, `Invoice ${invoiceNumber}`, { size: 10 }));
-  ops.push(pdfTextAt(430, 722, `Date ${paidLabel}`, { size: 10 }));
+  ops.push(pdfTextAt(430, 732, `Invoice ${invoiceNumber}`, { size: 10 }));
+  ops.push(pdfTextAt(430, 718, `Date ${paidLabel}`, { size: 10 }));
   ops.push('0 g');
 
   // Bill to / status
