@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260807-2';
+const ASSET_VERSION = 'admin-cms-20260807-3';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2671,7 +2671,7 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}"><span class="sponsor-marquee-logo">${visual}</span><span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }

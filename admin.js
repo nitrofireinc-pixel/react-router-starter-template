@@ -2993,12 +2993,16 @@ function ensureSponsorFormToast() {
     <button type="button" class="admin-sponsor-form-toast-backdrop" data-sponsor-form-dismiss aria-label="Close sponsor form"></button>
     <div class="admin-sponsor-form-toast-panel">
       <div class="admin-sponsor-form-toast-card">
+        <p class="admin-sponsor-form-edit-note" data-sponsor-edit-note hidden>Editing existing sponsor</p>
         <h3 id="admin-sponsor-form-toast-title">Manual Add Sponsor</h3>
         <form id="sponsor-manual-form" class="admin-sponsor-manual-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <input type="hidden" name="logo_url" value="">
+          <input type="hidden" name="active" value="1">
           <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
           <label>Address<input name="address" required maxlength="400" placeholder="Street, city, state" autocomplete="street-address"></label>
-          <label>Phone<input name="phone" required maxlength="40" placeholder="(336) 555-0100" autocomplete="tel"></label>
-          <label>Invoice email<input name="email" type="email" required maxlength="160" placeholder="billing@business.com" autocomplete="email"></label>
+          <label data-sponsor-phone-field>Phone<input name="phone" required maxlength="40" placeholder="(336) 555-0100" autocomplete="tel"></label>
+          <label data-sponsor-email-field>Invoice email<input name="email" type="email" required maxlength="160" placeholder="billing@business.com" autocomplete="email"></label>
           <label>Sponsor package
             <select name="tier" required>
               <option value="bronze">Bronze — $100</option>
@@ -3006,47 +3010,17 @@ function ensureSponsorFormToast() {
               <option value="gold" selected>Gold — $500</option>
             </select>
           </label>
-          <label class="admin-sponsor-manual-logo">Company logo <span>(optional)</span>
+          <label class="admin-sponsor-manual-logo">Company logo <span data-logo-optional-label>(optional)</span>
             <input name="logo" type="file" accept="image/*,.svg">
           </label>
+          <p class="admin-sponsor-current-logo" data-current-logo hidden></p>
           <label class="checkline admin-sponsor-bypass" data-bypass-payment-row hidden>
             <input name="bypass_payment" type="checkbox" value="1"> Bypass payment (activate sponsor now)
           </label>
           <p class="admin-sponsor-form-toast-status" id="sponsor-manual-status" aria-live="polite"></p>
           <div class="admin-sponsor-form-toast-actions">
             <button class="btn outline" type="button" data-sponsor-form-dismiss>Cancel</button>
-            <button class="btn primary" type="submit">Save Sponsor</button>
-          </div>
-        </form>
-        <form id="sponsor-edit-form" class="admin-sponsor-edit-form" hidden novalidate>
-          <input type="hidden" name="id">
-          <label>Sponsor name<input name="name" required placeholder="ABC Company"></label>
-          <label>Sponsor tier
-            <select name="level">
-              <option value="Bronze Sponsor">Bronze — marquee</option>
-              <option value="Silver Sponsor">Silver — marquee + fly-in</option>
-              <option value="Gold Sponsor">Gold — marquee + fly-in + public advert</option>
-            </select>
-          </label>
-          <label>Street address<input name="address" placeholder="123 Main Street"></label>
-          <label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label>
-          <label>State
-            <select name="state">
-              <option value="NC" selected>North Carolina</option>
-              <option value="SC">South Carolina</option>
-              <option value="VA">Virginia</option>
-              <option value="GA">Georgia</option>
-              <option value="TN">Tennessee</option>
-            </select>
-          </label>
-          <label>Logo URL<input name="logo_url" placeholder="https://example.com/logo.png"></label>
-          <label>Upload logo<input name="logo_file" type="file" accept="image/*,.svg"></label>
-          <label>Fallback logo text<input name="mark_text" placeholder="ABC"></label>
-          <label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label>
-          <p class="admin-sponsor-form-toast-status" id="sponsor-edit-status" aria-live="polite"></p>
-          <div class="admin-sponsor-form-toast-actions">
-            <button class="btn outline" type="button" data-sponsor-form-dismiss>Cancel</button>
-            <button class="btn primary" type="submit">Save Changes</button>
+            <button class="btn primary" type="submit" data-sponsor-submit-label>Save Sponsor</button>
           </div>
         </form>
       </div>
@@ -3058,80 +3032,103 @@ function ensureSponsorFormToast() {
   return root;
 }
 
-function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast')) {
+function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast'), { editing = false } = {}) {
   const row = root?.querySelector('[data-bypass-payment-row]');
   if (!row) return;
-  const allowed = canBypassSponsorPayment();
+  const allowed = !editing && canBypassSponsorPayment();
   row.hidden = !allowed;
   const input = row.querySelector('input[name="bypass_payment"]');
   if (input && !allowed) input.checked = false;
 }
 
-function showManualAddSponsorToast() {
+function openSponsorFormToast() {
   const root = ensureSponsorFormToast();
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  return root;
+}
+
+function showManualAddSponsorToast() {
+  const root = openSponsorFormToast();
   const title = root.querySelector('#admin-sponsor-form-toast-title');
-  const manual = root.querySelector('#sponsor-manual-form');
-  const edit = root.querySelector('#sponsor-edit-form');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
   if (title) title.textContent = 'Manual Add Sponsor';
-  if (manual) {
-    manual.hidden = false;
-    manual.reset();
-    const tier = manual.elements.tier;
-    if (tier) tier.value = 'gold';
+  if (note) note.hidden = true;
+  if (submit) submit.textContent = 'Save Sponsor';
+  if (currentLogo) {
+    currentLogo.hidden = true;
+    currentLogo.textContent = '';
+  }
+  if (form) {
+    form.dataset.mode = 'add';
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.logo_url.value = '';
+    form.elements.active.value = '1';
+    if (form.elements.tier) form.elements.tier.value = 'gold';
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
     const status = root.querySelector('#sponsor-manual-status');
     if (status) status.textContent = '';
   }
-  if (edit) edit.hidden = true;
-  syncBypassPaymentVisibility(root);
-  window.clearTimeout(sponsorFormToastLeaveTimer);
-  root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
-  window.setTimeout(() => manual?.elements.business_name?.focus(), 40);
+  syncBypassPaymentVisibility(root, { editing: false });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
 }
 
 function showEditSponsorToast(sponsor) {
-  const root = ensureSponsorFormToast();
+  const root = openSponsorFormToast();
   const title = root.querySelector('#admin-sponsor-form-toast-title');
-  const manual = root.querySelector('#sponsor-manual-form');
-  const edit = root.querySelector('#sponsor-edit-form');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  const tier = sponsorTierFromLevel(sponsor.level || sponsor.tier) || 'bronze';
+  const address = String(sponsor.formatted_address || [
+    sponsor.address,
+    sponsor.city,
+    sponsor.state,
+  ].filter(Boolean).join(', ')).trim();
   if (title) title.textContent = 'Edit Sponsor';
-  if (manual) manual.hidden = true;
-  if (edit) {
-    edit.hidden = false;
-    edit.reset();
-    fillForm(edit, {
-      ...sponsor,
-      city: sponsor.city || 'Kernersville',
-      state: sponsor.state || 'NC',
-    });
-    setSelectValue(formControl(edit, 'state'), sponsor.state || 'NC');
-    const levelSelect = formControl(edit, 'level');
-    if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
-      if (![...levelSelect.options].some((option) => option.value === level)) {
-        const option = document.createElement('option');
-        option.value = level;
-        option.textContent = level;
-        levelSelect.appendChild(option);
-      }
-      setSelectValue(levelSelect, level);
-    }
-    if (edit.elements.active) edit.elements.active.checked = Boolean(Number(sponsor.active));
-    const file = formControl(edit, 'logo_file');
-    if (file) file.value = '';
-    const status = root.querySelector('#sponsor-edit-status');
+  if (note) {
+    note.hidden = false;
+    note.textContent = 'Editing existing sponsor';
+  }
+  if (submit) submit.textContent = 'Save Changes';
+  if (form) {
+    form.dataset.mode = 'edit';
+    form.reset();
+    form.elements.id.value = String(sponsor.id || '');
+    form.elements.logo_url.value = String(sponsor.logo_url || '');
+    form.elements.active.value = Number(sponsor.active) === 0 ? '0' : '1';
+    form.elements.business_name.value = String(sponsor.name || '');
+    form.elements.address.value = address;
+    form.elements.phone.value = '';
+    form.elements.email.value = '';
+    form.elements.phone.required = false;
+    form.elements.email.required = false;
+    if (form.elements.tier) form.elements.tier.value = tier;
+    if (form.elements.logo) form.elements.logo.value = '';
+    const status = root.querySelector('#sponsor-manual-status');
     if (status) status.textContent = '';
   }
-  window.clearTimeout(sponsorFormToastLeaveTimer);
-  root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
-  window.setTimeout(() => edit?.elements.name?.focus(), 40);
+  if (currentLogo) {
+    if (sponsor.logo_url) {
+      currentLogo.hidden = false;
+      currentLogo.textContent = `Current logo: ${sponsor.logo_url}`;
+    } else {
+      currentLogo.hidden = true;
+      currentLogo.textContent = '';
+    }
+  }
+  syncBypassPaymentVisibility(root, { editing: true });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
 }
 
 function hideSponsorFormToast() {
@@ -5130,62 +5127,57 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#sponsor-manual-status');
+    const mode = form.dataset.mode === 'edit' ? 'edit' : 'add';
     const tier = String(form.elements.tier?.value || '').trim().toLowerCase();
-    const amounts = MANUAL_SPONSOR_TIER_AMOUNTS[tier] || MANUAL_SPONSOR_TIER_AMOUNTS.gold;
-    const bypass = Boolean(form.elements.bypass_payment?.checked) && canBypassSponsorPayment();
-    const body = new FormData();
-    body.set('business_name', String(form.elements.business_name?.value || '').trim());
-    body.set('address', String(form.elements.address?.value || '').trim());
-    body.set('phone', String(form.elements.phone?.value || '').trim());
-    body.set('email', String(form.elements.email?.value || '').trim());
-    body.set('tier', tier);
-    body.set('amount_cents', String(amounts.cents));
-    body.set('amount_display', amounts.display);
-    if (bypass) body.set('bypass_payment', '1');
+    const businessName = String(form.elements.business_name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim();
     const logo = form.elements.logo?.files?.[0];
-    if (logo) body.set('logo', logo);
     if (status) status.textContent = 'Saving…';
     try {
-      await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
-      hideSponsorFormToast();
-      await loadSponsors();
-    } catch (error) {
-      const detail = error?.message || 'Could not save sponsor.';
-      if (status) status.textContent = detail;
-      showFailedToast(detail);
-    }
-  });
-
-  sponsorToast.querySelector('#sponsor-edit-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-edit-status');
-    const payload = formPayload(form);
-    delete payload.homepage_ad;
-    payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
-    payload.state = String(payload.state || 'NC').trim() || 'NC';
-    payload.active = Boolean(form.elements.active?.checked);
-    const id = payload.id;
-    delete payload.id;
-    delete payload.logo_file;
-    delete payload.sort_order;
-    if (!id) {
-      showFailedToast('Missing sponsor id.');
-      return;
-    }
-    if (status) status.textContent = 'Saving…';
-    try {
-      const file = formControl(form, 'logo_file')?.files?.[0];
-      if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Sponsor logo');
-        upload.set('caption', payload.level || 'Sponsor');
-        upload.set('sort_order', '-400');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
-        payload.logo_url = stored.url;
+      if (mode === 'edit') {
+        const id = String(form.elements.id?.value || '').trim();
+        if (!id) {
+          showFailedToast('Missing sponsor id.');
+          return;
+        }
+        const level = tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor';
+        let logoUrl = String(form.elements.logo_url?.value || '').trim();
+        if (logo) {
+          const upload = new FormData();
+          upload.set('file', logo);
+          upload.set('alt_text', businessName || 'Sponsor logo');
+          upload.set('caption', level);
+          upload.set('sort_order', '-400');
+          const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+          logoUrl = stored.url || logoUrl;
+        }
+        await jsonFetch(`/api/admin/sponsors/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: businessName,
+            address,
+            logo_url: logoUrl,
+            level,
+            active: form.elements.active?.value !== '0',
+          }),
+        });
+      } else {
+        const amounts = MANUAL_SPONSOR_TIER_AMOUNTS[tier] || MANUAL_SPONSOR_TIER_AMOUNTS.gold;
+        const bypass = Boolean(form.elements.bypass_payment?.checked) && canBypassSponsorPayment();
+        const body = new FormData();
+        body.set('business_name', businessName);
+        body.set('address', address);
+        body.set('phone', phone);
+        body.set('email', email);
+        body.set('tier', tier);
+        body.set('amount_cents', String(amounts.cents));
+        body.set('amount_display', amounts.display);
+        if (bypass) body.set('bypass_payment', '1');
+        if (logo) body.set('logo', logo);
+        await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
       }
-      await jsonFetch(`/api/admin/sponsors/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
       hideSponsorFormToast();
       await loadSponsors();
     } catch (error) {

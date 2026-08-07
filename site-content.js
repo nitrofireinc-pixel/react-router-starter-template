@@ -270,7 +270,7 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
     const visual = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}"><span class="sponsor-marquee-logo">${visual}</span><span>${escapeHtml(sponsor.name)}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
   }).join('');
   return `
     <div class="wrap sponsor-marquee-bar">

@@ -1268,6 +1268,29 @@ body.admin-upload-open{overflow:hidden}
   font-weight:900;
   letter-spacing:-.02em;
 }
+.admin-sponsor-form-edit-note{
+  display:inline-flex;
+  align-items:center;
+  margin:0 0 12px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(255,216,106,.18);
+  border:1px solid rgba(255,216,106,.45);
+  color:#ffd86a;
+  font-size:.72rem;
+  font-weight:900;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.admin-sponsor-form-edit-note[hidden]{display:none!important}
+.admin-sponsor-current-logo{
+  margin:-2px 0 10px;
+  font-size:.78rem;
+  color:rgba(255,255,255,.78);
+  line-height:1.35;
+  word-break:break-all;
+}
+.admin-sponsor-current-logo[hidden]{display:none!important}
 .admin-sponsor-form-toast-card label,
 .admin-password-toast-card label{
   display:grid;
@@ -2467,43 +2490,34 @@ body.sponsor-signup-open{overflow:hidden}
   text-decoration:none;
   box-shadow:0 4px 12px rgba(0,33,66,.05);
 }
-.sponsor-marquee-logo{
-  display:grid;
-  place-items:center;
-  width:38px;
-  height:38px;
-  border-radius:999px;
-  flex:0 0 auto;
-  background:#fff;
-  border:2px solid #d5deea;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.65);
-  overflow:hidden;
+.sponsor-marquee-item.tier-bronze{
+  background:#f3e2d0;
+  border-color:#d7b48f;
+  color:#5c3a1d;
 }
-.sponsor-marquee-item.tier-bronze .sponsor-marquee-logo{
-  border-color:#b07945;
-  box-shadow:0 0 0 2px rgba(176,121,69,.22);
+.sponsor-marquee-item.tier-silver{
+  background:#e7eef6;
+  border-color:#c5d0de;
+  color:#243447;
 }
-.sponsor-marquee-item.tier-silver .sponsor-marquee-logo{
-  border-color:#7b8794;
-  box-shadow:0 0 0 2px rgba(123,135,148,.24);
-}
-.sponsor-marquee-item.tier-gold .sponsor-marquee-logo{
-  border-color:#c9a227;
-  box-shadow:0 0 0 2px rgba(201,162,39,.28);
+.sponsor-marquee-item.tier-gold{
+  background:#ffe9a8;
+  border-color:#e2c56a;
+  color:#5a4500;
 }
 .sponsor-marquee-item img{
-  width:28px;
-  height:20px;
+  width:34px;
+  height:24px;
   object-fit:contain;
   flex:0 0 auto;
 }
 .sponsor-marquee-mark{
   display:grid;
   place-items:center;
-  width:100%;
-  height:100%;
-  border-radius:inherit;
-  background:#edf2f8;
+  width:24px;
+  height:24px;
+  border-radius:7px;
+  background:rgba(255,255,255,.72);
   font-weight:950;
   font-size:.72rem;
   flex:0 0 auto;
@@ -2546,13 +2560,9 @@ body.sponsor-signup-open{overflow:hidden}
     gap:6px;
     border-radius:8px;
   }
-  .sponsor-marquee-logo{
-    width:34px;
-    height:34px;
-  }
   .sponsor-marquee-item img{
-    width:24px;
-    height:18px;
+    width:28px;
+    height:20px;
   }
   .sponsor-marquee-mark{
     width:20px;
