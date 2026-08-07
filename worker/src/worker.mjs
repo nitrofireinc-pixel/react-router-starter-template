@@ -1,4 +1,9 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
+import {
+  INVOICE_LOGO_HEIGHT,
+  INVOICE_LOGO_RGB_FLATE_BASE64,
+  INVOICE_LOGO_WIDTH,
+} from './invoice-logo-rgb.mjs';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -184,11 +189,17 @@ export function extractSponsorTierFields(html = '') {
 }
 
 const SESSION_COOKIE = 'efband_session';
+export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
-const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
+const ASSET_VERSION = 'gallery-no-placeholders-20260807-1';
+/** Shared Blue Regiment mark used by the public title and minutes letterhead. */
+const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
+const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
+export { BLUE_REGIMENT_MARK_PATH, MINUTES_LETTERHEAD_MARK, PUBLIC_BRAND_MARK };
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -407,6 +418,20 @@ async function makeSession(user, env) {
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
 
+export function isSessionFresh(issuedAtSeconds, nowSeconds = Math.floor(Date.now() / 1000), ttlSeconds = SESSION_TTL_SECONDS) {
+  const issued = Number(issuedAtSeconds);
+  const now = Number(nowSeconds);
+  const ttl = Number(ttlSeconds);
+  if (!Number.isFinite(issued) || !Number.isFinite(now) || !Number.isFinite(ttl)) return false;
+  if (issued > now + 60) return false; // reject far-future timestamps
+  return (now - issued) <= ttl;
+}
+
+export function sessionCookieHeader(token, { maxAge = SESSION_TTL_SECONDS } = {}) {
+  const age = Math.max(0, Number(maxAge) || 0);
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+}
+
 async function currentUser(request, env) {
   const value = getCookie(request, SESSION_COOKIE);
   if (!value || !value.includes('.')) return null;
@@ -415,6 +440,7 @@ async function currentUser(request, env) {
   if (supplied !== expected) return null;
   try {
     const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    if (!isSessionFresh(data.t)) return null;
     if (data.uid) return getUserById(env, Number(data.uid));
     if (data.u) return getUserByUsername(env, data.u);
   } catch {
@@ -459,8 +485,8 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, square_payment_id TEXT NOT NULL DEFAULT \'\', square_auth_id TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -468,7 +494,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, is_tester INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
@@ -538,6 +564,16 @@ async function initDb(env) {
     // Column already exists on upgraded databases.
   }
   try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN square_payment_id TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN square_auth_id TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
     await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN city TEXT NOT NULL DEFAULT 'Kernersville'").run();
   } catch {
     // Column already exists on upgraded databases.
@@ -546,6 +582,51 @@ async function initDb(env) {
     await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN state TEXT NOT NULL DEFAULT 'NC'").run();
   } catch {
     // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN phone TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN email TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  // Recover phone/email onto sponsor rows from their linked applications when missing.
+  try {
+    await env.DB.prepare(`
+      UPDATE sponsors
+      SET
+        phone = CASE
+          WHEN TRIM(COALESCE(phone, '')) = '' THEN COALESCE((
+            SELECT TRIM(sa.phone) FROM sponsor_applications sa
+            WHERE sa.sponsor_id = sponsors.id AND TRIM(COALESCE(sa.phone, '')) != ''
+            ORDER BY sa.id DESC LIMIT 1
+          ), phone)
+          ELSE phone
+        END,
+        email = CASE
+          WHEN TRIM(COALESCE(email, '')) = '' THEN COALESCE((
+            SELECT LOWER(TRIM(sa.email)) FROM sponsor_applications sa
+            WHERE sa.sponsor_id = sponsors.id AND TRIM(COALESCE(sa.email, '')) != ''
+            ORDER BY sa.id DESC LIMIT 1
+          ), email)
+          ELSE email
+        END
+    `).run();
+  } catch {
+    // sponsor_applications may be unavailable during early bootstraps.
   }
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
@@ -581,7 +662,7 @@ async function initDb(env) {
   }
   const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
   if (!sponsorCount?.count) {
-    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
+    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.phone || '', sponsor.email || '', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
   }
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
@@ -609,6 +690,23 @@ async function initDb(env) {
         .run();
     }
   }
+  const galleryPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'gallery');
+  if (galleryPage) {
+    const existingGallery = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'gallery'").first();
+    if (!existingGallery) {
+      await env.DB.prepare('UPDATE cms_pages SET nav_order = nav_order + 1 WHERE nav_order >= ?').bind(galleryPage.nav_order).run();
+      await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(galleryPage.slug, galleryPage.path, galleryPage.title, galleryPage.body_html, galleryPage.nav_order, galleryPage.is_home, galleryPage.active)
+        .run();
+    } else if (existingGallery.body_html) {
+      const nextGalleryHtml = ensureGalleryPageSlot(existingGallery.body_html);
+      if (nextGalleryHtml !== existingGallery.body_html) {
+        await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .bind(nextGalleryHtml, existingGallery.id)
+          .run();
+      }
+    }
+  }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
     const nextSponsorsHtml = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html)));
@@ -629,13 +727,24 @@ async function initDb(env) {
   }
   const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
   if (homePageRow?.body_html) {
-    const nextHomeHtml = refreshHomeStartHereSection(homePageRow.body_html);
+    const nextHomeHtml = ensureHomePhotoGallerySlot(refreshHomeStartHereSection(homePageRow.body_html));
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
         .run();
     }
   }
+  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
+  if (calendarPageRow?.body_html) {
+    const nextCalendarHtml = ensureCalendarMonthMount(calendarPageRow.body_html);
+    if (nextCalendarHtml !== calendarPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextCalendarHtml, calendarPageRow.id)
+        .run();
+    }
+  }
+  // Homepage fly-in duration is fixed at 6 seconds (settings UI removed).
+  await env.DB.prepare("INSERT INTO site_content (key, value) VALUES ('sponsor_ad_seconds', '6') ON CONFLICT(key) DO UPDATE SET value='6'").run();
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
     const previousHash = await env.DB.prepare("SELECT value FROM auth_settings WHERE key = 'admin_password_hash'").first();
@@ -660,10 +769,19 @@ export function isPublicHtmlPath(pathname = '/') {
   return path.endsWith('.html');
 }
 
-export function shouldRedirectToMaintenance(pathname = '/', site = {}) {
+export function shouldRedirectToMaintenance(pathname = '/', site = {}, { bypass = false } = {}) {
+  if (bypass) return false;
   if (!isMaintenanceMode(site)) return false;
   if (isMaintenancePath(pathname)) return false;
   return isPublicHtmlPath(pathname);
+}
+
+export function renderMaintenancePreviewBanner() {
+  return `<div class="maintenance-preview-banner" role="status" data-maintenance-preview-banner>
+  <strong>Maintenance mode is on.</strong>
+  <span>Super Admin preview — the public and other users still see the maintenance page.</span>
+  <a href="/admin">Back to CMS</a>
+</div>`;
 }
 
 export function sanitizeMaintenanceReturnPath(value = '/') {
@@ -805,13 +923,30 @@ export async function createSquareCardPayment(env, {
     return { ok: false, detail: formatSquareError(payload, response.status) };
   }
   const payment = payload?.payment || {};
+  const authId = resolveSquarePurchaseAuthId(payment);
   return {
     ok: true,
     payment_id: String(payment.id || ''),
+    auth_id: authId,
     status: String(payment.status || ''),
     receipt_url: String(payment.receipt_url || ''),
     location_id: resolvedLocationId,
   };
+}
+
+/** Square dashboard / receipt Auth ID: card auth code when present, otherwise payment id. */
+export function resolveSquarePurchaseAuthId(payment = {}, {
+  authId = '',
+  paymentId = '',
+} = {}) {
+  const fromCard = String(
+    payment?.card_details?.auth_result_code
+      || authId
+      || '',
+  ).trim();
+  if (fromCard) return fromCard.slice(0, 64);
+  const fromPayment = String(payment?.id || paymentId || '').trim();
+  return fromPayment.slice(0, 191);
 }
 
 export function squareApiBase(env = {}) {
@@ -2182,6 +2317,53 @@ async function getEventById(env, id) {
   return row ? hydrateEventRow(row) : null;
 }
 
+/** Replace the old upcoming-events timeline with a month-calendar mount on the Calendar page. */
+export function ensureCalendarMonthMount(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  const mount = '<div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>';
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(source)) !== null) {
+    const start = match.index;
+    let depth = 1;
+    let i = start + match[0].length;
+    while (i < source.length && depth > 0) {
+      const nextOpen = source.toLowerCase().indexOf('<div', i);
+      const nextClose = source.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) ranges.push([start, i]);
+      }
+    }
+  }
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const [start, end] = ranges[index];
+    next = `${next.slice(0, start)}${mount}${next.slice(end)}`;
+  }
+  if (/data-month-calendar/i.test(next)) {
+    // Collapse duplicate mounts if a page was migrated more than once.
+    return next.replace(
+      /(?:<div class="month-calendar" data-month-calendar aria-label="Program calendar"><\/div>\s*){2,}/gi,
+      `${mount}\n`,
+    );
+  }
+  if (/<div class="wrap">/i.test(next)) {
+    return next.replace(
+      /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${mount}$3`,
+    );
+  }
+  return `${next}${mount}`;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -2258,6 +2440,54 @@ export function refreshHomeStartHereSection(html) {
       /A place for local businesses and alumni to support the program and be recognized\./g,
       'Discover the businesses and community partners that support our program, learn about sponsorship opportunities, and help strengthen the Blue Regiment tradition.',
     );
+}
+
+export function ensureHomePhotoGallerySlot(html) {
+  let source = String(html || '');
+  if (!source.trim() || !/\bdata-photo-gallery\b/i.test(source)) return source;
+  source = source.replace(/<div\b([^>]*\bdata-photo-gallery\b[^>]*)>/gi, (_match, attrs) => {
+    const cleaned = String(attrs || '')
+      .replace(/\s*data-limit=(["'])[^"']*\1/gi, '')
+      .replace(/\s*data-sort=(["'])[^"']*\1/gi, '')
+      .trimEnd();
+    return `<div${cleaned} data-limit="6" data-sort="recent">`;
+  });
+  if (!/gallery-more|View full gallery/i.test(source)) {
+    const withLink = source.replace(
+      /(<(?:div)\b[^>]*\bdata-photo-gallery\b[^>]*>[\s\S]*?<\/div>)(\s*)(?=<\/div>\s*<\/section>)/i,
+      '$1$2<p class="gallery-more"><a class="btn outline" href="/gallery.html">View full gallery</a></p>$2',
+    );
+    if (withLink !== source) source = withLink;
+  }
+  return source;
+}
+
+export function sortPhotosByRecent(photos = []) {
+  return [...(Array.isArray(photos) ? photos : [])].sort((a, b) => {
+    const aTime = Date.parse(a?.created_at || '') || 0;
+    const bTime = Date.parse(b?.created_at || '') || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+}
+
+export function ensureGalleryPageSlot(html) {
+  let source = String(html || '');
+  if (!source.trim()) return source;
+  // Never ship brand/logo placeholders inside the public Gallery photo mount.
+  if (/\bdata-photo-gallery\b/i.test(source)) {
+    source = source.replace(
+      /(<div\b[^>]*\bdata-photo-gallery\b[^>]*>)[\s\S]*?(<\/div>)/gi,
+      '$1$2',
+    );
+  }
+  if (!/\bdata-photo-gallery\b/i.test(source) && /data-cms-layout=["']gallery["']/i.test(source)) {
+    source = source.replace(
+      /(<\/section>\s*)$/i,
+      '<section class="content soft photo-gallery-section"><div class="wrap"><div class="photo-gallery" data-photo-gallery data-sort="recent"></div></div></section>$1',
+    );
+  }
+  return source;
 }
 
 export function ensureFundraisingDonateSlot(html) {
@@ -2603,6 +2833,8 @@ export function hydrateSponsor(sponsor) {
     address,
     city,
     state,
+    phone: String(source.phone || '').trim(),
+    email: String(source.email || '').trim().toLowerCase(),
     level,
     ...benefits,
     homepage_ad: benefits.show_flyin ? 1 : 0,
@@ -2614,7 +2846,7 @@ export function hydrateSponsor(sponsor) {
 
 async function getSponsors(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
+  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
   return (rows.results || []).map((row) => hydrateSponsor(row));
 }
 
@@ -2664,10 +2896,12 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
   const logos = items.map((sponsor) => {
+    const tier = normalizeSponsorTier(sponsor.tier || sponsor.level) || String(sponsor.tier || '').toLowerCase();
+    const tierClass = ['bronze', 'silver', 'gold'].includes(tier) ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
@@ -2685,6 +2919,220 @@ export function squareMockPayEnabled(env = {}) {
 
 export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
 export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
+
+export function pdfSafeText(value = '') {
+  return String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, '?')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function pdfBinaryFromBase64(base64 = '') {
+  const raw = atob(String(base64 || ''));
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) out += String.fromCharCode(raw.charCodeAt(i) & 0xff);
+  return out;
+}
+
+function assemblePdfBase64(objects = []) {
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const obj of objects) {
+    offsets.push(pdf.length);
+    pdf += obj;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  for (let i = 1; i < offsets.length; i += 1) {
+    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  let binary = '';
+  for (let i = 0; i < pdf.length; i += 1) binary += String.fromCharCode(pdf.charCodeAt(i) & 0xff);
+  return btoa(binary);
+}
+
+function pdfTextAt(x, y, text, { font = 'F1', size = 11 } = {}) {
+  return `BT /${font} ${size} Tf ${x} ${y} Td (${pdfSafeText(text)}) Tj ET`;
+}
+
+export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
+  const content = ['BT', '/F1 18 Tf', '50 760 Td', `(${pdfSafeText(title)}) Tj`, '/F1 11 Tf'];
+  for (const line of lines) {
+    content.push('0 -16 Td');
+    content.push(`(${pdfSafeText(line)}) Tj`);
+  }
+  content.push('ET');
+  const stream = `${content.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+  ]);
+}
+
+export function buildSponsorInvoicePdfBase64({
+  invoiceNumber = '',
+  paidLabel = '',
+  businessName = '',
+  address = '',
+  phone = '',
+  email = '',
+  tierLabel = '',
+  amountDisplay = '',
+  squareAuthId = '',
+} = {}) {
+  const logoBytes = pdfBinaryFromBase64(INVOICE_LOGO_RGB_FLATE_BASE64);
+  const logoW = Number(INVOICE_LOGO_WIDTH) || 120;
+  const logoH = Number(INVOICE_LOGO_HEIGHT) || 120;
+  const drawLogo = 56;
+  const left = 48;
+  const right = 564;
+  const headerBottom = 702;
+  const headerTop = 770;
+  const navy = '0.063 0.176 0.365';
+  const slate = '0.392 0.455 0.545';
+  const soft = '0.961 0.973 0.988';
+
+  const ops = [];
+  // Letterhead bar
+  ops.push(`${soft} rg ${left} ${headerBottom} ${right - left} ${headerTop - headerBottom} re f`);
+  ops.push(`${navy} RG 1.5 w ${left} ${headerBottom} m ${right} ${headerBottom} l S`);
+  // Blue Regiment mark (same asset as public title). DeviceRGB samples are top-to-bottom; draw upright.
+  const logoX = left + 8;
+  const logoY = headerBottom + 6;
+  ops.push(`q ${drawLogo} 0 0 ${drawLogo} ${logoX} ${logoY} cm /Im1 Do Q`);
+  // Org block
+  const textX = logoX + drawLogo + 12;
+  ops.push(pdfTextAt(textX, 748, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(textX, 732, 'East Forsyth High School Band', { size: 10 }));
+  ops.push(pdfTextAt(textX, 718, 'efhsband.org', { size: 10 }));
+  ops.push('0 g');
+  // Invoice title block (right)
+  ops.push(pdfTextAt(430, 748, 'DONATION INVOICE', { font: 'F2', size: 13 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(430, 732, `Invoice ${invoiceNumber}`, { size: 10 }));
+  ops.push(pdfTextAt(430, 718, `Date ${paidLabel}`, { size: 10 }));
+  ops.push('0 g');
+
+  // Bill to / status
+  const authId = String(squareAuthId || '').trim();
+  ops.push(pdfTextAt(left, 680, 'BILL TO', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(360, 680, 'PAYMENT STATUS', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(left, 662, businessName || 'Sponsor', { font: 'F2', size: 12 }));
+  ops.push(`${navy} rg`);
+  ops.push(pdfTextAt(360, 662, 'PAID', { font: 'F2', size: 14 }));
+  ops.push('0 g');
+  let y = 644;
+  for (const line of [address, phone, email].map((value) => String(value || '').trim()).filter(Boolean)) {
+    ops.push(`${slate} rg`);
+    ops.push(pdfTextAt(left, y, line, { size: 10 }));
+    ops.push('0 g');
+    y -= 14;
+  }
+  if (authId) {
+    ops.push(`${slate} rg`);
+    ops.push(pdfTextAt(360, 644, `Square Auth ID: ${authId}`, { size: 9 }));
+    ops.push('0 g');
+  }
+
+  // Table header
+  const tableTop = Math.min(y - 18, 600);
+  ops.push(`${navy} rg ${left} ${tableTop - 4} ${right - left} 22 re f`);
+  ops.push('1 g');
+  ops.push(pdfTextAt(left + 10, tableTop + 3, 'Description', { font: 'F2', size: 10 }));
+  ops.push(pdfTextAt(470, tableTop + 3, 'Amount', { font: 'F2', size: 10 }));
+  ops.push('0 g');
+  // Table row
+  const rowTop = tableTop - 28;
+  ops.push(`${soft} rg ${left} ${rowTop - 8} ${right - left} 28 re f`);
+  ops.push(pdfTextAt(left + 10, rowTop + 2, `${tierLabel || 'Sponsor package'} sponsorship donation`, { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop + 2, amountDisplay || '$0', { font: 'F2', size: 11 }));
+
+  // Totals
+  ops.push(`${navy} RG 1 w ${360} ${rowTop - 36} m ${right} ${rowTop - 36} l S`);
+  ops.push(pdfTextAt(360, rowTop - 54, 'Total donation', { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop - 54, amountDisplay || '$0', { font: 'F2', size: 12 }));
+
+  // Notes
+  const noteTop = rowTop - 100;
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, noteTop, 'Thank you for your donation supporting the East Forsyth High School Band.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 14, 'This payment is recorded as a donation to the East Forsyth Band Boosters.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 28, 'A copy of this invoice was emailed for your records.', { size: 10 }));
+  ops.push('0 g');
+
+  // Footer
+  ops.push(`${navy} RG 1 w ${left} 72 m ${right} 72 l S`);
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, 56, 'East Forsyth Band Boosters  ·  Kernersville, NC  ·  https://efhsband.org', { size: 9 }));
+  ops.push('0 g');
+
+  const stream = `${ops.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R /F2 6 0 R >> /XObject<< /Im1 7 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+    '6 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>endobj\n',
+    `7 0 obj<< /Type /XObject /Subtype /Image /Width ${logoW} /Height ${logoH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${logoBytes.length} >>stream\n${logoBytes}endstream\nendobj\n`,
+  ]);
+}
+
+export function defaultSponsorTierAmountDisplay(tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier);
+  if (key === 'gold') return SPONSOR_TIER_FIELD_DEFAULTS.gold_amount;
+  if (key === 'silver') return SPONSOR_TIER_FIELD_DEFAULTS.silver_amount;
+  if (key === 'bronze') return SPONSOR_TIER_FIELD_DEFAULTS.bronze_amount;
+  return '';
+}
+
+export async function resolveSponsorTierAmountDisplay(env, tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier) || 'bronze';
+  try {
+    const page = await env.DB.prepare("SELECT body_html FROM cms_pages WHERE slug = 'become-a-sponsor'").first();
+    if (page?.body_html) {
+      const fields = extractSponsorTierFields(page.body_html);
+      const amount = String(fields[`${key}_amount`] || '').trim();
+      if (amount) return amount;
+    }
+  } catch {
+    // Fall through to defaults when page lookup is unavailable.
+  }
+  return defaultSponsorTierAmountDisplay(key);
+}
+
+export function applicationFromSponsorRecord(sponsor = {}, {
+  amountDisplay = '',
+  amountCents = 0,
+  paidAt = '',
+  invoicePrefix = 'MS',
+} = {}) {
+  const hydrated = hydrateSponsor(sponsor);
+  const tier = hydrated.tier || normalizeSponsorTier(hydrated.level) || 'bronze';
+  const display = String(amountDisplay || '').trim() || defaultSponsorTierAmountDisplay(tier);
+  const cents = Number(amountCents) > 0
+    ? Number(amountCents)
+    : resolveSponsorAmountCents({ amountDisplay: display });
+  return {
+    id: Number(hydrated.id || 0) || 0,
+    tier,
+    amount_cents: cents || 0,
+    amount_display: display || formatSponsorAmountDisplay(cents) || '$0',
+    business_name: hydrated.name || 'Sponsor',
+    address: hydrated.formatted_address || formatSponsorAddress(hydrated) || hydrated.address || '',
+    phone: hydrated.phone || '',
+    email: hydrated.email || '',
+    paid_at: paidAt || new Date().toISOString(),
+    invoice_prefix: invoicePrefix,
+  };
+}
 
 export function formatSponsorInvoiceDate(value = '') {
   const raw = String(value || '').trim();
@@ -2706,7 +3154,7 @@ export function formatSponsorInvoiceDate(value = '') {
 }
 
 export function buildSponsorDonationInvoice(application = {}) {
-  const tier = normalizeSponsorTierKey(application.tier);
+  const tier = normalizeSponsorTierKey(application.tier) || normalizeSponsorTier(application.tier);
   const tierLabel = tier
     ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`
     : 'Sponsor package';
@@ -2717,15 +3165,15 @@ export function buildSponsorDonationInvoice(application = {}) {
   const address = String(application.address || '').trim() || '—';
   const phone = String(application.phone || '').trim() || '—';
   const email = String(application.email || '').trim().toLowerCase();
-  const invoiceNumber = `SP-${Number(application.id || 0) || 'pending'}`;
+  const prefix = String(application.invoice_prefix || 'SP').trim().toUpperCase() || 'SP';
+  const invoiceNumber = `${prefix}-${Number(application.id || 0) || 'pending'}`;
   const paidLabel = formatSponsorInvoiceDate(application.paid_at);
+  const squareAuthId = resolveSquarePurchaseAuthId({}, {
+    authId: application.square_auth_id || application.auth_id || '',
+    paymentId: application.square_payment_id || application.payment_id || '',
+  });
   const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
-  const text = [
-    'Thank you for your donation to the East Forsyth Band Boosters.',
-    '',
-    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
-    '',
-    'Invoice details',
+  const detailLines = [
     `Invoice number: ${invoiceNumber}`,
     `Date: ${paidLabel}`,
     `Business / organization: ${businessName}`,
@@ -2735,42 +3183,77 @@ export function buildSponsorDonationInvoice(application = {}) {
     `Package: ${tierLabel}`,
     `Amount: ${amountDisplay}`,
     'Payment status: Paid',
+  ];
+  if (squareAuthId) detailLines.push(`Square Auth ID: ${squareAuthId}`);
+  const text = [
+    'Thank you for your donation to the East Forsyth Band Boosters.',
+    '',
+    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
+    '',
+    'A PDF copy of this invoice is attached.',
+    '',
+    'Invoice details',
+    ...detailLines,
     '',
     'East Forsyth Band Boosters',
     'East Forsyth High School Band',
     'https://efhsband.org',
   ].join('\n');
+  const authIdRow = squareAuthId
+    ? `<tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Square Auth ID</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(squareAuthId)}</strong></td></tr>`
+    : '';
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
-      <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
-      <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
-      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
-      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
-        <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Business / organization</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(businessName)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Address</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(address)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Phone</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(phone)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Package</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+    <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#10233c;max-width:640px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-bottom:3px solid #102d5e">
+        <img src="${escapeHtml(INVOICE_LOGO_PUBLIC_URL)}" width="64" height="64" alt="East Forsyth Blue Regiment" style="display:block;border:0;border-radius:50%">
+        <div>
+          <div style="font-size:20px;font-weight:700;color:#102d5e">East Forsyth Band Boosters</div>
+          <div style="font-size:13px;color:#64748b">Donation invoice · ${escapeHtml(invoiceNumber)}</div>
+        </div>
+      </div>
+      <p style="margin:18px 0 12px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation in support of the East Forsyth High School Band program. A PDF copy is attached for your records.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#f5f8fc;border:1px solid #d9e2ef">
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Invoice number</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Date</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Business / organization</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(businessName)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Address</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(address)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Phone</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(phone)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Email</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Package</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Amount</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        ${authIdRow}
+        <tr><td style="padding:10px 12px;color:#64748b">Payment status</td><td style="padding:10px 12px;text-align:right"><strong style="color:#102d5e">Paid</strong></td></tr>
       </table>
-      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+      <p style="margin:0;color:#64748b;font-size:13px">East Forsyth Band Boosters · <a href="https://efhsband.org" style="color:#102d5e">efhsband.org</a></p>
     </div>
   `.trim();
+  const pdfBase64 = buildSponsorInvoicePdfBase64({
+    invoiceNumber,
+    paidLabel,
+    businessName,
+    address,
+    phone,
+    email: email || '—',
+    tierLabel,
+    amountDisplay,
+    squareAuthId,
+  });
   return {
     to: email,
     subject,
     text,
     html,
     invoice_number: invoiceNumber,
+    square_auth_id: squareAuthId,
     from_email: SPONSOR_INVOICE_FROM_EMAIL,
     from_name: SPONSOR_INVOICE_FROM_NAME,
+    pdf_filename: `${invoiceNumber}.pdf`,
+    pdf_base64: pdfBase64,
   };
 }
 
-export async function sendSponsorDonationInvoice(env, application = {}) {
+export async function sendSponsorDonationInvoice(env, application = {}, { markApplicationSent = true } = {}) {
   const invoice = buildSponsorDonationInvoice(application);
   if (!isValidEmail(invoice.to)) {
     return { ok: false, detail: 'Invoice email is missing or invalid' };
@@ -2786,18 +3269,36 @@ export async function sendSponsorDonationInvoice(env, application = {}) {
       html: invoice.html,
       fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
       fromName: SPONSOR_INVOICE_FROM_NAME,
+      attachments: invoice.pdf_base64 ? [{
+        filename: invoice.pdf_filename || `${invoice.invoice_number}.pdf`,
+        content: invoice.pdf_base64,
+        content_type: 'application/pdf',
+      }] : [],
     });
     const id = Number(application.id || 0);
-    if (id) {
+    if (markApplicationSent && id && !application.invoice_prefix) {
       const sentAt = new Date().toISOString();
       await env.DB.prepare(
         'UPDATE sponsor_applications SET invoice_sent_at = ?, updated_at = ? WHERE id = ?',
       ).bind(sentAt, sentAt, id).run();
     }
-    return { ok: true, detail: 'Invoice emailed', invoice_number: invoice.invoice_number };
+    return { ok: true, detail: 'Invoice emailed with PDF attachment', invoice_number: invoice.invoice_number };
   } catch (error) {
     return { ok: false, detail: error?.message || 'Could not send invoice email' };
   }
+}
+
+export async function sendManualSponsorInvoice(env, sponsor = {}) {
+  if (!sponsor?.email || !isValidEmail(sponsor.email)) {
+    return { ok: false, detail: 'Sponsor email is missing or invalid' };
+  }
+  const amountDisplay = await resolveSponsorTierAmountDisplay(env, sponsor.level || sponsor.tier);
+  const application = applicationFromSponsorRecord(sponsor, {
+    amountDisplay,
+    invoicePrefix: 'MS',
+    paidAt: new Date().toISOString(),
+  });
+  return sendSponsorDonationInvoice(env, application, { markApplicationSent: false });
 }
 
 async function maybeSendSponsorInvoice(env, application, { force = false } = {}) {
@@ -2814,7 +3315,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   if (!id) throw new Error('Application not found');
   if (row.sponsor_id) {
     const existing = await env.DB.prepare(
-      'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+      'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
     ).bind(row.sponsor_id).first();
     if (existing) {
       return {
@@ -2830,6 +3331,8 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   const sponsor = normalizeSponsorPayload({
     name: row.business_name,
     address: row.address,
+    phone: row.phone || '',
+    email: row.email || '',
     logo_url: row.logo_url || '',
     level,
     active: 1,
@@ -2840,12 +3343,14 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
     sponsor.sort_order = Number(max?.max_order || 0) + 1;
   }
   const inserted = await env.DB.prepare(
-    'INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).bind(
     sponsor.name,
     sponsor.address,
     sponsor.city,
     sponsor.state,
+    sponsor.phone,
+    sponsor.email,
     sponsor.logo_url,
     sponsor.level,
     sponsor.mark_text,
@@ -2861,7 +3366,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
      WHERE id = ?`,
   ).bind(mock ? 'paid_mock' : 'paid', sponsorId, paidAt, paidAt, id).run();
   const saved = await env.DB.prepare(
-    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+    'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
   ).bind(sponsorId).first();
   return {
     application: {
@@ -2890,11 +3395,15 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
     homepageAd: payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad,
   });
   const benefits = sponsorBenefitsFromLevel(level);
+  const phone = String(payload.phone ?? existing?.phone ?? '').trim().slice(0, 40);
+  const emailRaw = String(payload.email ?? existing?.email ?? '').trim().toLowerCase().slice(0, 160);
   return {
     name,
     address,
     city,
     state,
+    phone,
+    email: emailRaw,
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
     level,
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
@@ -3316,7 +3825,18 @@ export async function normalizeMailAttachments(files = []) {
   return attachments;
 }
 
-export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
+export function normalizeAdminMailExtraEmails(value) {
+  const raw = Array.isArray(value)
+    ? value.flatMap((item) => String(item || '').split(/[,;\n]+/))
+    : String(value || '').split(/[,;\n]+/);
+  return [...new Set(
+    raw
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((email) => isValidEmail(email)),
+  )];
+}
+
+export function normalizeAdminMailPayload({ subject, html, userIds, extraEmails } = {}) {
   const cleanSubject = String(subject || '').trim();
   const cleanHtml = sanitizeRichHtml(html || '');
   const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
@@ -3327,6 +3847,7 @@ export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
     html: cleanHtml,
     text: htmlToPlainText(cleanHtml),
     user_ids: ids,
+    extra_emails: normalizeAdminMailExtraEmails(extraEmails),
   };
 }
 
@@ -3344,6 +3865,7 @@ async function parseAdminMailRequest(request) {
         subject: form.get('subject'),
         html: form.get('html'),
         userIds,
+        extraEmails: form.get('extra_emails') || form.get('manual_emails') || '',
       }),
       attachments: await normalizeMailAttachments(files),
     };
@@ -3354,6 +3876,7 @@ async function parseAdminMailRequest(request) {
       subject: payload.subject,
       html: payload.html || payload.body_html || payload.message,
       userIds: payload.user_ids || payload.userIds || [],
+      extraEmails: payload.extra_emails || payload.extraEmails || payload.manual_emails || [],
     }),
     attachments: [],
   };
@@ -3578,24 +4101,61 @@ async function getPageByPath(env, path) {
 async function getUserByUsername(env, username) {
   const normalized = String(username || '').trim();
   if (!normalized) return null;
-  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(normalized).first();
+  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE username = ?').bind(normalized).first();
   if (direct) return direct;
   // Bootstrap alias: allow "admin" (or the configured bootstrap username) to reach the
   // active site administrator even after the account was renamed to an email address.
   const bootstrap = String(adminUsername(env) || 'admin').trim().toLowerCase();
   if (normalized.toLowerCase() === 'admin' || normalized.toLowerCase() === bootstrap) {
-    return env.DB.prepare("SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1").first();
+    return env.DB.prepare("SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1").first();
   }
   return null;
 }
 
 async function getUserById(env, id) {
-  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE id = ? AND active = 1').bind(id).first();
+  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE id = ? AND active = 1').bind(id).first();
 }
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, username: user.username, display_name: user.display_name, role: user.role, permissions: parsePermissions(user.permissions), active: Boolean(user.active) };
+  return {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    permissions: parsePermissions(user.permissions),
+    active: Boolean(user.active),
+    must_change_password: Boolean(Number(user.must_change_password)),
+    is_tester: Boolean(Number(user.is_tester)),
+  };
+}
+
+export function generateTesterPassword(length = 12) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(Math.max(8, Number(length) || 12));
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+export function normalizeTesterCreatePayload(payload = {}) {
+  const random = generateTesterPassword(8).toLowerCase();
+  let username = String(payload.username || '').trim().toLowerCase();
+  if (!username) username = `tester-${random}`;
+  let password = String(payload.password || '');
+  let generatedPassword = false;
+  if (!password) {
+    password = generateTesterPassword(12);
+    generatedPassword = true;
+  }
+  const displayName = String(payload.display_name || '').trim() || 'Tester';
+  return {
+    username,
+    password,
+    generatedPassword,
+    display_name: displayName,
+    permissions: parsePermissions(payload.permissions),
+    active: payload.active === false ? 0 : 1,
+  };
 }
 
 function canEditPage(user, slug) {
@@ -3733,6 +4293,8 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       display: block;
       width: 1.45in;
       height: 1.45in;
+      object-fit: contain;
+      border-radius: 50%;
       opacity: 0.28;
       -webkit-user-drag: none;
     }
@@ -3794,7 +4356,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
   <main class="sheet">
     <header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="East Forsyth Blue Regiment" draggable="false">
     </header>
     <p class="doc-kicker">${escapeHtml(title)}</p>
     <h1>Booster Meeting Minutes</h1>
@@ -3860,8 +4422,66 @@ async function requirePermission(request, env, scope) {
   return auth;
 }
 
-async function updatePassword(env, userId, newPassword) {
-  await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(newPassword), userId).run();
+async function updatePassword(env, userId, newPassword, { mustChangePassword = false } = {}) {
+  await env.DB.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?')
+    .bind(await hashPassword(newPassword), mustChangePassword ? 1 : 0, userId)
+    .run();
+}
+
+export function buildUserWelcomeInvite({
+  username,
+  password,
+  loginUrl = 'https://efhsband.org/admin',
+} = {}) {
+  const subject = 'Welcome to EFHSBand.org!';
+  const intro = 'Welcome to the new East Forsyth High School Blue Regiment website! Below are your login credentials. Please change your password after login. Thank you for being a part of EFHSBand.org and helping to support our students.';
+  const safeUser = String(username || '').trim();
+  const safePassword = String(password || '');
+  const safeLogin = String(loginUrl || 'https://efhsband.org/admin').trim() || 'https://efhsband.org/admin';
+  const text = [
+    intro,
+    '',
+    `Username: ${safeUser}`,
+    `Temporary password: ${safePassword}`,
+    '',
+    `Sign in: ${safeLogin}`,
+  ].join('\n');
+  const html = [
+    `<p>${escapeHtml(intro)}</p>`,
+    `<p><strong>Username:</strong> ${escapeHtml(safeUser)}<br>`,
+    `<strong>Temporary password:</strong> ${escapeHtml(safePassword)}</p>`,
+    `<p><a href="${escapeHtml(safeLogin)}">Sign in to the admin CMS</a></p>`,
+  ].join('');
+  return { subject, text, html, to: safeUser.toLowerCase() };
+}
+
+export async function sendUserWelcomeInvite(env, { username, password, replyTo } = {}) {
+  const invite = buildUserWelcomeInvite({ username, password });
+  if (!isValidEmail(invite.to)) {
+    return { ok: false, detail: 'Username must be a valid email address to send the welcome invite.' };
+  }
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, detail: 'Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.' };
+  }
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
+  if (!isValidEmail(fromEmail)) {
+    return { ok: false, detail: 'CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain.' };
+  }
+  try {
+    await sendViaResend(env, {
+      to: invite.to,
+      replyTo: isValidEmail(replyTo) ? String(replyTo).trim().toLowerCase() : undefined,
+      subject: invite.subject,
+      text: invite.text,
+      html: invite.html,
+      fromEmail,
+      fromName,
+    });
+    return { ok: true, to: invite.to };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Could not send welcome invite email.' };
+  }
 }
 
 export function validateSelfPasswordChange(payload = {}) {
@@ -4152,7 +4772,11 @@ export function generateStructuredPageHtml(payload = {}) {
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section>`;
 
   if (layout === 'calendar') {
-    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="timeline" data-events data-limit="5"></div>${callout}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>${callout}</div></section>`;
+  }
+
+  if (layout === 'gallery') {
+    return `${hero}<section class="content soft photo-gallery-section"><div class="wrap"><div class="photo-gallery" data-photo-gallery data-sort="recent"></div>${callout}</div></section>`;
   }
 
   if (layout === 'contact') {
@@ -4239,8 +4863,19 @@ async function handleApi(request, env, url) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+  if (url.pathname === '/api/session' && request.method === 'GET') {
+    const user = await currentUser(request, env);
+    return jsonResponse({
+      logged_in: Boolean(user),
+      is_super_admin: Boolean(user) && isSuperAdmin(user),
+    });
+  }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+  }
+  if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
+    // Full month view needs past and future months, not only upcoming rows.
+    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
@@ -4481,7 +5116,8 @@ async function handleApi(request, env, url) {
     if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
     const application = await env.DB.prepare(
       `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
-              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
+              square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at,
+              square_payment_id, square_auth_id
        FROM sponsor_applications WHERE id = ?`,
     ).bind(applicationId).first();
     if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
@@ -4490,7 +5126,7 @@ async function handleApi(request, env, url) {
     }
     if (application.sponsor_id) {
       const existing = await env.DB.prepare(
-        'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+        'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
       ).bind(application.sponsor_id).first();
       return jsonResponse({
         ok: true,
@@ -4514,21 +5150,26 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await activatePaidSponsorApplication(env, application, { mock: false });
+      const squarePaymentId = String(payment.payment_id || '').trim();
+      const squareAuthId = String(payment.auth_id || resolveSquarePurchaseAuthId({}, { paymentId: squarePaymentId })).trim();
       await env.DB.prepare(
         `UPDATE sponsor_applications
-         SET square_payment_link_id = ?, status = 'paid', updated_at = ?
+         SET square_payment_id = ?, square_auth_id = ?, status = 'paid', updated_at = ?
          WHERE id = ?`,
-      ).bind(payment.payment_id || '', new Date().toISOString(), applicationId).run();
+      ).bind(squarePaymentId, squareAuthId, new Date().toISOString(), applicationId).run();
       const invoice = await maybeSendSponsorInvoice(env, {
         ...application,
         ...result.application,
+        square_payment_id: squarePaymentId,
+        square_auth_id: squareAuthId,
       });
       return jsonResponse({
         ok: true,
         created: result.created,
         sponsor: result.sponsor,
         application_id: applicationId,
-        payment_id: payment.payment_id,
+        payment_id: squarePaymentId,
+        auth_id: squareAuthId,
         invoice_sent: Boolean(invoice.ok && !invoice.skipped),
         invoice_detail: invoice.detail || '',
         detail: result.created
@@ -4734,11 +5375,18 @@ async function handleApi(request, env, url) {
   }
 
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
-    const auth = await requirePermission(request, env, 'site');
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    const canSite = hasPermission(auth.user, 'site');
+    const canHomeSiteFields = canSite || canManageUtilityLinks(auth.user);
+    if (!canHomeSiteFields) return jsonResponse({ detail: 'Permission required: site or page:home' }, 403);
     const payload = await request.json();
+    const homeKeys = new Set(['hero_title', 'hero_subtitle', 'footer_note']);
+    const siteOnlyKeys = new Set(['title', 'logo_url']);
     for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url']) {
       if (payload[key] === undefined) continue;
+      if (siteOnlyKeys.has(key) && !canSite) continue;
+      if (homeKeys.has(key) && !canHomeSiteFields) continue;
       let value = String(payload[key]);
       if (key === 'hero_title' || key === 'title') value = sanitizeInlineRichHtml(value) || htmlToPlainText(value);
       if (key === 'hero_subtitle' || key === 'footer_note') {
@@ -4746,7 +5394,7 @@ async function handleApi(request, env, url) {
       }
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run();
     }
-    if (payload.maintenance_mode !== undefined) {
+    if (payload.maintenance_mode !== undefined && canSite) {
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
@@ -4929,16 +5577,58 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/users' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users ORDER BY username').all();
+    const rows = isSuperAdmin(auth.user)
+      ? await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users ORDER BY username').all()
+      : await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE COALESCE(is_tester, 0) = 0 ORDER BY username').all();
     return jsonResponse((rows.results || []).map(publicUser));
   }
   if (url.pathname === '/api/admin/users' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     const payload = await request.json();
-    const username = String(payload.username || '').trim();
+    const createTester = Boolean(payload.is_tester);
+    if (createTester && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can create tester accounts' }, 403);
+    }
+    if (createTester) {
+      const normalized = normalizeTesterCreatePayload(payload);
+      if (normalized.password.length < 8) {
+        return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
+      }
+      try {
+        const result = await env.DB.prepare(
+          'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password, is_tester) VALUES (?, ?, ?, ?, ?, ?, 0, 1)',
+        ).bind(
+          normalized.username,
+          normalized.display_name,
+          await hashPassword(normalized.password),
+          'editor',
+          JSON.stringify(normalized.permissions),
+          normalized.active,
+        ).run();
+        const created = await env.DB.prepare(
+          'SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?',
+        ).bind(result.meta.last_row_id).first();
+        return jsonResponse({
+          ...publicUser(created),
+          invite_sent: false,
+          invite_detail: 'Tester created. No welcome email was sent.',
+          generated_password: normalized.generatedPassword ? normalized.password : undefined,
+        });
+      } catch (error) {
+        const message = String(error?.message || error || '');
+        if (message.includes('UNIQUE') || message.includes('unique')) {
+          return jsonResponse({ detail: 'A user with that username already exists' }, 409);
+        }
+        throw error;
+      }
+    }
+    const username = String(payload.username || '').trim().toLowerCase();
     const password = String(payload.password || '');
     if (!username || !password) return jsonResponse({ detail: 'Username and password are required' }, 422);
+    if (!isValidEmail(username)) {
+      return jsonResponse({ detail: 'Username must be a valid email address so we can send the welcome invite.' }, 422);
+    }
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
@@ -4947,9 +5637,31 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: 'Only Super Admins can create Super Admin accounts' }, 403);
     }
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
-      const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
-      return jsonResponse(publicUser(created));
+      const result = await env.DB.prepare(
+        'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password, is_tester) VALUES (?, ?, ?, ?, ?, ?, 1, 0)',
+      ).bind(
+        username,
+        displayName,
+        await hashPassword(password),
+        wantsAdmin ? 'admin' : 'editor',
+        JSON.stringify(parsePermissions(payload.permissions)),
+        payload.active === false ? 0 : 1,
+      ).run();
+      const created = await env.DB.prepare(
+        'SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?',
+      ).bind(result.meta.last_row_id).first();
+      const invite = await sendUserWelcomeInvite(env, {
+        username,
+        password,
+        replyTo: auth.user?.username,
+      });
+      return jsonResponse({
+        ...publicUser(created),
+        invite_sent: Boolean(invite.ok),
+        invite_detail: invite.ok
+          ? `Welcome invite emailed to ${invite.to}.`
+          : (invite.detail || 'User saved, but the welcome invite could not be sent.'),
+      });
     } catch (error) {
       const message = String(error?.message || error || '');
       if (message.includes('UNIQUE') || message.includes('unique')) {
@@ -4969,26 +5681,36 @@ async function handleApi(request, env, url) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
+    if (Number(existing.is_tester) && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can edit tester accounts' }, 403);
+    }
     const wantsAdmin = payload.role === 'admin';
     if (wantsAdmin && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can assign the Super Admin role' }, 403);
     }
-    const role = wantsAdmin ? 'admin' : 'editor';
+    const role = Number(existing.is_tester) ? 'editor' : (wantsAdmin ? 'admin' : 'editor');
     const permissions = JSON.stringify(parsePermissions(payload.permissions));
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password);
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(id).first()));
+    const nextUsername = Number(existing.is_tester)
+      ? String(payload.username || existing.username).trim().toLowerCase()
+      : String(payload.username || existing.username).trim();
+    if (!nextUsername) return jsonResponse({ detail: 'Username is required' }, 422);
+    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(nextUsername, displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
+    if (payload.password) await updatePassword(env, id, payload.password, { mustChangePassword: !Number(existing.is_tester) });
+    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     if (Number(userMatch[1]) === auth.user.id) return jsonResponse({ detail: 'You cannot delete your own account' }, 400);
-    const existing = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
+    const existing = await env.DB.prepare('SELECT id, role, is_tester FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
     if (!existing) return jsonResponse({ detail: 'User not found' }, 404);
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can delete Super Admin accounts' }, 403);
+    }
+    if (Number(existing.is_tester) && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can delete tester accounts' }, 403);
     }
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
     return jsonResponse({ ok: true });
@@ -5106,8 +5828,180 @@ async function handleApi(request, env, url) {
       const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
       sponsor.sort_order = Number(max?.max_order || 0) + 1;
     }
-    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
+    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
+    const saved = hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first());
+    let invoice = { ok: false, detail: 'Invoice not sent' };
+    if (isValidEmail(saved.email)) {
+      invoice = await sendManualSponsorInvoice(env, saved);
+    }
+    return jsonResponse({
+      ...saved,
+      invoice_sent: Boolean(invoice.ok),
+      invoice_detail: invoice.detail || '',
+      invoice_number: invoice.invoice_number || '',
+    });
+  }
+  if (url.pathname === '/api/admin/sponsors/manual' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    const contentType = String(request.headers.get('content-type') || '');
+    let businessName = '';
+    let address = '';
+    let phone = '';
+    let email = '';
+    let tier = '';
+    let amountDisplay = '';
+    let amountCents = 0;
+    let bypassPayment = false;
+    let logoFile = null;
+    if (/multipart\/form-data/i.test(contentType)) {
+      const form = await request.formData();
+      businessName = String(form.get('business_name') || '').trim();
+      address = String(form.get('address') || '').trim();
+      phone = String(form.get('phone') || '').trim();
+      email = String(form.get('email') || '').trim().toLowerCase();
+      tier = normalizeSponsorTierKey(form.get('tier'));
+      amountDisplay = String(form.get('amount_display') || '').trim();
+      amountCents = resolveSponsorAmountCents({
+        amountCents: form.get('amount_cents'),
+        amountDisplay: form.get('amount_display') || amountDisplay,
+      });
+      bypassPayment = ['1', 'true', 'on', 'yes'].includes(String(form.get('bypass_payment') || '').trim().toLowerCase());
+      const rawLogo = form.get('logo');
+      if (rawLogo && typeof rawLogo !== 'string' && Number(rawLogo.size || 0) > 0) logoFile = rawLogo;
+    } else {
+      const payload = await request.json().catch(() => ({}));
+      businessName = String(payload.business_name || '').trim();
+      address = String(payload.address || '').trim();
+      phone = String(payload.phone || '').trim();
+      email = String(payload.email || '').trim().toLowerCase();
+      tier = normalizeSponsorTierKey(payload.tier);
+      amountDisplay = String(payload.amount_display || '').trim();
+      amountCents = resolveSponsorAmountCents({
+        amountCents: payload.amount_cents,
+        amountDisplay: payload.amount_display || amountDisplay,
+      });
+      bypassPayment = Boolean(payload.bypass_payment);
+    }
+    if (!tier) return jsonResponse({ detail: 'Choose a Bronze, Silver, or Gold package' }, 422);
+    if (!businessName || businessName.length > 160) {
+      return jsonResponse({ detail: 'Business or organization name is required' }, 422);
+    }
+    if (!address || address.length > 400) {
+      return jsonResponse({ detail: 'Business address is required' }, 422);
+    }
+    if (!phone || phone.length > 40) {
+      return jsonResponse({ detail: 'Phone number is required' }, 422);
+    }
+    if (!isValidEmail(email) || email.length > 160) {
+      return jsonResponse({ detail: 'A valid invoice email address is required' }, 422);
+    }
+    if (!amountCents || amountCents < 100) {
+      const defaults = { bronze: 10000, silver: 25000, gold: 50000 };
+      amountCents = defaults[tier] || 0;
+      amountDisplay = formatSponsorAmountDisplay(amountCents);
+    }
+    if (!amountCents || amountCents < 100) {
+      return jsonResponse({ detail: 'A valid package amount is required' }, 422);
+    }
+    if (bypassPayment && !hasPermission(auth.user, 'sponsors:bypass-payment')) {
+      return jsonResponse({ detail: 'Permission required: sponsors:bypass-payment' }, 403);
+    }
+    let logoUrl = '';
+    if (logoFile) {
+      try {
+        const stored = await storeImageUpload(
+          env,
+          logoFile,
+          `${businessName} logo`,
+          'Manual sponsor logo',
+          SPONSOR_APPLICATION_LOGO_SORT,
+        );
+        logoUrl = stored.url || '';
+      } catch (error) {
+        return jsonResponse({ detail: error.message || 'Could not upload logo' }, 422);
+      }
+    }
+    const display = amountDisplay || formatSponsorAmountDisplay(amountCents);
+    const now = new Date().toISOString();
+    const completionToken = crypto.randomUUID().replace(/-/g, '');
+    const insert = await env.DB.prepare(
+      `INSERT INTO sponsor_applications
+        (tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(tier, amountCents, display, businessName, address, phone, email, logoUrl, completionToken, now, now).run();
+    const applicationId = insert.meta.last_row_id;
+    const application = {
+      id: applicationId,
+      tier,
+      amount_cents: amountCents,
+      amount_display: display,
+      business_name: businessName,
+      address,
+      phone,
+      email,
+      logo_url: logoUrl,
+      status: 'pending_payment',
+      completion_token: completionToken,
+    };
+    if (bypassPayment) {
+      const result = await activatePaidSponsorApplication(env, application, { mock: true });
+      return jsonResponse({
+        ok: true,
+        bypassed: true,
+        application: result.application,
+        sponsor: result.sponsor,
+      });
+    }
+    // Without bypass, still create the live sponsor record (manual CMS add) and leave the application unpaid.
+    const level = sponsorLevelFromTierKey(tier);
+    const sponsor = normalizeSponsorPayload({
+      name: businessName,
+      address,
+      phone,
+      email,
+      logo_url: logoUrl,
+      level,
+      active: 1,
+    });
+    if (sponsor._assign_sort_order) {
+      const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
+      sponsor.sort_order = Number(max?.max_order || 0) + 1;
+    }
+    const result = await env.DB.prepare(
+      'INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
+      sponsor.name,
+      sponsor.address,
+      sponsor.city,
+      sponsor.state,
+      sponsor.phone,
+      sponsor.email,
+      sponsor.logo_url,
+      sponsor.level,
+      sponsor.mark_text,
+      sponsor.sort_order,
+      sponsor.active,
+      sponsor.homepage_ad,
+    ).run();
+    const sponsorId = result.meta.last_row_id;
+    await env.DB.prepare(
+      `UPDATE sponsor_applications
+       SET sponsor_id = ?, updated_at = ?
+       WHERE id = ?`,
+    ).bind(sponsorId, now, applicationId).run();
+    const saved = await env.DB.prepare(
+      'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+    ).bind(sponsorId).first();
+    return jsonResponse({
+      ok: true,
+      bypassed: false,
+      application: { ...application, sponsor_id: sponsorId },
+      sponsor: hydrateSponsor(saved),
+    });
   }
   if (url.pathname === '/api/admin/sponsors/reorder' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
@@ -5140,8 +6034,8 @@ async function handleApi(request, env, url) {
     if (!existing) return jsonResponse({ detail: 'Sponsor not found' }, 404);
     const sponsor = normalizeSponsorPayload(await request.json(), existing);
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
-    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
+    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, phone = ?, email = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
   }
 
   if (url.pathname === '/api/admin/staff' && request.method === 'GET') {
@@ -5412,7 +6306,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
+    const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 AND COALESCE(is_tester, 0) = 0 ORDER BY display_name, username').all();
     const recipients = (rows.results || [])
       .map((user) => ({
         id: user.id,
@@ -5534,7 +6428,9 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (!mail.user_ids.length && !mail.extra_emails.length) {
+      return jsonResponse({ detail: 'Choose a recipient or enter at least one email address.' }, 422);
+    }
     if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
     if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
     if (resolveContactEmailProvider(env) !== 'resend') {
@@ -5543,19 +6439,36 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
-    const placeholders = mail.user_ids.map(() => '?').join(', ');
-    const rows = await env.DB.prepare(
-      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
-    ).bind(...mail.user_ids).all();
-    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
-
-    const results = [];
+    const users = [];
+    if (mail.user_ids.length) {
+      const placeholders = mail.user_ids.map(() => '?').join(', ');
+      const rows = await env.DB.prepare(
+        `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
+      ).bind(...mail.user_ids).all();
+      users.push(...(rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username)));
+    }
+    const seenEmails = new Set();
+    const recipients = [];
     for (const user of users) {
       const email = String(user.username).trim().toLowerCase();
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: user.id, email });
+    }
+    for (const email of mail.extra_emails) {
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: null, email });
+    }
+    if (!recipients.length) {
+      return jsonResponse({ detail: 'No valid recipient emails were found.' }, 422);
+    }
+
+    const results = [];
+    for (const recipient of recipients) {
       try {
         await sendAdminUserMail(env, {
-          to: email,
+          to: recipient.email,
           replyTo: sender.replyTo,
           fromName: sender.fromName,
           subject: mail.subject,
@@ -5563,9 +6476,14 @@ async function handleApi(request, env, url) {
           text: mail.text || htmlToPlainText(mail.html),
           attachments: mail.attachments,
         });
-        results.push({ user_id: user.id, email, ok: true });
+        results.push({ user_id: recipient.user_id, email: recipient.email, ok: true });
       } catch (error) {
-        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
+        results.push({
+          user_id: recipient.user_id,
+          email: recipient.email,
+          ok: false,
+          error: String(error?.message || error || 'Send failed'),
+        });
       }
     }
     const sent = results.filter((item) => item.ok).length;
@@ -5574,6 +6492,7 @@ async function handleApi(request, env, url) {
       ok: failed === 0,
       sent,
       failed,
+      reply_to: sender.replyTo,
       results,
       detail: failed
         ? `Sent ${sent} of ${results.length}. ${failed} failed.`
@@ -5762,7 +6681,7 @@ async function handleUploadGet(env, url) {
 }
 
 function clearSessionCookie() {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+  return sessionCookieHeader('', { maxAge: 0 });
 }
 
 function renderLoginHtml(nextPath = '/admin') {
@@ -5797,7 +6716,7 @@ async function handleLogin(request, env) {
     );
   }
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', `${SESSION_COOKIE}=${await makeSession(user, env)}; HttpOnly; Secure; SameSite=Lax; Path=/`);
+  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
   return response;
 }
 
@@ -5813,18 +6732,35 @@ function logout() {
   return response;
 }
 
-function renderNav(pages) {
-  return pages
-    .filter((page) => page.slug !== 'become-a-sponsor')
-    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
+export function renderStaffAuthNavLink(loggedIn = false) {
+  if (loggedIn) {
+    return '<a href="/admin" data-staff-auth-link>Staff Menu</a>';
+  }
+  return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null) {
+export function renderNav(pages, { loggedIn = false } = {}) {
+  const pageLinks = (Array.isArray(pages) ? pages : [])
+    .filter((page) => page.slug !== 'become-a-sponsor')
+    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`)
+    .join('');
+  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}`;
+}
+
+export function renderPublicBrand(site = {}) {
+  const title = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const logo = String(site?.logo_url || '/assets/efhs-logo.png').trim() || '/assets/efhs-logo.png';
+  return `<a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(logo)}" alt="${escapeAttr(title)} logo"><span data-site-field="title">${escapeHtml(title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a>`;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { loggedIn = false, maintenancePreview = false } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
+  const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
+  const bodyClass = maintenancePreview ? ' class="maintenance-preview"' : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -5838,13 +6774,14 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
 </head>
-<body>
+<body${bodyClass}>
+${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
+<header class="site-header"><div class="header-inner">${renderPublicBrand(site)}<button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>
 </body></html>`;
 }
@@ -5926,6 +6863,9 @@ async function serveStaticOrCms(request, env, url) {
   await initDb(env);
   const site = await getSite(env);
   const maintenanceOn = isMaintenanceMode(site);
+  const user = await currentUser(request, env);
+  const loggedIn = Boolean(user);
+  const superAdmin = loggedIn && isSuperAdmin(user);
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
@@ -5939,10 +6879,20 @@ async function serveStaticOrCms(request, env, url) {
         },
       });
     }
+    // Super admins preview the real site; everyone else stays on the public maintenance page.
+    if (superAdmin) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: '/',
+          'cache-control': 'no-store',
+        },
+      });
+    }
     return htmlResponse(renderMaintenancePage(site));
   }
-  // Keep admin/API available; send every public HTML page to maintenance while enabled.
-  if (shouldRedirectToMaintenance(url.pathname, site)) {
+  // Public + non-super-admin users get the maintenance page. Super admins can preview.
+  if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
     return new Response(null, {
       status: 302,
@@ -5965,7 +6915,10 @@ async function serveStaticOrCms(request, env, url) {
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
-      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors));
+      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
+        loggedIn,
+        maintenancePreview: maintenanceOn && superAdmin,
+      }));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
@@ -6011,33 +6964,22 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
-<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/index.html">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>Edit the Gallery page header here. Photos are managed in the Photos tab and appear newest-first on the public Gallery page.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview. Home shows the 6 newest photos with a link to the full Gallery.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="gallery">Photo gallery page</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
-<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-tier-benefits-card">
-  <h2>Gold Sponsor Benefits</h2>
-  <ul class="gold-tier-benefits-list">
-    <li>Company logo and business name prominently displayed on the East Forsyth Bands website.</li>
-    <li>Featured fly-in advertisement when visitors open the East Forsyth Bands website.</li>
-    <li>Company logo and business name displayed on the sponsor marquee.</li>
-    <li>Public advertising through band programs, event flyers, pamphlets, and other promotional materials distributed throughout the year.</li>
-    <li>Recognition as a Gold Sponsor supporting the East Forsyth Bands program and its students.</li>
-  </ul>
-</div>
-<div class="admin-card stack gold-sponsors-print-card">
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
   <h2>Gold sponsors for advertising</h2>
   <p class="muted">Active Gold sponsors with logos for programs, flyers, and handouts. Print builds a PDF in the background, then opens the print dialog in this page (no pop-up window).</p>
   <div id="gold-sponsors-print-preview" class="gold-sponsors-print-preview" aria-live="polite"></div>
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
-<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
-<section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
+<div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section><section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>
   <div class="page-settings-actions utility-links-actions">
@@ -6063,7 +7005,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="button" data-open-social-tab>Open Social / Facebook</button>
   </div>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Publish</p><h1>Social / Facebook</h1><p>Connect the band Facebook Page through Zernio, then publish or schedule posts from the CMS.</p></div></div>
 <div class="editor-layout">
@@ -6165,7 +7107,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.</p></div></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div></div><div class="editor-layout minutes-layout"><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.</p><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></div></div></div><div class="minutes-footer-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div>
 <div id="minutes-view-modal" class="minutes-frame-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-view-dismiss aria-label="Close minutes document"></button>
   <div class="minutes-view-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-view-title">
@@ -6195,7 +7137,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <p class="kicker">Boosters</p>
         <h2 id="minutes-editor-title">Add Minutes</h2>
       </div>
-      <button class="btn outline" type="button" data-minutes-editor-dismiss>Close</button>
     </div>
     <form id="minutes-form" class="stack minutes-editor-form" novalidate>
       <input type="hidden" name="minutes_id" value="">
@@ -6207,23 +7148,34 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
       </div>
       <p class="status" id="minutes-status"></p>
     </form>
+    <div class="admin-sponsor-form-confirm minutes-editor-confirm" data-minutes-editor-confirm hidden>
+      <div class="admin-sponsor-form-confirm-card" role="alertdialog" aria-labelledby="minutes-editor-confirm-title" aria-describedby="minutes-editor-confirm-copy">
+        <h4 id="minutes-editor-confirm-title">Are you sure?</h4>
+        <p id="minutes-editor-confirm-copy">Canceling closes the editor and discards unsaved changes.</p>
+        <div class="admin-sponsor-form-confirm-actions">
+          <button class="btn outline" type="button" data-minutes-confirm-no>No</button>
+          <button class="btn primary" type="button" data-minutes-confirm-yes>Yes</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 </section><section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to CMS users or any email address. Reply-To is always set to the logged-in user’s email.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
 <div class="mail-recipients">
-  <div class="mail-recipients-head">
-    <h2>Recipients</h2>
-    <div class="panel-actions">
-      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
-      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
+  <div class="mail-recipient-select-label">Send to <small>Tap or click names to select one or more</small>
+    <div class="mail-recipient-picker">
+      <button type="button" id="mail-toggle-all-users" class="mail-toggle-all-users" aria-pressed="false">All users</button>
+      <select name="recipient" id="mail-recipient-select" multiple size="6" aria-label="Send to CMS users"></select>
     </div>
   </div>
-  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
-  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+  <label class="mail-extra-emails-label">Also send to <small>Optional · other people outside the CMS user list</small>
+    <input name="extra_emails" id="mail-extra-emails" type="text" maxlength="500" placeholder="name@example.com, another@example.com" autocomplete="email">
+  </label>
+  <p class="muted">CMS users are listed by name and emailed at their login username. Use <strong>All users</strong> to select or clear everyone. Replies always return to your account email.</p>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
@@ -6244,7 +7196,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Manage CMS editor accounts and page-level permissions.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-tester" hidden>Add Tester</button><button class="btn primary" type="button" id="new-user">New User</button></div></div><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div><p class="status" id="users-list-status" aria-live="polite"></p></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>
