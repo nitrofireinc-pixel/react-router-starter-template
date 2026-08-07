@@ -3919,38 +3919,163 @@ function canEditManagedUser(user) {
   return !isSuperAdmin(user);
 }
 
+let userFormToastLeaveTimer = null;
+
+function ensureUserFormToast() {
+  let root = document.querySelector('#admin-user-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-user-form-toast';
+  root.className = 'admin-user-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-user-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-user-form-toast-backdrop" data-user-form-dismiss aria-label="Close user form"></button>
+    <div class="admin-user-form-toast-panel">
+      <div class="admin-user-form-toast-card">
+        <h3 id="admin-user-form-toast-title">New User</h3>
+        <form id="user-form" class="admin-user-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <label>Email / Username<input name="username" type="email" required autocomplete="username" placeholder="editor@example.com"></label>
+          <label>Display name<input name="display_name" required placeholder="Full name"></label>
+          <label id="user-password-label">Password <small id="user-password-hint">required · min 8 characters</small>
+            <input name="password" type="password" autocomplete="new-password" minlength="8">
+          </label>
+          <label>Role
+            <select name="role">
+              <option value="editor">Editor</option>
+              <option value="admin">Super Admin - all permissions</option>
+            </select>
+          </label>
+          <label class="checkline"><input name="active" type="checkbox" checked> Active</label>
+          <fieldset>
+            <legend>Global permissions</legend>
+            <label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Page edit permissions</legend>
+            <div id="page-permission-boxes"></div>
+          </fieldset>
+          <p class="admin-user-form-toast-status" id="user-status" aria-live="polite"></p>
+          <div class="admin-user-form-toast-actions">
+            <button class="btn outline" type="button" data-user-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" id="user-submit">Send Invite</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-user-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideUserFormToast());
+  });
+  return root;
+}
+
 function syncUserFormMode(form = document.querySelector('#user-form')) {
   if (!form) return;
   const editing = Boolean(String(formControl(form, 'id')?.value || '').trim());
-  const title = document.querySelector('#user-form-title');
+  const title = document.querySelector('#admin-user-form-toast-title');
   const submit = document.querySelector('#user-submit');
   const passwordHint = document.querySelector('#user-password-hint');
   const passwordInput = formControl(form, 'password');
-  if (title) title.textContent = editing ? 'Edit User' : 'Invite New User';
+  const roleSelect = formControl(form, 'role');
+  if (title) title.textContent = editing ? 'Edit User' : 'New User';
   if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
   if (passwordHint) {
     passwordHint.textContent = editing
       ? 'optional · leave blank to keep current password'
-      : 'required for new users (min 8 chars)';
+      : 'required · min 8 characters';
   }
   if (passwordInput) {
     passwordInput.required = !editing;
     passwordInput.placeholder = editing ? 'Leave blank to keep current password' : '';
   }
-  form.dataset.mode = editing ? 'edit' : 'create';
-}
-
-async function loadUsers() {
-  if (!hasPermission('users')) return;
-  state.users = await jsonFetch('/api/admin/users');
-  const list = document.querySelector('#users-list');
-  const roleSelect = document.querySelector('#user-form [name="role"]');
   if (roleSelect) {
     [...roleSelect.options].forEach((option) => {
       if (option.value === 'admin') option.hidden = !isSuperAdmin();
     });
     if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
   }
+  form.dataset.mode = editing ? 'edit' : 'create';
+}
+
+function openUserFormToast({ editing = false } = {}) {
+  const root = ensureUserFormToast();
+  renderPagePermissionBoxes();
+  window.clearTimeout(userFormToastLeaveTimer);
+  root.hidden = false;
+  playOverlayEnter(root);
+  syncUserFormMode(root.querySelector('#user-form'));
+  const focusName = editing ? 'display_name' : 'username';
+  window.setTimeout(() => root.querySelector(`[name="${focusName}"]`)?.focus(), 40);
+}
+
+function hideUserFormToast() {
+  const root = document.querySelector('#admin-user-form-toast');
+  if (!root || root.hidden) return;
+  window.clearTimeout(userFormToastLeaveTimer);
+  userFormToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
+}
+
+function resetUserForm(form = document.querySelector('#user-form')) {
+  if (!form) return;
+  form.reset();
+  formControl(form, 'id').value = '';
+  if (form.elements.active) form.elements.active.checked = true;
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => { input.checked = false; });
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = '';
+  syncUserFormMode(form);
+}
+
+function openNewUserToast() {
+  ensureUserFormToast();
+  resetUserForm();
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = 'Saving will email a welcome invite with login details.';
+  openUserFormToast({ editing: false });
+}
+
+function openEditUserToast(user) {
+  if (!user || !canEditManagedUser(user)) return;
+  const root = ensureUserFormToast();
+  const form = root.querySelector('#user-form');
+  renderPagePermissionBoxes();
+  fillForm(form, {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    password: '',
+  });
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+    input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+  });
+  form.elements.active.checked = Boolean(user.active);
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = 'Changes save only — no email is sent.';
+  openUserFormToast({ editing: true });
+}
+
+async function loadUsers() {
+  if (!hasPermission('users')) return;
+  state.users = await jsonFetch('/api/admin/users');
+  const list = document.querySelector('#users-list');
+  if (!list) return;
   list.innerHTML = state.users.length
     ? state.users.map(user => {
       const editable = canEditManagedUser(user);
@@ -3966,24 +4091,7 @@ async function loadUsers() {
     : '<p class="draft">No users found.</p>';
   list.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => {
     const user = state.users.find(item => item.id === Number(button.dataset.editUser));
-    if (!user || !canEditManagedUser(user)) return;
-    const form = document.querySelector('#user-form');
-    fillForm(form, {
-      id: user.id,
-      username: user.username,
-      display_name: user.display_name,
-      role: user.role,
-      password: '',
-    });
-    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
-    });
-    form.elements.active.checked = Boolean(user.active);
-    syncUserFormMode(form);
-    const status = document.querySelector('#user-status');
-    if (status) status.textContent = `Editing ${user.display_name || user.username}. Changes save only — no email is sent.`;
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    formControl(form, 'display_name')?.focus();
+    openEditUserToast(user);
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
@@ -5375,79 +5483,81 @@ function bindForms() {
     formControl(form, 'label')?.focus();
   });
 
-  document.querySelector('#user-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#user-status');
-    const payload = formPayload(form);
-    payload.username = String(payload.username || '').trim();
-    payload.display_name = String(payload.display_name || '').trim();
-    payload.password = String(payload.password || '');
-    if (!payload.username) {
-      status.textContent = 'Username is required.';
-      return;
-    }
-    if (!payload.display_name) {
-      status.textContent = 'Display name is required.';
-      return;
-    }
-    const id = payload.id;
-    if (!id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
-      status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
-      return;
-    }
-    if (!id && !payload.password) {
-      status.textContent = 'Password is required for new users.';
-      return;
-    }
-    if (payload.password && payload.password.length < 8) {
-      status.textContent = 'Password must be at least 8 characters.';
-      return;
-    }
-    payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
-    delete payload.id;
-    if (!payload.password) delete payload.password;
-    status.textContent = id ? 'Updating…' : 'Sending invite…';
-    try {
-      const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (id) {
-        status.textContent = 'User updated.';
-      } else if (result?.invite_detail) {
-        status.textContent = result.invite_sent
-          ? `User saved. ${result.invite_detail}`
-          : `User saved, but invite email failed: ${result.invite_detail}`;
-      } else {
-        status.textContent = 'User saved.';
+  const bindUserForm = () => {
+    const form = ensureUserFormToast().querySelector('#user-form');
+    if (!form || form.dataset.boundUserSubmit === '1') return;
+    form.dataset.boundUserSubmit = '1';
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = document.querySelector('#user-status');
+      const listStatus = document.querySelector('#users-list-status');
+      const payload = formPayload(form);
+      payload.username = String(payload.username || '').trim();
+      payload.display_name = String(payload.display_name || '').trim();
+      payload.password = String(payload.password || '');
+      if (!payload.username) {
+        if (status) status.textContent = 'Username is required.';
+        return;
       }
-      form.reset();
-      form.elements.active.checked = true;
-      form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
-      syncUserFormMode(form);
-      await loadUsers();
-    } catch (error) {
-      let message = id ? 'Could not update user.' : 'Could not save user.';
+      if (!payload.display_name) {
+        if (status) status.textContent = 'Display name is required.';
+        return;
+      }
+      const id = payload.id;
+      if (!id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
+        if (status) status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
+        return;
+      }
+      if (!id && !payload.password) {
+        if (status) status.textContent = 'Password is required for new users.';
+        return;
+      }
+      if (payload.password && payload.password.length < 8) {
+        if (status) status.textContent = 'Password must be at least 8 characters.';
+        return;
+      }
+      payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
+      delete payload.id;
+      if (!payload.password) delete payload.password;
+      if (status) status.textContent = id ? 'Updating…' : 'Sending invite…';
       try {
-        const parsed = JSON.parse(String(error.message || ''));
-        if (parsed?.detail) message = parsed.detail;
-      } catch {
-        if (error?.message) message = error.message;
+        const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', {
+          method: id ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        });
+        let message = id ? 'User updated.' : 'User saved.';
+        if (!id && result?.invite_detail) {
+          message = result.invite_sent
+            ? result.invite_detail
+            : `User saved, but invite email failed: ${result.invite_detail}`;
+        }
+        if (listStatus) listStatus.textContent = message;
+        if (status) status.textContent = message;
+        hideUserFormToast();
+        resetUserForm(form);
+        await loadUsers();
+        if (!id && result?.invite_sent) {
+          showSavedToast('Invite sent.', { icon: 'envelope' });
+        } else if (id) {
+          showSavedToast('User updated.');
+        }
+      } catch (error) {
+        let message = id ? 'Could not update user.' : 'Could not save user.';
+        try {
+          const parsed = JSON.parse(String(error.message || ''));
+          if (parsed?.detail) message = parsed.detail;
+        } catch {
+          if (error?.message) message = error.message;
+        }
+        if (status) status.textContent = message;
       }
-      status.textContent = message;
-    }
-  });
+    });
+  };
+  bindUserForm();
 
   document.querySelector('#new-user')?.addEventListener('click', () => {
-    const form = document.querySelector('#user-form');
-    form.reset();
-    formControl(form, 'id').value = '';
-    form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
-    syncUserFormMode(form);
-    const status = document.querySelector('#user-status');
-    if (status) status.textContent = 'Creating a new user. Saving will email a welcome invite.';
-    formControl(form, 'username')?.focus();
+    openNewUserToast();
   });
-  syncUserFormMode(document.querySelector('#user-form'));
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
     event.preventDefault();

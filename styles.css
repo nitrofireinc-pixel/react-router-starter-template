@@ -1268,6 +1268,7 @@ body.admin-upload-open{overflow:hidden}
   font-size:clamp(1.15rem,3.4vw,1.45rem);
 }
 .admin-sponsor-form-toast,
+.admin-user-form-toast,
 .admin-password-toast{
   position:fixed;
   inset:0;
@@ -1278,8 +1279,10 @@ body.admin-upload-open{overflow:hidden}
   pointer-events:none;
 }
 .admin-sponsor-form-toast.is-visible,
+.admin-user-form-toast.is-visible,
 .admin-password-toast.is-visible{pointer-events:auto}
 .admin-sponsor-form-toast-backdrop,
+.admin-user-form-toast-backdrop,
 .admin-password-toast-backdrop{
   position:absolute;
   inset:0;
@@ -1293,10 +1296,13 @@ body.admin-upload-open{overflow:hidden}
   cursor:pointer;
 }
 .admin-sponsor-form-toast.is-visible .admin-sponsor-form-toast-backdrop,
+.admin-user-form-toast.is-visible .admin-user-form-toast-backdrop,
 .admin-password-toast.is-visible .admin-password-toast-backdrop{opacity:1}
 .admin-sponsor-form-toast.is-leaving .admin-sponsor-form-toast-backdrop,
+.admin-user-form-toast.is-leaving .admin-user-form-toast-backdrop,
 .admin-password-toast.is-leaving .admin-password-toast-backdrop{opacity:0}
 .admin-sponsor-form-toast-panel,
+.admin-user-form-toast-panel,
 .admin-password-toast-panel{
   position:relative;
   z-index:1;
@@ -1307,12 +1313,16 @@ body.admin-upload-open{overflow:hidden}
   opacity:0;
   transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
 }
+.admin-user-form-toast-panel{width:min(480px,100%);max-height:min(90vh,820px)}
 .admin-password-toast-panel{width:min(360px,100%);max-height:none;overflow:visible}
 .admin-sponsor-form-toast.is-visible .admin-sponsor-form-toast-panel,
+.admin-user-form-toast.is-visible .admin-user-form-toast-panel,
 .admin-password-toast.is-visible .admin-password-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
 .admin-sponsor-form-toast.is-leaving .admin-sponsor-form-toast-panel,
+.admin-user-form-toast.is-leaving .admin-user-form-toast-panel,
 .admin-password-toast.is-leaving .admin-password-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
 .admin-sponsor-form-toast-card,
+.admin-user-form-toast-card,
 .admin-password-toast-card{
   padding:22px 22px 20px;
   border-radius:22px;
@@ -1322,6 +1332,7 @@ body.admin-upload-open{overflow:hidden}
   box-shadow:0 24px 60px rgba(0,16,32,.45);
 }
 .admin-sponsor-form-toast-card h3,
+.admin-user-form-toast-card h3,
 .admin-password-toast-card h3{
   margin:0 0 14px;
   color:#ff6b6b;
@@ -1353,6 +1364,7 @@ body.admin-upload-open{overflow:hidden}
 }
 .admin-sponsor-current-logo[hidden]{display:none!important}
 .admin-sponsor-form-toast-card label,
+.admin-user-form-toast-card label,
 .admin-password-toast-card label{
   display:grid;
   gap:5px;
@@ -1362,6 +1374,7 @@ body.admin-upload-open{overflow:hidden}
   color:rgba(255,255,255,.9);
 }
 .admin-sponsor-form-toast-card label.checkline,
+.admin-user-form-toast-card label.checkline,
 .admin-password-toast-card label.checkline{
   display:flex;
   align-items:center;
@@ -1370,6 +1383,8 @@ body.admin-upload-open{overflow:hidden}
 }
 .admin-sponsor-form-toast-card input,
 .admin-sponsor-form-toast-card select,
+.admin-user-form-toast-card input,
+.admin-user-form-toast-card select,
 .admin-password-toast-card input{
   padding:9px 11px;
   border-radius:10px;
@@ -1380,15 +1395,36 @@ body.admin-upload-open{overflow:hidden}
   font-size:.92rem;
 }
 .admin-sponsor-form-toast-card input[type="checkbox"],
+.admin-user-form-toast-card input[type="checkbox"],
 .admin-password-toast-card input[type="checkbox"]{
   width:auto;
   padding:0;
 }
-.admin-sponsor-form-toast-card label span{font-weight:600;opacity:.8}
+.admin-sponsor-form-toast-card label span,
+.admin-user-form-toast-card label small{font-weight:600;opacity:.8}
+.admin-user-form-toast-card fieldset{
+  margin:0 0 12px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:12px;
+}
+.admin-user-form-toast-card legend{
+  padding:0 6px;
+  font-size:.72rem;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:rgba(255,255,255,.75);
+}
+.admin-user-form-toast-card #page-permission-boxes{
+  display:grid;
+  gap:6px;
+}
 .admin-password-toast.is-required .admin-password-toast-actions{
   grid-template-columns:1fr;
 }
 .admin-sponsor-form-toast-actions,
+.admin-user-form-toast-actions,
 .admin-password-toast-actions{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -1396,6 +1432,7 @@ body.admin-upload-open{overflow:hidden}
   margin-top:12px;
 }
 .admin-sponsor-form-toast-actions .btn,
+.admin-user-form-toast-actions .btn,
 .admin-password-toast-actions .btn{
   width:100%;
   min-height:40px;
@@ -1403,12 +1440,14 @@ body.admin-upload-open{overflow:hidden}
   font-size:.88rem;
 }
 .admin-sponsor-form-toast-actions .btn.outline,
+.admin-user-form-toast-actions .btn.outline,
 .admin-password-toast-actions .btn.outline{
   background:transparent;
   border:1px solid rgba(255,255,255,.35);
   color:#fff;
 }
 .admin-sponsor-form-toast-status,
+.admin-user-form-toast-status,
 .admin-password-toast-status{
   margin:8px 0 0;
   min-height:1.2em;
@@ -1466,7 +1505,9 @@ body.admin-upload-open{overflow:hidden}
   .admin-password-toast-backdrop,
   .admin-password-toast-panel,
   .admin-sponsor-form-toast-backdrop,
-  .admin-sponsor-form-toast-panel{transition:none}
+  .admin-sponsor-form-toast-panel,
+  .admin-user-form-toast-backdrop,
+  .admin-user-form-toast-panel{transition:none}
 }
 
 /* Homepage sponsor fly-in ad — centered modal */
