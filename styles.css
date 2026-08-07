@@ -32,7 +32,7 @@ header.site-header{position:sticky;top:0;z-index:50;display:flex;flex-direction:
   top:auto;
   z-index:2;
 }
-.header-inner{position:relative;width:100%;max-width:var(--max);margin:auto;padding:12px 20px;display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;column-gap:26px;row-gap:0;box-sizing:border-box}.brand{display:flex;align-items:center;justify-content:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:0;text-align:center}.brand img,.brand .brand-logo,.brand .brand-mark{width:50px;height:50px;object-fit:contain;flex:0 0 auto}.brand .brand-mark{border-radius:50%}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1;text-align:center}
+.header-inner{position:relative;width:100%;max-width:none;margin:0;padding:14px 20px;display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;column-gap:26px;row-gap:0;box-sizing:border-box}.brand{display:inline-flex;align-items:center;justify-content:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:0;margin:0 auto;text-align:center}.brand img,.brand .brand-logo,.brand .brand-mark{width:50px;height:50px;object-fit:contain;flex:0 0 auto}.brand .brand-mark{border-radius:50%}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1;text-align:center}
 /* Brand/title row first; nav always on its own full-width line beneath. */
 header.site-header nav{
   display:flex;
@@ -51,17 +51,18 @@ header.site-header nav a{font-size:.86rem;font-weight:800;color:var(--navy);padd
 header.site-header nav a:hover,
 header.site-header nav a:focus{background:#eef3fa;outline:none}
 .menu-button{display:none;position:absolute;right:20px;top:50%;transform:translateY(-50%);margin:0;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy);z-index:2}
-/* Desktop nav bar: full-bleed utility navy, gold links with black glow */
+/* Desktop nav bar: full-bleed utility navy, gold links centered */
 @media(min-width:761px){
   header.site-header nav{
     width:100%;
     max-width:none;
     margin:0;
-    padding:3px max(20px, calc(50% - (var(--max) / 2) + 20px));
+    padding:3px 20px;
     border-top:0;
     border-radius:0;
     background:var(--navy);
     box-shadow:none;
+    justify-content:center;
   }
   header.site-header nav a{
     padding:4px 10px;
@@ -99,11 +100,11 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 /* Phones/small tablets only: collapse into Menu. Keep full link row at 1024x768 and similar. */
 @media(max-width:760px){
   .utility{display:none}
-  .header-inner{position:relative;flex-wrap:wrap;align-items:flex-start;padding:12px 20px;row-gap:10px;overflow-x:clip}
-  .brand{flex:1 1 auto;min-width:0;max-width:calc(100% - 96px);gap:10px}
+  .header-inner{flex-wrap:nowrap;align-items:center;justify-content:center;padding:12px 72px 12px 20px;row-gap:0;overflow-x:clip}
+  .brand{flex:0 1 auto;min-width:0;max-width:100%;gap:10px}
   .brand .brand-logo,.brand .brand-mark{width:44px;height:44px}
   .brand span{font-size:.95rem;min-width:0;overflow-wrap:anywhere}
-  .menu-button{display:inline-flex;margin:0;align-self:flex-start}
+  .menu-button{display:inline-flex}
   header.site-header nav{display:none!important;position:absolute;left:20px;right:20px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
   header.site-header nav a{
