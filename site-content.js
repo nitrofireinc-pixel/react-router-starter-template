@@ -179,15 +179,19 @@ function normalizeSponsorAdSeconds(value, fallback = 6) {
 function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   if (!sponsor || document.querySelector('.sponsor-flyin')) return;
 
+  const tierRaw = String(sponsor.tier || sponsor.level || sponsor.tier_label || '').toLowerCase();
+  const tier = /\bgold\b/.test(tierRaw) ? 'gold' : /\bsilver\b/.test(tierRaw) ? 'silver' : /\bbronze\b/.test(tierRaw) ? 'bronze' : '';
+  const tierClass = tier ? ` tier-${tier}` : '';
   const logo = sponsor.logo_url
     ? `<span class="sponsor-flyin-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>`
     : `<span class="sponsor-flyin-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
 
   const root = document.createElement('aside');
-  root.className = 'sponsor-flyin';
+  root.className = `sponsor-flyin${tierClass}`;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
+  if (tier) root.dataset.sponsorTier = tier;
   root.innerHTML = `
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">
@@ -197,7 +201,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
         <div class="sponsor-flyin-copy">
           <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
           <strong>${escapeHtml(sponsor.name)}</strong>
-          <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
+          <span class="sponsor-flyin-tier">${escapeHtml(sponsor.level || 'Sponsor')}</span>
           <em>View all sponsors</em>
         </div>
       </a>
@@ -260,10 +264,13 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
+    const tierRaw = String(sponsor.tier || sponsor.level || '').toLowerCase();
+    const tier = /\bgold\b/.test(tierRaw) ? 'gold' : /\bsilver\b/.test(tierRaw) ? 'silver' : /\bbronze\b/.test(tierRaw) ? 'bronze' : '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
   }).join('');
   return `
     <div class="wrap sponsor-marquee-bar">
