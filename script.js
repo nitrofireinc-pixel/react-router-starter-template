@@ -54,7 +54,7 @@ function ensureMaintenancePreviewBanner() {
   banner.className = 'maintenance-preview-banner';
   banner.setAttribute('role', 'status');
   banner.setAttribute('data-maintenance-preview-banner', '');
-  banner.innerHTML = '<strong>Maintenance mode is on.</strong> <span>You’re previewing the live site as staff. The public still sees the maintenance page.</span> <a href="/admin">Back to CMS</a>';
+  banner.innerHTML = '<strong>Maintenance mode is on.</strong> <span>Super Admin preview — the public and other users still see the maintenance page.</span> <a href="/admin">Back to CMS</a>';
   document.body.classList.add('maintenance-preview');
   document.body.insertBefore(banner, document.body.firstChild);
 }
@@ -72,7 +72,8 @@ function ensureMaintenancePreviewBanner() {
       || site.maintenance_mode === 1
       || site.maintenance_mode === '1';
     if (!enabled) return;
-    if (session && session.logged_in) {
+    // Only Super Admins may preview public pages during maintenance.
+    if (session && session.is_super_admin) {
       ensureMaintenancePreviewBanner();
       return;
     }

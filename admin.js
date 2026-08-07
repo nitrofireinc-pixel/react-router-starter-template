@@ -4719,7 +4719,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. Public visitors see maintenance.html. Logged-in staff can still preview site pages with a banner.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });

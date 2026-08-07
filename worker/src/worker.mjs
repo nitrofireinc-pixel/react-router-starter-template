@@ -188,7 +188,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-maintenance-preview-20260807-1';
+const ASSET_VERSION = 'admin-maintenance-preview-20260807-2';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -695,7 +695,7 @@ export function shouldRedirectToMaintenance(pathname = '/', site = {}, { bypass 
 export function renderMaintenancePreviewBanner() {
   return `<div class="maintenance-preview-banner" role="status" data-maintenance-preview-banner>
   <strong>Maintenance mode is on.</strong>
-  <span>You’re previewing the live site as staff. The public still sees the maintenance page.</span>
+  <span>Super Admin preview — the public and other users still see the maintenance page.</span>
   <a href="/admin">Back to CMS</a>
 </div>`;
 }
@@ -4338,7 +4338,10 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env);
-    return jsonResponse({ logged_in: Boolean(user) });
+    return jsonResponse({
+      logged_in: Boolean(user),
+      is_super_admin: Boolean(user) && isSuperAdmin(user),
+    });
   }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
@@ -6068,7 +6071,9 @@ async function serveStaticOrCms(request, env, url) {
   await initDb(env);
   const site = await getSite(env);
   const maintenanceOn = isMaintenanceMode(site);
-  const loggedIn = Boolean(await currentUser(request, env));
+  const user = await currentUser(request, env);
+  const loggedIn = Boolean(user);
+  const superAdmin = loggedIn && isSuperAdmin(user);
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
@@ -6082,8 +6087,8 @@ async function serveStaticOrCms(request, env, url) {
         },
       });
     }
-    // Logged-in staff preview the real site instead of staying on the public maintenance page.
-    if (loggedIn) {
+    // Super admins preview the real site; everyone else stays on the public maintenance page.
+    if (superAdmin) {
       return new Response(null, {
         status: 302,
         headers: {
@@ -6094,8 +6099,8 @@ async function serveStaticOrCms(request, env, url) {
     }
     return htmlResponse(renderMaintenancePage(site));
   }
-  // Public visitors get the maintenance page; logged-in staff can preview site pages.
-  if (shouldRedirectToMaintenance(url.pathname, site, { bypass: loggedIn })) {
+  // Public + non-super-admin users get the maintenance page. Super admins can preview.
+  if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
     return new Response(null, {
       status: 302,
@@ -6120,7 +6125,7 @@ async function serveStaticOrCms(request, env, url) {
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
         loggedIn,
-        maintenancePreview: maintenanceOn && loggedIn,
+        maintenancePreview: maintenanceOn && superAdmin,
       }));
     }
   }
@@ -6219,7 +6224,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="button" data-open-social-tab>Open Social / Facebook</button>
   </div>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Publish</p><h1>Social / Facebook</h1><p>Connect the band Facebook Page through Zernio, then publish or schedule posts from the CMS.</p></div></div>
 <div class="editor-layout">

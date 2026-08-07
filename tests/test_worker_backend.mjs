@@ -462,8 +462,11 @@ test('maintenance mode redirects all public HTML pages except maintenance itself
   assert.equal(shouldRedirectToMaintenance('/contact.html', off), false);
   assert.equal(shouldRedirectToMaintenance('/contact.html', on, { bypass: true }), false);
   assert.equal(shouldRedirectToMaintenance('/', on, { bypass: true }), false);
+  // Non-super-admin visitors still redirect when bypass is false.
+  assert.equal(shouldRedirectToMaintenance('/sponsors.html', on, { bypass: false }), true);
   const banner = renderMaintenancePreviewBanner();
   assert.match(banner, /Maintenance mode is on/);
+  assert.match(banner, /Super Admin preview/);
   assert.match(banner, /data-maintenance-preview-banner/);
   assert.match(banner, /\/admin/);
 });
