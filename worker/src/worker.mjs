@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'public-brand-blue-regiment-20260807-2';
+const ASSET_VERSION = 'public-brand-blue-regiment-20260807-3';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
