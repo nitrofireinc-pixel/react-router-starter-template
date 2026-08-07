@@ -129,12 +129,25 @@ function ensurePasswordToast() {
   return root;
 }
 
-function showPasswordToast() {
+function mustChangePassword() {
+  return Boolean(state.me?.user?.must_change_password);
+}
+
+function showPasswordToast({ required = false } = {}) {
   const root = ensurePasswordToast();
   const form = root.querySelector('#password-form');
   const status = root.querySelector('#password-status');
+  const forceRequired = required || mustChangePassword();
   form?.reset();
-  if (status) status.textContent = '';
+  if (status) {
+    status.textContent = forceRequired
+      ? 'Please choose a new password before continuing.'
+      : '';
+  }
+  root.classList.toggle('is-required', forceRequired);
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = forceRequired;
+  });
   window.clearTimeout(passwordToastLeaveTimer);
   root.hidden = false;
   root.classList.remove('is-leaving');
@@ -145,8 +158,13 @@ function showPasswordToast() {
 }
 
 function hidePasswordToast() {
+  if (mustChangePassword()) return;
   const root = document.querySelector('#admin-password-toast');
   if (!root || root.hidden) return;
+  root.classList.remove('is-required');
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = false;
+  });
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
   window.clearTimeout(passwordToastLeaveTimer);
@@ -4624,6 +4642,9 @@ function bindMinutesPanel() {
 async function refreshAll() {
   await loadMe();
   await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
+  if (mustChangePassword()) {
+    showPasswordToast({ required: true });
+  }
 }
 
 function bindPasswordControls() {
@@ -4665,6 +4686,7 @@ function bindPasswordControls() {
           confirm_password: confirmPassword,
         }),
       });
+      if (state.me?.user) state.me.user.must_change_password = false;
       form.reset();
       if (status) status.textContent = '';
       hidePasswordToast();
@@ -5114,6 +5136,10 @@ function bindForms() {
       return;
     }
     const id = payload.id;
+    if (!id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
+      status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
+      return;
+    }
     if (!id && !payload.password) {
       status.textContent = 'Password is required for new users.';
       return;
@@ -5127,8 +5153,14 @@ function bindForms() {
     if (!payload.password) delete payload.password;
     status.textContent = 'Saving…';
     try {
-      await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      status.textContent = 'User saved.';
+      const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      if (!id && result?.invite_detail) {
+        status.textContent = result.invite_sent
+          ? `User saved. ${result.invite_detail}`
+          : `User saved, but invite email failed: ${result.invite_detail}`;
+      } else {
+        status.textContent = 'User saved.';
+      }
       form.reset();
       form.elements.active.checked = true;
       form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });

@@ -1266,6 +1266,9 @@ body.admin-upload-open{overflow:hidden}
   font:inherit;
   font-size:.92rem;
 }
+.admin-password-toast.is-required .admin-password-toast-actions{
+  grid-template-columns:1fr;
+}
 .admin-password-toast-actions{
   display:grid;
   grid-template-columns:1fr 1fr;

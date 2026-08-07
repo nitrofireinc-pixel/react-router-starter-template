@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
+const ASSET_VERSION = 'user-welcome-invite-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -468,7 +468,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
@@ -544,6 +544,11 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN state TEXT NOT NULL DEFAULT 'NC'").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -3578,24 +3583,32 @@ async function getPageByPath(env, path) {
 async function getUserByUsername(env, username) {
   const normalized = String(username || '').trim();
   if (!normalized) return null;
-  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(normalized).first();
+  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE username = ?').bind(normalized).first();
   if (direct) return direct;
   // Bootstrap alias: allow "admin" (or the configured bootstrap username) to reach the
   // active site administrator even after the account was renamed to an email address.
   const bootstrap = String(adminUsername(env) || 'admin').trim().toLowerCase();
   if (normalized.toLowerCase() === 'admin' || normalized.toLowerCase() === bootstrap) {
-    return env.DB.prepare("SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1").first();
+    return env.DB.prepare("SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1").first();
   }
   return null;
 }
 
 async function getUserById(env, id) {
-  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE id = ? AND active = 1').bind(id).first();
+  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, must_change_password FROM users WHERE id = ? AND active = 1').bind(id).first();
 }
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, username: user.username, display_name: user.display_name, role: user.role, permissions: parsePermissions(user.permissions), active: Boolean(user.active) };
+  return {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    permissions: parsePermissions(user.permissions),
+    active: Boolean(user.active),
+    must_change_password: Boolean(Number(user.must_change_password)),
+  };
 }
 
 function canEditPage(user, slug) {
@@ -3860,8 +3873,66 @@ async function requirePermission(request, env, scope) {
   return auth;
 }
 
-async function updatePassword(env, userId, newPassword) {
-  await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(newPassword), userId).run();
+async function updatePassword(env, userId, newPassword, { mustChangePassword = false } = {}) {
+  await env.DB.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?')
+    .bind(await hashPassword(newPassword), mustChangePassword ? 1 : 0, userId)
+    .run();
+}
+
+export function buildUserWelcomeInvite({
+  username,
+  password,
+  loginUrl = 'https://efhsband.org/admin',
+} = {}) {
+  const subject = 'Welcome to EFHSBand.org!';
+  const intro = 'Welcome to the new East Forsyth High School Blue Regiment website! Below are your login credentials. Please change your password after login. Thank you for being a part of EFHSBand.org and helping to support our students.';
+  const safeUser = String(username || '').trim();
+  const safePassword = String(password || '');
+  const safeLogin = String(loginUrl || 'https://efhsband.org/admin').trim() || 'https://efhsband.org/admin';
+  const text = [
+    intro,
+    '',
+    `Username: ${safeUser}`,
+    `Temporary password: ${safePassword}`,
+    '',
+    `Sign in: ${safeLogin}`,
+  ].join('\n');
+  const html = [
+    `<p>${escapeHtml(intro)}</p>`,
+    `<p><strong>Username:</strong> ${escapeHtml(safeUser)}<br>`,
+    `<strong>Temporary password:</strong> ${escapeHtml(safePassword)}</p>`,
+    `<p><a href="${escapeHtml(safeLogin)}">Sign in to the admin CMS</a></p>`,
+  ].join('');
+  return { subject, text, html, to: safeUser.toLowerCase() };
+}
+
+export async function sendUserWelcomeInvite(env, { username, password, replyTo } = {}) {
+  const invite = buildUserWelcomeInvite({ username, password });
+  if (!isValidEmail(invite.to)) {
+    return { ok: false, detail: 'Username must be a valid email address to send the welcome invite.' };
+  }
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, detail: 'Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.' };
+  }
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
+  if (!isValidEmail(fromEmail)) {
+    return { ok: false, detail: 'CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain.' };
+  }
+  try {
+    await sendViaResend(env, {
+      to: invite.to,
+      replyTo: isValidEmail(replyTo) ? String(replyTo).trim().toLowerCase() : undefined,
+      subject: invite.subject,
+      text: invite.text,
+      html: invite.html,
+      fromEmail,
+      fromName,
+    });
+    return { ok: true, to: invite.to };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Could not send welcome invite email.' };
+  }
 }
 
 export function validateSelfPasswordChange(payload = {}) {
@@ -4929,16 +5000,19 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/users' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users ORDER BY username').all();
+    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password FROM users ORDER BY username').all();
     return jsonResponse((rows.results || []).map(publicUser));
   }
   if (url.pathname === '/api/admin/users' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     const payload = await request.json();
-    const username = String(payload.username || '').trim();
+    const username = String(payload.username || '').trim().toLowerCase();
     const password = String(payload.password || '');
     if (!username || !password) return jsonResponse({ detail: 'Username and password are required' }, 422);
+    if (!isValidEmail(username)) {
+      return jsonResponse({ detail: 'Username must be a valid email address so we can send the welcome invite.' }, 422);
+    }
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
@@ -4947,9 +5021,31 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: 'Only Super Admins can create Super Admin accounts' }, 403);
     }
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
-      const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
-      return jsonResponse(publicUser(created));
+      const result = await env.DB.prepare(
+        'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1)',
+      ).bind(
+        username,
+        displayName,
+        await hashPassword(password),
+        wantsAdmin ? 'admin' : 'editor',
+        JSON.stringify(parsePermissions(payload.permissions)),
+        payload.active === false ? 0 : 1,
+      ).run();
+      const created = await env.DB.prepare(
+        'SELECT id, username, display_name, role, permissions, active, must_change_password FROM users WHERE id = ?',
+      ).bind(result.meta.last_row_id).first();
+      const invite = await sendUserWelcomeInvite(env, {
+        username,
+        password,
+        replyTo: auth.user?.username,
+      });
+      return jsonResponse({
+        ...publicUser(created),
+        invite_sent: Boolean(invite.ok),
+        invite_detail: invite.ok
+          ? `Welcome invite emailed to ${invite.to}.`
+          : (invite.detail || 'User saved, but the welcome invite could not be sent.'),
+      });
     } catch (error) {
       const message = String(error?.message || error || '');
       if (message.includes('UNIQUE') || message.includes('unique')) {
@@ -4978,8 +5074,8 @@ async function handleApi(request, env, url) {
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password);
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(id).first()));
+    if (payload.password) await updatePassword(env, id, payload.password, { mustChangePassword: true });
+    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
