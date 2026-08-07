@@ -670,6 +670,10 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   const pdf = Buffer.from(invoice.pdf_base64, 'base64').toString('latin1');
   assert.match(pdf, /^%PDF-/);
   assert.match(pdf, /Acme Music/);
+  assert.match(pdf, /DONATION INVOICE/);
+  assert.match(pdf, /East Forsyth Band Boosters/);
+  assert.match(pdf, /\/Subtype \/Image/);
+  assert.match(pdf, /Helvetica-Bold/);
 });
 
 test('applicationFromSponsorRecord builds manual-entry invoice source', () => {

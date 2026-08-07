@@ -1,4 +1,9 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
+import {
+  INVOICE_LOGO_HEIGHT,
+  INVOICE_LOGO_RGB_FLATE_BASE64,
+  INVOICE_LOGO_WIDTH,
+} from './invoice-logo-rgb.mjs';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -188,8 +193,9 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'sponsor-invoice-pdf-20260807-1';
+const ASSET_VERSION = 'sponsor-invoice-pdf-20260807-2';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -2792,21 +2798,14 @@ export function pdfSafeText(value = '') {
     .replace(/\)/g, '\\)');
 }
 
-export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
-  const content = ['BT', '/F1 18 Tf', '50 760 Td', `(${pdfSafeText(title)}) Tj`, '/F1 11 Tf'];
-  for (const line of lines) {
-    content.push('0 -16 Td');
-    content.push(`(${pdfSafeText(line)}) Tj`);
-  }
-  content.push('ET');
-  const stream = `${content.join('\n')}\n`;
-  const objects = [
-    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
-    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
-    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n',
-    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
-    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
-  ];
+function pdfBinaryFromBase64(base64 = '') {
+  const raw = atob(String(base64 || ''));
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) out += String.fromCharCode(raw.charCodeAt(i) & 0xff);
+  return out;
+}
+
+function assemblePdfBase64(objects = []) {
   let pdf = '%PDF-1.4\n';
   const offsets = [0];
   for (const obj of objects) {
@@ -2823,6 +2822,125 @@ export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
   let binary = '';
   for (let i = 0; i < pdf.length; i += 1) binary += String.fromCharCode(pdf.charCodeAt(i) & 0xff);
   return btoa(binary);
+}
+
+function pdfTextAt(x, y, text, { font = 'F1', size = 11 } = {}) {
+  return `BT /${font} ${size} Tf ${x} ${y} Td (${pdfSafeText(text)}) Tj ET`;
+}
+
+export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
+  const content = ['BT', '/F1 18 Tf', '50 760 Td', `(${pdfSafeText(title)}) Tj`, '/F1 11 Tf'];
+  for (const line of lines) {
+    content.push('0 -16 Td');
+    content.push(`(${pdfSafeText(line)}) Tj`);
+  }
+  content.push('ET');
+  const stream = `${content.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+  ]);
+}
+
+export function buildSponsorInvoicePdfBase64({
+  invoiceNumber = '',
+  paidLabel = '',
+  businessName = '',
+  address = '',
+  phone = '',
+  email = '',
+  tierLabel = '',
+  amountDisplay = '',
+} = {}) {
+  const logoBytes = pdfBinaryFromBase64(INVOICE_LOGO_RGB_FLATE_BASE64);
+  const logoW = Number(INVOICE_LOGO_WIDTH) || 120;
+  const logoH = Number(INVOICE_LOGO_HEIGHT) || 120;
+  const drawLogo = 72;
+  const left = 48;
+  const right = 564;
+  const navy = '0.063 0.176 0.365';
+  const slate = '0.392 0.455 0.545';
+  const soft = '0.961 0.973 0.988';
+
+  const ops = [];
+  // Letterhead bar
+  ops.push(`${soft} rg ${left} 720 ${right - left} 48 re f`);
+  ops.push(`${navy} RG 1.5 w ${left} 720 m ${right} 720 l S`);
+  // Logo
+  ops.push(`q ${drawLogo} 0 0 ${drawLogo} ${left} 722 cm /Im1 Do Q`);
+  // Org block
+  ops.push(pdfTextAt(left + drawLogo + 14, 752, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left + drawLogo + 14, 736, 'East Forsyth High School Band', { size: 10 }));
+  ops.push(pdfTextAt(left + drawLogo + 14, 722, 'efhsband.org', { size: 10 }));
+  ops.push('0 g');
+  // Invoice title block (right)
+  ops.push(pdfTextAt(430, 752, 'DONATION INVOICE', { font: 'F2', size: 13 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(430, 736, `Invoice ${invoiceNumber}`, { size: 10 }));
+  ops.push(pdfTextAt(430, 722, `Date ${paidLabel}`, { size: 10 }));
+  ops.push('0 g');
+
+  // Bill to / status
+  ops.push(pdfTextAt(left, 680, 'BILL TO', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(360, 680, 'PAYMENT STATUS', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(left, 662, businessName || 'Sponsor', { font: 'F2', size: 12 }));
+  ops.push(`${navy} rg`);
+  ops.push(pdfTextAt(360, 662, 'PAID', { font: 'F2', size: 14 }));
+  ops.push('0 g');
+  let y = 644;
+  for (const line of [address, phone, email].map((value) => String(value || '').trim()).filter(Boolean)) {
+    ops.push(`${slate} rg`);
+    ops.push(pdfTextAt(left, y, line, { size: 10 }));
+    ops.push('0 g');
+    y -= 14;
+  }
+
+  // Table header
+  const tableTop = Math.min(y - 18, 600);
+  ops.push(`${navy} rg ${left} ${tableTop - 4} ${right - left} 22 re f`);
+  ops.push('1 g');
+  ops.push(pdfTextAt(left + 10, tableTop + 3, 'Description', { font: 'F2', size: 10 }));
+  ops.push(pdfTextAt(470, tableTop + 3, 'Amount', { font: 'F2', size: 10 }));
+  ops.push('0 g');
+  // Table row
+  const rowTop = tableTop - 28;
+  ops.push(`${soft} rg ${left} ${rowTop - 8} ${right - left} 28 re f`);
+  ops.push(pdfTextAt(left + 10, rowTop + 2, `${tierLabel || 'Sponsor package'} sponsorship donation`, { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop + 2, amountDisplay || '$0', { font: 'F2', size: 11 }));
+
+  // Totals
+  ops.push(`${navy} RG 1 w ${360} ${rowTop - 36} m ${right} ${rowTop - 36} l S`);
+  ops.push(pdfTextAt(360, rowTop - 54, 'Total donation', { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop - 54, amountDisplay || '$0', { font: 'F2', size: 12 }));
+
+  // Notes
+  const noteTop = rowTop - 100;
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, noteTop, 'Thank you for your donation supporting the East Forsyth High School Band.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 14, 'This payment is recorded as a donation to the East Forsyth Band Boosters.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 28, 'A copy of this invoice was emailed for your records.', { size: 10 }));
+  ops.push('0 g');
+
+  // Footer
+  ops.push(`${navy} RG 1 w ${left} 72 m ${right} 72 l S`);
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, 56, 'East Forsyth Band Boosters  ·  Kernersville, NC  ·  https://efhsband.org', { size: 9 }));
+  ops.push('0 g');
+
+  const stream = `${ops.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R /F2 6 0 R >> /XObject<< /Im1 7 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+    '6 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>endobj\n',
+    `7 0 obj<< /Type /XObject /Subtype /Image /Width ${logoW} /Height ${logoH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${logoBytes.length} >>stream\n${logoBytes}endstream\nendobj\n`,
+  ]);
 }
 
 export function defaultSponsorTierAmountDisplay(tier = '') {
@@ -2935,36 +3053,40 @@ export function buildSponsorDonationInvoice(application = {}) {
     'https://efhsband.org',
   ].join('\n');
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
-      <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
-      <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
-      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
-      <p style="margin:0 0 18px">A PDF copy of this invoice is attached.</p>
-      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
-        <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Business / organization</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(businessName)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Address</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(address)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Phone</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(phone)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Package</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+    <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#10233c;max-width:640px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-bottom:3px solid #102d5e">
+        <img src="${escapeHtml(INVOICE_LOGO_PUBLIC_URL)}" width="64" height="64" alt="East Forsyth Blue Regiment" style="display:block;border:0;border-radius:50%">
+        <div>
+          <div style="font-size:20px;font-weight:700;color:#102d5e">East Forsyth Band Boosters</div>
+          <div style="font-size:13px;color:#64748b">Donation invoice · ${escapeHtml(invoiceNumber)}</div>
+        </div>
+      </div>
+      <p style="margin:18px 0 12px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation in support of the East Forsyth High School Band program. A PDF copy is attached for your records.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#f5f8fc;border:1px solid #d9e2ef">
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Invoice number</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Date</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Business / organization</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(businessName)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Address</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(address)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Phone</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(phone)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Email</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Package</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Amount</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b">Payment status</td><td style="padding:10px 12px;text-align:right"><strong style="color:#102d5e">Paid</strong></td></tr>
       </table>
-      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+      <p style="margin:0;color:#64748b;font-size:13px">East Forsyth Band Boosters · <a href="https://efhsband.org" style="color:#102d5e">efhsband.org</a></p>
     </div>
   `.trim();
-  const pdfLines = [
-    'East Forsyth Band Boosters',
-    'Donation invoice',
-    '',
-    'Thank you for your donation supporting the East Forsyth High School Band.',
-    '',
-    ...detailLines,
-    '',
-    'https://efhsband.org',
-  ];
-  const pdfBase64 = buildTextPdfBase64(pdfLines, { title: 'Donation Invoice' });
+  const pdfBase64 = buildSponsorInvoicePdfBase64({
+    invoiceNumber,
+    paidLabel,
+    businessName,
+    address,
+    phone,
+    email: email || '—',
+    tierLabel,
+    amountDisplay,
+  });
   return {
     to: email,
     subject,
