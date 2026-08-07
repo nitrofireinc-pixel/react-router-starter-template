@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-tester-users-20260807-1';
+const ASSET_VERSION = 'home-footer-note-cms-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -5306,11 +5306,18 @@ async function handleApi(request, env, url) {
   }
 
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
-    const auth = await requirePermission(request, env, 'site');
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    const canSite = hasPermission(auth.user, 'site');
+    const canHomeSiteFields = canSite || canManageUtilityLinks(auth.user);
+    if (!canHomeSiteFields) return jsonResponse({ detail: 'Permission required: site or page:home' }, 403);
     const payload = await request.json();
+    const homeKeys = new Set(['hero_title', 'hero_subtitle', 'footer_note']);
+    const siteOnlyKeys = new Set(['title', 'logo_url']);
     for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url']) {
       if (payload[key] === undefined) continue;
+      if (siteOnlyKeys.has(key) && !canSite) continue;
+      if (homeKeys.has(key) && !canHomeSiteFields) continue;
       let value = String(payload[key]);
       if (key === 'hero_title' || key === 'title') value = sanitizeInlineRichHtml(value) || htmlToPlainText(value);
       if (key === 'hero_subtitle' || key === 'footer_note') {
@@ -5318,7 +5325,7 @@ async function handleApi(request, env, url) {
       }
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run();
     }
-    if (payload.maintenance_mode !== undefined) {
+    if (payload.maintenance_mode !== undefined && canSite) {
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }

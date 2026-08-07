@@ -1248,8 +1248,40 @@ function markHomeHtmlEditable(html = '') {
     }
   });
 
-  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
+  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. The site footer note at the bottom appears on every public page. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
   return note + template.innerHTML;
+}
+
+function buildHomeSiteFooterEditor() {
+  const note = state.site?.footer_note
+    || 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.';
+  const html = formatRichText(note) || '<p></p>';
+  return `
+<footer class="footer cms-home-site-footer" data-cms-home-site-footer>
+  <div class="wrap">
+    <div>
+      <p class="kicker">Site footer</p>
+      <h3>Footer note</h3>
+      <p class="muted cms-home-footer-help">Shown on every public page. Use the formatting toolbar for bold, links, and more.</p>
+      <div class="cms-edit-field cms-edit-rich cms-home-footer-note" data-cms-field="footer_note" data-site-field="footer_note" data-edit-label="Footer note" contenteditable="true" role="textbox" spellcheck="true" aria-multiline="true" aria-label="Footer note" data-placeholder="Footer note shown on every public page…">${html}</div>
+      <small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small>
+    </div>
+  </div>
+</footer>`;
+}
+
+function readHomeFooterNote(preview = document.querySelector('#page-preview')) {
+  const footerNode = preview?.querySelector('[data-cms-field="footer_note"], [data-site-field="footer_note"]');
+  if (!footerNode) return '';
+  return sanitizeRichHtml(footerNode.innerHTML || '') || plainTextFromHtml(footerNode.innerHTML || '');
+}
+
+function captureHomeFooterNoteFromPreview(preview = document.querySelector('#page-preview')) {
+  const note = readHomeFooterNote(preview);
+  if (!note) return note;
+  if (!state.site) state.site = {};
+  state.site.footer_note = note;
+  return note;
 }
 
 function serializeHomePreviewHtml(preview) {
@@ -1265,8 +1297,9 @@ function serializeHomePreviewHtml(preview) {
       link.dataset.cmsHref = href;
     }
   });
+  captureHomeFooterNoteFromPreview(preview);
   const clone = preview.cloneNode(true);
-  clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field').forEach((node) => node.remove());
+  clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field, [data-cms-home-site-footer]').forEach((node) => node.remove());
   clone.querySelectorAll('[contenteditable], [data-cms-home-field], .cms-edit-field').forEach((el) => {
     el.removeAttribute('contenteditable');
     el.removeAttribute('role');
@@ -1283,14 +1316,17 @@ function serializeHomePreviewHtml(preview) {
   return clone.innerHTML.trim();
 }
 
-function extractHomeSiteFields(html = '') {
+function extractHomeSiteFields(html = '', preview = null) {
   const template = document.createElement('template');
   template.innerHTML = html;
   const titleNode = template.content.querySelector('[data-site-field="hero_title"]');
   const subtitleNode = template.content.querySelector('[data-site-field="hero_subtitle"]');
+  const footerNote = readHomeFooterNote(preview)
+    || sanitizeRichHtml(template.content.querySelector('[data-site-field="footer_note"], [data-cms-field="footer_note"]')?.innerHTML || '');
   return {
     hero_title: sanitizeInlineRichHtml(titleNode?.innerHTML || '') || plainTextFromHtml(titleNode?.innerHTML || ''),
     hero_subtitle: sanitizeRichHtml(subtitleNode?.innerHTML || '') || plainTextFromHtml(subtitleNode?.innerHTML || ''),
+    footer_note: footerNote || plainTextFromHtml(template.content.querySelector('[data-site-field="footer_note"]')?.innerHTML || ''),
   };
 }
 
@@ -1299,7 +1335,7 @@ function buildEditableHomePreview() {
   if (!base) {
     return '<div class="cms-home-preview-note"><p class="kicker">Home page</p><p>Home page HTML is missing. Refresh or restore the Home page content.</p></div>';
   }
-  return markHomeHtmlEditable(base);
+  return markHomeHtmlEditable(base) + buildHomeSiteFooterEditor();
 }
 
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
@@ -1612,6 +1648,7 @@ function currentPageSnapshot() {
       return JSON.stringify({
         page: JSON.parse(base),
         home_html: serializeHomePreviewHtml(document.querySelector('#page-preview')),
+        footer_note: readHomeFooterNote(document.querySelector('#page-preview')) || state.site?.footer_note || '',
       });
     }
     return base;
@@ -1712,17 +1749,20 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
       method: original ? 'PUT' : 'POST',
       body: JSON.stringify(payload),
     });
-    if (isHomeSave && hasPermission('site')) {
-      const siteFields = extractHomeSiteFields(payload.body_html);
-      if (siteFields.hero_title || siteFields.hero_subtitle) {
-        await jsonFetch('/api/admin/site', {
+    if (isHomeSave && (hasPermission('site') || hasPermission('pages') || canEditPage('home'))) {
+      const siteFields = extractHomeSiteFields(payload.body_html, document.querySelector('#page-preview'));
+      if (siteFields.hero_title || siteFields.hero_subtitle || siteFields.footer_note) {
+        const savedSite = await jsonFetch('/api/admin/site', {
           method: 'POST',
           body: JSON.stringify({
             ...(state.site || {}),
             hero_title: siteFields.hero_title || state.site?.hero_title,
             hero_subtitle: siteFields.hero_subtitle || state.site?.hero_subtitle,
+            footer_note: siteFields.footer_note || state.site?.footer_note,
           }),
         }).catch(() => null);
+        if (savedSite) state.site = savedSite;
+        else if (state.site && siteFields.footer_note) state.site.footer_note = siteFields.footer_note;
       }
     }
     if (status) status.textContent = 'Page saved. Public site updated.';
