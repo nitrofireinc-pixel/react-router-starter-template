@@ -184,10 +184,11 @@ export function extractSponsorTierFields(html = '') {
 }
 
 const SESSION_COOKIE = 'efband_session';
+export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'staff-email-recipients-20260807-1';
+const ASSET_VERSION = 'public-login-nav-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -407,6 +408,20 @@ async function makeSession(user, env) {
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
 
+export function isSessionFresh(issuedAtSeconds, nowSeconds = Math.floor(Date.now() / 1000), ttlSeconds = SESSION_TTL_SECONDS) {
+  const issued = Number(issuedAtSeconds);
+  const now = Number(nowSeconds);
+  const ttl = Number(ttlSeconds);
+  if (!Number.isFinite(issued) || !Number.isFinite(now) || !Number.isFinite(ttl)) return false;
+  if (issued > now + 60) return false; // reject far-future timestamps
+  return (now - issued) <= ttl;
+}
+
+export function sessionCookieHeader(token, { maxAge = SESSION_TTL_SECONDS } = {}) {
+  const age = Math.max(0, Number(maxAge) || 0);
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+}
+
 async function currentUser(request, env) {
   const value = getCookie(request, SESSION_COOKIE);
   if (!value || !value.includes('.')) return null;
@@ -415,6 +430,7 @@ async function currentUser(request, env) {
   if (supplied !== expected) return null;
   try {
     const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    if (!isSessionFresh(data.t)) return null;
     if (data.uid) return getUserById(env, Number(data.uid));
     if (data.u) return getUserByUsername(env, data.u);
   } catch {
@@ -4311,6 +4327,10 @@ async function handleApi(request, env, url) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+  if (url.pathname === '/api/session' && request.method === 'GET') {
+    const user = await currentUser(request, env);
+    return jsonResponse({ logged_in: Boolean(user) });
+  }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
   }
@@ -5863,7 +5883,7 @@ async function handleUploadGet(env, url) {
 }
 
 function clearSessionCookie() {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+  return sessionCookieHeader('', { maxAge: 0 });
 }
 
 function renderLoginHtml(nextPath = '/admin') {
@@ -5898,7 +5918,7 @@ async function handleLogin(request, env) {
     );
   }
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', `${SESSION_COOKIE}=${await makeSession(user, env)}; HttpOnly; Secure; SameSite=Lax; Path=/`);
+  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
   return response;
 }
 
@@ -5914,13 +5934,22 @@ function logout() {
   return response;
 }
 
-function renderNav(pages) {
-  return pages
-    .filter((page) => page.slug !== 'become-a-sponsor')
-    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
+export function renderStaffAuthNavLink(loggedIn = false) {
+  if (loggedIn) {
+    return '<a href="/admin" data-staff-auth-link>Staff Menu</a>';
+  }
+  return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null) {
+export function renderNav(pages, { loggedIn = false } = {}) {
+  const pageLinks = (Array.isArray(pages) ? pages : [])
+    .filter((page) => page.slug !== 'become-a-sponsor')
+    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`)
+    .join('');
+  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}`;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { loggedIn = false } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
   const marqueeHtml = renderSponsorMarqueeSection(
@@ -5942,7 +5971,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
+<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
@@ -6066,7 +6095,8 @@ async function serveStaticOrCms(request, env, url) {
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
-      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors));
+      const loggedIn = Boolean(await currentUser(request, env));
+      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, { loggedIn }));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
