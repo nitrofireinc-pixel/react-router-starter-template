@@ -2331,6 +2331,7 @@ function renderPageShortcuts() {
 function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
   document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
+  syncTesterUserButton();
 
   const panels = {
     dashboard: true,
@@ -3918,9 +3919,14 @@ function bindMailComposer() {
 
 function canEditManagedUser(user) {
   if (!user || !hasPermission('users')) return false;
+  if (user.is_tester) return isSuperAdmin();
   if (isSuperAdmin()) return true;
   // Editors with the users permission can manage other editors, not Super Admins.
   return !isSuperAdmin(user);
+}
+
+function syncTesterUserButton() {
+  document.querySelector('#new-tester')?.toggleAttribute('hidden', !isSuperAdmin());
 }
 
 let userFormToastLeaveTimer = null;
@@ -3942,12 +3948,12 @@ function ensureUserFormToast() {
         <h3 id="admin-user-form-toast-title">New User</h3>
         <form id="user-form" class="admin-user-form" novalidate>
           <input type="hidden" name="id" value="">
-          <label>Email / Username<input name="username" type="email" required autocomplete="username" placeholder="editor@example.com"></label>
-          <label>Display name<input name="display_name" required placeholder="Full name"></label>
+          <label id="user-username-label">Email / Username<input name="username" type="email" required autocomplete="username" placeholder="editor@example.com"></label>
+          <label id="user-display-name-label">Display name<input name="display_name" required placeholder="Full name"></label>
           <label id="user-password-label">Password <small id="user-password-hint">required · min 8 characters</small>
             <input name="password" type="password" autocomplete="new-password" minlength="8">
           </label>
-          <label>Role
+          <label id="user-role-label">Role
             <select name="role">
               <option value="editor">Editor</option>
               <option value="admin">Super Admin - all permissions</option>
@@ -3992,29 +3998,63 @@ function ensureUserFormToast() {
 function syncUserFormMode(form = document.querySelector('#user-form')) {
   if (!form) return;
   const editing = Boolean(String(formControl(form, 'id')?.value || '').trim());
+  const testerMode = form.dataset.mode === 'tester' || form.dataset.isTester === '1';
   const title = document.querySelector('#admin-user-form-toast-title');
   const submit = document.querySelector('#user-submit');
   const passwordHint = document.querySelector('#user-password-hint');
   const passwordInput = formControl(form, 'password');
+  const usernameInput = formControl(form, 'username');
+  const displayNameInput = formControl(form, 'display_name');
   const roleSelect = formControl(form, 'role');
-  if (title) title.textContent = editing ? 'Edit User' : 'New User';
-  if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
+  const roleLabel = document.querySelector('#user-role-label');
+  if (testerMode && !editing) {
+    if (title) title.textContent = 'Add Tester';
+    if (submit) submit.textContent = 'Create Tester';
+  } else if (testerMode && editing) {
+    if (title) title.textContent = 'Edit Tester';
+    if (submit) submit.textContent = 'Update Tester';
+  } else {
+    if (title) title.textContent = editing ? 'Edit User' : 'New User';
+    if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
+  }
   if (passwordHint) {
-    passwordHint.textContent = editing
-      ? 'optional · leave blank to keep current password'
-      : 'required · min 8 characters';
+    if (testerMode && !editing) {
+      passwordHint.textContent = 'optional · auto-generated if blank';
+    } else if (editing) {
+      passwordHint.textContent = 'optional · leave blank to keep current password';
+    } else {
+      passwordHint.textContent = 'required · min 8 characters';
+    }
   }
   if (passwordInput) {
-    passwordInput.required = !editing;
-    passwordInput.placeholder = editing ? 'Leave blank to keep current password' : '';
+    passwordInput.required = !editing && !testerMode;
+    passwordInput.placeholder = editing
+      ? 'Leave blank to keep current password'
+      : (testerMode ? 'Leave blank to auto-generate' : '');
+    if (!editing && !testerMode) passwordInput.minLength = 8;
+    else passwordInput.removeAttribute('minlength');
+  }
+  if (usernameInput) {
+    usernameInput.required = !testerMode || editing;
+    usernameInput.type = testerMode ? 'text' : 'email';
+    usernameInput.placeholder = testerMode
+      ? 'optional · e.g. tester1 (auto if blank)'
+      : 'editor@example.com';
+  }
+  if (displayNameInput) {
+    displayNameInput.required = !testerMode || editing;
+    displayNameInput.placeholder = testerMode ? 'optional · defaults to Tester' : 'Full name';
   }
   if (roleSelect) {
     [...roleSelect.options].forEach((option) => {
-      if (option.value === 'admin') option.hidden = !isSuperAdmin();
+      if (option.value === 'admin') option.hidden = !isSuperAdmin() || testerMode;
     });
-    if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
+    if (testerMode || (!isSuperAdmin() && roleSelect.value === 'admin')) roleSelect.value = 'editor';
   }
-  form.dataset.mode = editing ? 'edit' : 'create';
+  if (roleLabel) roleLabel.hidden = Boolean(testerMode);
+  if (!editing) form.dataset.mode = testerMode ? 'tester' : 'create';
+  else if (testerMode) form.dataset.mode = 'tester';
+  else form.dataset.mode = 'edit';
 }
 
 function openUserFormToast({ editing = false } = {}) {
@@ -4035,10 +4075,12 @@ function hideUserFormToast() {
   userFormToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
 }
 
-function resetUserForm(form = document.querySelector('#user-form')) {
+function resetUserForm(form = document.querySelector('#user-form'), { mode = 'create' } = {}) {
   if (!form) return;
   form.reset();
   formControl(form, 'id').value = '';
+  form.dataset.mode = mode;
+  form.dataset.isTester = mode === 'tester' ? '1' : '0';
   if (form.elements.active) form.elements.active.checked = true;
   form.querySelectorAll('input[name="permissions"]').forEach((input) => { input.checked = false; });
   const status = document.querySelector('#user-status');
@@ -4048,9 +4090,20 @@ function resetUserForm(form = document.querySelector('#user-form')) {
 
 function openNewUserToast() {
   ensureUserFormToast();
-  resetUserForm();
+  resetUserForm(undefined, { mode: 'create' });
   const status = document.querySelector('#user-status');
   if (status) status.textContent = 'Saving will email a welcome invite with login details.';
+  openUserFormToast({ editing: false });
+}
+
+function openNewTesterToast() {
+  if (!isSuperAdmin()) return;
+  ensureUserFormToast();
+  resetUserForm(undefined, { mode: 'tester' });
+  const status = document.querySelector('#user-status');
+  if (status) {
+    status.textContent = 'Tester accounts skip required fields, send no email, and are only visible to Super Admins.';
+  }
   openUserFormToast({ editing: false });
 }
 
@@ -4059,11 +4112,13 @@ function openEditUserToast(user) {
   const root = ensureUserFormToast();
   const form = root.querySelector('#user-form');
   renderPagePermissionBoxes();
+  form.dataset.mode = user.is_tester ? 'tester' : 'edit';
+  form.dataset.isTester = user.is_tester ? '1' : '0';
   fillForm(form, {
     id: user.id,
     username: user.username,
     display_name: user.display_name,
-    role: user.role,
+    role: user.is_tester ? 'editor' : user.role,
     password: '',
   });
   form.querySelectorAll('input[name="permissions"]').forEach((input) => {
@@ -4071,12 +4126,17 @@ function openEditUserToast(user) {
   });
   form.elements.active.checked = Boolean(user.active);
   const status = document.querySelector('#user-status');
-  if (status) status.textContent = 'Changes save only — no email is sent.';
+  if (status) {
+    status.textContent = user.is_tester
+      ? 'Tester changes save only — no email is sent. Still visible only to Super Admins.'
+      : 'Changes save only — no email is sent.';
+  }
   openUserFormToast({ editing: true });
 }
 
 async function loadUsers() {
   if (!hasPermission('users')) return;
+  syncTesterUserButton();
   state.users = await jsonFetch('/api/admin/users');
   const list = document.querySelector('#users-list');
   if (!list) return;
@@ -4086,9 +4146,12 @@ async function loadUsers() {
       const actions = editable
         ? `<div class="row-actions"><button type="button" data-edit-user="${user.id}">Edit</button>${Number(user.id) !== Number(state.me.user.id) ? `<button type="button" data-delete-user="${user.id}">Delete</button>` : ''}</div>`
         : '<div class="row-actions"><span class="muted">View only</span></div>';
+      const roleLabel = user.is_tester
+        ? 'TESTER'
+        : (isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR');
       return `
-    <article class="admin-row user-admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small></div>
+    <article class="admin-row user-admin-row${user.is_tester ? ' is-tester' : ''}">
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${roleLabel}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (user.is_tester ? 'tester account' : (isSuperAdmin(user) ? 'all permissions' : 'no permissions')))}</small></div>
       ${actions}
     </article>`;
     }).join('')
@@ -4100,7 +4163,7 @@ async function loadUsers() {
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
     if (!user || !canEditManagedUser(user)) return;
-    if (!confirm('Delete this user?')) return;
+    if (!confirm(user.is_tester ? 'Delete this tester account?' : 'Delete this user?')) return;
     try {
       await jsonFetch(`/api/admin/users/${button.dataset.deleteUser}`, { method: 'DELETE' });
       await loadUsers();
@@ -5504,20 +5567,21 @@ function bindForms() {
       payload.username = String(payload.username || '').trim();
       payload.display_name = String(payload.display_name || '').trim();
       payload.password = String(payload.password || '');
-      if (!payload.username) {
+      const id = payload.id;
+      const creatingTester = !id && (form.dataset.mode === 'tester' || form.dataset.isTester === '1');
+      if (!creatingTester && !payload.username) {
         if (status) status.textContent = 'Username is required.';
         return;
       }
-      if (!payload.display_name) {
+      if (!creatingTester && !payload.display_name) {
         if (status) status.textContent = 'Display name is required.';
         return;
       }
-      const id = payload.id;
-      if (!id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
+      if (!id && !creatingTester && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
         if (status) status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
         return;
       }
-      if (!id && !payload.password) {
+      if (!id && !creatingTester && !payload.password) {
         if (status) status.textContent = 'Password is required for new users.';
         return;
       }
@@ -5528,14 +5592,26 @@ function bindForms() {
       payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
       delete payload.id;
       if (!payload.password) delete payload.password;
-      if (status) status.textContent = id ? 'Updating…' : 'Sending invite…';
+      if (creatingTester) {
+        payload.is_tester = true;
+        payload.role = 'editor';
+      }
+      if (status) {
+        status.textContent = id
+          ? 'Updating…'
+          : (creatingTester ? 'Creating tester…' : 'Sending invite…');
+      }
       try {
         const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', {
           method: id ? 'PUT' : 'POST',
           body: JSON.stringify(payload),
         });
         let message = id ? 'User updated.' : 'User saved.';
-        if (!id && result?.invite_detail) {
+        if (!id && creatingTester) {
+          message = result?.generated_password
+            ? `Tester created. Username: ${result.username}. Password: ${result.generated_password}`
+            : `Tester created. Username: ${result?.username || 'saved'}. No email sent.`;
+        } else if (!id && result?.invite_detail) {
           message = result.invite_sent
             ? result.invite_detail
             : `User saved, but invite email failed: ${result.invite_detail}`;
@@ -5545,10 +5621,12 @@ function bindForms() {
         hideUserFormToast();
         resetUserForm(form);
         await loadUsers();
-        if (!id && result?.invite_sent) {
+        if (!id && creatingTester) {
+          showSavedToast('Tester created.');
+        } else if (!id && result?.invite_sent) {
           showSavedToast('Invite sent.', { icon: 'envelope' });
         } else if (id) {
-          showSavedToast('User updated.');
+          showSavedToast(result?.is_tester ? 'Tester updated.' : 'User updated.');
         }
       } catch (error) {
         let message = id ? 'Could not update user.' : 'Could not save user.';
@@ -5566,6 +5644,9 @@ function bindForms() {
 
   document.querySelector('#new-user')?.addEventListener('click', () => {
     openNewUserToast();
+  });
+  document.querySelector('#new-tester')?.addEventListener('click', () => {
+    openNewTesterToast();
   });
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {

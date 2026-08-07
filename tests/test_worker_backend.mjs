@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { applyHomeFeatureCards, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -41,6 +41,35 @@ test('buildUserWelcomeInvite includes subject credentials and login link', () =>
   assert.match(invite.html, /Temporary password:<\/strong> TempPass99/);
   assert.match(invite.html, /https:\/\/efhsband\.org\/admin/);
   assert.equal(invite.to, 'editor@example.com');
+});
+
+test('normalizeTesterCreatePayload fills missing username display name and password', () => {
+  const generated = normalizeTesterCreatePayload({});
+  assert.match(generated.username, /^tester-[a-z0-9]+$/);
+  assert.equal(generated.display_name, 'Tester');
+  assert.equal(generated.generatedPassword, true);
+  assert.equal(generated.password.length >= 8, true);
+  assert.equal(generated.active, 1);
+
+  const custom = normalizeTesterCreatePayload({
+    username: 'QA-Lab',
+    display_name: 'QA',
+    password: 'custompass1',
+    permissions: ['events'],
+    active: false,
+  });
+  assert.equal(custom.username, 'qa-lab');
+  assert.equal(custom.display_name, 'QA');
+  assert.equal(custom.password, 'custompass1');
+  assert.equal(custom.generatedPassword, false);
+  assert.deepEqual(custom.permissions, ['events']);
+  assert.equal(custom.active, 0);
+});
+
+test('generateTesterPassword returns a usable random password', () => {
+  const password = generateTesterPassword(12);
+  assert.equal(password.length, 12);
+  assert.match(password, /^[A-Za-z0-9]+$/);
 });
 
 test('jsonResponse returns JSON with status and content-type', async () => {

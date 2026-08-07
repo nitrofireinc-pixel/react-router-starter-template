@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'user-list-actions-align-20260807-1';
+const ASSET_VERSION = 'admin-tester-users-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -494,7 +494,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, is_tester INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
@@ -595,6 +595,11 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -4056,6 +4061,35 @@ function publicUser(user) {
     permissions: parsePermissions(user.permissions),
     active: Boolean(user.active),
     must_change_password: Boolean(Number(user.must_change_password)),
+    is_tester: Boolean(Number(user.is_tester)),
+  };
+}
+
+export function generateTesterPassword(length = 12) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(Math.max(8, Number(length) || 12));
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+export function normalizeTesterCreatePayload(payload = {}) {
+  const random = generateTesterPassword(8).toLowerCase();
+  let username = String(payload.username || '').trim().toLowerCase();
+  if (!username) username = `tester-${random}`;
+  let password = String(payload.password || '');
+  let generatedPassword = false;
+  if (!password) {
+    password = generateTesterPassword(12);
+    generatedPassword = true;
+  }
+  const displayName = String(payload.display_name || '').trim() || 'Tester';
+  return {
+    username,
+    password,
+    generatedPassword,
+    display_name: displayName,
+    permissions: parsePermissions(payload.permissions),
+    active: payload.active === false ? 0 : 1,
   };
 }
 
@@ -5467,13 +5501,52 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/users' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password FROM users ORDER BY username').all();
+    const rows = isSuperAdmin(auth.user)
+      ? await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users ORDER BY username').all()
+      : await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE COALESCE(is_tester, 0) = 0 ORDER BY username').all();
     return jsonResponse((rows.results || []).map(publicUser));
   }
   if (url.pathname === '/api/admin/users' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     const payload = await request.json();
+    const createTester = Boolean(payload.is_tester);
+    if (createTester && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can create tester accounts' }, 403);
+    }
+    if (createTester) {
+      const normalized = normalizeTesterCreatePayload(payload);
+      if (normalized.password.length < 8) {
+        return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
+      }
+      try {
+        const result = await env.DB.prepare(
+          'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password, is_tester) VALUES (?, ?, ?, ?, ?, ?, 0, 1)',
+        ).bind(
+          normalized.username,
+          normalized.display_name,
+          await hashPassword(normalized.password),
+          'editor',
+          JSON.stringify(normalized.permissions),
+          normalized.active,
+        ).run();
+        const created = await env.DB.prepare(
+          'SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?',
+        ).bind(result.meta.last_row_id).first();
+        return jsonResponse({
+          ...publicUser(created),
+          invite_sent: false,
+          invite_detail: 'Tester created. No welcome email was sent.',
+          generated_password: normalized.generatedPassword ? normalized.password : undefined,
+        });
+      } catch (error) {
+        const message = String(error?.message || error || '');
+        if (message.includes('UNIQUE') || message.includes('unique')) {
+          return jsonResponse({ detail: 'A user with that username already exists' }, 409);
+        }
+        throw error;
+      }
+    }
     const username = String(payload.username || '').trim().toLowerCase();
     const password = String(payload.password || '');
     if (!username || !password) return jsonResponse({ detail: 'Username and password are required' }, 422);
@@ -5489,7 +5562,7 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await env.DB.prepare(
-        'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1)',
+        'INSERT INTO users (username, display_name, password_hash, role, permissions, active, must_change_password, is_tester) VALUES (?, ?, ?, ?, ?, ?, 1, 0)',
       ).bind(
         username,
         displayName,
@@ -5499,7 +5572,7 @@ async function handleApi(request, env, url) {
         payload.active === false ? 0 : 1,
       ).run();
       const created = await env.DB.prepare(
-        'SELECT id, username, display_name, role, permissions, active, must_change_password FROM users WHERE id = ?',
+        'SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?',
       ).bind(result.meta.last_row_id).first();
       const invite = await sendUserWelcomeInvite(env, {
         username,
@@ -5532,26 +5605,36 @@ async function handleApi(request, env, url) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
+    if (Number(existing.is_tester) && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can edit tester accounts' }, 403);
+    }
     const wantsAdmin = payload.role === 'admin';
     if (wantsAdmin && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can assign the Super Admin role' }, 403);
     }
-    const role = wantsAdmin ? 'admin' : 'editor';
+    const role = Number(existing.is_tester) ? 'editor' : (wantsAdmin ? 'admin' : 'editor');
     const permissions = JSON.stringify(parsePermissions(payload.permissions));
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password, { mustChangePassword: true });
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password FROM users WHERE id = ?').bind(id).first()));
+    const nextUsername = Number(existing.is_tester)
+      ? String(payload.username || existing.username).trim().toLowerCase()
+      : String(payload.username || existing.username).trim();
+    if (!nextUsername) return jsonResponse({ detail: 'Username is required' }, 422);
+    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(nextUsername, displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
+    if (payload.password) await updatePassword(env, id, payload.password, { mustChangePassword: !Number(existing.is_tester) });
+    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, must_change_password, is_tester FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     if (Number(userMatch[1]) === auth.user.id) return jsonResponse({ detail: 'You cannot delete your own account' }, 400);
-    const existing = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
+    const existing = await env.DB.prepare('SELECT id, role, is_tester FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
     if (!existing) return jsonResponse({ detail: 'User not found' }, 404);
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can delete Super Admin accounts' }, 403);
+    }
+    if (Number(existing.is_tester) && !isSuperAdmin(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can delete tester accounts' }, 403);
     }
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
     return jsonResponse({ ok: true });
@@ -6147,7 +6230,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
+    const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 AND COALESCE(is_tester, 0) = 0 ORDER BY display_name, username').all();
     const recipients = (rows.results || [])
       .map((user) => ({
         id: user.id,
@@ -7037,7 +7120,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Manage CMS editor accounts and page-level permissions.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-user">New User</button></div></div><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div><p class="status" id="users-list-status" aria-live="polite"></p></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Manage CMS editor accounts and page-level permissions.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-tester" hidden>Add Tester</button><button class="btn primary" type="button" id="new-user">New User</button></div></div><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div><p class="status" id="users-list-status" aria-live="polite"></p></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>Events are ordered by year, month, and day. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><div class="editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

@@ -2966,6 +2966,9 @@ body.sponsor-signup-open{overflow:hidden}
   align-items:flex-start;
   gap:14px;
 }
+.user-admin-row.is-tester{
+  border-style:dashed;
+}
 .user-admin-row > div:first-child{
   min-width:0;
   overflow-wrap:anywhere;
