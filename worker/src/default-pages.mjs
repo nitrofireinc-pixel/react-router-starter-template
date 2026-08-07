@@ -21,7 +21,7 @@ export const DEFAULT_CMS_PAGES = [
     "slug": "gallery",
     "path": "/gallery.html",
     "title": "Gallery",
-    "body_html": "<section class=\"page-hero\" data-cms-layout=\"gallery\"><div class=\"page-title\"><div class=\"kicker\" data-cms-field=\"kicker\">Photos</div><h1 data-cms-field=\"heading\">Gallery</h1><p data-cms-field=\"intro\">Recent moments from rehearsals, performances, and Eagle Pride — click any photo to view it larger.</p></div></section><section class=\"content soft photo-gallery-section\"><div class=\"wrap\"><div class=\"photo-gallery\" data-photo-gallery data-sort=\"recent\"><figure class=\"gallery-item\"><img src=\"assets/efhs-photo-1.png\" alt=\"East Forsyth Band\"><figcaption>Upload band photos from the admin Photos tab.</figcaption></figure><figure class=\"gallery-item\"><img src=\"assets/efhs-photo-2.png\" alt=\"East Forsyth Band\"><figcaption>Feature performances, rehearsals, and booster events.</figcaption></figure></div></div></section>",
+    "body_html": "<section class=\"page-hero\" data-cms-layout=\"gallery\"><div class=\"page-title\"><div class=\"kicker\" data-cms-field=\"kicker\">Photos</div><h1 data-cms-field=\"heading\">Gallery</h1><p data-cms-field=\"intro\">Recent moments from rehearsals, performances, and Eagle Pride — click any photo to view it larger.</p></div></section><section class=\"content soft photo-gallery-section\"><div class=\"wrap\"><div class=\"photo-gallery\" data-photo-gallery data-sort=\"recent\"></div></div></section>",
     "nav_order": 2,
     "is_home": 0,
     "active": 1
@@ -98,4 +98,4 @@ export const DEFAULT_CMS_PAGES = [
     "is_home": 0,
     "active": 1
   }
-];
+]

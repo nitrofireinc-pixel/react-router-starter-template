@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'photo-gallery-page-20260807-1';
+const ASSET_VERSION = 'gallery-no-placeholders-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -692,12 +692,19 @@ async function initDb(env) {
   }
   const galleryPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'gallery');
   if (galleryPage) {
-    const existingGallery = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'gallery'").first();
+    const existingGallery = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'gallery'").first();
     if (!existingGallery) {
       await env.DB.prepare('UPDATE cms_pages SET nav_order = nav_order + 1 WHERE nav_order >= ?').bind(galleryPage.nav_order).run();
       await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(galleryPage.slug, galleryPage.path, galleryPage.title, galleryPage.body_html, galleryPage.nav_order, galleryPage.is_home, galleryPage.active)
         .run();
+    } else if (existingGallery.body_html) {
+      const nextGalleryHtml = ensureGalleryPageSlot(existingGallery.body_html);
+      if (nextGalleryHtml !== existingGallery.body_html) {
+        await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .bind(nextGalleryHtml, existingGallery.id)
+          .run();
+      }
     }
   }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
@@ -2462,6 +2469,25 @@ export function sortPhotosByRecent(photos = []) {
     if (bTime !== aTime) return bTime - aTime;
     return Number(b?.id || 0) - Number(a?.id || 0);
   });
+}
+
+export function ensureGalleryPageSlot(html) {
+  let source = String(html || '');
+  if (!source.trim()) return source;
+  // Never ship brand/logo placeholders inside the public Gallery photo mount.
+  if (/\bdata-photo-gallery\b/i.test(source)) {
+    source = source.replace(
+      /(<div\b[^>]*\bdata-photo-gallery\b[^>]*>)[\s\S]*?(<\/div>)/gi,
+      '$1$2',
+    );
+  }
+  if (!/\bdata-photo-gallery\b/i.test(source) && /data-cms-layout=["']gallery["']/i.test(source)) {
+    source = source.replace(
+      /(<\/section>\s*)$/i,
+      '<section class="content soft photo-gallery-section"><div class="wrap"><div class="photo-gallery" data-photo-gallery data-sort="recent"></div></div></section>$1',
+    );
+  }
+  return source;
 }
 
 export function ensureFundraisingDonateSlot(html) {

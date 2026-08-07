@@ -833,8 +833,19 @@ function sortPhotosByRecent(photos = []) {
   });
 }
 
+function isBrandGalleryPlaceholder(src = '') {
+  const value = String(src || '').toLowerCase();
+  return /efhs-photo-[12]\.png|efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/.test(value);
+}
+
 function renderPhotoGallery(container, photos = []) {
   if (!container) return;
+  // Drop any brand/logo placeholders immediately so they never flash on Gallery.
+  container.querySelectorAll('.gallery-item img').forEach((img) => {
+    if (isBrandGalleryPlaceholder(img.getAttribute('src') || img.src)) {
+      img.closest('.gallery-item')?.remove();
+    }
+  });
   let list = Array.isArray(photos) ? [...photos] : [];
   const sortMode = String(container.dataset.sort || '').trim().toLowerCase();
   if (sortMode === 'recent') list = sortPhotosByRecent(list);
@@ -844,9 +855,7 @@ function renderPhotoGallery(container, photos = []) {
     list = list.slice(0, limit);
   }
   if (!list.length) {
-    if (!container.querySelector('.gallery-item')) {
-      container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
-    }
+    container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }
   container.innerHTML = list.map((photo) => `
