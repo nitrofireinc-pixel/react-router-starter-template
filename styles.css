@@ -1409,13 +1409,20 @@ body.sponsor-flyin-open{overflow:hidden}
   letter-spacing:.14em;
   text-transform:uppercase;
 }
+.sponsor-flyin.tier-bronze .sponsor-flyin-kicker,
+.sponsor-flyin.tier-bronze .sponsor-flyin-tier{color:#e0a86a}
+.sponsor-flyin.tier-silver .sponsor-flyin-kicker,
+.sponsor-flyin.tier-silver .sponsor-flyin-tier{color:#d5dde8}
+.sponsor-flyin.tier-gold .sponsor-flyin-kicker,
+.sponsor-flyin.tier-gold .sponsor-flyin-tier{color:#ffd86a}
 .sponsor-flyin-copy strong{
   color:#fff;
   font-size:clamp(1.15rem,3.6vw,1.45rem);
   line-height:1.15;
   overflow-wrap:anywhere;
 }
-.sponsor-flyin-copy span{color:#d7e4f3;font-size:.95rem;font-weight:700}
+.sponsor-flyin-copy span,
+.sponsor-flyin-tier{color:#d7e4f3;font-size:.95rem;font-weight:700}
 .sponsor-flyin-copy em{
   margin-top:4px;
   font-style:normal;
