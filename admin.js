@@ -3919,6 +3919,27 @@ function canEditManagedUser(user) {
   return !isSuperAdmin(user);
 }
 
+function syncUserFormMode(form = document.querySelector('#user-form')) {
+  if (!form) return;
+  const editing = Boolean(String(formControl(form, 'id')?.value || '').trim());
+  const title = document.querySelector('#user-form-title');
+  const submit = document.querySelector('#user-submit');
+  const passwordHint = document.querySelector('#user-password-hint');
+  const passwordInput = formControl(form, 'password');
+  if (title) title.textContent = editing ? 'Edit User' : 'Invite New User';
+  if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
+  if (passwordHint) {
+    passwordHint.textContent = editing
+      ? 'optional · leave blank to keep current password'
+      : 'required for new users (min 8 chars)';
+  }
+  if (passwordInput) {
+    passwordInput.required = !editing;
+    passwordInput.placeholder = editing ? 'Leave blank to keep current password' : '';
+  }
+  form.dataset.mode = editing ? 'edit' : 'create';
+}
+
 async function loadUsers() {
   if (!hasPermission('users')) return;
   state.users = await jsonFetch('/api/admin/users');
@@ -3958,8 +3979,9 @@ async function loadUsers() {
       input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
     });
     form.elements.active.checked = Boolean(user.active);
+    syncUserFormMode(form);
     const status = document.querySelector('#user-status');
-    if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
+    if (status) status.textContent = `Editing ${user.display_name || user.username}. Changes save only — no email is sent.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     formControl(form, 'display_name')?.focus();
   }));
@@ -5385,10 +5407,12 @@ function bindForms() {
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
     delete payload.id;
     if (!payload.password) delete payload.password;
-    status.textContent = 'Saving…';
+    status.textContent = id ? 'Updating…' : 'Sending invite…';
     try {
       const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (!id && result?.invite_detail) {
+      if (id) {
+        status.textContent = 'User updated.';
+      } else if (result?.invite_detail) {
         status.textContent = result.invite_sent
           ? `User saved. ${result.invite_detail}`
           : `User saved, but invite email failed: ${result.invite_detail}`;
@@ -5398,9 +5422,10 @@ function bindForms() {
       form.reset();
       form.elements.active.checked = true;
       form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
+      syncUserFormMode(form);
       await loadUsers();
     } catch (error) {
-      let message = 'Could not save user.';
+      let message = id ? 'Could not update user.' : 'Could not save user.';
       try {
         const parsed = JSON.parse(String(error.message || ''));
         if (parsed?.detail) message = parsed.detail;
@@ -5414,9 +5439,15 @@ function bindForms() {
   document.querySelector('#new-user')?.addEventListener('click', () => {
     const form = document.querySelector('#user-form');
     form.reset();
+    formControl(form, 'id').value = '';
     form.elements.active.checked = true;
     form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    syncUserFormMode(form);
+    const status = document.querySelector('#user-status');
+    if (status) status.textContent = 'Creating a new user. Saving will email a welcome invite.';
+    formControl(form, 'username')?.focus();
   });
+  syncUserFormMode(document.querySelector('#user-form'));
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
     event.preventDefault();
