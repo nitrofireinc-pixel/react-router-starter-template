@@ -188,7 +188,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'gold-sponsor-contact-20260807-1';
+const ASSET_VERSION = 'sponsor-invoice-pdf-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -2781,6 +2781,99 @@ export function squareMockPayEnabled(env = {}) {
 export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
 export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
 
+export const SAMPLE_SPONSOR_INVOICE_TOKEN = 'efhs-band-sample-invoice-20260807';
+
+
+export function pdfSafeText(value = '') {
+  return String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, '?')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
+  const content = ['BT', '/F1 18 Tf', '50 760 Td', `(${pdfSafeText(title)}) Tj`, '/F1 11 Tf'];
+  for (const line of lines) {
+    content.push('0 -16 Td');
+    content.push(`(${pdfSafeText(line)}) Tj`);
+  }
+  content.push('ET');
+  const stream = `${content.join('\n')}\n`;
+  const objects = [
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const obj of objects) {
+    offsets.push(pdf.length);
+    pdf += obj;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  for (let i = 1; i < offsets.length; i += 1) {
+    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  let binary = '';
+  for (let i = 0; i < pdf.length; i += 1) binary += String.fromCharCode(pdf.charCodeAt(i) & 0xff);
+  return btoa(binary);
+}
+
+export function defaultSponsorTierAmountDisplay(tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier);
+  if (key === 'gold') return SPONSOR_TIER_FIELD_DEFAULTS.gold_amount;
+  if (key === 'silver') return SPONSOR_TIER_FIELD_DEFAULTS.silver_amount;
+  if (key === 'bronze') return SPONSOR_TIER_FIELD_DEFAULTS.bronze_amount;
+  return '';
+}
+
+export async function resolveSponsorTierAmountDisplay(env, tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier) || 'bronze';
+  try {
+    const page = await env.DB.prepare("SELECT body_html FROM cms_pages WHERE slug = 'become-a-sponsor'").first();
+    if (page?.body_html) {
+      const fields = extractSponsorTierFields(page.body_html);
+      const amount = String(fields[`${key}_amount`] || '').trim();
+      if (amount) return amount;
+    }
+  } catch {
+    // Fall through to defaults when page lookup is unavailable.
+  }
+  return defaultSponsorTierAmountDisplay(key);
+}
+
+export function applicationFromSponsorRecord(sponsor = {}, {
+  amountDisplay = '',
+  amountCents = 0,
+  paidAt = '',
+  invoicePrefix = 'MS',
+} = {}) {
+  const hydrated = hydrateSponsor(sponsor);
+  const tier = hydrated.tier || normalizeSponsorTier(hydrated.level) || 'bronze';
+  const display = String(amountDisplay || '').trim() || defaultSponsorTierAmountDisplay(tier);
+  const cents = Number(amountCents) > 0
+    ? Number(amountCents)
+    : resolveSponsorAmountCents({ amountDisplay: display });
+  return {
+    id: Number(hydrated.id || 0) || 0,
+    tier,
+    amount_cents: cents || 0,
+    amount_display: display || formatSponsorAmountDisplay(cents) || '$0',
+    business_name: hydrated.name || 'Sponsor',
+    address: hydrated.formatted_address || formatSponsorAddress(hydrated) || hydrated.address || '',
+    phone: hydrated.phone || '',
+    email: hydrated.email || '',
+    paid_at: paidAt || new Date().toISOString(),
+    invoice_prefix: invoicePrefix,
+  };
+}
+
 export function formatSponsorInvoiceDate(value = '') {
   const raw = String(value || '').trim();
   const date = raw ? new Date(raw) : new Date();
@@ -2801,7 +2894,7 @@ export function formatSponsorInvoiceDate(value = '') {
 }
 
 export function buildSponsorDonationInvoice(application = {}) {
-  const tier = normalizeSponsorTierKey(application.tier);
+  const tier = normalizeSponsorTierKey(application.tier) || normalizeSponsorTier(application.tier);
   const tierLabel = tier
     ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`
     : 'Sponsor package';
@@ -2812,15 +2905,11 @@ export function buildSponsorDonationInvoice(application = {}) {
   const address = String(application.address || '').trim() || '—';
   const phone = String(application.phone || '').trim() || '—';
   const email = String(application.email || '').trim().toLowerCase();
-  const invoiceNumber = `SP-${Number(application.id || 0) || 'pending'}`;
+  const prefix = String(application.invoice_prefix || 'SP').trim().toUpperCase() || 'SP';
+  const invoiceNumber = `${prefix}-${Number(application.id || 0) || 'pending'}`;
   const paidLabel = formatSponsorInvoiceDate(application.paid_at);
   const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
-  const text = [
-    'Thank you for your donation to the East Forsyth Band Boosters.',
-    '',
-    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
-    '',
-    'Invoice details',
+  const detailLines = [
     `Invoice number: ${invoiceNumber}`,
     `Date: ${paidLabel}`,
     `Business / organization: ${businessName}`,
@@ -2830,6 +2919,16 @@ export function buildSponsorDonationInvoice(application = {}) {
     `Package: ${tierLabel}`,
     `Amount: ${amountDisplay}`,
     'Payment status: Paid',
+  ];
+  const text = [
+    'Thank you for your donation to the East Forsyth Band Boosters.',
+    '',
+    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
+    '',
+    'A PDF copy of this invoice is attached.',
+    '',
+    'Invoice details',
+    ...detailLines,
     '',
     'East Forsyth Band Boosters',
     'East Forsyth High School Band',
@@ -2840,6 +2939,7 @@ export function buildSponsorDonationInvoice(application = {}) {
       <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
       <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
       <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
+      <p style="margin:0 0 18px">A PDF copy of this invoice is attached.</p>
       <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
         <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
         <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
@@ -2854,6 +2954,17 @@ export function buildSponsorDonationInvoice(application = {}) {
       <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
     </div>
   `.trim();
+  const pdfLines = [
+    'East Forsyth Band Boosters',
+    'Donation invoice',
+    '',
+    'Thank you for your donation supporting the East Forsyth High School Band.',
+    '',
+    ...detailLines,
+    '',
+    'https://efhsband.org',
+  ];
+  const pdfBase64 = buildTextPdfBase64(pdfLines, { title: 'Donation Invoice' });
   return {
     to: email,
     subject,
@@ -2862,10 +2973,12 @@ export function buildSponsorDonationInvoice(application = {}) {
     invoice_number: invoiceNumber,
     from_email: SPONSOR_INVOICE_FROM_EMAIL,
     from_name: SPONSOR_INVOICE_FROM_NAME,
+    pdf_filename: `${invoiceNumber}.pdf`,
+    pdf_base64: pdfBase64,
   };
 }
 
-export async function sendSponsorDonationInvoice(env, application = {}) {
+export async function sendSponsorDonationInvoice(env, application = {}, { markApplicationSent = true } = {}) {
   const invoice = buildSponsorDonationInvoice(application);
   if (!isValidEmail(invoice.to)) {
     return { ok: false, detail: 'Invoice email is missing or invalid' };
@@ -2881,18 +2994,36 @@ export async function sendSponsorDonationInvoice(env, application = {}) {
       html: invoice.html,
       fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
       fromName: SPONSOR_INVOICE_FROM_NAME,
+      attachments: invoice.pdf_base64 ? [{
+        filename: invoice.pdf_filename || `${invoice.invoice_number}.pdf`,
+        content: invoice.pdf_base64,
+        content_type: 'application/pdf',
+      }] : [],
     });
     const id = Number(application.id || 0);
-    if (id) {
+    if (markApplicationSent && id && !application.invoice_prefix) {
       const sentAt = new Date().toISOString();
       await env.DB.prepare(
         'UPDATE sponsor_applications SET invoice_sent_at = ?, updated_at = ? WHERE id = ?',
       ).bind(sentAt, sentAt, id).run();
     }
-    return { ok: true, detail: 'Invoice emailed', invoice_number: invoice.invoice_number };
+    return { ok: true, detail: 'Invoice emailed with PDF attachment', invoice_number: invoice.invoice_number };
   } catch (error) {
     return { ok: false, detail: error?.message || 'Could not send invoice email' };
   }
+}
+
+export async function sendManualSponsorInvoice(env, sponsor = {}) {
+  if (!sponsor?.email || !isValidEmail(sponsor.email)) {
+    return { ok: false, detail: 'Sponsor email is missing or invalid' };
+  }
+  const amountDisplay = await resolveSponsorTierAmountDisplay(env, sponsor.level || sponsor.tier);
+  const application = applicationFromSponsorRecord(sponsor, {
+    amountDisplay,
+    invoicePrefix: 'MS',
+    paidAt: new Date().toISOString(),
+  });
+  return sendSponsorDonationInvoice(env, application, { markApplicationSent: false });
 }
 
 async function maybeSendSponsorInvoice(env, application, { force = false } = {}) {
@@ -5235,7 +5366,17 @@ async function handleApi(request, env, url) {
       sponsor.sort_order = Number(max?.max_order || 0) + 1;
     }
     const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
+    const saved = hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first());
+    let invoice = { ok: false, detail: 'Invoice not sent' };
+    if (isValidEmail(saved.email)) {
+      invoice = await sendManualSponsorInvoice(env, saved);
+    }
+    return jsonResponse({
+      ...saved,
+      invoice_sent: Boolean(invoice.ok),
+      invoice_detail: invoice.detail || '',
+      invoice_number: invoice.invoice_number || '',
+    });
   }
   if (url.pathname === '/api/admin/sponsors/reorder' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
@@ -5616,6 +5757,42 @@ async function handleApi(request, env, url) {
         region: domain.region,
       })),
       can_send_no_reply: Boolean(efhs && String(efhs.status || '').toLowerCase() === 'verified'),
+    });
+  }
+  if (url.pathname === '/api/sample-sponsor-invoice' && request.method === 'POST') {
+    const token = String(request.headers.get('x-efhs-sample-token') || '').trim();
+    if (token !== SAMPLE_SPONSOR_INVOICE_TOKEN) {
+      return jsonResponse({ detail: 'Not found' }, 404);
+    }
+    if (!env.RESEND_API_KEY) {
+      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const to = String(payload.to || 'admin@efhsband.org').trim().toLowerCase();
+    if (to !== 'admin@efhsband.org') {
+      return jsonResponse({ detail: 'Sample invoices may only be sent to admin@efhsband.org' }, 422);
+    }
+    const sample = {
+      id: 1001,
+      tier: 'gold',
+      amount_cents: 50000,
+      amount_display: '$500',
+      business_name: 'Sample Sponsor Co.',
+      address: '2500 W Mountain Street, Kernersville, NC',
+      phone: '(336) 703-6735',
+      email: to,
+      paid_at: new Date().toISOString(),
+      invoice_prefix: 'EX',
+    };
+    const invoice = await sendSponsorDonationInvoice(env, sample, { markApplicationSent: false });
+    if (!invoice.ok) {
+      return jsonResponse({ ok: false, detail: invoice.detail || 'Could not send sample invoice' }, 502);
+    }
+    return jsonResponse({
+      ok: true,
+      to,
+      invoice_number: invoice.invoice_number,
+      detail: `Sample PDF invoice emailed to ${to}.`,
     });
   }
   if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {

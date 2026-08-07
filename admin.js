@@ -5001,8 +5001,16 @@ function bindForms() {
         formControl(form, 'logo_url').value = stored.url;
         syncSponsorLogoPreview(form, stored.url);
       }
-      await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (status) status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+      const saved = await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      if (status) {
+        if (!id && saved?.invoice_sent) {
+          status.textContent = `Sponsor saved. Invoice PDF emailed to ${saved.email || 'the sponsor'} (${saved.invoice_number || 'invoice'}).`;
+        } else if (!id && payload.email) {
+          status.textContent = `Sponsor saved. Invoice email note: ${saved?.invoice_detail || 'not sent'}.`;
+        } else {
+          status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
+        }
+      }
       resetSponsorForm(form);
       await loadSponsors();
     } catch (error) {
