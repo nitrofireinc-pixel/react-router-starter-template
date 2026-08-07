@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'gallery-no-placeholders-20260807-1';
+const ASSET_VERSION = 'hero-mark-protect-images-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -727,7 +727,9 @@ async function initDb(env) {
   }
   const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
   if (homePageRow?.body_html) {
-    const nextHomeHtml = ensureHomePhotoGallerySlot(refreshHomeStartHereSection(homePageRow.body_html));
+    const nextHomeHtml = ensureHomePhotoGallerySlot(
+      ensureHomeHeroCardMark(refreshHomeStartHereSection(homePageRow.body_html)),
+    );
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
@@ -2440,6 +2442,22 @@ export function refreshHomeStartHereSection(html) {
       /A place for local businesses and alumni to support the program and be recognized\./g,
       'Discover the businesses and community partners that support our program, learn about sponsorship opportunities, and help strengthen the Blue Regiment tradition.',
     );
+}
+
+export function ensureHomeHeroCardMark(html) {
+  const source = String(html || '');
+  if (!source.trim() || !/\bhero-card\b/i.test(source)) return source;
+  return source.replace(
+    /(<aside\b[^>]*\bhero-card\b[^>]*>\s*<img\b)([^>]*)(>)/i,
+    (_match, start, attrs, end) => {
+      let next = String(attrs || '')
+        .replace(/\ssrc=(["'])[^"']*\1/i, ' src="/assets/efhs-blue-regiment-mark.png"')
+        .replace(/\salt=(["'])[^"']*\1/i, ' alt="East Forsyth Blue Regiment"');
+      if (!/\ssrc=/i.test(next)) next += ' src="/assets/efhs-blue-regiment-mark.png"';
+      if (!/\salt=/i.test(next)) next += ' alt="East Forsyth Blue Regiment"';
+      return `${start}${next}${end}`;
+    },
+  );
 }
 
 export function ensureHomePhotoGallerySlot(html) {

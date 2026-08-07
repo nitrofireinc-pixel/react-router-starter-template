@@ -112,3 +112,40 @@ document.querySelectorAll('[data-square-checkout]').forEach((button) => {
     else window.open(url, '_blank', 'noopener,noreferrer');
   });
 });
+
+(function protectSiteImages() {
+  const isProtectedTarget = (target) => Boolean(
+    target?.closest?.('img, picture, svg, canvas, .gallery-item, .photo-lightbox, .brand-logo, .brand-mark, .hero-card img, .mini-logo, .avatar'),
+  );
+
+  const markImages = (root = document) => {
+    root.querySelectorAll('img').forEach((img) => {
+      if (img.dataset.imageProtected === '1') return;
+      img.dataset.imageProtected = '1';
+      img.setAttribute('draggable', 'false');
+    });
+  };
+
+  document.addEventListener('contextmenu', (event) => {
+    if (isProtectedTarget(event.target)) event.preventDefault();
+  }, true);
+
+  document.addEventListener('dragstart', (event) => {
+    if (isProtectedTarget(event.target)) event.preventDefault();
+  }, true);
+
+  markImages(document);
+  if (typeof MutationObserver === 'function') {
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) return;
+          if (node.matches?.('img')) markImages(node.parentElement || document);
+          else if (node.querySelectorAll) markImages(node);
+        });
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+  window.__efProtectSiteImages = markImages;
+})();

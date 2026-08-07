@@ -873,13 +873,20 @@ function protectPhotoMedia(root = document) {
     event.preventDefault();
     return false;
   };
-  root.querySelectorAll('.gallery-item img, .photo-lightbox-image, .photo-lightbox-frame').forEach((el) => {
-    if (el.dataset.photoProtected === '1') return;
+  root.querySelectorAll('img, .gallery-item img, .photo-lightbox-image, .photo-lightbox-frame').forEach((el) => {
+    if (el.dataset.photoProtected === '1' || el.dataset.imageProtected === '1') {
+      el.setAttribute('draggable', 'false');
+      return;
+    }
     el.dataset.photoProtected = '1';
+    el.dataset.imageProtected = '1';
     el.setAttribute('draggable', 'false');
     el.addEventListener('contextmenu', block);
     el.addEventListener('dragstart', block);
   });
+  if (typeof window.__efProtectSiteImages === 'function') {
+    window.__efProtectSiteImages(root);
+  }
 }
 
 function closePhotoLightbox() {
@@ -929,7 +936,7 @@ function bindPhotoGalleries(root = document) {
       }
     });
     document.addEventListener('contextmenu', (event) => {
-      if (event.target?.closest?.('.gallery-item, .photo-lightbox')) {
+      if (event.target?.closest?.('img, picture, svg, canvas, .gallery-item, .photo-lightbox')) {
         event.preventDefault();
       }
     });
