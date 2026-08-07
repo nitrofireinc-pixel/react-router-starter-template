@@ -18,6 +18,5 @@ rmSync(OUTPUT, { recursive: true, force: true });
 cpSync(PUBLIC, OUTPUT, { recursive: true });
 cpSync(join(SOURCE, 'worker.mjs'), join(OUTPUT, '_worker.js'));
 cpSync(join(SOURCE, 'default-pages.mjs'), join(OUTPUT, 'default-pages.mjs'));
-cpSync(join(SOURCE, 'invoice-logo-rgb.mjs'), join(OUTPUT, 'invoice-logo-rgb.mjs'));
 
 console.log(`Built Cloudflare Pages output: ${OUTPUT}`);

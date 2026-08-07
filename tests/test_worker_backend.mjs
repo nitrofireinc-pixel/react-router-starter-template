@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import zlib from 'node:zlib';
-
-import { applyHomeFeatureCards, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, MINUTES_LETTERHEAD_MARK, PUBLIC_BRAND_MARK, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -660,31 +658,26 @@ test('ensureSponsorDonateButton adds Donate control beside Become a sponsor', ()
   assert.match(structured, /Become a sponsor/);
 });
 
-test('renderPublicBrand places Blue Regiment mark after the site title', () => {
+test('renderPublicBrand shows school logo and title without Blue Regiment mark', () => {
   const html = renderPublicBrand({ title: 'East Forsyth Band', logo_url: '/assets/efhs-logo.png' });
   assert.match(html, /class="brand"/);
-  assert.match(html, /brand-logo[\s\S]*data-site-field="title"[\s\S]*brand-mark/);
-  assert.match(html, /efhs-blue-regiment-mark\.png/);
-  assert.match(html, /alt="East Forsyth Blue Regiment"/);
+  assert.match(html, /brand-logo/);
+  assert.match(html, /data-site-field="title"/);
+  assert.doesNotMatch(html, /brand-mark/);
+  assert.doesNotMatch(html, /efhs-blue-regiment-mark/);
   assert.ok(html.indexOf('brand-logo') < html.indexOf('data-site-field="title"'));
-  assert.ok(html.indexOf('data-site-field="title"') < html.indexOf('brand-mark'));
 });
 
-test('minutes letterhead and public title share the same Blue Regiment asset', () => {
+test('Blue Regiment mark path is reserved while asset is temporarily removed', () => {
   assert.equal(BLUE_REGIMENT_MARK_PATH, '/assets/efhs-blue-regiment-mark.png');
-  assert.equal(PUBLIC_BRAND_MARK, MINUTES_LETTERHEAD_MARK);
-  assert.ok(PUBLIC_BRAND_MARK.startsWith(BLUE_REGIMENT_MARK_PATH));
-  assert.ok(MINUTES_LETTERHEAD_MARK.startsWith(BLUE_REGIMENT_MARK_PATH));
-
   const brand = renderPublicBrand({ title: 'East Forsyth Band' });
   const minutes = renderMinutesDocumentHtml(
     { title: 'East Forsyth Band' },
     { meeting_date: '2026-08-04', body_html: '<p>Notes</p>' },
   );
-  assert.match(brand, new RegExp(BLUE_REGIMENT_MARK_PATH.replace(/\./g, '\\.')));
-  assert.match(minutes, new RegExp(BLUE_REGIMENT_MARK_PATH.replace(/\./g, '\\.')));
-  assert.match(minutes, /opacity:\s*0\.28/);
-  assert.match(minutes, /opacity:\s*0\.24/);
+  assert.doesNotMatch(brand, /efhs-blue-regiment-mark/);
+  assert.doesNotMatch(minutes, /efhs-blue-regiment-mark/);
+  assert.doesNotMatch(minutes, /letterhead-mark/);
 });
 
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
@@ -716,20 +709,10 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   assert.match(pdf, /Acme Music/);
   assert.match(pdf, /DONATION INVOICE/);
   assert.match(pdf, /East Forsyth Band Boosters/);
-  assert.match(pdf, /\/Subtype \/Image/);
   assert.match(pdf, /Helvetica-Bold/);
-  // Logo uses the Blue Regiment mark drawn upright as DeviceRGB (top-to-bottom samples).
-  assert.match(pdf, /\/Im1 Do/);
-  assert.match(pdf, /\d+(?:\.\d+)? 0 0 \d+(?:\.\d+)? \d+(?:\.\d+)? \d+(?:\.\d+)? cm \/Im1 Do/);
-  // Raw DeviceRGB payload size is width*height*3 (no PNG row-filter bytes).
-  const imgMatch = pdf.match(/\/Width (\d+)[\s\S]*?\/Height (\d+)[\s\S]*?\/Length (\d+) >>stream\n/);
-  assert.ok(imgMatch);
-  const width = Number(imgMatch[1]);
-  const height = Number(imgMatch[2]);
-  const streamStart = pdf.indexOf('stream\n', pdf.indexOf('/Subtype /Image')) + 'stream\n'.length;
-  const streamEnd = pdf.indexOf('endstream', streamStart);
-  const inflated = zlib.inflateSync(Buffer.from(pdf.slice(streamStart, streamEnd), 'latin1'));
-  assert.equal(inflated.length, width * height * 3);
+  // Blue Regiment invoice logo temporarily removed until a replacement asset is provided.
+  assert.doesNotMatch(pdf, /\/Im1 Do/);
+  assert.doesNotMatch(pdf, /\/Subtype \/Image/);
   assert.equal(invoice.square_auth_id, '');
   assert.doesNotMatch(invoice.text, /Square Auth ID/);
 });
@@ -1137,11 +1120,8 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /Called to order/);
   assert.doesNotMatch(documentHtml, /<script/i);
   assert.match(documentHtml, /window\.print\(\)/);
-  assert.match(documentHtml, /efhs-blue-regiment-mark/);
-  assert.match(documentHtml, /letterhead-mark/);
-  assert.match(documentHtml, /alt="East Forsyth Blue Regiment"/);
-  assert.match(documentHtml, /opacity:\s*0\.28/);
-  assert.match(documentHtml, /opacity:\s*0\.24/);
+  assert.doesNotMatch(documentHtml, /efhs-blue-regiment-mark/);
+  assert.doesNotMatch(documentHtml, /letterhead-mark/);
 });
 
 
