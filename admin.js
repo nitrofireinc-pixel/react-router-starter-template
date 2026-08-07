@@ -2986,6 +2986,18 @@ function formatAdminSponsorAddress(sponsor = {}) {
   return [street, city, state].filter(Boolean).join(', ');
 }
 
+
+function formatAdminSponsorContactLines(sponsor = {}) {
+  const address = formatAdminSponsorAddress(sponsor);
+  const phone = String(sponsor.phone || '').trim();
+  const email = String(sponsor.email || '').trim();
+  return [
+    address || 'No address on file',
+    phone ? `Phone: ${phone}` : 'Phone: —',
+    email ? `Email: ${email}` : 'Email: —',
+  ];
+}
+
 function sponsorPreviewCard(sponsor, index = 0) {
   const featured = index === 0 ? ' sponsor-featured' : '';
   const mark = sponsor.logo_url ? `<span class="sponsor-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>` : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
@@ -3047,10 +3059,16 @@ function renderGoldSponsorsPrintPreview() {
     const logo = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
       : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    const contact = formatAdminSponsorContactLines(sponsor)
+      .map((line) => `<span>${escapeHtml(line)}</span>`)
+      .join('');
     return `
       <article class="gold-sponsor-print-row">
         <div class="gold-sponsor-print-logo">${logo}</div>
-        <b>${escapeHtml(sponsor.name)}</b>
+        <div class="gold-sponsor-print-copy">
+          <b>${escapeHtml(sponsor.name)}</b>
+          ${contact}
+        </div>
       </article>
     `;
   }).join('');
@@ -3179,13 +3197,14 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
-    const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    const addressLines = doc.splitTextToSize(address, textWidth);
-    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const contactLines = formatAdminSponsorContactLines(sponsor).flatMap((line) => (
+      doc.splitTextToSize(String(line), textWidth)
+    ));
+    const textBlockHeight = nameLines.length * 18 + 4 + contactLines.length * 14;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
-    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
+    const rowHeight = Math.max(72, logoBasedHeight, textBlockHeight + 24);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -3224,7 +3243,7 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(91, 111, 136);
-    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
+    doc.text(contactLines, nameX, textTop + nameLines.length * 18 + 2);
 
     y += rowHeight + 10;
   }
@@ -3292,7 +3311,10 @@ function printGoldSponsorsHtmlFallback(sponsors) {
       const logo = sponsor.logo_url
         ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
         : `<span class="mark">${mark}</span>`;
-      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+      const contact = formatAdminSponsorContactLines(sponsor)
+        .map((line) => `<span>${escapeHtml(line)}</span>`)
+        .join('');
+      return `<li><div class="logo">${logo}</div><div class="copy"><strong>${escapeHtml(sponsor.name)}</strong>${contact}</div></li>`;
     }).join('')
     : '<li><strong>No active Gold sponsors yet.</strong></li>';
   const html = `<!doctype html>
@@ -3309,6 +3331,8 @@ function printGoldSponsorsHtmlFallback(sponsors) {
     .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
     .logo img{max-width:100%;max-height:100%;object-fit:contain}
     .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    .copy{display:grid;gap:4px}
+    .copy span{display:block;color:#445;font:400 .95rem/1.35 Helvetica,Arial,sans-serif}
     strong{font-size:1.15rem}
     @media print{body{margin:.55in} li{break-inside:avoid}}
   </style>

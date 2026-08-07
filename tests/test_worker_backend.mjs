@@ -785,17 +785,23 @@ test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
     name: 'Eagle Financial Partners',
     level: 'Gold Sponsor',
     active: true,
+    phone: '(336) 555-0100',
+    email: 'Hello@Eagle.example',
   });
   assert.equal(gold.homepage_ad, 1);
   assert.equal(gold.level, 'Gold Sponsor');
   assert.equal(gold.city, 'Kernersville');
   assert.equal(gold.state, 'NC');
+  assert.equal(gold.phone, '(336) 555-0100');
+  assert.equal(gold.email, 'hello@eagle.example');
   assert.equal(gold._assign_sort_order, true);
   const bronze = normalizeSponsorPayload({ name: 'Local Shop', level: 'Bronze Sponsor' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC', sort_order: 4 });
   assert.equal(bronze.homepage_ad, 0);
   assert.equal(bronze.city, 'Greensboro');
   assert.equal(bronze.sort_order, 4);
   assert.equal(bronze._assign_sort_order, false);
+  assert.equal(bronze.phone, '');
+  assert.equal(bronze.email, '');
   const legacy = normalizeSponsorPayload({ name: 'Legacy Co', homepage_ad: true }, { level: 'Community Sponsor' });
   assert.equal(legacy.level, 'Silver Sponsor');
   assert.equal(legacy.homepage_ad, 1);

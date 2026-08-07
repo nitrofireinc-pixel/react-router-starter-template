@@ -188,7 +188,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'cms-cleanup-20260807-1';
+const ASSET_VERSION = 'gold-sponsor-contact-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -475,7 +475,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -563,6 +563,16 @@ async function initDb(env) {
   } catch {
     // Column already exists on upgraded databases.
   }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN phone TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN email TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
     const rawAddress = String(row.address || '');
@@ -597,7 +607,7 @@ async function initDb(env) {
   }
   const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
   if (!sponsorCount?.count) {
-    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
+    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.phone || '', sponsor.email || '', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
   }
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
@@ -2684,6 +2694,8 @@ export function hydrateSponsor(sponsor) {
     address,
     city,
     state,
+    phone: String(source.phone || '').trim(),
+    email: String(source.email || '').trim().toLowerCase(),
     level,
     ...benefits,
     homepage_ad: benefits.show_flyin ? 1 : 0,
@@ -2695,7 +2707,7 @@ export function hydrateSponsor(sponsor) {
 
 async function getSponsors(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
+  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
   return (rows.results || []).map((row) => hydrateSponsor(row));
 }
 
@@ -2897,7 +2909,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   if (!id) throw new Error('Application not found');
   if (row.sponsor_id) {
     const existing = await env.DB.prepare(
-      'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+      'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
     ).bind(row.sponsor_id).first();
     if (existing) {
       return {
@@ -2913,6 +2925,8 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   const sponsor = normalizeSponsorPayload({
     name: row.business_name,
     address: row.address,
+    phone: row.phone || '',
+    email: row.email || '',
     logo_url: row.logo_url || '',
     level,
     active: 1,
@@ -2923,12 +2937,14 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
     sponsor.sort_order = Number(max?.max_order || 0) + 1;
   }
   const inserted = await env.DB.prepare(
-    'INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).bind(
     sponsor.name,
     sponsor.address,
     sponsor.city,
     sponsor.state,
+    sponsor.phone,
+    sponsor.email,
     sponsor.logo_url,
     sponsor.level,
     sponsor.mark_text,
@@ -2944,7 +2960,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
      WHERE id = ?`,
   ).bind(mock ? 'paid_mock' : 'paid', sponsorId, paidAt, paidAt, id).run();
   const saved = await env.DB.prepare(
-    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+    'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
   ).bind(sponsorId).first();
   return {
     application: {
@@ -2973,11 +2989,15 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
     homepageAd: payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad,
   });
   const benefits = sponsorBenefitsFromLevel(level);
+  const phone = String(payload.phone ?? existing?.phone ?? '').trim().slice(0, 40);
+  const emailRaw = String(payload.email ?? existing?.email ?? '').trim().toLowerCase().slice(0, 160);
   return {
     name,
     address,
     city,
     state,
+    phone,
+    email: emailRaw,
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
     level,
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
@@ -4598,7 +4618,7 @@ async function handleApi(request, env, url) {
     }
     if (application.sponsor_id) {
       const existing = await env.DB.prepare(
-        'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+        'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
       ).bind(application.sponsor_id).first();
       return jsonResponse({
         ok: true,
@@ -5214,8 +5234,8 @@ async function handleApi(request, env, url) {
       const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
       sponsor.sort_order = Number(max?.max_order || 0) + 1;
     }
-    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
+    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
   }
   if (url.pathname === '/api/admin/sponsors/reorder' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
@@ -5248,8 +5268,8 @@ async function handleApi(request, env, url) {
     if (!existing) return jsonResponse({ detail: 'Sponsor not found' }, 404);
     const sponsor = normalizeSponsorPayload(await request.json(), existing);
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
-    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
+    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, phone = ?, email = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
   }
 
   if (url.pathname === '/api/admin/staff' && request.method === 'GET') {
@@ -6197,7 +6217,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
-<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
+<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label>Phone<input name="phone" type="tel" autocomplete="tel" placeholder="(336) 555-0100"></label><label>Email<input name="email" type="email" autocomplete="email" placeholder="hello@business.com"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>
