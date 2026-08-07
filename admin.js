@@ -3726,8 +3726,10 @@ function syncMailRecipientAllSelection(select, toggledValue = '') {
   if (!allOption || !people.length) return;
 
   if (toggledValue === '__all__') {
-    // Selecting All users selects every person; clearing it clears everyone.
-    const selectAll = allOption.selected;
+    // All users is a master toggle: select everyone, or clear everyone if already all selected.
+    // Ignore any prior partial selection.
+    const allAlreadySelected = people.every((option) => option.selected);
+    const selectAll = !allAlreadySelected;
     people.forEach((option) => { option.selected = selectAll; });
     allOption.selected = selectAll;
     return;
@@ -3803,8 +3805,12 @@ function bindMailComposer() {
       if (!option || option.disabled) return;
       event.preventDefault();
       recipientSelect.focus();
-      option.selected = !option.selected;
-      syncMailRecipientAllSelection(recipientSelect, option.value);
+      if (option.value === '__all__') {
+        syncMailRecipientAllSelection(recipientSelect, '__all__');
+      } else {
+        option.selected = !option.selected;
+        syncMailRecipientAllSelection(recipientSelect, option.value);
+      }
       recipientSelect.dispatchEvent(new Event('input', { bubbles: true }));
     });
     recipientSelect.addEventListener('change', () => {
