@@ -1051,7 +1051,8 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /window\.print\(\)/);
   assert.match(documentHtml, /efhs-blue-regiment-mark/);
   assert.match(documentHtml, /letterhead-mark/);
-  assert.match(documentHtml, /opacity:\s*0\.28/);
+  assert.match(documentHtml, /alt="East Forsyth Blue Regiment"/);
+  assert.match(documentHtml, /opacity:\s*1/);
 });
 
 

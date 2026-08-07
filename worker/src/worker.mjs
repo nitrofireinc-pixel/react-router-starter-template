@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'public-brand-blue-regiment-20260807-4';
+const ASSET_VERSION = 'minutes-letterhead-logo-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -4099,9 +4099,10 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
     }
     .letterhead-mark {
       display: block;
-      width: 1.45in;
-      height: 1.45in;
-      opacity: 0.28;
+      width: 1.55in;
+      height: 1.55in;
+      object-fit: contain;
+      opacity: 1;
       -webkit-user-drag: none;
     }
     .doc-kicker {
@@ -4154,7 +4155,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
-      .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letterhead-mark { opacity: 1; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
@@ -4162,7 +4163,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
   <main class="sheet">
     <header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="East Forsyth Blue Regiment" draggable="false">
     </header>
     <p class="doc-kicker">${escapeHtml(title)}</p>
     <h1>Booster Meeting Minutes</h1>
