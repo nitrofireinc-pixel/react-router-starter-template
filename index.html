@@ -18,9 +18,10 @@
   <div class="header-inner">
     <a class="brand" href="index.html"><img src="assets/efhs-logo.png" alt="East Forsyth High School logo"><span data-site-field="title">East Forsyth Band</span></a>
     <button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button>
-    <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a></nav>
   </div>
+  <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a></nav>
 </header>
+<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>
 <main id="main">
 
 <section class="hero">
@@ -34,14 +35,13 @@
     <aside class="hero-card"><img src="assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2><ul><li>Ensembles and program overview</li><li>Upcoming events and rehearsal notes</li><li>Booster, fundraising, and sponsor information</li></ul></aside>
   </div>
 </section>
-<div class="band-strip"><div class="wrap"><div class="stat"><b>9</b>Core pages drafted</div><div class="stat"><b>EFHS</b>Navy, red, silver, gold palette</div><div class="stat"><b>Mobile</b>Responsive navigation and layout</div></div></div>
 <section>
   <div class="wrap">
-    <div class="section-head"><div><div class="kicker">Start here</div><h2>Built around the pages families expect.</h2></div><p>Modeled after a full high-school band program site structure, with East Forsyth branding and easy paths for students, parents, sponsors, and visitors.</p></div>
+    <div class="section-head"><div><div class="kicker">Start here</div><h2>Everything families need, all in one place.</h2></div><p>Designed to keep students, parents, alumni, sponsors, and the community connected with the East Forsyth Blue Regiment through quick access to important information, events, and resources.</p></div>
     <div class="grid cards">
-      <article class="card red-card"><span class="tag">Program</span><h3>Ensembles</h3><p>Marching band, concert bands, percussion, color guard, jazz, and chamber opportunities.</p></article>
-      <article class="card red-card"><span class="tag">Families</span><h3>Resources</h3><p>Forms, handbook links, rehearsal expectations, fees, uniforms, and travel information.</p></article>
-      <article class="card red-card"><span class="tag">Community</span><h3>Sponsors</h3><p>A place for local businesses and alumni to support the program and be recognized.</p></article>
+      <article class="card red-card"><span class="tag">Program</span><h3>Ensembles</h3><p>Explore our marching band, concert bands, percussion, color guard, jazz, and chamber ensembles, with information about each group's activities and expectations.</p></article>
+      <article class="card red-card"><span class="tag">Families</span><h3>Resources</h3><p>Find forms, handbooks, rehearsal schedules, fees, uniform information, travel details, volunteer opportunities, and other essential family resources.</p></article>
+      <article class="card red-card"><span class="tag">Community</span><h3>Sponsors</h3><p>Discover the businesses and community partners that support our program, learn about sponsorship opportunities, and help strengthen the Blue Regiment tradition.</p></article>
     </div>
   </div>
 </section>
@@ -64,16 +64,16 @@
     </div>
   </div>
 </section>
-<section>
+<section data-cms-home-cards>
   <div class="wrap grid two">
-    <article class="card accent-card"><span class="tag">Boosters</span><h3>Parents make the program move.</h3><p>Add booster meeting dates, volunteer signups, concessions, uniforms, meals, transportation, and fundraising needs.</p><p style="margin-top:18px"><a class="btn secondary" href="boosters.html">Booster info</a></p></article>
-    <article class="card"><span class="tag">Launch note</span><h3>This is a first website draft.</h3><p>Because official names, dates, director bios, forms, and contact details were not provided yet, those areas are clearly marked as placeholders.</p><p class="draft">Ready for review, copy replacement, and GitHub publishing.</p></article>
+    <article class="card accent-card" data-cms-block="home-boosters"><span class="tag" data-cms-field="boosters_tag">Boosters</span><h3 data-cms-field="boosters_heading">Parents make the program move.</h3><p data-cms-field="boosters_body">Add booster meeting dates, volunteer signups, concessions, uniforms, meals, transportation, and fundraising needs.</p><p style="margin-top:18px"><a class="btn secondary" href="boosters.html" data-cms-field="boosters_button">Booster info</a></p></article>
+    <article class="card" data-cms-block="home-launch"><span class="tag" data-cms-field="launch_tag">Launch note</span><h3 data-cms-field="launch_heading">This is a first website draft.</h3><p data-cms-field="launch_body">Because official names, dates, director bios, forms, and contact details were not provided yet, those areas are clearly marked as placeholders.</p><p class="draft" data-cms-field="launch_footer">Ready for review, copy replacement, and GitHub publishing.</p></article>
   </div>
 </section>
 </main>
 <footer class="footer">
   <div class="wrap">
-    <div><h3 data-site-field="title">East Forsyth Band</h3><p data-site-field="footer_note">Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div>
+    <div><nav class="footer-social" aria-label="Social media" hidden></nav><h3 data-site-field="title">East Forsyth Band</h3><p data-site-field="footer_note">Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div>
     <div><h3>Program</h3><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a></div>
     <div><h3>Families</h3><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="fundraising.html">Fundraising</a></div>
     <div><h3>Community</h3><a href="sponsors.html">Sponsors</a><a href="contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div>

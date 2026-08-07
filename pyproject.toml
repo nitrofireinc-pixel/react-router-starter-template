@@ -14,3 +14,8 @@ dev = [
   "pytest>=8.0.0",
   "httpx>=0.27.0",
 ]
+
+# Cloudflare Pages auto-runs `pip install .` when pyproject.toml is present.
+# Pin discovery so setuptools does not treat worker/assets/node_modules as packages.
+[tool.setuptools.packages.find]
+include = ["backend*"]

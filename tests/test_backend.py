@@ -80,20 +80,42 @@ def test_admin_can_change_password_after_login():
 
     blocked = client.post(
         "/api/admin/password",
-        json={"current_password": "admin123$", "new_password": "newAdmin456$"},
+        json={
+            "current_password": "admin123$",
+            "new_password": "newAdmin456$",
+            "confirm_password": "newAdmin456$",
+        },
     )
     assert blocked.status_code == 401
 
     login(client)
     wrong_current = client.post(
         "/api/admin/password",
-        json={"current_password": "wrong", "new_password": "newAdmin456$"},
+        json={
+            "current_password": "wrong",
+            "new_password": "newAdmin456$",
+            "confirm_password": "newAdmin456$",
+        },
     )
     assert wrong_current.status_code == 400
 
+    mismatch = client.post(
+        "/api/admin/password",
+        json={
+            "current_password": "admin123$",
+            "new_password": "newAdmin456$",
+            "confirm_password": "different456$",
+        },
+    )
+    assert mismatch.status_code == 422
+
     changed = client.post(
         "/api/admin/password",
-        json={"current_password": "admin123$", "new_password": "newAdmin456$"},
+        json={
+            "current_password": "admin123$",
+            "new_password": "newAdmin456$",
+            "confirm_password": "newAdmin456$",
+        },
     )
     assert changed.status_code == 200
     assert changed.json()["ok"] is True

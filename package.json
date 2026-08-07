@@ -1,12 +1,16 @@
 {
+  "name": "east-forsyth-band-site",
+  "private": true,
   "scripts": {
+    "build": "npm run build:pages",
     "test:worker": "node --test tests/test_worker_backend.mjs",
-    "test:pages-build": "uv run pytest -q tests/test_pages_build.py",
-    "sync:worker-assets": "python3 worker/scripts/sync-public.py",
-    "build:pages": "npm run sync:worker-assets && python3 worker/scripts/build-pages.py",
+    "test:pages-build": "node --test tests/test_pages_build.mjs",
+    "sync:worker-assets": "node worker/scripts/sync-public.mjs",
+    "build:pages": "npm run sync:worker-assets && node worker/scripts/build-pages.mjs",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name=efhsband",
     "deploy:worker": "npm run sync:worker-assets && wrangler deploy"
   },
   "devDependencies": {
-    "wrangler": "^4.115.0"
+    "wrangler": "4.118.0"
   }
 }

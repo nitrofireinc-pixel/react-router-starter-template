@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="East Forsyth Band website is temporarily undergoing maintenance.">
+  <meta name="robots" content="noindex">
+  <title>Maintenance | East Forsyth Band</title>
+  <link rel="icon" href="/assets/efhs-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="maintenance-body">
+<main class="maintenance-shell" id="main">
+  <img class="maintenance-logo" src="/assets/efhs-logo.png" alt="East Forsyth High School logo">
+  <p class="kicker">East Forsyth Band</p>
+  <h1>We’ll be right back.</h1>
+  <p class="maintenance-copy">The website is temporarily down for maintenance. Please check back soon, or visit the school site for general information.</p>
+  <div class="button-row">
+    <a class="btn primary" href="/">Try homepage again</a>
+    <a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a>
+  </div>
+</main>
+<script>
+(function () {
+  function readReturnPath() {
+    var parts = document.cookie.split(';');
+    for (var i = 0; i < parts.length; i += 1) {
+      var part = parts[i].trim();
+      if (part.indexOf('efband_maintenance_return=') !== 0) continue;
+      try {
+        var value = decodeURIComponent(part.slice('efband_maintenance_return='.length) || '');
+        if (!value || value.charAt(0) !== '/' || value.indexOf('//') === 0 || value.indexOf(':') !== -1) return '/';
+        if (value.indexOf('/maintenance') !== -1 || value.indexOf('/admin') === 0) return '/';
+        return value.split('#')[0] || '/';
+      } catch (error) {
+        return '/';
+      }
+    }
+    return '/';
+  }
+  function clearReturnPath() {
+    document.cookie = 'efband_maintenance_return=; Path=/; Max-Age=0; SameSite=Lax';
+  }
+  async function leaveIfLive() {
+    try {
+      const response = await fetch('/api/site', { cache: 'no-store' });
+      if (!response.ok) return;
+      const site = await response.json();
+      const enabled = site && (site.maintenance_mode === true || site.maintenance_mode === 1 || site.maintenance_mode === '1');
+      if (!enabled) {
+        var target = readReturnPath() || '/';
+        clearReturnPath();
+        window.location.replace(target);
+      }
+    } catch (_) {}
+  }
+  leaveIfLive();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') leaveIfLive();
+  });
+  setInterval(leaveIfLive, 15000);
+})();
+</script>
+</body>
+</html>
