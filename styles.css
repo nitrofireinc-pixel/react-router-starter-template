@@ -246,14 +246,19 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    min-height:42px;
-    padding:10px 14px;
+    flex:0 0 auto;
+    width:auto;
+    min-width:0;
+    min-height:34px;
+    padding:6px 8px;
     border:1px solid #d5deea;
-    border-radius:12px;
+    border-radius:10px;
     background:#fff;
     color:#10233c;
+    font-size:.8rem;
     font-weight:900;
-    box-shadow:0 10px 24px rgba(15,34,58,.08);
+    line-height:1;
+    box-shadow:0 8px 18px rgba(15,34,58,.08);
   }
   .admin-mobile-bar-top{
     display:flex;
