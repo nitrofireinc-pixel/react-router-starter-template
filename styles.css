@@ -145,10 +145,6 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   gap:3px;
 }
 .admin-menu-group[hidden]{display:none!important}
-.admin-menu-group-label{
-  margin-top:10px;
-  margin-bottom:2px;
-}
 .admin-menu-parent{
   position:relative;
   padding-right:28px!important;
@@ -172,12 +168,14 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   display:grid;
   gap:2px;
   margin:0 0 4px;
-  padding:0 0 0 10px;
+  padding:0 0 0 14px;
+  border-left:2px solid rgba(255,255,255,.12);
+  margin-left:10px;
 }
 .admin-menu-sub[hidden]{display:none!important}
 .admin-menu-sub button{
   font-size:.9rem!important;
-  padding-left:14px!important;
+  padding-left:12px!important;
   color:#c5d6ea!important;
 }
 .admin-sidebar-footer{
