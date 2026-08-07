@@ -2961,23 +2961,32 @@ body.sponsor-signup-open{overflow:hidden}
 .page-dirty-chip.is-visible{display:inline-flex}
 
 .user-admin-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
   align-items:flex-start;
+  gap:14px;
+}
+.user-admin-row > div:first-child{
+  min-width:0;
+  overflow-wrap:anywhere;
 }
 .user-admin-row .row-actions{
   flex:0 0 auto;
+  justify-content:flex-end;
+  align-self:start;
+  flex-wrap:nowrap;
 }
 @media(max-width:900px){
   .user-admin-row{
-    display:grid;
-    grid-template-columns:minmax(0,1fr);
+    grid-template-columns:minmax(0,1fr) auto;
     gap:10px;
   }
   .user-admin-row .row-actions{
-    width:100%;
-    justify-content:flex-start;
+    width:auto;
+    justify-content:flex-end;
   }
   .user-admin-row .row-actions button{
-    flex:1 1 auto;
+    flex:0 0 auto;
     min-height:40px;
   }
   #tab-users .editor-layout > .admin-card:first-child{
