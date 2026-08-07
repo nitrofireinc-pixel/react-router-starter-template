@@ -3693,9 +3693,10 @@ async function loadMailDeliveryStatus() {
 function renderMailRecipients() {
   const select = document.querySelector('#mail-recipient-select');
   if (!select) return;
-  const previous = String(select.value || '');
+  const previous = new Set(
+    [...select.selectedOptions].map((option) => String(option.value || '')).filter(Boolean),
+  );
   const options = [
-    '<option value="">Select a recipient…</option>',
     '<option value="__all__">All users</option>',
     ...state.mailRecipients.map((user) => {
       const name = String(user.display_name || user.email || 'User').trim();
@@ -3707,13 +3708,33 @@ function renderMailRecipients() {
     }),
   ];
   select.innerHTML = options.join('');
-  if (previous && [...select.options].some((option) => option.value === previous)) {
-    select.value = previous;
-  }
+  [...select.options].forEach((option) => {
+    option.selected = previous.has(String(option.value || ''));
+  });
   if (!state.mailRecipients.length) {
     const allOption = select.querySelector('option[value="__all__"]');
     if (allOption) allOption.disabled = true;
   }
+  enforceMailRecipientSelection(select);
+}
+
+function enforceMailRecipientSelection(select) {
+  if (!select) return;
+  const selected = [...select.selectedOptions];
+  if (!selected.length) return;
+  const allSelected = selected.some((option) => option.value === '__all__');
+  const peopleSelected = selected.some((option) => option.value !== '__all__');
+  if (!(allSelected && peopleSelected)) return;
+  // Prefer the most recent interaction: if All was just toggled on, keep only All;
+  // otherwise keep individual users and clear All.
+  const keepAll = select.dataset.lastRecipientChoice === '__all__';
+  [...select.options].forEach((option) => {
+    if (keepAll) {
+      option.selected = option.value === '__all__';
+    } else {
+      option.selected = option.value !== '__all__' && option.selected;
+    }
+  });
 }
 
 async function loadMailRecipients() {
@@ -3725,13 +3746,18 @@ async function loadMailRecipients() {
 
 function selectedMailUserIds(form) {
   const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
-  const value = String(select?.value || '').trim();
-  if (!value) return [];
-  if (value === '__all__') {
+  if (!select) return [];
+  const values = [...select.selectedOptions].map((option) => String(option.value || '').trim()).filter(Boolean);
+  if (!values.length) return [];
+  if (values.includes('__all__')) {
+    // All users already covers every CMS account; ignore any leftover individual picks.
     return state.mailRecipients.map((user) => Number(user.id)).filter((id) => Number.isInteger(id) && id > 0);
   }
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? [id] : [];
+  return [...new Set(
+    values
+      .map((value) => Number(value))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  )];
 }
 
 function selectedMailExtraEmails(form) {
@@ -3751,6 +3777,32 @@ function bindMailComposer() {
   const toolbar = document.querySelector('#mail-rich-toolbar');
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+
+  const recipientSelect = form.querySelector('#mail-recipient-select');
+  if (recipientSelect) {
+    recipientSelect.dataset.previousSelection = '';
+    recipientSelect.addEventListener('mousedown', (event) => {
+      const option = event.target?.closest?.('option');
+      if (option?.value) recipientSelect.dataset.lastRecipientChoice = option.value;
+    });
+    recipientSelect.addEventListener('change', () => {
+      const previous = String(recipientSelect.dataset.previousSelection || '')
+        .split(',')
+        .filter(Boolean);
+      const current = [...recipientSelect.selectedOptions].map((option) => option.value);
+      const added = current.filter((value) => !previous.includes(value));
+      if (added.includes('__all__')) {
+        recipientSelect.dataset.lastRecipientChoice = '__all__';
+      } else if (added.some((value) => value !== '__all__')) {
+        recipientSelect.dataset.lastRecipientChoice =
+          added.find((value) => value !== '__all__') || 'user';
+      }
+      enforceMailRecipientSelection(recipientSelect);
+      recipientSelect.dataset.previousSelection = [...recipientSelect.selectedOptions]
+        .map((option) => option.value)
+        .join(',');
+    });
+  }
 
   toolbar?.querySelectorAll('[data-mail-rich]').forEach((button) => {
     button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -3806,7 +3858,11 @@ function bindMailComposer() {
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
         if (form.elements.extra_emails) form.elements.extra_emails.value = '';
-        if (form.elements.recipient) form.elements.recipient.value = '';
+        const recipientSelectEl = form.querySelector('#mail-recipient-select');
+        if (recipientSelectEl) {
+          [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
+          delete recipientSelectEl.dataset.lastRecipientChoice;
+        }
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
         showSavedToast('Sent.', { icon: 'envelope' });

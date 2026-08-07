@@ -2016,6 +2016,15 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   background:#fff;
   color:#10233c;
 }
+.mail-recipient-select-label select[multiple]{
+  min-height:9.5rem;
+  padding:8px;
+  line-height:1.45;
+}
+.mail-recipient-select-label select[multiple] option{
+  padding:6px 8px;
+  border-radius:8px;
+}
 .mail-recipients .muted{
   margin:0;
   color:#5b6f88;
