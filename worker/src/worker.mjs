@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'sponsor-invoice-pdf-20260807-2';
+const ASSET_VERSION = 'sponsor-invoice-pdf-20260807-3';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
@@ -2786,9 +2786,6 @@ export function squareMockPayEnabled(env = {}) {
 
 export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
 export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
-
-export const SAMPLE_SPONSOR_INVOICE_TOKEN = 'efhs-band-sample-invoice-20260807';
-
 
 export function pdfSafeText(value = '') {
   return String(value ?? '')
@@ -5879,42 +5876,6 @@ async function handleApi(request, env, url) {
         region: domain.region,
       })),
       can_send_no_reply: Boolean(efhs && String(efhs.status || '').toLowerCase() === 'verified'),
-    });
-  }
-  if (url.pathname === '/api/sample-sponsor-invoice' && request.method === 'POST') {
-    const token = String(request.headers.get('x-efhs-sample-token') || '').trim();
-    if (token !== SAMPLE_SPONSOR_INVOICE_TOKEN) {
-      return jsonResponse({ detail: 'Not found' }, 404);
-    }
-    if (!env.RESEND_API_KEY) {
-      return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
-    }
-    const payload = await request.json().catch(() => ({}));
-    const to = String(payload.to || 'admin@efhsband.org').trim().toLowerCase();
-    if (to !== 'admin@efhsband.org') {
-      return jsonResponse({ detail: 'Sample invoices may only be sent to admin@efhsband.org' }, 422);
-    }
-    const sample = {
-      id: 1001,
-      tier: 'gold',
-      amount_cents: 50000,
-      amount_display: '$500',
-      business_name: 'Sample Sponsor Co.',
-      address: '2500 W Mountain Street, Kernersville, NC',
-      phone: '(336) 703-6735',
-      email: to,
-      paid_at: new Date().toISOString(),
-      invoice_prefix: 'EX',
-    };
-    const invoice = await sendSponsorDonationInvoice(env, sample, { markApplicationSent: false });
-    if (!invoice.ok) {
-      return jsonResponse({ ok: false, detail: invoice.detail || 'Could not send sample invoice' }, 502);
-    }
-    return jsonResponse({
-      ok: true,
-      to,
-      invoice_number: invoice.invoice_number,
-      detail: `Sample PDF invoice emailed to ${to}.`,
     });
   }
   if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {
