@@ -289,7 +289,10 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .admin-mobile-menu{
     display:grid!important;
     gap:4px;
+    width:60%;
+    max-width:14.5rem;
     margin-top:10px;
+    margin-right:auto;
     padding:10px;
     border:1px solid #d5deea;
     border-radius:16px;
@@ -297,6 +300,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     box-shadow:0 18px 40px rgba(15,34,58,.18);
     max-height:min(70vh,560px);
     overflow:auto;
+    box-sizing:border-box;
   }
   .admin-mobile-menu[hidden]{display:none!important}
   .admin-mobile-menu button{
