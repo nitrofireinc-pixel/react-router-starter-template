@@ -3050,7 +3050,6 @@ body.sponsor-signup-open{overflow:hidden}
 .minutes-editor-head{
   display:flex;
   align-items:flex-start;
-  justify-content:space-between;
   gap:14px;
   position:sticky;
   top:0;
@@ -3058,6 +3057,10 @@ body.sponsor-signup-open{overflow:hidden}
   margin:-4px -4px 0;
   padding:4px 4px 10px;
   background:#fff;
+}
+.minutes-editor-confirm{
+  border-radius:inherit;
+  z-index:4;
 }
 .minutes-editor-head h2{
   margin:.1rem 0 0;

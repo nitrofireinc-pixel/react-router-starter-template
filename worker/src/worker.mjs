@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'minutes-editor-scroll-20260807-1';
+const ASSET_VERSION = 'minutes-cancel-confirm-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -6978,7 +6978,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <p class="kicker">Boosters</p>
         <h2 id="minutes-editor-title">Add Minutes</h2>
       </div>
-      <button class="btn outline" type="button" data-minutes-editor-dismiss>Close</button>
     </div>
     <form id="minutes-form" class="stack minutes-editor-form" novalidate>
       <input type="hidden" name="minutes_id" value="">
@@ -6990,6 +6989,16 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
       </div>
       <p class="status" id="minutes-status"></p>
     </form>
+    <div class="admin-sponsor-form-confirm minutes-editor-confirm" data-minutes-editor-confirm hidden>
+      <div class="admin-sponsor-form-confirm-card" role="alertdialog" aria-labelledby="minutes-editor-confirm-title" aria-describedby="minutes-editor-confirm-copy">
+        <h4 id="minutes-editor-confirm-title">Are you sure?</h4>
+        <p id="minutes-editor-confirm-copy">Canceling closes the editor and discards unsaved changes.</p>
+        <div class="admin-sponsor-form-confirm-actions">
+          <button class="btn outline" type="button" data-minutes-confirm-no>No</button>
+          <button class="btn primary" type="button" data-minutes-confirm-yes>Yes</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 </section><section id="tab-mail" class="cms-panel mail-panel">

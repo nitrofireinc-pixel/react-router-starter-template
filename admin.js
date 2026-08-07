@@ -4552,8 +4552,35 @@ function closeMinutesView() {
   syncMinutesFrameBodyLock();
 }
 
+function hideMinutesEditorCancelConfirm() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function showMinutesEditorCancelConfirm() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-minutes-confirm-yes]')?.focus();
+}
+
+function isMinutesEditorCancelConfirmOpen() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  return Boolean(confirm && !confirm.hidden);
+}
+
+function dismissMinutesEditor() {
+  hideMinutesEditorCancelConfirm();
+  closeMinutesEditor();
+  const selected = selectedMinutes();
+  if (selected) openMinutesView(selected.id);
+  else showMinutesIdle();
+}
+
 function closeMinutesEditor() {
   const modal = document.querySelector('#minutes-editor-modal');
+  hideMinutesEditorCancelConfirm();
   if (modal) modal.toggleAttribute('hidden', true);
   syncMinutesFrameBodyLock();
 }
@@ -4565,6 +4592,7 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   const title = document.querySelector('#minutes-editor-title');
   if (!modal || !form) return;
   closeMinutesView();
+  hideMinutesEditorCancelConfirm();
   modal.toggleAttribute('hidden', false);
   syncMinutesFrameBodyLock();
   if (title) title.textContent = editing ? 'Edit Minutes' : 'Add Minutes';
@@ -4912,19 +4940,23 @@ function bindMinutesPanel() {
   });
   document.querySelectorAll('[data-minutes-editor-dismiss], #cancel-minutes-edit').forEach((button) => {
     button.addEventListener('click', () => {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      showMinutesEditorCancelConfirm();
     });
+  });
+  document.querySelector('[data-minutes-confirm-no]')?.addEventListener('click', () => {
+    hideMinutesEditorCancelConfirm();
+  });
+  document.querySelector('[data-minutes-confirm-yes]')?.addEventListener('click', () => {
+    dismissMinutesEditor();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (isMinutesEditorOpen()) {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      if (isMinutesEditorCancelConfirmOpen()) {
+        hideMinutesEditorCancelConfirm();
+        return;
+      }
+      showMinutesEditorCancelConfirm();
       return;
     }
     if (isMinutesViewOpen()) {
