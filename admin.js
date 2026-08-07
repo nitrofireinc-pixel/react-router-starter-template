@@ -3038,7 +3038,8 @@ let sponsorFormToastLeaveTimer = null;
 
 function ensureSponsorFormToast() {
   let root = document.querySelector('#admin-sponsor-form-toast');
-  if (root) return root;
+  if (root && root.querySelector('[data-sponsor-form-confirm]')) return root;
+  if (root) root.remove();
   root = document.createElement('div');
   root.id = 'admin-sponsor-form-toast';
   root.className = 'admin-sponsor-form-toast';
@@ -3080,13 +3081,43 @@ function ensureSponsorFormToast() {
             <button class="btn primary" type="submit" data-sponsor-submit-label>Save Sponsor</button>
           </div>
         </form>
+        <div class="admin-sponsor-form-confirm" data-sponsor-form-confirm hidden>
+          <div class="admin-sponsor-form-confirm-card" role="alertdialog" aria-labelledby="admin-sponsor-form-confirm-title" aria-describedby="admin-sponsor-form-confirm-copy">
+            <h4 id="admin-sponsor-form-confirm-title">Are you sure?</h4>
+            <p id="admin-sponsor-form-confirm-copy">Canceling returns you to Manage sponsors and discards this form.</p>
+            <div class="admin-sponsor-form-confirm-actions">
+              <button class="btn outline" type="button" data-sponsor-confirm-no>No</button>
+              <button class="btn primary" type="button" data-sponsor-confirm-yes>Yes</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(root);
   root.querySelectorAll('[data-sponsor-form-dismiss]').forEach((el) => {
-    el.addEventListener('click', () => hideSponsorFormToast());
+    el.addEventListener('click', () => showSponsorFormCancelConfirm(root));
+  });
+  root.querySelector('[data-sponsor-confirm-no]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+  });
+  root.querySelector('[data-sponsor-confirm-yes]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+    hideSponsorFormToast();
   });
   return root;
+}
+
+function showSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-sponsor-confirm-yes]')?.focus();
+}
+
+function hideSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
 }
 
 function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast'), { editing = false } = {}) {
@@ -3101,6 +3132,7 @@ function syncBypassPaymentVisibility(root = document.querySelector('#admin-spons
 function openSponsorFormToast() {
   const root = ensureSponsorFormToast();
   window.clearTimeout(sponsorFormToastLeaveTimer);
+  hideSponsorFormCancelConfirm(root);
   root.hidden = false;
   root.classList.remove('is-leaving');
   root.classList.remove('is-visible');
@@ -3191,6 +3223,7 @@ function showEditSponsorToast(sponsor) {
 function hideSponsorFormToast() {
   const root = document.querySelector('#admin-sponsor-form-toast');
   if (!root || root.hidden) return;
+  hideSponsorFormCancelConfirm(root);
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
   window.clearTimeout(sponsorFormToastLeaveTimer);
