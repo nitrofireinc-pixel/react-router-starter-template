@@ -1862,16 +1862,33 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
+  const isMenuParentToggle = (button) => (
+    button?.hasAttribute('data-sponsors-toggle')
+    || button?.hasAttribute('data-boosters-toggle')
+  );
+
+  // Desktop accordion subs stay [hidden] until expanded. Mobile still needs those children.
+  const isGroupActionButton = (button, group) => (
+    Boolean(button)
+    && !button.hidden
+    && !isMenuParentToggle(button)
+    && Boolean(group)
+    && !group.hidden
+    && group.contains(button)
+  );
+
   const isVisibleButton = (button) => (
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
+    && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button) => {
-    if (!isVisibleButton(button)) return;
+  const pushButton = (button, { allowCollapsedSubmenu = false, group = null } = {}) => {
+    const allowed = allowCollapsedSubmenu
+      ? isGroupActionButton(button, group)
+      : isVisibleButton(button);
+    if (!allowed) return;
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1890,6 +1907,9 @@ function renderMobileAdminMenu() {
 
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
     if (node.matches?.('button')) return isVisibleButton(node);
+    if (node.matches?.('.admin-menu-group') && !node.hidden) {
+      return [...node.querySelectorAll('button')].some((button) => isGroupActionButton(button, node));
+    }
     return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
   });
 
@@ -1923,9 +1943,12 @@ function renderMobileAdminMenu() {
     }
     if (child.matches('.admin-menu-group')) {
       if (child.hidden) return;
+      const groupButtons = [...child.querySelectorAll('button')]
+        .filter((button) => isGroupActionButton(button, child));
+      if (!groupButtons.length) return;
       const parent = child.querySelector('.admin-menu-parent');
       if (parent && !parent.hidden) pushLabel(parent.textContent);
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      groupButtons.forEach((button) => pushButton(button, { allowCollapsedSubmenu: true, group: child }));
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
