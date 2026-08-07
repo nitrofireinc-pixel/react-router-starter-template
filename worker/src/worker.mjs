@@ -193,7 +193,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'user-form-toast-20260807-1';
+const ASSET_VERSION = 'sponsor-contact-edit-20260807-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -597,6 +597,31 @@ async function initDb(env) {
     await env.DB.prepare('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0').run();
   } catch {
     // Column already exists on upgraded databases.
+  }
+  // Recover phone/email onto sponsor rows from their linked applications when missing.
+  try {
+    await env.DB.prepare(`
+      UPDATE sponsors
+      SET
+        phone = CASE
+          WHEN TRIM(COALESCE(phone, '')) = '' THEN COALESCE((
+            SELECT TRIM(sa.phone) FROM sponsor_applications sa
+            WHERE sa.sponsor_id = sponsors.id AND TRIM(COALESCE(sa.phone, '')) != ''
+            ORDER BY sa.id DESC LIMIT 1
+          ), phone)
+          ELSE phone
+        END,
+        email = CASE
+          WHEN TRIM(COALESCE(email, '')) = '' THEN COALESCE((
+            SELECT LOWER(TRIM(sa.email)) FROM sponsor_applications sa
+            WHERE sa.sponsor_id = sponsors.id AND TRIM(COALESCE(sa.email, '')) != ''
+            ORDER BY sa.id DESC LIMIT 1
+          ), email)
+          ELSE email
+        END
+    `).run();
+  } catch {
+    // sponsor_applications may be unavailable during early bootstraps.
   }
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
@@ -5777,6 +5802,8 @@ async function handleApi(request, env, url) {
     const sponsor = normalizeSponsorPayload({
       name: businessName,
       address,
+      phone,
+      email,
       logo_url: logoUrl,
       level,
       active: 1,
@@ -5786,12 +5813,14 @@ async function handleApi(request, env, url) {
       sponsor.sort_order = Number(max?.max_order || 0) + 1;
     }
     const result = await env.DB.prepare(
-      'INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).bind(
       sponsor.name,
       sponsor.address,
       sponsor.city,
       sponsor.state,
+      sponsor.phone,
+      sponsor.email,
       sponsor.logo_url,
       sponsor.level,
       sponsor.mark_text,
@@ -5806,7 +5835,7 @@ async function handleApi(request, env, url) {
        WHERE id = ?`,
     ).bind(sponsorId, now, applicationId).run();
     const saved = await env.DB.prepare(
-      'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+      'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
     ).bind(sponsorId).first();
     return jsonResponse({
       ok: true,

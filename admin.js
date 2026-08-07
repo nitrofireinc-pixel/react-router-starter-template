@@ -3216,10 +3216,10 @@ function showEditSponsorToast(sponsor) {
     form.elements.active.value = Number(sponsor.active) === 0 ? '0' : '1';
     form.elements.business_name.value = String(sponsor.name || '');
     form.elements.address.value = address;
-    form.elements.phone.value = '';
-    form.elements.email.value = '';
-    form.elements.phone.required = false;
-    form.elements.email.required = false;
+    form.elements.phone.value = String(sponsor.phone || '').trim();
+    form.elements.email.value = String(sponsor.email || '').trim();
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
     if (form.elements.tier) form.elements.tier.value = tier;
     if (form.elements.logo) form.elements.logo.value = '';
     const status = root.querySelector('#sponsor-manual-status');
@@ -3645,6 +3645,10 @@ function renderSponsors() {
       <div>
         <b>${escapeHtml(sponsor.name)}</b>
         <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
+        <span>${escapeHtml([
+          sponsor.phone ? `Phone: ${sponsor.phone}` : '',
+          sponsor.email ? `Email: ${sponsor.email}` : '',
+        ].filter(Boolean).join(' · ') || 'No phone/email on file')}</span>
         <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${sponsor.active ? 'Active' : 'Hidden'} · ${escapeHtml(benefits.join(' · '))}</small>
       </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
@@ -5408,11 +5412,23 @@ function bindForms() {
           const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
           logoUrl = stored.url || logoUrl;
         }
+        if (!phone) {
+          if (status) status.textContent = 'Phone is required.';
+          showFailedToast('Phone is required.');
+          return;
+        }
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          if (status) status.textContent = 'A valid invoice email is required.';
+          showFailedToast('A valid invoice email is required.');
+          return;
+        }
         await jsonFetch(`/api/admin/sponsors/${id}`, {
           method: 'PUT',
           body: JSON.stringify({
             name: businessName,
             address,
+            phone,
+            email,
             logo_url: logoUrl,
             level,
             active: form.elements.active?.value !== '0',
