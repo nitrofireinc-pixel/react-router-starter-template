@@ -91,6 +91,70 @@ header.site-header nav .nav-notify-me:focus-visible{background:#eef3fa;outline:n
   .nav-notify-me:hover .nav-notify-bell,
   .nav-notify-me:focus-visible .nav-notify-bell{animation:none}
 }
+/* Add to Home is mobile-only; keep it out of the desktop nav entirely. */
+.nav-add-home{display:none}
+.add-home-sheet{
+  position:fixed;
+  inset:0;
+  z-index:140;
+  display:grid;
+  align-items:end;
+  justify-items:center;
+  padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));
+  background:rgba(2,16,32,.48);
+}
+.add-home-sheet[hidden]{display:none!important}
+.add-home-sheet-panel{
+  width:min(420px,100%);
+  margin:0;
+  padding:22px 20px 18px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:22px 22px 18px 18px;
+  background:linear-gradient(180deg,#0a2748,#041526 70%);
+  color:#eaf0f8;
+  box-shadow:0 24px 50px rgba(0,0,0,.35);
+}
+.add-home-sheet-head{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin:0 0 12px;
+}
+.add-home-sheet-head img{
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  object-fit:contain;
+  background:#fff;
+  flex:0 0 auto;
+}
+.add-home-sheet-head h2{
+  margin:0;
+  color:#fff;
+  font-size:1.2rem;
+  line-height:1.15;
+  letter-spacing:-.02em;
+}
+.add-home-sheet-head p{
+  margin:4px 0 0;
+  color:#b8c8dc;
+  font-size:.86rem;
+  font-weight:700;
+}
+.add-home-sheet ol{
+  margin:0 0 16px;
+  padding-left:1.2rem;
+  color:#d7e3f3;
+  font-weight:650;
+  line-height:1.45;
+}
+.add-home-sheet ol li{margin:0 0 .45rem}
+.add-home-sheet-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.add-home-sheet-actions .btn{min-height:42px;padding:10px 16px}
 .menu-button{display:none;margin:0;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
 /* Desktop nav bar: full-bleed utility navy, gold links centered */
 @media(min-width:761px){
@@ -180,12 +244,38 @@ img{-webkit-touch-callout:none}
     color:var(--navy);
   }
   header.site-header nav .nav-notify-label{display:none}
-  header.site-header nav .nav-notify-me{
+  header.site-header nav .nav-notify-me,
+  header.site-header nav .nav-add-home{
     align-self:flex-start;
     width:auto;
     padding:10px 12px;
   }
   header.site-header nav .nav-notify-bell{width:1.25rem;height:1.25rem}
+  header.site-header nav .nav-add-home{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:0;
+    background:transparent;
+    border-radius:999px;
+    cursor:pointer;
+    color:var(--navy);
+    line-height:1;
+  }
+  header.site-header nav .nav-add-home:hover,
+  header.site-header nav .nav-add-home:focus-visible{
+    background:#eef3fa;
+    outline:none;
+  }
+  header.site-header nav .nav-add-home-mark{
+    display:block;
+    width:1.35rem;
+    height:1.35rem;
+    border-radius:50%;
+    object-fit:contain;
+    background:#fff;
+  }
+  header.site-header nav .nav-add-home[hidden]{display:none!important}
   /* Keep the mobile menu above the sponsor marquee strip. */
   .site-chrome .sponsor-marquee-section,
   .sponsor-marquee-section{position:relative;z-index:1}

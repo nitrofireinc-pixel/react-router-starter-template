@@ -199,7 +199,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'web-push-notify-me-20260808-2';
+const ASSET_VERSION = 'add-to-home-nav-20260808-1';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -7233,12 +7233,16 @@ export function renderNotifyMeNavControl() {
   return `<button type="button" class="nav-notify-me" data-notify-me aria-label="Notify me about calendar updates" title="Notify me about calendar updates"><span class="nav-notify-bell" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg></span><span class="nav-notify-label">Notify Me</span></button>`;
 }
 
+export function renderAddToHomeNavControl() {
+  return `<button type="button" class="nav-add-home" data-add-home aria-label="Add East Forsyth Band to your home screen" title="Add to Home Screen"><img class="nav-add-home-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="" width="22" height="22" decoding="async"></button>`;
+}
+
 export function renderNav(pages, { loggedIn = false } = {}) {
   const pageLinks = (Array.isArray(pages) ? pages : [])
     .filter((page) => page.slug !== 'become-a-sponsor')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`)
     .join('');
-  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}`;
+  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
 export function renderPublicBrand(site = {}) {
@@ -7263,6 +7267,12 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta name="description" content="${escapeAttr(site.title)} website.">
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
+  <link rel="apple-touch-icon" href="${escapeAttr(BLUE_REGIMENT_MARK_PATH)}">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#002142">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EFHS Band">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
@@ -7421,12 +7431,15 @@ async function serveStaticOrCms(request, env, url) {
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js'].includes(assetName)) {
+  if (['admin.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
     if (assetName === 'push-sw.js') {
       headers.set('content-type', 'application/javascript; charset=utf-8');
       headers.set('service-worker-allowed', '/');
+    }
+    if (assetName === 'manifest.webmanifest') {
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
     }
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
   }

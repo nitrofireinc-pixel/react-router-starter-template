@@ -209,6 +209,204 @@ async function disableNotifyMe(button) {
   });
 })();
 
+function isMobileNavViewport() {
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+}
+
+function isStandaloneDisplay() {
+  return Boolean(
+    window.matchMedia?.('(display-mode: standalone)').matches
+      || window.navigator.standalone === true,
+  );
+}
+
+function detectMobileInstallOs() {
+  const ua = String(navigator.userAgent || '');
+  const platform = String(navigator.platform || '');
+  const touchMac = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  if (/iPhone|iPad|iPod/i.test(ua) || touchMac) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'other';
+}
+
+function ensureWebAppManifestLink() {
+  if (document.querySelector('link[rel="manifest"]')) return;
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = '/manifest.webmanifest';
+  document.head.appendChild(link);
+  if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+    const apple = document.createElement('link');
+    apple.rel = 'apple-touch-icon';
+    apple.href = '/assets/efhs-blue-regiment-mark.png';
+    document.head.appendChild(apple);
+  }
+}
+
+function ensureAddToHomeNavControl() {
+  const siteNav = document.querySelector('#site-nav');
+  if (!siteNav) return null;
+  let button = siteNav.querySelector('[data-add-home]');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nav-add-home';
+    button.dataset.addHome = '';
+    button.setAttribute('aria-label', 'Add East Forsyth Band to your home screen');
+    button.title = 'Add to Home Screen';
+    button.innerHTML = '<img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png" alt="" width="22" height="22" decoding="async">';
+    const notify = siteNav.querySelector('[data-notify-me]');
+    if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
+    else if (notify) siteNav.appendChild(button);
+    else siteNav.appendChild(button);
+  }
+  return button;
+}
+
+function addToHomeInstructions(os) {
+  if (os === 'ios') {
+    return {
+      eyebrow: 'iPhone / iPad',
+      steps: [
+        'Tap the Share button in Safari (square with an up arrow).',
+        'Scroll and tap Add to Home Screen.',
+        'Tap Add to save the Blue Regiment shortcut.',
+      ],
+    };
+  }
+  if (os === 'android') {
+    return {
+      eyebrow: 'Android',
+      steps: [
+        'Tap the browser menu (⋮).',
+        'Choose Add to Home screen or Install app.',
+        'Confirm to place the Blue Regiment icon on your home screen.',
+      ],
+    };
+  }
+  return {
+    eyebrow: 'Mobile browser',
+    steps: [
+      'Open this site in your phone’s browser menu.',
+      'Choose Add to Home screen / Install app.',
+      'Confirm to save the Blue Regiment shortcut.',
+    ],
+  };
+}
+
+function ensureAddToHomeSheet() {
+  let sheet = document.querySelector('[data-add-home-sheet]');
+  if (sheet) return sheet;
+  sheet = document.createElement('div');
+  sheet.className = 'add-home-sheet';
+  sheet.dataset.addHomeSheet = '';
+  sheet.hidden = true;
+  sheet.innerHTML = `
+    <div class="add-home-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="add-home-title">
+      <div class="add-home-sheet-head">
+        <img src="/assets/efhs-blue-regiment-mark.png" alt="">
+        <div>
+          <h2 id="add-home-title">Add to Home Screen</h2>
+          <p data-add-home-os></p>
+        </div>
+      </div>
+      <ol data-add-home-steps></ol>
+      <div class="add-home-sheet-actions">
+        <button type="button" class="btn primary" data-add-home-install hidden>Install</button>
+        <button type="button" class="btn secondary" data-add-home-close>Got it</button>
+      </div>
+    </div>`;
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click', (event) => {
+    if (event.target === sheet || event.target.closest('[data-add-home-close]')) {
+      sheet.hidden = true;
+    }
+  });
+  return sheet;
+}
+
+function showAddToHomeSheet({ os, canInstall }) {
+  const sheet = ensureAddToHomeSheet();
+  const info = addToHomeInstructions(os);
+  const osLabel = sheet.querySelector('[data-add-home-os]');
+  const steps = sheet.querySelector('[data-add-home-steps]');
+  const installBtn = sheet.querySelector('[data-add-home-install]');
+  if (osLabel) osLabel.textContent = info.eyebrow;
+  if (steps) {
+    steps.innerHTML = info.steps.map((step) => `<li>${step}</li>`).join('');
+  }
+  if (installBtn) {
+    installBtn.hidden = !canInstall;
+    installBtn.onclick = async () => {
+      if (!window.__efhsDeferredInstallPrompt) return;
+      const promptEvent = window.__efhsDeferredInstallPrompt;
+      window.__efhsDeferredInstallPrompt = null;
+      installBtn.hidden = true;
+      await promptEvent.prompt();
+      sheet.hidden = true;
+      syncAddToHomeButtonState(ensureAddToHomeNavControl());
+    };
+  }
+  sheet.hidden = false;
+}
+
+function syncAddToHomeButtonState(button) {
+  if (!button) return;
+  const show = isMobileNavViewport() && !isStandaloneDisplay();
+  button.hidden = !show;
+}
+
+(function bindAddToHomeNavControl() {
+  ensureWebAppManifestLink();
+  const button = ensureAddToHomeNavControl();
+  if (!button || button.dataset.boundAddHome === '1') return;
+  button.dataset.boundAddHome = '1';
+  syncAddToHomeButtonState(button);
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    window.__efhsDeferredInstallPrompt = event;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    window.__efhsDeferredInstallPrompt = null;
+    syncAddToHomeButtonState(button);
+  });
+
+  if (window.matchMedia) {
+    const media = window.matchMedia('(max-width: 760px)');
+    const onChange = () => syncAddToHomeButtonState(button);
+    if (media.addEventListener) media.addEventListener('change', onChange);
+    else if (media.addListener) media.addListener(onChange);
+  }
+
+  // Help Android meet installability when visitors open the mobile menu.
+  if (isMobileNavViewport() && 'serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/push-sw.js', { scope: '/' }).catch(() => {});
+  }
+
+  button.addEventListener('click', async () => {
+    if (!isMobileNavViewport()) return;
+    if (isStandaloneDisplay()) {
+      window.alert('East Forsyth Band is already on your home screen.');
+      return;
+    }
+    const os = detectMobileInstallOs();
+    const deferred = window.__efhsDeferredInstallPrompt;
+    if (deferred && os === 'android') {
+      try {
+        await deferred.prompt();
+        window.__efhsDeferredInstallPrompt = null;
+        syncAddToHomeButtonState(button);
+        return;
+      } catch {
+        // Fall through to instructions if the native prompt fails.
+      }
+    }
+    showAddToHomeSheet({ os, canInstall: Boolean(window.__efhsDeferredInstallPrompt) });
+  });
+})();
+
 function ensureMaintenancePreviewBanner() {
   if (document.querySelector('[data-maintenance-preview-banner]')) {
     document.body.classList.add('maintenance-preview');
