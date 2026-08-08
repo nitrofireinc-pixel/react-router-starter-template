@@ -470,6 +470,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS push_devices (token TEXT PRIMARY KEY, platform TEXT NOT NULL DEFAULT \'android\', app_id TEXT NOT NULL DEFAULT \'efhs_calendar\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
     await env.DB.prepare('ALTER TABLE events ADD COLUMN event_year INTEGER NOT NULL DEFAULT 2026').run();
@@ -1204,6 +1205,246 @@ async function setSiteContentValue(env, key, value) {
   await env.DB.prepare(
     'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
   ).bind(key, String(value ?? '')).run();
+}
+
+export const CALENDAR_PUSH_STATE_KEY = 'calendar_push_state';
+export const CALENDAR_PUSH_TOPIC = 'efhs_calendar';
+
+export function emptyCalendarPushState() {
+  return {
+    revision: 0,
+    action: '',
+    title: '',
+    event_id: null,
+    at: '',
+  };
+}
+
+export function parseCalendarPushState(raw) {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+    if (!parsed || typeof parsed !== 'object') return emptyCalendarPushState();
+    const revision = Number(parsed.revision);
+    return {
+      revision: Number.isFinite(revision) && revision > 0 ? Math.floor(revision) : 0,
+      action: ['created', 'updated', 'deleted'].includes(String(parsed.action || '')) ? String(parsed.action) : '',
+      title: String(parsed.title || '').trim().slice(0, 200),
+      event_id: parsed.event_id == null || parsed.event_id === '' ? null : Number(parsed.event_id) || null,
+      at: String(parsed.at || '').trim(),
+    };
+  } catch {
+    return emptyCalendarPushState();
+  }
+}
+
+export function buildCalendarPushPayload({ action = 'updated', event = null, eventId = null } = {}) {
+  const normalizedAction = ['created', 'updated', 'deleted'].includes(action) ? action : 'updated';
+  const title = htmlToPlainText(event?.title || '').trim() || (normalizedAction === 'deleted' ? 'An event was removed' : 'Calendar update');
+  const headlines = {
+    created: 'New calendar event',
+    updated: 'Calendar event updated',
+    deleted: 'Calendar event removed',
+  };
+  return {
+    action: normalizedAction,
+    event_id: event?.id ?? eventId ?? null,
+    title,
+    notification_title: headlines[normalizedAction],
+    notification_body: title,
+  };
+}
+
+export function normalizePushRegisterPayload(payload = {}) {
+  const token = String(payload.token || '').trim();
+  const platform = String(payload.platform || 'android').trim().toLowerCase() || 'android';
+  const appId = String(payload.app_id || payload.appId || 'efhs_calendar').trim() || 'efhs_calendar';
+  if (!token || token.length < 20 || token.length > 4096) {
+    return { ok: false, detail: 'A valid push token is required' };
+  }
+  if (!['android', 'ios', 'web'].includes(platform)) {
+    return { ok: false, detail: 'platform must be android, ios, or web' };
+  }
+  return { ok: true, token, platform, app_id: appId.slice(0, 80) };
+}
+
+export function parseFcmServiceAccount(env = {}) {
+  const raw = String(env.FCM_SERVICE_ACCOUNT_JSON || '').trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const clientEmail = String(parsed.client_email || '').trim();
+    const privateKey = String(parsed.private_key || '').replace(/\\n/g, '\n').trim();
+    const projectId = String(parsed.project_id || env.FCM_PROJECT_ID || '').trim();
+    if (!clientEmail || !privateKey || !projectId) return null;
+    return { client_email: clientEmail, private_key: privateKey, project_id: projectId };
+  } catch {
+    return null;
+  }
+}
+
+export function fcmServerKey(env = {}) {
+  return String(env.FCM_SERVER_KEY || '').trim();
+}
+
+export function fcmConfigured(env = {}) {
+  return Boolean(parseFcmServiceAccount(env) || fcmServerKey(env));
+}
+
+function base64UrlFromBytes(bytes) {
+  let binary = '';
+  const view = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
+  for (let i = 0; i < view.length; i += 1) binary += String.fromCharCode(view[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function pemToArrayBuffer(pem) {
+  const b64 = String(pem || '')
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s+/g, '');
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function createFcmAccessToken(serviceAccount) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlFromBytes(TEXT.encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
+  const claim = base64UrlFromBytes(TEXT.encode(JSON.stringify({
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  })));
+  const unsigned = `${header}.${claim}`;
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToArrayBuffer(serviceAccount.private_key),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, TEXT.encode(unsigned));
+  const jwt = `${unsigned}.${base64UrlFromBytes(signature)}`;
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  });
+  const payload = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !payload.access_token) {
+    throw new Error(payload.error_description || payload.error || 'Unable to mint FCM access token');
+  }
+  return String(payload.access_token);
+}
+
+export async function sendFcmCalendarPush(env, pushPayload) {
+  const data = {
+    action: String(pushPayload.action || ''),
+    event_id: pushPayload.event_id == null ? '' : String(pushPayload.event_id),
+    title: String(pushPayload.title || ''),
+    revision: pushPayload.revision == null ? '' : String(pushPayload.revision),
+  };
+  const notification = {
+    title: String(pushPayload.notification_title || 'Calendar update'),
+    body: String(pushPayload.notification_body || pushPayload.title || 'The band calendar changed.'),
+  };
+  const serviceAccount = parseFcmServiceAccount(env);
+  if (serviceAccount) {
+    const accessToken = await createFcmAccessToken(serviceAccount);
+    const response = await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: {
+          topic: CALENDAR_PUSH_TOPIC,
+          notification,
+          data,
+          android: { priority: 'HIGH' },
+          apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
+        },
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error?.message || body.error || `FCM v1 send failed (${response.status})`);
+    }
+    return { ok: true, transport: 'http_v1', topic: CALENDAR_PUSH_TOPIC, result: body };
+  }
+
+  const serverKey = fcmServerKey(env);
+  if (!serverKey) return { ok: false, skipped: true, detail: 'FCM is not configured' };
+
+  const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+    method: 'POST',
+    headers: {
+      authorization: `key=${serverKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: `/topics/${CALENDAR_PUSH_TOPIC}`,
+      priority: 'high',
+      notification,
+      data,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.failure) {
+    throw new Error(body.results?.[0]?.error || body.error || `FCM legacy send failed (${response.status})`);
+  }
+  return { ok: true, transport: 'legacy', topic: CALENDAR_PUSH_TOPIC, result: body };
+}
+
+async function getCalendarPushState(env) {
+  return parseCalendarPushState(await getSiteContentValue(env, CALENDAR_PUSH_STATE_KEY));
+}
+
+export async function recordCalendarPushChange(env, { action = 'updated', event = null, eventId = null } = {}) {
+  const payload = buildCalendarPushPayload({ action, event, eventId });
+  const previous = await getCalendarPushState(env);
+  const next = {
+    revision: (previous.revision || 0) + 1,
+    action: payload.action,
+    title: payload.title,
+    event_id: payload.event_id,
+    at: new Date().toISOString(),
+  };
+  await setSiteContentValue(env, CALENDAR_PUSH_STATE_KEY, JSON.stringify(next));
+  const pushPayload = { ...payload, revision: next.revision };
+  let delivery = { ok: false, skipped: true, detail: 'FCM is not configured' };
+  if (fcmConfigured(env)) {
+    try {
+      delivery = await sendFcmCalendarPush(env, pushPayload);
+    } catch (error) {
+      delivery = { ok: false, detail: error.message || 'FCM send failed' };
+    }
+  }
+  return { state: next, delivery, push: pushPayload };
+}
+
+async function upsertPushDevice(env, { token, platform, app_id }) {
+  await env.DB.prepare(
+    `INSERT INTO push_devices (token, platform, app_id, created_at, updated_at)
+     VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(token) DO UPDATE SET
+       platform=excluded.platform,
+       app_id=excluded.app_id,
+       updated_at=CURRENT_TIMESTAMP`,
+  ).bind(token, platform, app_id).run();
+  return { ok: true, token, platform, app_id, topic: CALENDAR_PUSH_TOPIC };
+}
+
+async function deletePushDevice(env, token) {
+  await env.DB.prepare('DELETE FROM push_devices WHERE token = ?').bind(token).run();
+  return { ok: true };
 }
 
 export function parseZernioFacebookConnection(value) {
@@ -4235,12 +4476,31 @@ export function serializePagePayload(payload, existing = null) {
   };
 }
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+  }
+  if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
+    const state = await getCalendarPushState(env);
+    return jsonResponse({
+      ...state,
+      topic: CALENDAR_PUSH_TOPIC,
+      fcm_configured: fcmConfigured(env),
+    });
+  }
+  if (url.pathname === '/api/push/register' && request.method === 'POST') {
+    const normalized = normalizePushRegisterPayload(await request.json().catch(() => ({})));
+    if (!normalized.ok) return jsonResponse({ detail: normalized.detail }, 422);
+    return jsonResponse(await upsertPushDevice(env, normalized));
+  }
+  if (url.pathname === '/api/push/register' && request.method === 'DELETE') {
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    if (!token) return jsonResponse({ detail: 'token is required' }, 422);
+    return jsonResponse(await deletePushDevice(env, token));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
@@ -5620,6 +5880,9 @@ async function handleApi(request, env, url) {
     ).run();
     const created = await getEventById(env, result.meta.last_row_id);
     try { await queueEventForFacebook(env, created, 'new'); } catch { /* queue is best-effort */ }
+    const pushTask = recordCalendarPushChange(env, { action: 'created', event: created });
+    if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
+    else try { await pushTask; } catch { /* push is best-effort */ }
     return jsonResponse(created);
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
@@ -5635,6 +5898,9 @@ async function handleApi(request, env, url) {
     if (request.method === 'DELETE') {
       await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
       try { await unqueueEventForFacebook(env, id); } catch { /* ignore */ }
+      const pushTask = recordCalendarPushChange(env, { action: 'deleted', event: existing, eventId: id });
+      if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
+      else try { await pushTask; } catch { /* push is best-effort */ }
       return jsonResponse({ ok: true });
     }
     const p = normalizeEventPayload(await request.json(), existing);
@@ -5664,6 +5930,9 @@ async function handleApi(request, env, url) {
     ).run();
     const updated = await getEventById(env, id);
     try { await queueEventForFacebook(env, updated, 'updated'); } catch { /* queue is best-effort */ }
+    const pushTask = recordCalendarPushChange(env, { action: 'updated', event: updated });
+    if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
+    else try { await pushTask; } catch { /* push is best-effort */ }
     return jsonResponse(updated);
   }
 
@@ -5983,9 +6252,9 @@ async function serveStaticOrCms(request, env, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url);
+    if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
