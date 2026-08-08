@@ -199,7 +199,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'add-to-home-nav-20260808-1';
+const ASSET_VERSION = 'add-to-home-nav-20260808-2';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -260,6 +260,37 @@ self.addEventListener('notificationclick', (event) => {
 
 export function renderPushServiceWorker() {
   return PUSH_SW_JS;
+}
+
+const WEB_APP_MANIFEST = `{
+  "name": "East Forsyth Band",
+  "short_name": "EFHS Band",
+  "description": "East Forsyth Band calendar, ensembles, boosters, and program updates.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#002142",
+  "theme_color": "#002142",
+  "icons": [
+    {
+      "src": "/assets/efhs-blue-regiment-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/efhs-blue-regiment-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
+`;
+
+export function renderWebAppManifest() {
+  return WEB_APP_MANIFEST;
 }
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7450,7 +7481,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
-    // Serve the push SW from the worker so Pages asset fallback never returns HTML.
+    // Serve push SW + manifest from the worker so Pages asset fallback never returns HTML.
     if (url.pathname === '/push-sw.js') {
       return new Response(renderPushServiceWorker(), {
         status: 200,
@@ -7458,6 +7489,15 @@ export default {
           'content-type': 'application/javascript; charset=utf-8',
           'cache-control': 'no-store',
           'service-worker-allowed': '/',
+        },
+      });
+    }
+    if (url.pathname === '/manifest.webmanifest') {
+      return new Response(renderWebAppManifest(), {
+        status: 200,
+        headers: {
+          'content-type': 'application/manifest+json; charset=utf-8',
+          'cache-control': 'no-store',
         },
       });
     }
