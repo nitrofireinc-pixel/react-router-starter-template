@@ -68,6 +68,7 @@ class HelpScreen extends StatelessWidget {
             title: 'East Forsyth endpoints',
             body:
                 'Upcoming/expanded events: https://efhsband.org/api/events\n'
+                'Full calendar (past + future): https://efhsband.org/api/calendar-events\n'
                 'Push revision state: https://efhsband.org/api/calendar-push-state',
           ),
           _section(
