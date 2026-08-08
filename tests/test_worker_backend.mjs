@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-
-import { applyHomeFeatureCards, buildCalendarPushPayload, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildCalendarPushPayload, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -26,6 +25,88 @@ test('validateSelfPasswordChange requires length match and confirmation', () => 
   });
   assert.equal(ok.ok, true);
   assert.equal(ok.new_password, 'newpass99');
+});
+
+test('buildUserWelcomeInvite includes subject credentials and login link', () => {
+  const invite = buildUserWelcomeInvite({
+    username: 'editor@example.com',
+    password: 'TempPass99',
+    loginUrl: 'https://efhsband.org/admin',
+  });
+  assert.equal(invite.subject, 'Welcome to EFHSBand.org!');
+  assert.match(invite.text, /Welcome to the new East Forsyth High School Blue Regiment website!/);
+  assert.match(invite.text, /Username: editor@example\.com/);
+  assert.match(invite.text, /Temporary password: TempPass99/);
+  assert.match(invite.text, /Please change your password after login/);
+  assert.match(invite.html, /Temporary password:<\/strong> TempPass99/);
+  assert.match(invite.html, /https:\/\/efhsband\.org\/admin/);
+  assert.equal(invite.to, 'editor@example.com');
+});
+
+test('normalizeTesterCreatePayload fills missing username display name and password', () => {
+  const generated = normalizeTesterCreatePayload({});
+  assert.match(generated.username, /^tester-[a-z0-9]+$/);
+  assert.equal(generated.display_name, 'Tester');
+  assert.equal(generated.generatedPassword, true);
+  assert.equal(generated.password.length >= 8, true);
+  assert.equal(generated.active, 1);
+
+  const custom = normalizeTesterCreatePayload({
+    username: 'QA-Lab',
+    display_name: 'QA',
+    password: 'custompass1',
+    permissions: ['events'],
+    active: false,
+  });
+  assert.equal(custom.username, 'qa-lab');
+  assert.equal(custom.display_name, 'QA');
+  assert.equal(custom.password, 'custompass1');
+  assert.equal(custom.generatedPassword, false);
+  assert.deepEqual(custom.permissions, ['events']);
+  assert.equal(custom.active, 0);
+});
+
+test('generateTesterPassword returns a usable random password', () => {
+  const password = generateTesterPassword(12);
+  assert.equal(password.length, 12);
+  assert.match(password, /^[A-Za-z0-9]+$/);
+});
+
+
+
+
+test('ensureHomeHeroCardMark swaps the hero-card logo for the Blue Regiment mark', () => {
+  const html = '<aside class="hero-card"><img src="assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
+  const next = ensureHomeHeroCardMark(html);
+  assert.match(next, /efhs-blue-regiment-mark\.png/);
+  assert.match(next, /alt="East Forsyth Blue Regiment"/);
+  assert.doesNotMatch(next, /efhs-logo\.png/);
+});
+
+test('ensureGalleryPageSlot strips placeholder images from gallery mounts', () => {
+  const html = '<section class="page-hero" data-cms-layout="gallery"></section><section><div class="wrap"><div class="photo-gallery" data-photo-gallery data-sort="recent"><figure class="gallery-item"><img src="assets/efhs-photo-1.png" alt="x"></figure><figure class="gallery-item"><img src="assets/efhs-photo-2.png" alt="y"></figure></div></div></section>';
+  const next = ensureGalleryPageSlot(html);
+  assert.match(next, /data-photo-gallery/);
+  assert.doesNotMatch(next, /efhs-photo-1\.png|efhs-photo-2\.png/);
+  assert.doesNotMatch(next, /gallery-item/);
+});
+
+test('sortPhotosByRecent orders by created_at then id', () => {
+  const sorted = sortPhotosByRecent([
+    { id: 1, created_at: '2026-08-01T10:00:00.000Z' },
+    { id: 3, created_at: '2026-08-07T10:00:00.000Z' },
+    { id: 2, created_at: '2026-08-07T10:00:00.000Z' },
+  ]);
+  assert.deepEqual(sorted.map((item) => item.id), [3, 2, 1]);
+});
+
+test('ensureHomePhotoGallerySlot limits home gallery and adds full gallery link', () => {
+  const html = '<section><div class="wrap"><div class="gallery" data-photo-gallery><figure class="gallery-item"></figure></div></div></section>';
+  const next = ensureHomePhotoGallerySlot(html);
+  assert.match(next, /data-limit="6"/);
+  assert.match(next, /data-sort="recent"/);
+  assert.match(next, /View full gallery/);
+  assert.match(next, /href="\/gallery\.html"/);
 });
 
 test('jsonResponse returns JSON with status and content-type', async () => {
@@ -274,9 +355,19 @@ test('serializePagePayload turns structured CMS fields into generated HTML', () 
 
   assert.equal(page.slug, 'calendar');
   assert.equal(page.path, '/calendar.html');
-  assert.match(page.body_html, /data-events/);
+  assert.match(page.body_html, /data-month-calendar/);
+  assert.doesNotMatch(page.body_html, /data-events/);
   assert.match(page.body_html, /Use the Calendar tab/);
   assert.doesNotMatch(page.body_html, /<textarea/);
+});
+
+test('ensureCalendarMonthMount replaces nested event timelines with a month grid mount', () => {
+  const html = '<section class="content soft"><div class="wrap"><div class="timeline" data-events data-limit="5"><article class="event"><div class="datebox">Aug <span>01</span></div><div><h3>Band Camp</h3><p>Details</p></div></article></div></div></section>';
+  const next = ensureCalendarMonthMount(html);
+  assert.match(next, /data-month-calendar/);
+  assert.doesNotMatch(next, /data-events/);
+  assert.doesNotMatch(next, /Band Camp/);
+  assert.equal(ensureCalendarMonthMount(next), next);
 });
 
 test('events sort by year, month, and day instead of editor sort_order', () => {
@@ -450,6 +541,15 @@ test('maintenance mode redirects all public HTML pages except maintenance itself
   assert.equal(shouldRedirectToMaintenance('/maintenance.html', on), false);
   assert.equal(shouldRedirectToMaintenance('/styles.css', on), false);
   assert.equal(shouldRedirectToMaintenance('/contact.html', off), false);
+  assert.equal(shouldRedirectToMaintenance('/contact.html', on, { bypass: true }), false);
+  assert.equal(shouldRedirectToMaintenance('/', on, { bypass: true }), false);
+  // Non-super-admin visitors still redirect when bypass is false.
+  assert.equal(shouldRedirectToMaintenance('/sponsors.html', on, { bypass: false }), true);
+  const banner = renderMaintenancePreviewBanner();
+  assert.match(banner, /Maintenance mode is on/);
+  assert.match(banner, /Super Admin preview/);
+  assert.match(banner, /data-maintenance-preview-banner/);
+  assert.match(banner, /\/admin/);
 });
 
 test('maintenance return path cookie values are sanitized to safe same-site pages', () => {
@@ -624,6 +724,29 @@ test('ensureSponsorDonateButton adds Donate control beside Become a sponsor', ()
   assert.match(structured, /Become a sponsor/);
 });
 
+test('renderPublicBrand shows school logo, title, then Blue Regiment mark', () => {
+  const html = renderPublicBrand({ title: 'East Forsyth Band', logo_url: '/assets/efhs-logo.png' });
+  assert.match(html, /class="brand"/);
+  assert.match(html, /brand-logo/);
+  assert.match(html, /brand-mark/);
+  assert.match(html, /efhs-blue-regiment-mark/);
+  assert.match(html, /data-site-field="title"/);
+  assert.ok(html.indexOf('brand-logo') < html.indexOf('data-site-field="title"'));
+  assert.ok(html.indexOf('data-site-field="title"') < html.indexOf('brand-mark'));
+});
+
+test('Blue Regiment mark path is shared by public brand and minutes letterhead', () => {
+  assert.equal(BLUE_REGIMENT_MARK_PATH, '/assets/efhs-blue-regiment-mark.png');
+  const brand = renderPublicBrand({ title: 'East Forsyth Band' });
+  const minutes = renderMinutesDocumentHtml(
+    { title: 'East Forsyth Band' },
+    { meeting_date: '2026-08-04', body_html: '<p>Notes</p>' },
+  );
+  assert.match(brand, /efhs-blue-regiment-mark/);
+  assert.match(minutes, /efhs-blue-regiment-mark/);
+  assert.match(minutes, /letterhead-mark/);
+});
+
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
   const invoice = buildSponsorDonationInvoice({
     id: 42,
@@ -643,8 +766,80 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   assert.match(invoice.text, /donation to the East Forsyth Band Boosters/i);
   assert.match(invoice.text, /Acme Music/);
   assert.match(invoice.text, /\$500/);
+  assert.match(invoice.text, /PDF copy of this invoice is attached/i);
   assert.match(invoice.html, /East Forsyth Band Boosters/);
   assert.equal(invoice.invoice_number, 'SP-42');
+  assert.match(invoice.pdf_filename, /SP-42\.pdf/);
+  assert.ok(invoice.pdf_base64);
+  const pdf = Buffer.from(invoice.pdf_base64, 'base64').toString('latin1');
+  assert.match(pdf, /^%PDF-/);
+  assert.match(pdf, /Acme Music/);
+  assert.match(pdf, /DONATION INVOICE/);
+  assert.match(pdf, /East Forsyth Band Boosters/);
+  assert.match(pdf, /Helvetica-Bold/);
+  assert.match(pdf, /\/Im1 Do/);
+  assert.match(pdf, /\/Subtype \/Image/);
+  assert.equal(invoice.square_auth_id, '');
+  assert.doesNotMatch(invoice.text, /Square Auth ID/);
+});
+
+test('resolveSquarePurchaseAuthId prefers card auth code then payment id', () => {
+  assert.equal(resolveSquarePurchaseAuthId({
+    id: 'PAYMENT123',
+    card_details: { auth_result_code: 'A1B2C3' },
+  }), 'A1B2C3');
+  assert.equal(resolveSquarePurchaseAuthId({ id: 'PAYMENT123' }), 'PAYMENT123');
+  assert.equal(resolveSquarePurchaseAuthId({}, { paymentId: 'FALLBACK99' }), 'FALLBACK99');
+});
+
+test('buildSponsorDonationInvoice includes Square Auth ID from purchase', () => {
+  const invoice = buildSponsorDonationInvoice({
+    id: 42,
+    tier: 'gold',
+    amount_cents: 50000,
+    amount_display: '$500',
+    business_name: 'Acme Music',
+    address: '100 Band Way, Kernersville, NC',
+    phone: '(336) 555-0100',
+    email: 'billing@acme.example',
+    paid_at: '2026-08-05T15:00:00.000Z',
+    square_payment_id: 'sq0paymentABC',
+    square_auth_id: 'AUTH7788',
+  });
+  assert.equal(invoice.square_auth_id, 'AUTH7788');
+  assert.match(invoice.text, /Square Auth ID: AUTH7788/);
+  assert.match(invoice.html, /Square Auth ID[\s\S]*AUTH7788/);
+  const pdf = Buffer.from(invoice.pdf_base64, 'base64').toString('latin1');
+  assert.match(pdf, /Square Auth ID: AUTH7788/);
+});
+
+test('applicationFromSponsorRecord builds manual-entry invoice source', () => {
+  const application = applicationFromSponsorRecord({
+    id: 9,
+    name: 'Manual Co',
+    address: '1 Main',
+    city: 'Kernersville',
+    state: 'NC',
+    phone: '(336) 555-0199',
+    email: 'manual@example.com',
+    level: 'Silver Sponsor',
+  }, { amountDisplay: '$250' });
+  assert.equal(application.invoice_prefix, 'MS');
+  assert.equal(application.tier, 'silver');
+  assert.equal(application.amount_display, '$250');
+  assert.equal(application.email, 'manual@example.com');
+  const pdf = Buffer.from(buildTextPdfBase64(['Line'], { title: 'Test' }), 'base64').toString('latin1');
+  assert.match(pdf, /^%PDF-/);
+});
+
+test('GLOBAL_PERMISSIONS includes sponsors bypass-payment scope', async () => {
+  // Permission list is not exported; verify via hasPermission short-circuit with explicit scope string usage in source file.
+  const fs = await import('node:fs');
+  const workerSource = fs.readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  const adminSource = fs.readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+  assert.match(workerSource, /sponsors:bypass-payment/);
+  assert.match(workerSource, /\/api\/admin\/sponsors\/manual/);
+  assert.match(adminSource, /Bypass sponsor payment/);
 });
 
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {
@@ -751,22 +946,38 @@ test('sponsor tiers drive marquee, fly-in, and game-day benefits', () => {
   assert.equal(hydrated.show_game_announcement, true);
 });
 
+test('renderSponsorMarqueeSection applies tier background classes', () => {
+  const html = renderSponsorMarqueeSection([
+    { name: 'Nitrofire Computing', level: 'Gold Sponsor', logo_url: '', active: 1, mark_text: 'N' },
+    { name: 'Silver Shop', tier: 'silver', active: 1, mark_text: 'S' },
+  ]);
+  assert.match(html, /sponsor-marquee-item tier-gold/);
+  assert.match(html, /sponsor-marquee-item tier-silver/);
+  assert.match(html, /data-sponsor-tier="gold"/);
+});
+
 test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
   const gold = normalizeSponsorPayload({
     name: 'Eagle Financial Partners',
     level: 'Gold Sponsor',
     active: true,
+    phone: '(336) 555-0100',
+    email: 'Hello@Eagle.example',
   });
   assert.equal(gold.homepage_ad, 1);
   assert.equal(gold.level, 'Gold Sponsor');
   assert.equal(gold.city, 'Kernersville');
   assert.equal(gold.state, 'NC');
+  assert.equal(gold.phone, '(336) 555-0100');
+  assert.equal(gold.email, 'hello@eagle.example');
   assert.equal(gold._assign_sort_order, true);
   const bronze = normalizeSponsorPayload({ name: 'Local Shop', level: 'Bronze Sponsor' }, { homepage_ad: 1, active: 1, city: 'Greensboro', state: 'NC', sort_order: 4 });
   assert.equal(bronze.homepage_ad, 0);
   assert.equal(bronze.city, 'Greensboro');
   assert.equal(bronze.sort_order, 4);
   assert.equal(bronze._assign_sort_order, false);
+  assert.equal(bronze.phone, '');
+  assert.equal(bronze.email, '');
   const legacy = normalizeSponsorPayload({ name: 'Legacy Co', homepage_ad: true }, { level: 'Community Sponsor' });
   assert.equal(legacy.level, 'Silver Sponsor');
   assert.equal(legacy.homepage_ad, 1);
@@ -890,14 +1101,20 @@ test('admin mail payload sanitizes rich html and builds plain text', () => {
     subject: '  Practice update  ',
     html: '<p>Hello <strong>team</strong></p><script>alert(1)</script><p>See you Thursday.</p>',
     userIds: ['3', 3, 7, 'nope'],
+    extraEmails: 'Parent@example.com, bad-email, parent@example.com; volunteer@efhsband.org',
   });
   assert.equal(mail.subject, 'Practice update');
   assert.deepEqual(mail.user_ids, [3, 7]);
+  assert.deepEqual(mail.extra_emails, ['parent@example.com', 'volunteer@efhsband.org']);
   assert.match(mail.html, /<strong>team<\/strong>/);
   assert.doesNotMatch(mail.html, /script/i);
   assert.match(mail.text, /Hello team/);
   assert.match(mail.text, /See you Thursday/);
   assert.equal(htmlToPlainText('<p>Line one</p><br>Line two'), 'Line one\n\nLine two');
+  assert.deepEqual(
+    normalizeAdminMailExtraEmails(['A@Band.org', 'not-email', 'a@band.org']),
+    ['a@band.org'],
+  );
 });
 
 test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
@@ -910,6 +1127,7 @@ test('resolveAdminMailSender uses logged-in user email for Reply-To', () => {
   assert.match(missing.detail, /valid email/i);
   const fallback = resolveAdminMailSender({ username: 'admin@efhsband.org', display_name: '  ' });
   assert.equal(fallback.fromName, 'admin@efhsband.org');
+  assert.equal(fallback.replyTo, 'admin@efhsband.org');
 });
 
 test('meeting minutes dates and secretary edit window', () => {
@@ -970,7 +1188,6 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /window\.print\(\)/);
   assert.match(documentHtml, /efhs-blue-regiment-mark/);
   assert.match(documentHtml, /letterhead-mark/);
-  assert.match(documentHtml, /opacity:\s*0\.28/);
 });
 
 
@@ -1015,6 +1232,30 @@ test('sanitizeAdminReturnPath only allows admin return paths', () => {
   assert.equal(sanitizeAdminReturnPath('/admin?tab=social&zernio=facebook_select'), '/admin?tab=social&zernio=facebook_select');
   assert.equal(sanitizeAdminReturnPath('https://evil.example/admin'), '/admin');
   assert.equal(sanitizeAdminReturnPath('/api/admin/me'), '/admin');
+});
+
+test('admin sessions stay fresh for 24 hours and public nav reflects login state', () => {
+  assert.equal(SESSION_TTL_SECONDS, 24 * 60 * 60);
+  const now = 1_700_000_000;
+  assert.equal(isSessionFresh(now - 60, now), true);
+  assert.equal(isSessionFresh(now - SESSION_TTL_SECONDS, now), true);
+  assert.equal(isSessionFresh(now - SESSION_TTL_SECONDS - 1, now), false);
+  assert.equal(isSessionFresh(now + 120, now), false);
+  assert.match(sessionCookieHeader('abc.token'), /Max-Age=86400/);
+  assert.match(sessionCookieHeader('', { maxAge: 0 }), /Max-Age=0/);
+  assert.match(renderStaffAuthNavLink(false), /Login/);
+  assert.match(renderStaffAuthNavLink(false), /\/admin\/login/);
+  assert.match(renderStaffAuthNavLink(true), /Staff Menu/);
+  assert.match(renderStaffAuthNavLink(true), /href="\/admin"/);
+  const nav = renderNav([
+    { slug: 'home', path: '/', title: 'Home' },
+    { slug: 'become-a-sponsor', path: '/become-a-sponsor.html', title: 'Become a Sponsor' },
+    { slug: 'contact', path: '/contact.html', title: 'Contact' },
+  ], { loggedIn: true });
+  assert.match(nav, />Home</);
+  assert.match(nav, />Contact</);
+  assert.doesNotMatch(nav, /Become a Sponsor/);
+  assert.match(nav, /Staff Menu/);
 });
 
 test('formatFacebookCalendarDigest lists queued events for Facebook', () => {

@@ -16,10 +16,10 @@
 <div class="utility"><div class="wrap"><a href="calendar.html">Upcoming Events</a><a href="resources.html">Student Resources</a><a href="contact.html">Contact</a></div></div>
 <header class="site-header">
   <div class="header-inner">
-    <a class="brand" href="index.html"><img src="assets/efhs-logo.png" alt="East Forsyth High School logo"><span data-site-field="title">East Forsyth Band</span></a>
+    <a class="brand" href="index.html"><img class="brand-logo" src="assets/efhs-logo.png" alt="East Forsyth High School logo"><span data-site-field="title">East Forsyth Band</span><img class="brand-mark" src="assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"></a>
     <button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button>
   </div>
-  <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a></nav>
+  <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a><a href="/admin/login" data-staff-auth-link>Login</a></nav>
 </header>
 <section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>
 <main id="main">
@@ -32,7 +32,7 @@
       <p data-site-field="hero_subtitle">A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.</p>
       <div class="button-row"><a class="btn primary" href="calendar.html">View Calendar</a><a class="btn secondary" href="ensembles.html">Explore Ensembles</a><a class="btn gold" href="sponsors.html">Support the Band</a></div>
     </div>
-    <aside class="hero-card"><img src="assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2><ul><li>Ensembles and program overview</li><li>Upcoming events and rehearsal notes</li><li>Booster, fundraising, and sponsor information</li></ul></aside>
+    <aside class="hero-card"><img src="assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"><h2>Band information in one place</h2><ul><li>Ensembles and program overview</li><li>Upcoming events and rehearsal notes</li><li>Booster, fundraising, and sponsor information</li></ul></aside>
   </div>
 </section>
 <section>
@@ -58,10 +58,11 @@
 <section>
   <div class="wrap">
     <div class="section-head"><div><div class="kicker">Photos</div><h2>Band photo gallery</h2></div><p>Photos uploaded from the admin backend will appear here automatically.</p></div>
-    <div class="gallery" data-photo-gallery>
+    <div class="gallery" data-photo-gallery data-limit="6" data-sort="recent">
       <figure class="gallery-item"><img src="assets/efhs-photo-1.png" alt="East Forsyth school building"><figcaption>Upload band photos from the admin area.</figcaption></figure>
       <figure class="gallery-item"><img src="assets/efhs-photo-2.png" alt="East Forsyth campus"><figcaption>Feature performances, rehearsals, and booster events.</figcaption></figure>
     </div>
+    <p class="gallery-more"><a class="btn outline" href="/gallery.html">View full gallery</a></p>
   </div>
 </section>
 <section data-cms-home-cards>
@@ -73,7 +74,7 @@
 </main>
 <footer class="footer">
   <div class="wrap">
-    <div><nav class="footer-social" aria-label="Social media" hidden></nav><h3 data-site-field="title">East Forsyth Band</h3><p data-site-field="footer_note">Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div>
+    <div><nav class="footer-social" aria-label="Social media" hidden></nav><h3 data-site-field="title">East Forsyth Band</h3><div class="footer-note" data-site-field="footer_note">Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div>
     <div><h3>Program</h3><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a></div>
     <div><h3>Families</h3><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="fundraising.html">Fundraising</a></div>
     <div><h3>Community</h3><a href="sponsors.html">Sponsors</a><a href="contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div>
