@@ -1259,6 +1259,8 @@ test('admin sessions stay fresh for 24 hours and public nav reflects login state
   assert.match(nav, /data-notify-me/);
   assert.match(nav, /Notify Me/);
   assert.match(renderNotifyMeNavControl(), /nav-notify-bell/);
+  assert.match(renderPushServiceWorker(), /showNotification/);
+  assert.match(renderPushServiceWorker(), /notificationclick/);
 });
 
 test('normalizeWebPushSubscription validates browser push endpoints and keys', () => {

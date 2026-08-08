@@ -199,7 +199,68 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'web-push-notify-me-20260808-1';
+const ASSET_VERSION = 'web-push-notify-me-20260808-2';
+
+const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
+self.addEventListener('install', (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    try {
+      const text = event.data ? event.data.text() : '';
+      data = text ? { body: text } : {};
+    } catch {
+      data = {};
+    }
+  }
+
+  const title = String(data.title || data.notification_title || 'Calendar update').trim() || 'Calendar update';
+  const body = String(data.body || data.notification_body || data.title || 'The band calendar changed.').trim();
+  const url = String(data.url || '/calendar.html').trim() || '/calendar.html';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/assets/efhs-icon.png',
+      badge: '/assets/efhs-icon.png',
+      tag: \`efhs-calendar-\${data.revision || data.event_id || 'update'}\`,
+      renotify: true,
+      data: { url },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = String(event.notification?.data?.url || '/calendar.html');
+  event.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of allClients) {
+      if ('focus' in client) {
+        if ('navigate' in client) {
+          try { await client.navigate(targetUrl); } catch { /* keep focusing existing tab */ }
+        }
+        return client.focus();
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    return undefined;
+  })());
+});
+`;
+
+export function renderPushServiceWorker() {
+  return PUSH_SW_JS;
+}
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -7376,6 +7437,17 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
+    // Serve the push SW from the worker so Pages asset fallback never returns HTML.
+    if (url.pathname === '/push-sw.js') {
+      return new Response(renderPushServiceWorker(), {
+        status: 200,
+        headers: {
+          'content-type': 'application/javascript; charset=utf-8',
+          'cache-control': 'no-store',
+          'service-worker-allowed': '/',
+        },
+      });
+    }
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
