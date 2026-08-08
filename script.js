@@ -45,6 +45,170 @@ function applyStaffAuthNavState(loggedIn) {
     });
 })();
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+function ensureNotifyMeNavControl() {
+  const siteNav = document.querySelector('#site-nav');
+  if (!siteNav) return null;
+  let button = siteNav.querySelector('[data-notify-me]');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nav-notify-me';
+    button.dataset.notifyMe = '';
+    button.setAttribute('aria-label', 'Notify me about calendar updates');
+    button.title = 'Notify me about calendar updates';
+    button.innerHTML = `
+      <span class="nav-notify-bell" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg>
+      </span>
+      <span class="nav-notify-label">Notify Me</span>`;
+    siteNav.appendChild(button);
+  }
+  return button;
+}
+
+function setNotifyMeState(button, state) {
+  if (!button) return;
+  const label = button.querySelector('.nav-notify-label');
+  button.classList.toggle('is-enabled', state === 'enabled');
+  button.classList.toggle('is-busy', state === 'busy');
+  button.classList.toggle('is-unsupported', state === 'unsupported');
+  button.disabled = state === 'busy' || state === 'unsupported';
+  if (state === 'enabled') {
+    if (label) label.textContent = 'Notifications On';
+    button.setAttribute('aria-label', 'Calendar notifications are on. Click to turn off.');
+    button.title = 'Calendar notifications are on';
+  } else if (state === 'unsupported') {
+    if (label) label.textContent = 'Notify Me';
+    button.setAttribute('aria-label', 'Notifications are not supported in this browser');
+    button.title = 'Notifications are not supported in this browser';
+  } else if (state === 'busy') {
+    if (label) label.textContent = 'Working…';
+    button.setAttribute('aria-label', 'Updating notification settings');
+  } else {
+    if (label) label.textContent = 'Notify Me';
+    button.setAttribute('aria-label', 'Notify me about calendar updates');
+    button.title = 'Notify me about calendar updates';
+  }
+}
+
+function webPushSupported() {
+  return Boolean(
+    window.isSecureContext
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window
+      && 'Notification' in window,
+  );
+}
+
+async function getNotifyMeSubscription() {
+  const registration = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
+  await navigator.serviceWorker.ready;
+  return {
+    registration,
+    subscription: await registration.pushManager.getSubscription(),
+  };
+}
+
+async function syncNotifyMeButtonState(button) {
+  if (!webPushSupported()) {
+    setNotifyMeState(button, 'unsupported');
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  try {
+    const { subscription } = await getNotifyMeSubscription();
+    if (Notification.permission === 'denied') {
+      setNotifyMeState(button, 'default');
+      return;
+    }
+    setNotifyMeState(button, subscription ? 'enabled' : 'default');
+  } catch {
+    setNotifyMeState(button, 'default');
+  }
+}
+
+async function enableNotifyMe(button) {
+  setNotifyMeState(button, 'busy');
+  const keyResponse = await fetch('/api/push/vapid-public-key', { cache: 'no-store' });
+  const keyPayload = await keyResponse.json().catch(() => ({}));
+  if (!keyResponse.ok || !keyPayload.publicKey) {
+    throw new Error(keyPayload.detail || 'Could not load notification settings.');
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error('Notifications were blocked. Enable them in your browser settings to get calendar alerts.');
+  }
+  const { registration } = await getNotifyMeSubscription();
+  let subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+    });
+  }
+  const body = subscription.toJSON();
+  body.user_agent = navigator.userAgent || '';
+  const saveResponse = await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const savePayload = await saveResponse.json().catch(() => ({}));
+  if (!saveResponse.ok) {
+    throw new Error(savePayload.detail || 'Could not save notification subscription.');
+  }
+  setNotifyMeState(button, 'enabled');
+}
+
+async function disableNotifyMe(button) {
+  setNotifyMeState(button, 'busy');
+  const { subscription } = await getNotifyMeSubscription();
+  if (subscription) {
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe().catch(() => {});
+    await fetch('/api/push/subscribe', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint }),
+    }).catch(() => {});
+  }
+  setNotifyMeState(button, 'default');
+}
+
+(function bindNotifyMeNavControl() {
+  const button = ensureNotifyMeNavControl();
+  if (!button || button.dataset.boundNotifyMe === '1') return;
+  button.dataset.boundNotifyMe = '1';
+  syncNotifyMeButtonState(button);
+
+  button.addEventListener('click', async () => {
+    if (!webPushSupported()) {
+      window.alert('Notifications are not supported in this browser.');
+      return;
+    }
+    try {
+      if (button.classList.contains('is-enabled')) {
+        await disableNotifyMe(button);
+      } else {
+        await enableNotifyMe(button);
+      }
+    } catch (error) {
+      await syncNotifyMeButtonState(button);
+      window.alert(error?.message || 'Could not update notifications.');
+    }
+  });
+})();
+
 function ensureMaintenancePreviewBanner() {
   if (document.querySelector('[data-maintenance-preview-banner]')) {
     document.body.classList.add('maintenance-preview');

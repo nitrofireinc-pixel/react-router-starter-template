@@ -25,6 +25,7 @@ for (const name of [
   'script.js',
   'site-content.js',
   'admin.js',
+  'push-sw.js',
 ]) {
   cpSync(join(ROOT, name), join(PUBLIC, name));
 }

@@ -4,6 +4,12 @@ import {
   INVOICE_LOGO_RGB_FLATE_BASE64,
   INVOICE_LOGO_WIDTH,
 } from './invoice-logo-rgb.mjs';
+import {
+  deserializeVapidKeys,
+  generateVapidKeys,
+  sendPushNotification,
+  serializeVapidKeys,
+} from './web-push-browser/index.js';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -193,7 +199,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'staff-email-second-send-20260808-1';
+const ASSET_VERSION = 'web-push-notify-me-20260808-1';
 /** Shared Blue Regiment mark used by the public title and minutes letterhead. */
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
@@ -497,6 +503,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, is_tester INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS push_devices (token TEXT PRIMARY KEY, platform TEXT NOT NULL DEFAULT \'android\', app_id TEXT NOT NULL DEFAULT \'efhs_calendar\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
     await env.DB.prepare('ALTER TABLE events ADD COLUMN event_year INTEGER NOT NULL DEFAULT 2026').run();
@@ -1544,6 +1551,117 @@ async function getCalendarPushState(env) {
   return parseCalendarPushState(await getSiteContentValue(env, CALENDAR_PUSH_STATE_KEY));
 }
 
+const WEB_PUSH_VAPID_PUBLIC_KEY = 'web_push_vapid_public';
+const WEB_PUSH_VAPID_PRIVATE_KEY = 'web_push_vapid_private';
+
+export async function getWebPushVapidKeys(env = {}) {
+  const envPublic = String(env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
+  const envPrivate = String(env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
+  if (envPublic && envPrivate) {
+    return { publicKey: envPublic, privateKey: envPrivate, source: 'env' };
+  }
+  let publicKey = await getSiteContentValue(env, WEB_PUSH_VAPID_PUBLIC_KEY);
+  let privateKey = await getSiteContentValue(env, WEB_PUSH_VAPID_PRIVATE_KEY);
+  if (publicKey && privateKey) {
+    return { publicKey, privateKey, source: 'db' };
+  }
+  const pair = await generateVapidKeys();
+  const serialized = await serializeVapidKeys(pair);
+  await setSiteContentValue(env, WEB_PUSH_VAPID_PUBLIC_KEY, serialized.publicKey);
+  await setSiteContentValue(env, WEB_PUSH_VAPID_PRIVATE_KEY, serialized.privateKey);
+  return { publicKey: serialized.publicKey, privateKey: serialized.privateKey, source: 'generated' };
+}
+
+export function normalizeWebPushSubscription(payload = {}) {
+  const endpoint = String(payload.endpoint || '').trim();
+  const keys = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
+  const p256dh = String(keys.p256dh || payload.p256dh || '').trim();
+  const auth = String(keys.auth || payload.auth || '').trim();
+  const userAgent = String(payload.user_agent || payload.userAgent || '').trim().slice(0, 300);
+  if (!/^https:\/\//i.test(endpoint) || endpoint.length > 2048) {
+    return { ok: false, detail: 'A valid push endpoint is required' };
+  }
+  if (p256dh.length < 20 || p256dh.length > 512 || auth.length < 8 || auth.length > 256) {
+    return { ok: false, detail: 'Subscription keys are missing or invalid' };
+  }
+  return { ok: true, endpoint, p256dh, auth, user_agent: userAgent };
+}
+
+async function upsertWebPushSubscription(env, { endpoint, p256dh, auth, user_agent }) {
+  await env.DB.prepare(
+    `INSERT INTO web_push_subscriptions (endpoint, p256dh, auth, user_agent, created_at, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh=excluded.p256dh,
+       auth=excluded.auth,
+       user_agent=excluded.user_agent,
+       updated_at=CURRENT_TIMESTAMP`,
+  ).bind(endpoint, p256dh, auth, user_agent || '').run();
+  return { ok: true, endpoint };
+}
+
+async function deleteWebPushSubscription(env, endpoint) {
+  await env.DB.prepare('DELETE FROM web_push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
+  return { ok: true };
+}
+
+export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
+  const rows = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM web_push_subscriptions').all();
+  const subscriptions = rows.results || [];
+  if (!subscriptions.length) {
+    return { ok: true, skipped: true, sent: 0, failed: 0, removed: 0, detail: 'No browser subscriptions' };
+  }
+  const vapid = await getWebPushVapidKeys(env);
+  const keyPair = await deserializeVapidKeys({
+    publicKey: vapid.publicKey,
+    privateKey: vapid.privateKey,
+  });
+  // createJWT prefixes mailto: itself — pass a bare email address here.
+  const subjectEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL || 'no-reply@efhsband.org')
+    .trim()
+    .replace(/^mailto:/i, '');
+  const subject = subjectEmail.includes('@') ? subjectEmail : 'no-reply@efhsband.org';
+  const message = JSON.stringify({
+    title: pushPayload.notification_title || 'Calendar update',
+    body: pushPayload.notification_body || pushPayload.title || 'The band calendar changed.',
+    url: '/calendar.html',
+    action: pushPayload.action || '',
+    event_id: pushPayload.event_id,
+    revision: pushPayload.revision,
+  });
+
+  let sent = 0;
+  let failed = 0;
+  let removed = 0;
+  for (const row of subscriptions) {
+    try {
+      const response = await sendPushNotification(
+        keyPair,
+        {
+          endpoint: row.endpoint,
+          keys: { p256dh: row.p256dh, auth: row.auth },
+        },
+        subject,
+        message,
+        { algorithm: 'aes128gcm', ttl: 86400, urgency: 'high' },
+      );
+      if (response.status === 404 || response.status === 410) {
+        await deleteWebPushSubscription(env, row.endpoint);
+        removed += 1;
+        continue;
+      }
+      if (!response.ok) {
+        failed += 1;
+        continue;
+      }
+      sent += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { ok: failed === 0, sent, failed, removed, total: subscriptions.length };
+}
+
 export async function recordCalendarPushChange(env, { action = 'updated', event = null, eventId = null } = {}) {
   const payload = buildCalendarPushPayload({ action, event, eventId });
   const previous = await getCalendarPushState(env);
@@ -1564,7 +1682,13 @@ export async function recordCalendarPushChange(env, { action = 'updated', event 
       delivery = { ok: false, detail: error.message || 'FCM send failed' };
     }
   }
-  return { state: next, delivery, push: pushPayload };
+  let webPush = { ok: false, skipped: true, detail: 'No browser subscriptions' };
+  try {
+    webPush = await sendWebPushCalendarNotifications(env, pushPayload);
+  } catch (error) {
+    webPush = { ok: false, detail: error.message || 'Web push send failed' };
+  }
+  return { state: next, delivery, web_push: webPush, push: pushPayload };
 }
 
 async function upsertPushDevice(env, { token, platform, app_id }) {
@@ -5144,6 +5268,24 @@ async function handleApi(request, env, url, ctx = null) {
       fcm_configured: fcmConfigured(env),
     });
   }
+  if (url.pathname === '/api/push/vapid-public-key' && request.method === 'GET') {
+    const keys = await getWebPushVapidKeys(env);
+    return jsonResponse({
+      publicKey: keys.publicKey,
+      supported: true,
+    });
+  }
+  if (url.pathname === '/api/push/subscribe' && request.method === 'POST') {
+    const normalized = normalizeWebPushSubscription(await request.json().catch(() => ({})));
+    if (!normalized.ok) return jsonResponse({ detail: normalized.detail }, 422);
+    return jsonResponse(await upsertWebPushSubscription(env, normalized));
+  }
+  if (url.pathname === '/api/push/subscribe' && request.method === 'DELETE') {
+    const payload = await request.json().catch(() => ({}));
+    const endpoint = String(payload.endpoint || '').trim();
+    if (!endpoint) return jsonResponse({ detail: 'endpoint is required' }, 422);
+    return jsonResponse(await deleteWebPushSubscription(env, endpoint));
+  }
   if (url.pathname === '/api/push/register' && request.method === 'POST') {
     const normalized = normalizePushRegisterPayload(await request.json().catch(() => ({})));
     if (!normalized.ok) return jsonResponse({ detail: normalized.detail }, 422);
@@ -7026,12 +7168,16 @@ export function renderStaffAuthNavLink(loggedIn = false) {
   return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
+export function renderNotifyMeNavControl() {
+  return `<button type="button" class="nav-notify-me" data-notify-me aria-label="Notify me about calendar updates" title="Notify me about calendar updates"><span class="nav-notify-bell" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg></span><span class="nav-notify-label">Notify Me</span></button>`;
+}
+
 export function renderNav(pages, { loggedIn = false } = {}) {
   const pageLinks = (Array.isArray(pages) ? pages : [])
     .filter((page) => page.slug !== 'become-a-sponsor')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`)
     .join('');
-  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}`;
+  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}`;
 }
 
 export function renderPublicBrand(site = {}) {
@@ -7214,9 +7360,13 @@ async function serveStaticOrCms(request, env, url) {
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'site-content.js', 'script.js', 'styles.css'].includes(assetName)) {
+  if (['admin.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
+    if (assetName === 'push-sw.js') {
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('service-worker-allowed', '/');
+    }
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
   }
   return assetResponse;

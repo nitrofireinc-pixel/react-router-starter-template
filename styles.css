@@ -47,9 +47,50 @@ header.site-header nav{
   border-top:1px solid rgba(0,33,66,.1);
   box-sizing:border-box;
 }
-header.site-header nav a{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}
+header.site-header nav a,
+header.site-header nav .nav-notify-me{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}
 header.site-header nav a:hover,
-header.site-header nav a:focus{background:#eef3fa;outline:none}
+header.site-header nav a:focus,
+header.site-header nav .nav-notify-me:hover,
+header.site-header nav .nav-notify-me:focus-visible{background:#eef3fa;outline:none}
+.nav-notify-me{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+  font:inherit;
+  line-height:1;
+  white-space:nowrap;
+}
+.nav-notify-me:disabled{opacity:.72;cursor:wait}
+.nav-notify-bell{
+  display:inline-flex;
+  width:1.05em;
+  height:1.05em;
+  transform-origin:top center;
+  animation:nav-bell-ring 3.4s ease-in-out infinite;
+}
+.nav-notify-bell svg{width:100%;height:100%;fill:currentColor;display:block}
+.nav-notify-me:hover .nav-notify-bell,
+.nav-notify-me:focus-visible .nav-notify-bell{
+  animation-duration:1.6s;
+}
+@keyframes nav-bell-ring{
+  0%,68%,100%{transform:rotate(0deg)}
+  72%{transform:rotate(12deg)}
+  76%{transform:rotate(-10deg)}
+  80%{transform:rotate(8deg)}
+  84%{transform:rotate(-6deg)}
+  88%{transform:rotate(3deg)}
+  92%{transform:rotate(-1.5deg)}
+}
+@media (prefers-reduced-motion:reduce){
+  .nav-notify-bell,
+  .nav-notify-me:hover .nav-notify-bell,
+  .nav-notify-me:focus-visible .nav-notify-bell{animation:none}
+}
 .menu-button{display:none;margin:0;border:1px solid var(--line);background:white;border-radius:12px;padding:10px 12px;font-weight:800;color:var(--navy)}
 /* Desktop nav bar: full-bleed utility navy, gold links centered */
 @media(min-width:761px){
@@ -64,7 +105,8 @@ header.site-header nav a:focus{background:#eef3fa;outline:none}
     box-shadow:none;
     justify-content:center;
   }
-  header.site-header nav a{
+  header.site-header nav a,
+  header.site-header nav .nav-notify-me{
     padding:4px 10px;
     color:var(--gold);
     text-shadow:
@@ -76,10 +118,15 @@ header.site-header nav a:focus{background:#eef3fa;outline:none}
       0 0 2px rgba(0,0,0,.9);
   }
   header.site-header nav a:hover,
-  header.site-header nav a:focus-visible{
+  header.site-header nav a:focus-visible,
+  header.site-header nav .nav-notify-me:hover,
+  header.site-header nav .nav-notify-me:focus-visible{
     background:rgba(255,255,255,.12);
     color:#ffe566;
     outline:none;
+  }
+  header.site-header nav .nav-notify-me.is-enabled{
+    background:rgba(255,255,255,.1);
   }
 }
 .hero{position:relative;overflow:hidden;background:radial-gradient(circle at top right, rgba(253,215,3,.26), transparent 30%),linear-gradient(135deg,var(--navy),#00101f 62%,#000b16);color:#fff}.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,33,66,.15),rgba(0,33,66,.88)),url('assets/efhs-photo-2.png') right center/auto 100% no-repeat;opacity:.55}.hero .wrap{position:relative;max-width:var(--max);margin:auto;padding:86px 20px 74px;display:grid;grid-template-columns:1.15fr .85fr;gap:46px;align-items:center}.eyebrow{display:inline-flex;align-items:center;gap:10px;color:#fff;font-weight:900;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase}.eyebrow:before{content:"";width:34px;height:4px;background:var(--red);border-radius:99px}.hero h1{font-size:clamp(2.6rem,7vw,6.4rem);line-height:.92;margin:18px 0 20px;letter-spacing:-.06em;text-wrap:balance}.hero p{font-size:clamp(1.05rem,2vw,1.35rem);max-width:680px;color:#eaf0f8;margin:0 0 30px}.hero-card{background:rgba(255,255,255,.95);color:var(--ink);border-radius:30px;padding:28px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,.4)}.hero-card img{width:170px;margin:0 auto 14px}.hero-card h2{margin:0;color:var(--navy);font-size:1.55rem}.hero-card ul{margin:14px 0 0;padding-left:20px;color:var(--muted)}
@@ -120,15 +167,25 @@ img{-webkit-touch-callout:none}
   }
   header.site-header nav{display:none!important;position:absolute;left:16px;right:16px;top:calc(100% + 6px);flex:none;width:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow);justify-content:flex-start;z-index:80}
   header.site-header nav.open{display:flex!important;flex-direction:column}
-  header.site-header nav a{
+  header.site-header nav a,
+  header.site-header nav .nav-notify-me{
     color:var(--navy);
     text-shadow:none;
   }
   header.site-header nav a:hover,
-  header.site-header nav a:focus-visible{
+  header.site-header nav a:focus-visible,
+  header.site-header nav .nav-notify-me:hover,
+  header.site-header nav .nav-notify-me:focus-visible{
     background:#eef3fa;
     color:var(--navy);
   }
+  header.site-header nav .nav-notify-label{display:none}
+  header.site-header nav .nav-notify-me{
+    align-self:flex-start;
+    width:auto;
+    padding:10px 12px;
+  }
+  header.site-header nav .nav-notify-bell{width:1.25rem;height:1.25rem}
   /* Keep the mobile menu above the sponsor marquee strip. */
   .site-chrome .sponsor-marquee-section,
   .sponsor-marquee-section{position:relative;z-index:1}
@@ -136,7 +193,8 @@ img{-webkit-touch-callout:none}
 /* Mid-width desktops (e.g. 1024x768): slightly tighter nav pills so more links fit per row. */
 @media(max-width:1100px) and (min-width:761px){
   header.site-header nav{gap:2px;padding-top:2px;padding-bottom:2px}
-  header.site-header nav a{font-size:.8rem;padding:3px 8px}
+  header.site-header nav a,
+  header.site-header nav .nav-notify-me{font-size:.8rem;padding:3px 8px}
 }
 @media(max-width:900px){.sponsor-directory{grid-template-columns:1fr}.sponsor-intro,.sponsor-cta{align-items:flex-start;flex-direction:column}.cms-shell{display:block;padding:20px}.cms-shell .admin-top{border-radius:18px 18px 0 0}.cms-shell .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));border-radius:0 0 18px 18px}.cms-shell .cms-panel{margin:20px 0}.hero .wrap{grid-template-columns:1fr;padding-top:56px}.cards,.two,.directory,.footer .wrap,.gallery,.photo-gallery,.admin-grid{grid-template-columns:1fr}.admin-grid .admin-card:first-child{grid-column:auto}.section-head{display:block}.admin-top{display:block}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr}.hero:before{background:linear-gradient(90deg,rgba(0,33,66,.62),rgba(0,33,66,.92)),url('assets/efhs-photo-2.png') center/cover no-repeat}}
 
