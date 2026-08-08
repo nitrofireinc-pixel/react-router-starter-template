@@ -242,6 +242,8 @@ function showSavedToast(message = 'Saved.', options = {}) {
     savedToastLeaveTimer = playOverlayLeave(root, {
       ms: 380,
       onDone: () => {
+        // A newer toast may have started while this one was leaving.
+        if (root.classList.contains('is-visible')) return;
         root.classList.remove('is-password-success');
         root.classList.remove('is-error');
         root.classList.remove('has-icon');
@@ -429,15 +431,20 @@ function jsonFetchViaXhr(url, options = {}) {
         reject(new Error(data?.detail || data?.error || text || xhr.statusText || 'Request failed'));
         return;
       }
+      if (data == null) {
+        if (showUpload) hideUploadingOverlay();
+        reject(new Error('Server returned a non-JSON response. Refresh and try again.'));
+        return;
+      }
       if (showUpload) {
         setUploadProgress(100);
         window.setTimeout(() => {
           hideUploadingOverlay();
-          resolve(data || {});
+          resolve(data);
         }, 160);
         return;
       }
-      resolve(data || {});
+      resolve(data);
     };
     xhr.send(options.body);
   });
@@ -3851,15 +3858,36 @@ function selectedMailExtraEmails(form) {
   )];
 }
 
+function resetMailComposerForm(form, editor) {
+  if (!form) return;
+  if (form.elements.subject) form.elements.subject.value = '';
+  if (editor) editor.innerHTML = '';
+  if (form.elements.attachments) form.elements.attachments.value = '';
+  if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+  const recipientSelectEl = form.querySelector('#mail-recipient-select');
+  if (recipientSelectEl) {
+    [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
+    updateMailAllUsersButton(recipientSelectEl);
+  }
+  const colorInput = document.querySelector('#mail-rich-color');
+  if (colorInput) colorInput.value = '#002142';
+}
+
 function bindMailComposer() {
   const form = document.querySelector('#mail-form');
   const editor = document.querySelector('#mail-body');
   const toolbar = document.querySelector('#mail-rich-toolbar');
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+  // Prevent a native GET navigation to /admin if the JS handler ever fails to bind.
+  form.setAttribute('method', 'post');
+  form.setAttribute('action', '/api/admin/mail');
 
   const recipientSelect = form.querySelector('#mail-recipient-select');
   const allUsersButton = form.querySelector('#mail-toggle-all-users');
+  const submitButton = form.querySelector('button[type="submit"]');
+  let mailSendInFlight = false;
+  let mailSendGeneration = 0;
   if (allUsersButton && allUsersButton.dataset.boundAllUsers !== '1') {
     allUsersButton.dataset.boundAllUsers = '1';
     allUsersButton.addEventListener('click', () => {
@@ -3905,6 +3933,9 @@ function bindMailComposer() {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    event.stopPropagation();
+    if (mailSendInFlight) return;
+
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
@@ -3912,19 +3943,23 @@ function bindMailComposer() {
     const extraEmails = selectedMailExtraEmails(form);
     const rawExtra = String(form.elements.extra_emails?.value || '').trim();
     if (!userIds.length && !extraEmails.length) {
-      if (status) {
-        status.textContent = rawExtra
-          ? 'Enter a valid email address, or choose a recipient from the list.'
-          : 'Choose a recipient or enter at least one email address.';
-      }
+      const detail = rawExtra
+        ? 'Enter a valid email address, or choose a recipient from the list.'
+        : 'Choose a recipient or enter at least one email address.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
     if (!subject) {
-      if (status) status.textContent = 'Subject is required.';
+      const detail = 'Subject is required.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
     if (!html.replace(/<[^>]+>/g, '').trim()) {
-      if (status) status.textContent = 'Message body is required.';
+      const detail = 'Message body is required.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
 
@@ -3933,29 +3968,28 @@ function bindMailComposer() {
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
     if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
-    [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
+    [...(form.elements.attachments?.files || [])]
+      .filter((file) => file && Number(file.size || 0) > 0)
+      .forEach((file) => payload.append('attachments', file));
 
+    mailSendInFlight = true;
+    const sendGeneration = ++mailSendGeneration;
+    if (submitButton) submitButton.disabled = true;
     if (status) status.textContent = 'Sending…';
     try {
       const result = await jsonFetch('/api/admin/mail', { method: 'POST', body: payload });
-      if (result.ok) {
-        if (form.elements.subject) form.elements.subject.value = '';
-        editor.innerHTML = '';
-        if (form.elements.attachments) form.elements.attachments.value = '';
-        if (form.elements.extra_emails) form.elements.extra_emails.value = '';
-        const recipientSelectEl = form.querySelector('#mail-recipient-select');
-        if (recipientSelectEl) {
-          [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
-          updateMailAllUsersButton(recipientSelectEl);
-        }
-        const colorInput = document.querySelector('#mail-rich-color');
-        if (colorInput) colorInput.value = '#002142';
+      if (sendGeneration !== mailSendGeneration) return;
+      if (result?.ok) {
+        resetMailComposerForm(form, editor);
         showSavedToast('Sent.', { icon: 'envelope' });
         await loadMailDeliveryStatus();
-      } else if (status) {
-        status.textContent = result.detail || 'Email sent.';
+      } else {
+        const detail = result?.detail || 'Email could not be sent.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
       }
     } catch (error) {
+      if (sendGeneration !== mailSendGeneration) return;
       let message = error.message || 'Could not send email.';
       try {
         const parsed = JSON.parse(message);
@@ -3964,6 +3998,12 @@ function bindMailComposer() {
         // Keep raw error text when the API did not return JSON.
       }
       if (status) status.textContent = message;
+      showFailedToast(message);
+    } finally {
+      if (sendGeneration === mailSendGeneration) {
+        mailSendInFlight = false;
+        if (submitButton) submitButton.disabled = false;
+      }
     }
   });
 }
