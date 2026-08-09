@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:workmanager/workmanager.dart';
 
 import '../firebase_options.dart';
 import 'event_repository.dart';
@@ -14,12 +15,31 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Background display is handled by the OS notification payload from FCM.
 }
 
+@pragma('vm:entry-point')
+void calendarPushPollingCallback() {
+  Workmanager().executeTask((task, inputData) async {
+    try {
+      final settings = await SettingsStore.open();
+      if (!settings.pushEnabled) return true;
+      final repository = EventRepository(settings);
+      final push = PushService(settings, repository);
+      await push.initLocalNotificationsOnly();
+      await push.checkForUpdatesOnResume();
+      return true;
+    } catch (_) {
+      return true;
+    }
+  });
+}
+
 class PushService {
   PushService(this._settings, this._repository);
 
   static const _channelId = 'efhs_calendar_updates';
   static const _channelName = 'Calendar updates';
   static const topic = 'efhs_calendar';
+  static const pollTaskName = 'efhs_calendar_push_poll';
+  static const pollUniqueName = 'efhs-calendar-push-poll';
 
   final SettingsStore _settings;
   final EventRepository _repository;
@@ -27,6 +47,7 @@ class PushService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+  bool _localReady = false;
   bool firebaseReady = false;
   String? lastToken;
   String? lastError;
@@ -35,26 +56,16 @@ class PushService {
     if (_initialized) return;
     _initialized = true;
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
-    await _local.initialize(
-      settings: const InitializationSettings(android: androidInit, iOS: iosInit),
-    );
-    await _local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            _channelId,
-            _channelName,
-            description: 'Alerts when band calendar events are added or updated.',
-            importance: Importance.high,
-          ),
-        );
+    await initLocalNotificationsOnly();
+
+    if (Platform.isAndroid) {
+      await Workmanager().initialize(calendarPushPollingCallback);
+      await _syncBackgroundPolling();
+    }
 
     if (!DefaultFirebaseOptions.isConfigured) {
       lastError =
-          'Firebase is not configured yet. Local revision checks still work.';
+          'Firebase is not configured yet. The app checks for calendar changes in the background about every 15 minutes, and again whenever you open it.';
       return;
     }
 
@@ -75,14 +86,52 @@ class PushService {
     }
   }
 
+  Future<void> initLocalNotificationsOnly() async {
+    if (_localReady) return;
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosInit = DarwinInitializationSettings();
+    await _local.initialize(
+      settings: const InitializationSettings(android: androidInit, iOS: iosInit),
+    );
+    await _local
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            _channelId,
+            _channelName,
+            description: 'Alerts when band calendar events are added or updated.',
+            importance: Importance.high,
+          ),
+        );
+    _localReady = true;
+  }
+
+  Future<void> _syncBackgroundPolling() async {
+    if (!Platform.isAndroid) return;
+    if (!_settings.pushEnabled) {
+      await Workmanager().cancelByUniqueName(pollUniqueName);
+      return;
+    }
+    await Workmanager().registerPeriodicTask(
+      pollUniqueName,
+      pollTaskName,
+      frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+      constraints: Constraints(networkType: NetworkType.connected),
+    );
+  }
+
   Future<void> syncPermissionsAndRegistration() async {
     await init();
     if (!_settings.pushEnabled) {
       await _unsubscribe();
+      await _syncBackgroundPolling();
       return;
     }
 
     await _checkRevisionAndNotify();
+    await _syncBackgroundPolling();
 
     if (!firebaseReady) return;
 
@@ -131,6 +180,7 @@ class PushService {
       await syncPermissionsAndRegistration();
     } else {
       await _unsubscribe();
+      await _syncBackgroundPolling();
     }
   }
 
@@ -165,6 +215,7 @@ class PushService {
     required String body,
     String? payload,
   }) async {
+    await initLocalNotificationsOnly();
     await _local.show(
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: title,

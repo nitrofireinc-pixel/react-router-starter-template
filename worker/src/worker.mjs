@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'web-push-await-delivery-20260809-1';
+const ASSET_VERSION = 'web-push-brave-fix-20260809-3';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -228,16 +228,18 @@ self.addEventListener('push', (event) => {
   }
 
   const title = String(data.title || data.notification_title || 'Calendar update').trim() || 'Calendar update';
-  const body = String(data.body || data.notification_body || data.title || 'The band calendar changed.').trim();
+  const body = String(data.body || data.notification_body || 'The band calendar changed.').trim() || 'The band calendar changed.';
   const url = String(data.url || '/calendar.html').trim() || '/calendar.html';
+  const origin = self.location.origin || 'https://efhsband.org';
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: '/assets/efhs-icon.png',
-      badge: '/assets/efhs-icon.png',
-      tag: \`efhs-calendar-\${data.revision || data.event_id || 'update'}\`,
+      icon: origin + '/assets/efhs-icon.png',
+      badge: origin + '/assets/efhs-icon.png',
+      tag: \`efhs-calendar-\${data.revision || data.event_id || data.action || 'update'}\`,
       renotify: true,
+      requireInteraction: false,
       data: { url },
     }),
   );
@@ -1468,13 +1470,20 @@ export function parseCalendarPushState(raw) {
     const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
     if (!parsed || typeof parsed !== 'object') return emptyCalendarPushState();
     const revision = Number(parsed.revision);
-    return {
+    const state = {
       revision: Number.isFinite(revision) && revision > 0 ? Math.floor(revision) : 0,
       action: ['created', 'updated', 'deleted'].includes(String(parsed.action || '')) ? String(parsed.action) : '',
       title: String(parsed.title || '').trim().slice(0, 200),
       event_id: parsed.event_id == null || parsed.event_id === '' ? null : Number(parsed.event_id) || null,
       at: String(parsed.at || '').trim(),
     };
+    if (parsed.web_push && typeof parsed.web_push === 'object') {
+      state.web_push = parsed.web_push;
+    }
+    if (parsed.fcm && typeof parsed.fcm === 'object') {
+      state.fcm = parsed.fcm;
+    }
+    return state;
   } catch {
     return emptyCalendarPushState();
   }
@@ -1704,67 +1713,81 @@ async function deleteWebPushSubscription(env, endpoint) {
   return { ok: true };
 }
 
-export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
-  const rows = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM web_push_subscriptions').all();
-  const subscriptions = rows.results || [];
-  if (!subscriptions.length) {
-    return { ok: true, skipped: true, sent: 0, failed: 0, removed: 0, detail: 'No browser subscriptions' };
+function webPushSubjectEmail(env = {}) {
+  const subjectEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL || 'no-reply@efhsband.org')
+    .trim()
+    .replace(/^mailto:/i, '');
+  return subjectEmail.includes('@') ? subjectEmail : 'no-reply@efhsband.org';
+}
+
+function buildWebPushMessage(pushPayload = {}) {
+  return JSON.stringify({
+    title: pushPayload.notification_title || pushPayload.title || 'Calendar update',
+    body: pushPayload.notification_body || pushPayload.body || pushPayload.title || 'The band calendar changed.',
+    url: pushPayload.url || '/calendar.html',
+    action: pushPayload.action || '',
+    event_id: pushPayload.event_id,
+    revision: pushPayload.revision,
+  });
+}
+
+export async function sendWebPushToSubscription(env, subscription, pushPayload = {}) {
+  const endpoint = String(subscription?.endpoint || '').trim();
+  const p256dh = String(subscription?.p256dh || subscription?.keys?.p256dh || '').trim();
+  const auth = String(subscription?.auth || subscription?.keys?.auth || '').trim();
+  if (!endpoint || !p256dh || !auth) {
+    return { ok: false, sent: 0, failed: 1, removed: 0, detail: 'Subscription keys are missing' };
   }
   const vapid = await getWebPushVapidKeys(env);
   const keyPair = await deserializeVapidKeys({
     publicKey: vapid.publicKey,
     privateKey: vapid.privateKey,
   });
-  // createJWT prefixes mailto: itself — pass a bare email address here.
-  const subjectEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL || 'no-reply@efhsband.org')
-    .trim()
-    .replace(/^mailto:/i, '');
-  const subject = subjectEmail.includes('@') ? subjectEmail : 'no-reply@efhsband.org';
-  const message = JSON.stringify({
-    title: pushPayload.notification_title || 'Calendar update',
-    body: pushPayload.notification_body || pushPayload.title || 'The band calendar changed.',
-    url: '/calendar.html',
-    action: pushPayload.action || '',
-    event_id: pushPayload.event_id,
-    revision: pushPayload.revision,
-  });
+  try {
+    const response = await sendPushNotification(
+      keyPair,
+      { endpoint, keys: { p256dh, auth } },
+      webPushSubjectEmail(env),
+      buildWebPushMessage(pushPayload),
+      { algorithm: 'aes128gcm', ttl: 86400, urgency: 'high' },
+    );
+    if (response.status === 404 || response.status === 410) {
+      await deleteWebPushSubscription(env, endpoint);
+      return { ok: false, sent: 0, failed: 1, removed: 1, detail: `Push endpoint gone (${response.status})` };
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      return {
+        ok: false,
+        sent: 0,
+        failed: 1,
+        removed: 0,
+        detail: `Push service returned ${response.status}${body ? `: ${body.slice(0, 180)}` : ''}`,
+      };
+    }
+    return { ok: true, sent: 1, failed: 0, removed: 0, detail: '' };
+  } catch (error) {
+    return { ok: false, sent: 0, failed: 1, removed: 0, detail: error?.message || 'Web push send threw an error' };
+  }
+}
+
+export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
+  const rows = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM web_push_subscriptions').all();
+  const subscriptions = rows.results || [];
+  if (!subscriptions.length) {
+    return { ok: true, skipped: true, sent: 0, failed: 0, removed: 0, detail: 'No browser subscriptions' };
+  }
 
   let sent = 0;
   let failed = 0;
   let removed = 0;
   let detail = '';
   for (const row of subscriptions) {
-    try {
-      const response = await sendPushNotification(
-        keyPair,
-        {
-          endpoint: row.endpoint,
-          keys: { p256dh: row.p256dh, auth: row.auth },
-        },
-        subject,
-        message,
-        { algorithm: 'aes128gcm', ttl: 86400, urgency: 'high' },
-      );
-      if (response.status === 404 || response.status === 410) {
-        await deleteWebPushSubscription(env, row.endpoint);
-        removed += 1;
-        failed += 1;
-        if (!detail) detail = `Push endpoint gone (${response.status})`;
-        continue;
-      }
-      if (!response.ok) {
-        failed += 1;
-        const body = await response.text().catch(() => '');
-        if (!detail) {
-          detail = `Push service returned ${response.status}${body ? `: ${body.slice(0, 180)}` : ''}`;
-        }
-        continue;
-      }
-      sent += 1;
-    } catch (error) {
-      failed += 1;
-      if (!detail) detail = error?.message || 'Web push send threw an error';
-    }
+    const result = await sendWebPushToSubscription(env, row, pushPayload);
+    sent += Number(result.sent || 0);
+    failed += Number(result.failed || 0);
+    removed += Number(result.removed || 0);
+    if (!result.ok && !detail && result.detail) detail = result.detail;
   }
   return {
     ok: failed === 0 && sent > 0,
@@ -5409,7 +5432,46 @@ async function handleApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/push/subscribe' && request.method === 'POST') {
     const normalized = normalizeWebPushSubscription(await request.json().catch(() => ({})));
     if (!normalized.ok) return jsonResponse({ detail: normalized.detail }, 422);
-    return jsonResponse(await upsertWebPushSubscription(env, normalized));
+    const saved = await upsertWebPushSubscription(env, normalized);
+    let welcome = null;
+    try {
+      welcome = await sendWebPushToSubscription(env, normalized, {
+        notification_title: 'Notifications on',
+        notification_body: 'East Forsyth Band will notify you when the calendar changes.',
+        title: 'Notifications on',
+        body: 'East Forsyth Band will notify you when the calendar changes.',
+        url: '/calendar.html',
+        action: 'welcome',
+      });
+    } catch (error) {
+      welcome = { ok: false, detail: error?.message || 'Welcome push failed' };
+    }
+    return jsonResponse({ ...saved, welcome });
+  }
+  if (url.pathname === '/api/admin/push/test' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canManageEvents(auth.user)) return jsonResponse({ detail: 'Permission required: events:manage' }, 403);
+    const pushPayload = {
+      action: 'updated',
+      event_id: null,
+      title: 'Push test',
+      notification_title: 'East Forsyth Band push test',
+      notification_body: 'If you see this, browser notifications are working.',
+      revision: (await getCalendarPushState(env)).revision || 0,
+    };
+    const webPush = await sendWebPushCalendarNotifications(env, pushPayload);
+    let fcm = { ok: false, skipped: true, detail: 'FCM is not configured' };
+    if (fcmConfigured(env)) {
+      try { fcm = await sendFcmCalendarPush(env, pushPayload); }
+      catch (error) { fcm = { ok: false, detail: error.message || 'FCM send failed' }; }
+    }
+    return jsonResponse({
+      ok: Boolean(webPush?.ok || fcm?.ok),
+      web_push: webPush,
+      fcm,
+      fcm_configured: fcmConfigured(env),
+    });
   }
   if (url.pathname === '/api/push/subscribe' && request.method === 'DELETE') {
     const payload = await request.json().catch(() => ({}));

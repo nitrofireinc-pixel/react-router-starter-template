@@ -78,14 +78,13 @@ class HelpScreen extends StatelessWidget {
                 'When a CMS editor adds or updates a calendar event, the site bumps '
                 '/api/calendar-push-state and (when Firebase is configured) sends an FCM '
                 'message to topic "${PushService.topic}".\n\n'
-                'In Settings you can turn notifications on/off. The app also checks the '
-                'revision when you reopen it, so you still get an alert even before FCM '
-                'credentials are installed.\n\n'
-                'To enable true background push:\n'
+                'Without Firebase, the app still polls that revision about every 15 minutes '
+                'in the background and again whenever you open the app.\n\n'
+                'For instant background FCM push:\n'
                 '1. Create a Firebase project and add Android/iOS apps for org.efhsband.efhs_calendar\n'
                 '2. Replace android/app/google-services.json and lib/firebase_options.dart\n'
-                '3. Set Cloudflare secret FCM_SERVICE_ACCOUNT_JSON (or FCM_SERVER_KEY)\n'
-                '4. Rebuild/sideload the APK',
+                '3. Set Cloudflare Pages secret FCM_SERVICE_ACCOUNT_JSON (or FCM_SERVER_KEY)\n'
+                '4. Rebuild/sideload the APK'
           ),
           _section(
             context,

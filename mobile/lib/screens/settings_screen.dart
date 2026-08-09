@@ -124,7 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(
               widget.pushService.firebaseReady
                   ? 'FCM topic ${PushService.topic} + revision checks'
-                  : 'Revision checks now; add Firebase for background FCM push',
+                  : 'Checks every ~15 minutes in the background, and again when you open the app. Instant FCM push needs a Firebase project.',
             ),
             value: _pushEnabled,
             onChanged: (value) => setState(() => _pushEnabled = value),

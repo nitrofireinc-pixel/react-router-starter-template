@@ -33,7 +33,10 @@ export function createHeader(opts) {
         return concat(encoder.encode(`Content-Encoding: ${opts.algorithm}\0`), encoder.encode("P-256\0"), new Uint8Array(new Uint16Array([opts.clientPublicKey.byteLength]).buffer), new Uint8Array(opts.clientPublicKey), new Uint8Array(new Uint16Array([opts.localPublicKey.byteLength]).buffer), new Uint8Array(opts.localPublicKey));
     }
     if (opts.algorithm === "aes128gcm") {
-        return concat(new Uint8Array(opts.salt), new Uint8Array(new Uint32Array([4096]).buffer), // 4 bytes for record size
+        // RFC 8188: record size is a 32-bit unsigned integer in network byte order.
+        const recordSize = new Uint8Array(4);
+        new DataView(recordSize.buffer).setUint32(0, 4096, false);
+        return concat(new Uint8Array(opts.salt), recordSize, // 4 bytes for record size
         new Uint8Array([opts.localPublicKey.byteLength]), // 1 byte for key length
         new Uint8Array(opts.localPublicKey));
     }
