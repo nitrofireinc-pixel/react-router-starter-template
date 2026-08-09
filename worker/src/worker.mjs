@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'student-resources-utility-link-20260809-1';
+const ASSET_VERSION = 'web-push-await-delivery-20260809-1';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -1732,6 +1732,7 @@ export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
   let sent = 0;
   let failed = 0;
   let removed = 0;
+  let detail = '';
   for (const row of subscriptions) {
     try {
       const response = await sendPushNotification(
@@ -1747,18 +1748,32 @@ export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
       if (response.status === 404 || response.status === 410) {
         await deleteWebPushSubscription(env, row.endpoint);
         removed += 1;
+        failed += 1;
+        if (!detail) detail = `Push endpoint gone (${response.status})`;
         continue;
       }
       if (!response.ok) {
         failed += 1;
+        const body = await response.text().catch(() => '');
+        if (!detail) {
+          detail = `Push service returned ${response.status}${body ? `: ${body.slice(0, 180)}` : ''}`;
+        }
         continue;
       }
       sent += 1;
-    } catch {
+    } catch (error) {
       failed += 1;
+      if (!detail) detail = error?.message || 'Web push send threw an error';
     }
   }
-  return { ok: failed === 0, sent, failed, removed, total: subscriptions.length };
+  return {
+    ok: failed === 0 && sent > 0,
+    sent,
+    failed,
+    removed,
+    total: subscriptions.length,
+    detail: detail || (sent ? '' : 'No notifications were accepted'),
+  };
 }
 
 export async function recordCalendarPushChange(env, { action = 'updated', event = null, eventId = null } = {}) {
@@ -1771,7 +1786,6 @@ export async function recordCalendarPushChange(env, { action = 'updated', event 
     event_id: payload.event_id,
     at: new Date().toISOString(),
   };
-  await setSiteContentValue(env, CALENDAR_PUSH_STATE_KEY, JSON.stringify(next));
   const pushPayload = { ...payload, revision: next.revision };
   let delivery = { ok: false, skipped: true, detail: 'FCM is not configured' };
   if (fcmConfigured(env)) {
@@ -1787,7 +1801,25 @@ export async function recordCalendarPushChange(env, { action = 'updated', event 
   } catch (error) {
     webPush = { ok: false, detail: error.message || 'Web push send failed' };
   }
-  return { state: next, delivery, web_push: webPush, push: pushPayload };
+  const state = {
+    ...next,
+    fcm: {
+      ok: Boolean(delivery?.ok),
+      skipped: Boolean(delivery?.skipped),
+      detail: delivery?.detail || '',
+    },
+    web_push: {
+      ok: Boolean(webPush?.ok),
+      skipped: Boolean(webPush?.skipped),
+      sent: Number(webPush?.sent || 0),
+      failed: Number(webPush?.failed || 0),
+      removed: Number(webPush?.removed || 0),
+      total: Number(webPush?.total || 0),
+      detail: webPush?.detail || '',
+    },
+  };
+  await setSiteContentValue(env, CALENDAR_PUSH_STATE_KEY, JSON.stringify(state));
+  return { state, delivery, web_push: webPush, push: pushPayload };
 }
 
 async function upsertPushDevice(env, { token, platform, app_id }) {
@@ -7058,10 +7090,10 @@ async function handleApi(request, env, url, ctx = null) {
     ).run();
     const created = await getEventById(env, result.meta.last_row_id);
     try { await queueEventForFacebook(env, created, 'new'); } catch { /* queue is best-effort */ }
-    const pushTask = recordCalendarPushChange(env, { action: 'created', event: created });
-    if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
-    else try { await pushTask; } catch { /* push is best-effort */ }
-    return jsonResponse(created);
+    let pushResult = null;
+    try { pushResult = await recordCalendarPushChange(env, { action: 'created', event: created }); }
+    catch { /* push is best-effort */ }
+    return jsonResponse({ ...created, push: pushResult?.push || null, web_push: pushResult?.web_push || null });
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -7076,10 +7108,10 @@ async function handleApi(request, env, url, ctx = null) {
     if (request.method === 'DELETE') {
       await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
       try { await unqueueEventForFacebook(env, id); } catch { /* ignore */ }
-      const pushTask = recordCalendarPushChange(env, { action: 'deleted', event: existing, eventId: id });
-      if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
-      else try { await pushTask; } catch { /* push is best-effort */ }
-      return jsonResponse({ ok: true });
+      let pushResult = null;
+      try { pushResult = await recordCalendarPushChange(env, { action: 'deleted', event: existing, eventId: id }); }
+      catch { /* push is best-effort */ }
+      return jsonResponse({ ok: true, push: pushResult?.push || null, web_push: pushResult?.web_push || null });
     }
     const p = normalizeEventPayload(await request.json(), existing);
     if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
@@ -7108,10 +7140,10 @@ async function handleApi(request, env, url, ctx = null) {
     ).run();
     const updated = await getEventById(env, id);
     try { await queueEventForFacebook(env, updated, 'updated'); } catch { /* queue is best-effort */ }
-    const pushTask = recordCalendarPushChange(env, { action: 'updated', event: updated });
-    if (ctx?.waitUntil) ctx.waitUntil(pushTask.catch(() => null));
-    else try { await pushTask; } catch { /* push is best-effort */ }
-    return jsonResponse(updated);
+    let pushResult = null;
+    try { pushResult = await recordCalendarPushChange(env, { action: 'updated', event: updated }); }
+    catch { /* push is best-effort */ }
+    return jsonResponse({ ...updated, push: pushResult?.push || null, web_push: pushResult?.web_push || null });
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
