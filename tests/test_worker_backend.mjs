@@ -1262,6 +1262,7 @@ test('admin sessions stay fresh for 24 hours and public nav reflects login state
   assert.match(nav, /nav-add-home-mark/);
   assert.match(renderNotifyMeNavControl(), /nav-notify-bell/);
   assert.match(renderAddToHomeNavControl(), /efhs-blue-regiment-mark/);
+  assert.match(renderAddToHomeNavControl(), /nav-add-home-house/);
   assert.match(renderPushServiceWorker(), /showNotification/);
   assert.match(renderPushServiceWorker(), /notificationclick/);
   assert.match(renderWebAppManifest(), /"display": "standalone"/);

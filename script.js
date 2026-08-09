@@ -387,7 +387,11 @@ function ensureAddToHomeNavControl() {
     button.dataset.addHome = '';
     button.setAttribute('aria-label', 'Add East Forsyth Band to your home screen');
     button.title = 'Add to Home Screen';
-    button.innerHTML = '<img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png" alt="" width="22" height="22" decoding="async">';
+    button.innerHTML = `
+      <span class="nav-add-home-icon" aria-hidden="true">
+        <svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png" alt="" width="16" height="16" decoding="async">
+      </span>`;
     const notify = siteNav.querySelector('[data-notify-me]');
     if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
     else siteNav.appendChild(button);
@@ -495,7 +499,8 @@ function showAddToHomeSheet({ os, canInstall }) {
 
 function syncAddToHomeButtonState(button) {
   if (!button) return;
-  button.hidden = isStandaloneDisplay();
+  // Mobile-only control; desktop uses browser install UI / address-bar install.
+  button.hidden = !isMobileNavViewport() || isStandaloneDisplay();
 }
 
 (function bindAddToHomeNavControl() {
@@ -527,13 +532,14 @@ function syncAddToHomeButtonState(button) {
   }
 
   button.addEventListener('click', async () => {
+    if (!isMobileNavViewport()) return;
     if (isStandaloneDisplay()) {
-      window.alert('East Forsyth Band is already installed / on your home screen.');
+      window.alert('East Forsyth Band is already on your home screen.');
       return;
     }
     const os = detectMobileInstallOs();
     const deferred = window.__efhsDeferredInstallPrompt;
-    if (deferred && (os === 'android' || os === 'desktop')) {
+    if (deferred && os === 'android') {
       try {
         await deferred.prompt();
         window.__efhsDeferredInstallPrompt = null;

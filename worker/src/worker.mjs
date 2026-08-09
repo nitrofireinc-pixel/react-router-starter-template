@@ -199,7 +199,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'mobile-nav-fit-width-20260809-1';
+const ASSET_VERSION = 'add-home-house-icon-20260809-1';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -7265,7 +7265,7 @@ export function renderNotifyMeNavControl() {
 }
 
 export function renderAddToHomeNavControl() {
-  return `<button type="button" class="nav-add-home" data-add-home aria-label="Add East Forsyth Band to your home screen" title="Add to Home Screen"><img class="nav-add-home-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="" width="22" height="22" decoding="async"></button>`;
+  return `<button type="button" class="nav-add-home" data-add-home aria-label="Add East Forsyth Band to your home screen" title="Add to Home Screen"><span class="nav-add-home-icon" aria-hidden="true"><svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><img class="nav-add-home-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="" width="16" height="16" decoding="async"></span></button>`;
 }
 
 export function renderNav(pages, { loggedIn = false } = {}) {
