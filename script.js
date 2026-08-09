@@ -1,11 +1,116 @@
-const btn = document.querySelector('.menu-button');
-const nav = document.querySelector('nav');
-if (btn && nav) {
-  btn.addEventListener('click', () => {
-    const open = nav.classList.toggle('open');
-    btn.setAttribute('aria-expanded', String(open));
-  });
+function isMobileNavViewport() {
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
 }
+
+function ensureNavBackdrop() {
+  let backdrop = document.querySelector('[data-nav-backdrop]');
+  if (backdrop) return backdrop;
+  const header = document.querySelector('header.site-header');
+  if (!header) return null;
+  backdrop = document.createElement('div');
+  backdrop.className = 'nav-backdrop';
+  backdrop.dataset.navBackdrop = '';
+  backdrop.hidden = true;
+  const nav = header.querySelector('#site-nav');
+  if (nav) header.insertBefore(backdrop, nav);
+  else header.appendChild(backdrop);
+  return backdrop;
+}
+
+function ensureHeaderQuickActions() {
+  const inner = document.querySelector('header.site-header .header-inner');
+  if (!inner) return null;
+  let actions = inner.querySelector('[data-header-quick-actions]');
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'header-quick-actions';
+    actions.dataset.headerQuickActions = '';
+    inner.appendChild(actions);
+  }
+  return actions;
+}
+
+function enhanceMenuButton(button) {
+  if (!button) return;
+  if (!button.querySelector('.menu-button-icon')) {
+    button.innerHTML = '<span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span>';
+  }
+  if (!button.getAttribute('aria-label')) {
+    button.setAttribute('aria-label', 'Open menu');
+  }
+  if (!button.getAttribute('type')) button.type = 'button';
+}
+
+function setMobileNavOpen(open) {
+  const button = document.querySelector('.menu-button');
+  const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+  const backdrop = ensureNavBackdrop();
+  if (!nav) return;
+  nav.classList.toggle('open', open);
+  document.body.classList.toggle('nav-drawer-open', open);
+  if (button) {
+    button.setAttribute('aria-expanded', String(open));
+    button.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  }
+  if (backdrop) {
+    backdrop.hidden = !open;
+    backdrop.classList.toggle('is-open', open);
+  }
+}
+
+function placeHeaderQuickActions() {
+  const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+  const actions = ensureHeaderQuickActions();
+  if (!nav || !actions) return;
+  const notify = document.querySelector('[data-notify-me]');
+  const addHome = document.querySelector('[data-add-home]');
+  if (isMobileNavViewport()) {
+    if (notify) actions.appendChild(notify);
+    if (addHome) actions.appendChild(addHome);
+  } else {
+    setMobileNavOpen(false);
+    if (notify) nav.appendChild(notify);
+    if (addHome) nav.appendChild(addHome);
+  }
+}
+
+(function bindMobileNavDrawer() {
+  const button = document.querySelector('.menu-button');
+  const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+  if (!button || !nav) return;
+  enhanceMenuButton(button);
+  ensureNavBackdrop();
+  ensureHeaderQuickActions();
+  placeHeaderQuickActions();
+
+  button.addEventListener('click', () => {
+    const open = !nav.classList.contains('open');
+    setMobileNavOpen(open);
+  });
+
+  const backdrop = ensureNavBackdrop();
+  if (backdrop && backdrop.dataset.boundNavBackdrop !== '1') {
+    backdrop.dataset.boundNavBackdrop = '1';
+    backdrop.addEventListener('click', () => setMobileNavOpen(false));
+  }
+
+  nav.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', () => {
+      if (isMobileNavViewport()) setMobileNavOpen(false);
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setMobileNavOpen(false);
+  });
+
+  if (window.matchMedia) {
+    const media = window.matchMedia('(max-width: 760px)');
+    const onChange = () => placeHeaderQuickActions();
+    if (media.addEventListener) media.addEventListener('change', onChange);
+    else if (media.addListener) media.addListener(onChange);
+  }
+})();
 
 function ensureStaffAuthNavLink() {
   const siteNav = document.querySelector('#site-nav');
@@ -55,10 +160,10 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 function ensureNotifyMeNavControl() {
-  const siteNav = document.querySelector('#site-nav');
-  if (!siteNav) return null;
-  let button = siteNav.querySelector('[data-notify-me]');
+  let button = document.querySelector('[data-notify-me]');
   if (!button) {
+    const siteNav = document.querySelector('#site-nav');
+    if (!siteNav) return null;
     button = document.createElement('button');
     button.type = 'button';
     button.className = 'nav-notify-me';
@@ -72,7 +177,8 @@ function ensureNotifyMeNavControl() {
       <span class="nav-notify-label">Notify Me</span>`;
     siteNav.appendChild(button);
   }
-  return button;
+  placeHeaderQuickActions();
+  return document.querySelector('[data-notify-me]');
 }
 
 function setNotifyMeState(button, state) {
@@ -209,10 +315,6 @@ async function disableNotifyMe(button) {
   });
 })();
 
-function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
-}
-
 function isStandaloneDisplay() {
   return Boolean(
     window.matchMedia?.('(display-mode: standalone)').matches
@@ -244,10 +346,10 @@ function ensureWebAppManifestLink() {
 }
 
 function ensureAddToHomeNavControl() {
-  const siteNav = document.querySelector('#site-nav');
-  if (!siteNav) return null;
-  let button = siteNav.querySelector('[data-add-home]');
+  let button = document.querySelector('[data-add-home]');
   if (!button) {
+    const siteNav = document.querySelector('#site-nav');
+    if (!siteNav) return null;
     button = document.createElement('button');
     button.type = 'button';
     button.className = 'nav-add-home';
@@ -257,10 +359,10 @@ function ensureAddToHomeNavControl() {
     button.innerHTML = '<img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png" alt="" width="22" height="22" decoding="async">';
     const notify = siteNav.querySelector('[data-notify-me]');
     if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
-    else if (notify) siteNav.appendChild(button);
     else siteNav.appendChild(button);
   }
-  return button;
+  placeHeaderQuickActions();
+  return document.querySelector('[data-add-home]');
 }
 
 function addToHomeInstructions(os) {

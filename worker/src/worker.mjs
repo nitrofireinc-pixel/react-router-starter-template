@@ -199,7 +199,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'add-to-home-nav-20260808-2';
+const ASSET_VERSION = 'mobile-hamburger-drawer-20260809-1';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -7313,7 +7313,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner">${renderPublicBrand(site)}<button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
+<header class="site-header"><div class="header-inner"><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button>${renderPublicBrand(site)}<div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
