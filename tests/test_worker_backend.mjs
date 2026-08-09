@@ -996,16 +996,28 @@ test('normalizeUtilityLinks cleans top-right utility bar links', () => {
     { label: ' Upcoming Events ', href: 'calendar.html' },
     { label: 'Contact', href: 'javascript:alert(1)', target: '_parent' },
     { label: 'Resources', href: 'https://example.com/resources', target: '_blank' },
+    {
+      label: 'Student Resources',
+      href: "https://winstonsalemforsythcsnc.sites.thrillshare.com/o/efhs/page/counselor-assignments + \"target='_blank'\"",
+      target: '_blank',
+    },
   ]));
-  assert.equal(links.length, 3);
+  assert.equal(links.length, 4);
   assert.equal(links[0].href, '/calendar.html');
   assert.equal(links[0].target, '_self');
   assert.equal(links[1].href, '#');
   assert.equal(links[1].target, '_self');
   assert.equal(links[2].href, 'https://example.com/resources');
   assert.equal(links[2].target, '_blank');
+  assert.equal(
+    links[3].href,
+    'https://winstonsalemforsythcsnc.sites.thrillshare.com/o/efhs/page/counselor-assignments',
+  );
+  assert.equal(links[3].target, '_blank');
   assert.equal(normalizeUtilityLinks(null)[0].label, 'Upcoming Events');
   assert.equal(normalizeUtilityLinks(null)[0].target, '_self');
+  assert.equal(normalizeUtilityLinks(null)[1].label, 'Student Resources');
+  assert.match(normalizeUtilityLinks(null)[1].href, /thrillshare\.com\/o\/efhs\/page\/counselor-assignments/);
 });
 
 test('normalizeSocialLinks keeps platform order and cleans URLs', () => {

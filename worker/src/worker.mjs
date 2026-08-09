@@ -13,7 +13,11 @@ import {
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
-  { label: 'Student Resources', href: '/resources.html', target: '_self' },
+  {
+    label: 'Student Resources',
+    href: 'https://winstonsalemforsythcsnc.sites.thrillshare.com/o/efhs/page/counselor-assignments',
+    target: '_blank',
+  },
   { label: 'Contact', href: '/contact.html', target: '_self' },
 ];
 
@@ -199,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'brave-push-error-help-20260809-1';
+const ASSET_VERSION = 'student-resources-utility-link-20260809-1';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -1225,6 +1229,9 @@ export function normalizeUtilityLinks(value) {
   return items.slice(0, 6).map((item, index) => {
     const label = String(item?.label || '').trim() || `Link ${index + 1}`;
     let href = String(item?.href || '').trim() || '#';
+    // Strip accidental HTML / attribute fragments pasted into the URL field.
+    href = href.replace(/\s*\+?\s*["']?target\s*=.*$/i, '').trim();
+    href = href.split(/\s+/)[0] || '#';
     if (/^\s*javascript:/i.test(href)) href = '#';
     else if (/^https?:\/\//i.test(href) || href.startsWith('/') || href === '#') {
       // keep absolute URLs, site-root paths, and placeholders
@@ -1232,7 +1239,7 @@ export function normalizeUtilityLinks(value) {
       href = `/${href.replace(/^\/+/, '')}`;
     }
     const rawTarget = String(item?.target || '_self').trim().toLowerCase();
-    const target = rawTarget === '_blank' ? '_blank' : '_self';
+    const target = rawTarget === '_blank' || /^https?:\/\//i.test(href) ? '_blank' : '_self';
     return { label, href, target };
   }).filter((item) => item.label);
 }

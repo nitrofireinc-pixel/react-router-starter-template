@@ -1534,7 +1534,11 @@ function renderUtilityLinksEditor() {
     ? state.utilityLinks
     : [
       { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
-      { label: 'Student Resources', href: '/resources.html', target: '_self' },
+      {
+        label: 'Student Resources',
+        href: 'https://winstonsalemforsythcsnc.sites.thrillshare.com/o/efhs/page/counselor-assignments',
+        target: '_blank',
+      },
       { label: 'Contact', href: '/contact.html', target: '_self' },
     ];
   list.innerHTML = links.map((link, index) => {
