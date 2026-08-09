@@ -273,6 +273,34 @@ async function syncNotifyMeButtonState(button) {
   }
 }
 
+function isBraveBrowser() {
+  return Boolean(navigator.brave) || /Brave/i.test(navigator.userAgent || '');
+}
+
+function formatPushSubscribeError(error) {
+  const message = String(error?.message || error || '');
+  const pushServiceFailed = /push service error|Registration failed/i.test(message);
+  if (pushServiceFailed && isBraveBrowser()) {
+    return [
+      'Brave is blocking web push by default.',
+      '',
+      'To enable calendar notifications in Brave:',
+      '1. Open brave://settings/privacy',
+      '2. Turn ON “Use Google services for push messaging”',
+      '3. Reload this page and tap Notify Me again.',
+    ].join('\n');
+  }
+  if (pushServiceFailed) {
+    return [
+      'Your browser could not register for push notifications.',
+      '',
+      'Check that notifications are allowed for efhsband.org, then reload and try again.',
+      'In privacy-focused browsers, enable Google/Firefox push messaging services if required.',
+    ].join('\n');
+  }
+  return message || 'Could not update notifications.';
+}
+
 async function enableNotifyMe(button) {
   setNotifyMeState(button, 'busy');
   const keyResponse = await fetch('/api/push/vapid-public-key', { cache: 'no-store' });
@@ -287,10 +315,14 @@ async function enableNotifyMe(button) {
   const { registration } = await getNotifyMeSubscription();
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
-    });
+    try {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+      });
+    } catch (error) {
+      throw new Error(formatPushSubscribeError(error));
+    }
   }
   const body = subscription.toJSON();
   body.user_agent = navigator.userAgent || '';
@@ -340,7 +372,7 @@ async function disableNotifyMe(button) {
       }
     } catch (error) {
       await syncNotifyMeButtonState(button);
-      window.alert(error?.message || 'Could not update notifications.');
+      window.alert(formatPushSubscribeError(error));
     }
   });
 })();
