@@ -17,15 +17,32 @@ function ensureNavBackdrop() {
   return backdrop;
 }
 
+function ensureMobileNavTray() {
+  const header = document.querySelector('header.site-header');
+  if (!header) return null;
+  let tray = header.querySelector('[data-mobile-nav-tray]');
+  if (!tray) {
+    tray = document.createElement('div');
+    tray.className = 'mobile-nav-tray';
+    tray.dataset.mobileNavTray = '';
+    const inner = header.querySelector('.header-inner');
+    if (inner && inner.nextSibling) header.insertBefore(tray, inner.nextSibling);
+    else if (inner) header.appendChild(tray);
+    else header.insertBefore(tray, header.firstChild);
+  }
+  return tray;
+}
+
 function ensureHeaderQuickActions() {
-  const inner = document.querySelector('header.site-header .header-inner');
-  if (!inner) return null;
-  let actions = inner.querySelector('[data-header-quick-actions]');
+  const tray = ensureMobileNavTray();
+  const host = tray || document.querySelector('header.site-header .header-inner');
+  if (!host) return null;
+  let actions = host.querySelector('[data-header-quick-actions]');
   if (!actions) {
     actions = document.createElement('div');
     actions.className = 'header-quick-actions';
     actions.dataset.headerQuickActions = '';
-    inner.appendChild(actions);
+    host.appendChild(actions);
   }
   return actions;
 }
