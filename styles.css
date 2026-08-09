@@ -398,7 +398,7 @@ img{-webkit-touch-callout:none}
     opacity:1;
     pointer-events:auto;
   }
-  /* Vertical link panel slides from the left under the title / nav tray. */
+  /* Vertical link panel: hug link text with equal side padding. */
   header.site-header nav{
     display:flex!important;
     position:absolute;
@@ -406,11 +406,11 @@ img{-webkit-touch-callout:none}
     left:0;
     right:auto;
     bottom:auto;
-    width:min(88vw,320px);
-    max-width:320px;
+    width:max-content;
+    max-width:min(92vw,20rem);
     max-height:min(70vh,560px);
     margin:0;
-    padding:10px 10px 14px;
+    padding:10px 14px 14px;
     border:0;
     border-radius:0 0 16px 0;
     background:#fff;
@@ -425,17 +425,19 @@ img{-webkit-touch-callout:none}
     transition:transform .28s ease;
     overflow:auto;
     -webkit-overflow-scrolling:touch;
+    box-sizing:border-box;
   }
   header.site-header nav.open{transform:translateX(0)}
   header.site-header nav a{
     display:block;
-    width:100%;
+    width:auto;
     box-sizing:border-box;
-    padding:12px 12px;
+    padding:12px 4px;
     border-radius:12px;
     color:var(--navy);
     text-shadow:none;
     font-size:.95rem;
+    white-space:nowrap;
   }
   header.site-header nav a:hover,
   header.site-header nav a:focus-visible{
