@@ -75,9 +75,20 @@ function setMobileNavOpen(open) {
   }
 }
 
+function placeMenuButtonInTray() {
+  const tray = ensureMobileNavTray();
+  const button = document.querySelector('.menu-button');
+  if (!tray || !button) return button;
+  if (button.parentElement !== tray) {
+    tray.insertBefore(button, tray.firstChild);
+  }
+  return button;
+}
+
 function placeHeaderQuickActions() {
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
   const actions = ensureHeaderQuickActions();
+  const menuButton = placeMenuButtonInTray();
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
@@ -89,16 +100,18 @@ function placeHeaderQuickActions() {
     if (notify) nav.appendChild(notify);
     if (addHome) nav.appendChild(addHome);
   }
+  if (menuButton) enhanceMenuButton(menuButton);
 }
 
 (function bindMobileNavDrawer() {
-  const button = document.querySelector('.menu-button');
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
-  if (!button || !nav) return;
-  enhanceMenuButton(button);
+  if (!nav) return;
   ensureNavBackdrop();
   ensureHeaderQuickActions();
   placeHeaderQuickActions();
+  const button = document.querySelector('.menu-button');
+  if (!button) return;
+  enhanceMenuButton(button);
 
   button.addEventListener('click', () => {
     const open = !nav.classList.contains('open');
@@ -345,6 +358,7 @@ function detectMobileInstallOs() {
   const touchMac = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
   if (/iPhone|iPad|iPod/i.test(ua) || touchMac) return 'ios';
   if (/Android/i.test(ua)) return 'android';
+  if (!isMobileNavViewport()) return 'desktop';
   return 'other';
 }
 
@@ -400,6 +414,16 @@ function addToHomeInstructions(os) {
         'Tap the browser menu (⋮).',
         'Choose Add to Home screen or Install app.',
         'Confirm to place the Blue Regiment icon on your home screen.',
+      ],
+    };
+  }
+  if (os === 'desktop') {
+    return {
+      eyebrow: 'Desktop browser',
+      steps: [
+        'Look for the install icon in your browser address bar.',
+        'Or open the browser menu and choose Install East Forsyth Band / Install app.',
+        'Confirm to add a Blue Regiment shortcut you can open like an app.',
       ],
     };
   }
@@ -471,8 +495,7 @@ function showAddToHomeSheet({ os, canInstall }) {
 
 function syncAddToHomeButtonState(button) {
   if (!button) return;
-  const show = isMobileNavViewport() && !isStandaloneDisplay();
-  button.hidden = !show;
+  button.hidden = isStandaloneDisplay();
 }
 
 (function bindAddToHomeNavControl() {
@@ -499,20 +522,18 @@ function syncAddToHomeButtonState(button) {
     else if (media.addListener) media.addListener(onChange);
   }
 
-  // Help Android meet installability when visitors open the mobile menu.
-  if (isMobileNavViewport() && 'serviceWorker' in navigator && window.isSecureContext) {
+  if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('/push-sw.js', { scope: '/' }).catch(() => {});
   }
 
   button.addEventListener('click', async () => {
-    if (!isMobileNavViewport()) return;
     if (isStandaloneDisplay()) {
-      window.alert('East Forsyth Band is already on your home screen.');
+      window.alert('East Forsyth Band is already installed / on your home screen.');
       return;
     }
     const os = detectMobileInstallOs();
     const deferred = window.__efhsDeferredInstallPrompt;
-    if (deferred && os === 'android') {
+    if (deferred && (os === 'android' || os === 'desktop')) {
       try {
         await deferred.prompt();
         window.__efhsDeferredInstallPrompt = null;
