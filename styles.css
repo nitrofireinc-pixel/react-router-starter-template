@@ -33,6 +33,32 @@ header.site-header{position:sticky;top:0;z-index:50;display:flex;flex-direction:
   z-index:2;
 }
 .header-inner{position:relative;width:100%;max-width:none;margin:0;padding:14px 20px;display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;column-gap:26px;row-gap:0;box-sizing:border-box}.brand{display:inline-flex;align-items:center;justify-content:center;gap:12px;font-weight:900;color:var(--navy);letter-spacing:.01em;min-width:0;margin:0 auto;text-align:center}.brand img,.brand .brand-logo,.brand .brand-mark{width:50px;height:50px;object-fit:contain;flex:0 0 auto}.brand .brand-mark{border-radius:50%}.brand small{display:block;font-weight:700;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.brand span{font-size:1.08rem;line-height:1.1;text-align:center}
+/* Desktop/large screens: brand title scales with viewport width. */
+@media(min-width:761px){
+  .header-inner{
+    padding:clamp(16px,2.1vw,30px) clamp(20px,3vw,48px);
+    column-gap:clamp(18px,2vw,34px);
+  }
+  .brand{
+    gap:clamp(14px,1.5vw,24px);
+    max-width:min(1100px,94vw);
+  }
+  .brand img,
+  .brand .brand-logo,
+  .brand .brand-mark{
+    width:clamp(58px,5.8vw,92px);
+    height:clamp(58px,5.8vw,92px);
+  }
+  .brand span{
+    font-size:clamp(1.4rem,2.55vw,2.45rem);
+    line-height:1.05;
+    letter-spacing:-.02em;
+    text-wrap:balance;
+  }
+  .brand small{
+    font-size:clamp(.72rem,.9vw,0.9rem);
+  }
+}
 /* Brand/title row first; nav always on its own full-width line beneath. */
 header.site-header nav{
   display:flex;
