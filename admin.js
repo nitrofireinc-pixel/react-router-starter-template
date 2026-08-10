@@ -2255,6 +2255,9 @@ function activateTab(name) {
       setSponsorsMenuOpen(true);
       loadSponsors().catch(() => {});
     }
+    if (name === 'ledger') {
+      loadLedger().catch(() => {});
+    }
     if (name === 'booster-members' || name === 'minutes') {
       setBoostersMenuOpen(true);
     }
@@ -2346,6 +2349,10 @@ function canAccessSponsorsMenu() {
   return canEditSponsors() || canEditPage('sponsors') || canEditPage('become-a-sponsor');
 }
 
+function canAccessLedger() {
+  return hasPermission('treasurer');
+}
+
 function canAccessBoostersMenu() {
   return canEditBoosterMembers() || canViewMinutes();
 }
@@ -2399,6 +2406,7 @@ function showAllowedPanels() {
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
+    ledger: canAccessLedger(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
@@ -2801,6 +2809,7 @@ function renderDashboard() {
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
+    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, and expenses; view and download Excel.', 'ledger', 'Treasurer', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
@@ -2897,6 +2906,72 @@ async function loadSponsors() {
   state.sponsors = await jsonFetch('/api/admin/sponsors');
   renderSponsors();
   await loadSponsorAdSettings();
+}
+
+async function loadLedger() {
+  const summary = document.querySelector('#ledger-summary');
+  const body = document.querySelector('#ledger-table-body');
+  const status = document.querySelector('#ledger-status');
+  if (!summary || !body || !canAccessLedger()) return;
+  try {
+    const data = await jsonFetch('/api/admin/ledger');
+    const totals = data?.totals || {};
+    const counts = totals.counts || {};
+    summary.innerHTML = [
+      ['Income', totals.income_display || '$0.00', `${Number(counts.sponsor || 0) + Number(counts.donor || 0) + Number(counts.fundraiser || 0)} entries`],
+      ['Expenses', totals.expense_display || '$0.00', `${Number(counts.expense || 0)} entries`],
+      ['Cash net', totals.cash_display || '$0.00', 'Money exchanged'],
+      ['In-kind', totals.in_kind_display || '$0.00', 'No money exchanged'],
+      ['Net total', totals.net_display || '$0.00', 'Income − expenses'],
+    ].map(([label, value, hint]) => (
+      `<div class="ledger-summary-card"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b><small>${escapeHtml(hint)}</small></div>`
+    )).join('');
+    const entries = Array.isArray(data?.entries) ? data.entries : [];
+    if (!entries.length) {
+      body.innerHTML = '<tr><td colspan="8" class="draft">No ledger entries yet. Add a donor, sponsor, fundraiser, or expense.</td></tr>';
+    } else {
+      body.innerHTML = entries.map((row) => {
+        const signed = String(row.kind || '').toLowerCase() === 'expense'
+          ? -Math.abs(Number(row.amount_cents) || 0)
+          : Math.abs(Number(row.amount_cents) || 0);
+        const amountClass = signed < 0 ? 'is-expense' : 'is-income';
+        const amountText = row.amount_display || new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(signed / 100);
+        const moneyLabel = row.money_exchanged === false ? 'In-kind' : 'Cash';
+        return `<tr data-ledger-id="${escapeAttr(String(row.id || ''))}">
+          <td>${escapeHtml(formatLedgerDate(row.paid_at))}</td>
+          <td><span class="ledger-kind ledger-kind-${escapeAttr(String(row.kind || ''))}">${escapeHtml(ledgerKindLabel(row.kind))}</span></td>
+          <td><b>${escapeHtml(row.name || '—')}</b><small class="ledger-address">${escapeHtml(row.address || '')}</small></td>
+          <td class="ledger-amount ${amountClass}">${escapeHtml(amountText)}</td>
+          <td>${escapeHtml(moneyLabel)}</td>
+          <td>${escapeHtml(row.package || '—')}</td>
+          <td>${escapeHtml(row.note || '')}</td>
+          <td class="ledger-actions"><button type="button" class="btn outline btn-small" data-ledger-delete="${escapeAttr(String(row.id || ''))}">Delete</button></td>
+        </tr>`;
+      }).join('');
+    }
+    if (status) status.textContent = `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} in ledger.`;
+    body.querySelectorAll('[data-ledger-delete]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = String(button.dataset.ledgerDelete || '').trim();
+        if (!id) return;
+        if (!window.confirm('Delete this ledger entry? This cannot be undone.')) return;
+        if (status) status.textContent = 'Deleting…';
+        try {
+          await jsonFetch(`/api/admin/ledger/${id}`, { method: 'DELETE' });
+          showSavedToast('Ledger entry deleted.');
+          await loadLedger();
+        } catch (error) {
+          const detail = error?.message || 'Could not delete entry.';
+          if (status) status.textContent = detail;
+          showFailedToast(detail);
+        }
+      });
+    });
+  } catch (error) {
+    summary.innerHTML = '<div class="ledger-summary-card"><span>Ledger</span><b>Unavailable</b><small>Could not load totals</small></div>';
+    body.innerHTML = `<tr><td colspan="8" class="draft">${escapeHtml(error.message || 'Ledger unavailable')}</td></tr>`;
+    if (status) status.textContent = error.message || 'Ledger unavailable';
+  }
 }
 
 async function loadStaff() {
@@ -3318,73 +3393,101 @@ function resetSponsorForm() {
   // Legacy no-op kept for older call sites; form lives in the toast now.
 }
 
-function ensureInKindFormToast() {
-  let root = document.querySelector('#admin-inkind-form-toast');
+function formatLedgerDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function ledgerKindLabel(kind) {
+  const key = String(kind || '').trim().toLowerCase();
+  if (key === 'sponsor') return 'Sponsor';
+  if (key === 'donor') return 'Donor';
+  if (key === 'fundraiser') return 'Fundraiser';
+  if (key === 'expense') return 'Expense';
+  return key || 'Entry';
+}
+
+function ensureLedgerEntryToast() {
+  let root = document.querySelector('#admin-ledger-form-toast');
   if (root) return root;
   root = document.createElement('div');
-  root.id = 'admin-inkind-form-toast';
+  root.id = 'admin-ledger-form-toast';
   root.className = 'admin-sponsor-form-toast';
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-labelledby', 'admin-inkind-form-toast-title');
+  root.setAttribute('aria-labelledby', 'admin-ledger-form-toast-title');
   root.hidden = true;
   root.innerHTML = `
-    <button type="button" class="admin-sponsor-form-toast-backdrop" data-inkind-form-dismiss aria-label="Close in-kind form"></button>
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-ledger-form-dismiss aria-label="Close ledger entry form"></button>
     <div class="admin-sponsor-form-toast-panel">
       <div class="admin-sponsor-form-toast-card">
-        <h3 id="admin-inkind-form-toast-title">Add In-Kind Donation</h3>
-        <p class="muted">Records fair-market value for donated goods or services with no money exchanged. This updates the payment ledger XML only.</p>
-        <form id="inkind-manual-form" class="admin-sponsor-manual-form" novalidate>
-          <label>Record as
+        <h3 id="admin-ledger-form-toast-title">Add ledger entry</h3>
+        <p class="muted">Record a donor, sponsor, fundraiser, or expense. Choose cash or in-kind (fair-market value with no money exchanged).</p>
+        <form id="ledger-entry-form" class="admin-sponsor-manual-form" novalidate>
+          <label>Type
             <select name="kind" required>
-              <option value="sponsor" selected>Sponsor / organization</option>
-              <option value="donor">Donor / individual</option>
+              <option value="sponsor">Sponsor / organization</option>
+              <option value="donor" selected>Donor / individual</option>
+              <option value="fundraiser">Fundraiser income</option>
+              <option value="expense">Expense</option>
             </select>
           </label>
-          <label>Name or business<input name="name" required autocomplete="organization" maxlength="200" placeholder="Business or donor name"></label>
+          <label>Payment
+            <select name="entry_mode" required>
+              <option value="cash" selected>Cash / check / card</option>
+              <option value="in_kind">In-kind (no money exchanged)</option>
+            </select>
+          </label>
+          <label>Name or business<input name="name" required autocomplete="organization" maxlength="200" placeholder="Business, donor, or payee"></label>
           <label>Address <span class="muted">(optional)</span><input name="address" maxlength="400" placeholder="Street, city, state ZIP" autocomplete="street-address"></label>
-          <label>Fair market amount<input name="amount_display" required inputmode="decimal" placeholder="$8,264.00"></label>
-          <label>Package / description<input name="package" maxlength="80" value="In-kind donated services" placeholder="In-kind donated services"></label>
-          <label>Note<textarea name="note" rows="3" maxlength="500">Fair market value for donated services; no money exchanged.</textarea></label>
-          <p class="admin-sponsor-form-toast-status" id="inkind-manual-status" aria-live="polite"></p>
+          <label>Amount<input name="amount_display" required inputmode="decimal" placeholder="$100.00"></label>
+          <label>Date<input name="paid_at" type="date"></label>
+          <label>Package / description<input name="package" maxlength="80" placeholder="Donation, Gold Sponsor, Trailer rental…"></label>
+          <label>Note<textarea name="note" rows="3" maxlength="500" placeholder="Optional note for the ledger"></textarea></label>
+          <p class="admin-sponsor-form-toast-status" id="ledger-entry-status" aria-live="polite"></p>
           <div class="admin-sponsor-form-toast-actions">
-            <button class="btn outline" type="button" data-inkind-form-dismiss>Cancel</button>
-            <button class="btn primary" type="submit">Save In-Kind Entry</button>
+            <button class="btn outline" type="button" data-ledger-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit">Save entry</button>
           </div>
         </form>
       </div>
     </div>`;
   document.body.appendChild(root);
-  root.querySelectorAll('[data-inkind-form-dismiss]').forEach((el) => {
-    el.addEventListener('click', () => hideInKindFormToast());
+  root.querySelectorAll('[data-ledger-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideLedgerEntryToast());
   });
   return root;
 }
 
-function showInKindFormToast() {
-  const root = ensureInKindFormToast();
-  const form = root.querySelector('#inkind-manual-form');
-  const status = root.querySelector('#inkind-manual-status');
+function showLedgerEntryToast() {
+  const root = ensureLedgerEntryToast();
+  const form = root.querySelector('#ledger-entry-form');
+  const status = root.querySelector('#ledger-entry-status');
   if (form) {
     form.reset();
-    if (form.elements.kind) form.elements.kind.value = 'sponsor';
-    if (form.elements.package) form.elements.package.value = 'In-kind donated services';
-    if (form.elements.note) {
-      form.elements.note.value = 'Fair market value for donated services; no money exchanged.';
+    if (form.elements.kind) form.elements.kind.value = 'donor';
+    if (form.elements.entry_mode) form.elements.entry_mode.value = 'cash';
+    if (form.elements.paid_at) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      form.elements.paid_at.value = `${yyyy}-${mm}-${dd}`;
     }
   }
   if (status) status.textContent = '';
   root.hidden = false;
   root.classList.remove('is-leaving');
   root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  requestAnimationFrame(() => root.classList.add('is-visible'));
   window.setTimeout(() => form?.elements.name?.focus(), 40);
-  return root;
 }
 
-function hideInKindFormToast() {
-  const root = document.querySelector('#admin-inkind-form-toast');
+function hideLedgerEntryToast() {
+  const root = document.querySelector('#admin-ledger-form-toast');
   if (!root || root.hidden) return;
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
@@ -4137,6 +4240,7 @@ function ensureUserFormToast() {
             <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, expenses)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label>
@@ -5604,47 +5708,26 @@ function bindForms() {
     printGoldSponsorsPdf();
   });
 
-  async function loadPaymentLedgerSummary() {
-    const summary = document.querySelector('#payment-ledger-summary');
-    const status = document.querySelector('#payment-ledger-status');
-    if (!summary || !canEditSponsors()) return;
-    try {
-      const data = await jsonFetch('/api/admin/sponsors/payment-ledger');
-      const totals = data?.totals || {};
-      summary.textContent = [
-        `Sponsors: ${Number(data?.sponsors?.length || 0)} totaling ${totals.sponsors_display || '$0.00'}`,
-        `Donors: ${Number(data?.donors?.length || 0)} totaling ${totals.donors_display || '$0.00'}`,
-        `Cash: ${totals.cash_display || '$0.00'}`,
-        `In-kind: ${totals.in_kind_display || '$0.00'}`,
-        `Grand total: ${totals.grand_total_display || '$0.00'}`,
-      ].join(' · ');
-      if (status) status.textContent = '';
-    } catch (error) {
-      summary.textContent = 'Could not load payment ledger totals.';
-      if (status) status.textContent = error.message || 'Ledger unavailable';
-    }
-  }
-
-  document.querySelector('#refresh-payment-ledger')?.addEventListener('click', async () => {
-    const status = document.querySelector('#payment-ledger-status');
+  document.querySelector('#refresh-ledger')?.addEventListener('click', async () => {
+    const status = document.querySelector('#ledger-status');
     if (status) status.textContent = 'Refreshing…';
     try {
-      await jsonFetch('/api/admin/sponsors/payment-ledger?rebuild=1');
-      await loadPaymentLedgerSummary();
+      await jsonFetch('/api/admin/ledger?rebuild=1');
+      await loadLedger();
       if (status) status.textContent = 'Ledger refreshed.';
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not refresh ledger.';
     }
   });
 
-  document.querySelector('#download-payment-ledger')?.addEventListener('click', async (event) => {
+  document.querySelector('#download-ledger-excel')?.addEventListener('click', async (event) => {
     event.preventDefault();
-    const status = document.querySelector('#payment-ledger-status');
-    if (status) status.textContent = 'Preparing download…';
+    const status = document.querySelector('#ledger-status');
+    if (status) status.textContent = 'Preparing Excel download…';
     try {
-      const response = await fetch('/api/admin/sponsors/payment-ledger.xml', {
+      const response = await fetch('/api/admin/ledger.xls', {
         credentials: 'same-origin',
-        headers: { accept: 'application/xml' },
+        headers: { accept: 'application/vnd.ms-excel' },
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
@@ -5654,54 +5737,47 @@ function bindForms() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'efhs-payment-ledger.xml';
+      link.download = 'efhs-payment-ledger.xls';
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      if (status) status.textContent = 'XML downloaded.';
+      if (status) status.textContent = 'Excel ledger downloaded.';
     } catch (error) {
-      if (status) status.textContent = error.message || 'Could not download XML.';
+      if (status) status.textContent = error.message || 'Could not download Excel.';
+      showFailedToast(error.message || 'Could not download Excel.');
     }
   });
 
-  if (canEditSponsors()) {
-    loadPaymentLedgerSummary().catch(() => {});
-  }
-
-  document.querySelector('#new-sponsor')?.addEventListener('click', () => {
-    showManualAddSponsorToast();
+  document.querySelector('#new-ledger-entry')?.addEventListener('click', () => {
+    showLedgerEntryToast();
   });
 
-  document.querySelector('#new-inkind')?.addEventListener('click', () => {
-    showInKindFormToast();
-  });
-
-  const inKindToast = ensureInKindFormToast();
-  inKindToast.querySelector('#inkind-manual-form')?.addEventListener('submit', async (event) => {
+  const ledgerToast = ensureLedgerEntryToast();
+  ledgerToast.querySelector('#ledger-entry-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const status = document.querySelector('#inkind-manual-status');
-    const kind = String(form.elements.kind?.value || 'sponsor').trim().toLowerCase() === 'donor'
-      ? 'donor'
-      : 'sponsor';
+    const status = document.querySelector('#ledger-entry-status');
+    const kind = String(form.elements.kind?.value || 'donor').trim().toLowerCase();
+    const entryMode = String(form.elements.entry_mode?.value || 'cash').trim().toLowerCase();
     const name = String(form.elements.name?.value || '').trim();
     const address = String(form.elements.address?.value || '').trim();
     const amountDisplay = String(form.elements.amount_display?.value || '').trim();
-    const packageLabel = String(form.elements.package?.value || '').trim() || 'In-kind donated services';
-    const note = String(form.elements.note?.value || '').trim()
-      || 'Fair market value for donated services; no money exchanged.';
+    const packageLabel = String(form.elements.package?.value || '').trim();
+    const note = String(form.elements.note?.value || '').trim();
+    const paidDate = String(form.elements.paid_at?.value || '').trim();
     if (!name) {
       if (status) status.textContent = 'Name or business is required.';
       return;
     }
     if (!amountDisplay) {
-      if (status) status.textContent = 'Fair market amount is required.';
+      if (status) status.textContent = 'Amount is required.';
       return;
     }
     if (status) status.textContent = 'Saving…';
     try {
-      await jsonFetch('/api/admin/sponsors/payment-ledger/in-kind', {
+      const paidAt = paidDate ? `${paidDate}T12:00:00.000Z` : new Date().toISOString();
+      await jsonFetch('/api/admin/ledger', {
         method: 'POST',
         body: JSON.stringify({
           kind,
@@ -5710,16 +5786,23 @@ function bindForms() {
           amount_display: amountDisplay,
           package: packageLabel,
           note,
+          paid_at: paidAt,
+          entry_mode: entryMode === 'in_kind' ? 'in_kind' : 'cash',
+          money_exchanged: entryMode !== 'in_kind',
         }),
       });
-      hideInKindFormToast();
-      showSavedToast('In-kind donation saved to ledger.');
-      await loadPaymentLedgerSummary();
+      hideLedgerEntryToast();
+      showSavedToast('Ledger entry saved.');
+      await loadLedger();
     } catch (error) {
-      const detail = error?.message || 'Could not save in-kind entry.';
+      const detail = error?.message || 'Could not save ledger entry.';
       if (status) status.textContent = detail;
       showFailedToast(detail);
     }
+  });
+
+  document.querySelector('#new-sponsor')?.addEventListener('click', () => {
+    showManualAddSponsorToast();
   });
 
   const sponsorToast = ensureSponsorFormToast();

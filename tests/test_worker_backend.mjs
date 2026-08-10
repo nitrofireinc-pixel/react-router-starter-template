@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { applyHomeFeatureCards, buildCalendarPushPayload, buildPaymentLedgerXml, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildCalendarPushPayload, buildPaymentLedgerExcelXml, buildPaymentLedgerXml, buildUserWelcomeInvite, canAccessTreasurerLedger, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -749,6 +749,9 @@ test('Blue Regiment mark path is shared by public brand and minutes letterhead',
 
 test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
   assert.equal(escapeXml('A & B <C>'), 'A &amp; B &lt;C&gt;');
+  assert.equal(canAccessTreasurerLedger({ role: 'admin' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["treasurer"]' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["sponsors"]' }), false);
   const xml = buildPaymentLedgerXml({
     generatedAt: '2026-08-10T12:00:00.000Z',
     sponsors: [{
@@ -778,19 +781,52 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
       amount_display: '$25',
       paid_at: '2026-08-10T11:30:00.000Z',
     }],
+    fundraisers: [{
+      id: 8,
+      name: 'Cookie Dough Sale',
+      amount_cents: 12000,
+      amount_display: '$120.00',
+      package: 'Fundraiser',
+      paid_at: '2026-08-09T10:00:00.000Z',
+    }],
+    expenses: [{
+      id: 9,
+      kind: 'expense',
+      name: 'Trailer hitch',
+      amount_cents: 4500,
+      amount_display: '-$45.00',
+      package: 'Expense',
+      paid_at: '2026-08-08T10:00:00.000Z',
+    }],
   });
   assert.match(xml, /<\?xml version="1.0"/);
   assert.match(xml, /<sponsors count="2" total_cents="876400" total_display="\$8,764\.00">/);
   assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25\.00">/);
+  assert.match(xml, /<fundraisers count="1" total_cents="12000" total_display="\$120\.00">/);
+  assert.match(xml, /<expenses count="1" total_cents="-4500" total_display="-\$45\.00">/);
   assert.match(xml, /Acme Music &amp; Co/);
   assert.match(xml, /Nitrofire Computing LLC/);
   assert.match(xml, /money_exchanged="false"/);
   assert.match(xml, /Fair market value for donated services/);
   assert.match(xml, /Jane Donor/);
+  assert.match(xml, /Cookie Dough Sale/);
+  assert.match(xml, /Trailer hitch/);
   assert.match(xml, /<package>Gold Sponsor<\/package>/);
+  assert.match(xml, /income cents="890900" display="\$8,909\.00"/);
+  assert.match(xml, /<expenses cents="4500" display="\$45\.00"\/>/);
   assert.match(xml, /in_kind_total cents="826400" display="\$8,264\.00"/);
-  assert.match(xml, /cash_total cents="52500" display="\$525\.00"/);
-  assert.match(xml, /grand_total cents="878900" display="\$8,789\.00"/);
+  assert.match(xml, /cash_total cents="60000" display="\$600\.00"/);
+  assert.match(xml, /net_total cents="886400" display="\$8,864\.00"/);
+
+  const excel = buildPaymentLedgerExcelXml([
+    { id: 1, kind: 'donor', name: 'Jane Donor', amount_cents: 2500, amount_display: '$25.00', money_exchanged: true, paid_at: '2026-08-10' },
+    { id: 2, kind: 'expense', name: 'Trailer hitch', amount_cents: 4500, amount_display: '-$45.00', money_exchanged: true, paid_at: '2026-08-08' },
+  ], { generatedAt: '2026-08-10T12:00:00.000Z' });
+  assert.match(excel, /Excel\.Sheet/);
+  assert.match(excel, /EFHS Ledger/);
+  assert.match(excel, /Jane Donor/);
+  assert.match(excel, /Trailer hitch/);
+  assert.match(excel, /Cash net/);
 });
 
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
