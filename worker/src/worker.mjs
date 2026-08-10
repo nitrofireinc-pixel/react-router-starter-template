@@ -203,7 +203,8 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'login-password-toggle-20260809-2';
+const ASSET_VERSION = 'payment-ledger-xml-20260810-1';
+export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
 self.addEventListener('install', (event) => {
@@ -592,6 +593,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, square_payment_id TEXT NOT NULL DEFAULT \'\', square_auth_id TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -3846,6 +3848,252 @@ async function maybeSendSponsorInvoice(env, application, { force = false } = {})
   return sendSponsorDonationInvoice(env, application);
 }
 
+export function escapeXml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&apos;',
+    '"': '&quot;',
+  }[char]));
+}
+
+export function buildPaymentLedgerXml({
+  sponsors = [],
+  donors = [],
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const sponsorEntries = Array.isArray(sponsors) ? sponsors : [];
+  const donorEntries = Array.isArray(donors) ? donors : [];
+  const sponsorTotalCents = sponsorEntries.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+  const donorTotalCents = donorEntries.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+  const grandTotalCents = sponsorTotalCents + donorTotalCents;
+  const renderEntry = (row, kind) => {
+    const name = escapeXml(row.name || '');
+    const address = escapeXml(row.address || '');
+    const amountDisplay = escapeXml(row.amount_display || formatSponsorAmountDisplay(row.amount_cents) || '$0');
+    const cents = Number(row.amount_cents) || 0;
+    const paidAt = escapeXml(row.paid_at || '');
+    const pkg = escapeXml(row.package || '');
+    const id = escapeXml(row.id == null ? '' : String(row.id));
+    const packageXml = kind === 'sponsor' && pkg
+      ? `\n      <package>${pkg}</package>`
+      : '';
+    return `    <entry id="${id}" kind="${kind}" paid_at="${paidAt}">
+      <name>${name}</name>
+      <address>${address}</address>
+      <amount cents="${cents}" display="${amountDisplay}"/>${packageXml}
+    </entry>`;
+  };
+  const sponsorXml = sponsorEntries.map((row) => renderEntry(row, 'sponsor')).join('\n');
+  const donorXml = donorEntries.map((row) => renderEntry(row, 'donor')).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<payment_ledger generated_at="${escapeXml(generatedAt)}" organization="East Forsyth Band Boosters">
+  <sponsors count="${sponsorEntries.length}" total_cents="${sponsorTotalCents}" total_display="${escapeXml(formatSponsorAmountDisplay(sponsorTotalCents) || '$0')}">
+${sponsorXml ? `${sponsorXml}\n` : ''}  </sponsors>
+  <donors count="${donorEntries.length}" total_cents="${donorTotalCents}" total_display="${escapeXml(formatSponsorAmountDisplay(donorTotalCents) || '$0')}">
+${donorXml ? `${donorXml}\n` : ''}  </donors>
+  <totals>
+    <grand_total cents="${grandTotalCents}" display="${escapeXml(formatSponsorAmountDisplay(grandTotalCents) || '$0')}"/>
+  </totals>
+</payment_ledger>
+`;
+}
+
+export async function upsertPaymentLedgerEntry(env, {
+  kind = 'sponsor',
+  refType = '',
+  refId = null,
+  name = '',
+  address = '',
+  amountCents = 0,
+  amountDisplay = '',
+  packageLabel = '',
+  paidAt = '',
+} = {}) {
+  const normalizedKind = kind === 'donor' ? 'donor' : 'sponsor';
+  const cents = Math.max(0, Math.round(Number(amountCents) || 0));
+  const display = String(amountDisplay || formatSponsorAmountDisplay(cents) || '$0').trim();
+  const paid = String(paidAt || new Date().toISOString()).trim();
+  await env.DB.prepare(
+    `INSERT INTO payment_ledger
+      (kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, paid_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(kind, ref_type, ref_id) DO UPDATE SET
+       name=excluded.name,
+       address=excluded.address,
+       amount_cents=excluded.amount_cents,
+       amount_display=excluded.amount_display,
+       package=excluded.package,
+       paid_at=excluded.paid_at`,
+  ).bind(
+    normalizedKind,
+    String(refType || '').trim().slice(0, 40),
+    refId == null ? null : Number(refId),
+    String(name || '').trim().slice(0, 200),
+    String(address || '').trim().slice(0, 400),
+    cents,
+    display.slice(0, 40),
+    String(packageLabel || '').trim().slice(0, 80),
+    paid.slice(0, 64),
+    new Date().toISOString(),
+  ).run();
+}
+
+export async function recordSponsorPaymentLedger(env, application = {}) {
+  const id = Number(application.id || 0);
+  if (!id) return null;
+  const tier = normalizeSponsorTierKey(application.tier) || String(application.tier || '').trim();
+  const packageLabel = sponsorLevelFromTierKey(tier) || (tier ? `${tier} Sponsor` : 'Sponsor');
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'sponsor',
+    refType: 'application',
+    refId: id,
+    name: application.business_name || application.name || '',
+    address: application.address || '',
+    amountCents: application.amount_cents,
+    amountDisplay: application.amount_display,
+    packageLabel,
+    paidAt: application.paid_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function recordDonorPaymentLedger(env, donation = {}) {
+  const id = Number(donation.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'donor',
+    refType: 'donation',
+    refId: id,
+    name: donation.donor_name || donation.name || '',
+    address: donation.address || '',
+    amountCents: donation.amount_cents,
+    amountDisplay: donation.amount_display,
+    packageLabel: 'Donation',
+    paidAt: donation.paid_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function recordManualSponsorPaymentLedger(env, sponsor = {}, {
+  amountCents = 0,
+  amountDisplay = '',
+  paidAt = '',
+} = {}) {
+  const id = Number(sponsor.id || 0);
+  if (!id) return null;
+  const address = formatSponsorAddress(sponsor) || [sponsor.address, sponsor.city, sponsor.state].filter(Boolean).join(', ');
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'sponsor',
+    refType: 'manual_sponsor',
+    refId: id,
+    name: sponsor.name || '',
+    address,
+    amountCents: amountCents || resolveSponsorAmountCents({ amountCents, amountDisplay }),
+    amountDisplay,
+    packageLabel: sponsor.level || sponsor.tier_label || 'Sponsor',
+    paidAt: paidAt || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function loadPaymentLedgerRows(env) {
+  const rows = await env.DB.prepare(
+    `SELECT id, kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, paid_at
+     FROM payment_ledger
+     ORDER BY paid_at ASC, id ASC`,
+  ).all();
+  const all = rows.results || [];
+  return {
+    sponsors: all.filter((row) => row.kind === 'sponsor').map((row) => ({
+      id: row.ref_id || row.id,
+      name: row.name,
+      address: row.address,
+      amount_cents: row.amount_cents,
+      amount_display: row.amount_display,
+      package: row.package,
+      paid_at: row.paid_at,
+    })),
+    donors: all.filter((row) => row.kind === 'donor').map((row) => ({
+      id: row.ref_id || row.id,
+      name: row.name,
+      address: row.address,
+      amount_cents: row.amount_cents,
+      amount_display: row.amount_display,
+      package: row.package,
+      paid_at: row.paid_at,
+    })),
+  };
+}
+
+export async function refreshPaymentLedgerXml(env) {
+  const { sponsors, donors } = await loadPaymentLedgerRows(env);
+  const xml = buildPaymentLedgerXml({
+    sponsors,
+    donors,
+    generatedAt: new Date().toISOString(),
+  });
+  await setSiteContentValue(env, PAYMENT_LEDGER_XML_KEY, xml);
+  return xml;
+}
+
+export async function backfillPaymentLedgerFromPaidRecords(env) {
+  const existing = await env.DB.prepare('SELECT COUNT(*) AS n FROM payment_ledger').first();
+  if (Number(existing?.n || 0) > 0) return { imported: 0, skipped: true };
+  let imported = 0;
+  const apps = await env.DB.prepare(
+    `SELECT id, tier, amount_cents, amount_display, business_name, address, paid_at, status
+     FROM sponsor_applications
+     WHERE status IN ('paid', 'paid_mock') OR paid_at IS NOT NULL`,
+  ).all();
+  for (const row of apps.results || []) {
+    const tier = normalizeSponsorTierKey(row.tier) || String(row.tier || '').trim();
+    await upsertPaymentLedgerEntry(env, {
+      kind: 'sponsor',
+      refType: 'application',
+      refId: row.id,
+      name: row.business_name || '',
+      address: row.address || '',
+      amountCents: row.amount_cents,
+      amountDisplay: row.amount_display,
+      packageLabel: sponsorLevelFromTierKey(tier) || (tier ? `${tier} Sponsor` : 'Sponsor'),
+      paidAt: row.paid_at || new Date().toISOString(),
+    });
+    imported += 1;
+  }
+  const donations = await env.DB.prepare(
+    `SELECT id, donor_name, amount_cents, amount_display, paid_at, status
+     FROM donations
+     WHERE status IN ('paid', 'paid_mock') OR paid_at IS NOT NULL`,
+  ).all();
+  for (const row of donations.results || []) {
+    await upsertPaymentLedgerEntry(env, {
+      kind: 'donor',
+      refType: 'donation',
+      refId: row.id,
+      name: row.donor_name || '',
+      address: '',
+      amountCents: row.amount_cents,
+      amountDisplay: row.amount_display,
+      packageLabel: 'Donation',
+      paidAt: row.paid_at || new Date().toISOString(),
+    });
+    imported += 1;
+  }
+  await refreshPaymentLedgerXml(env);
+  return { imported, skipped: false };
+}
+
+export async function getPaymentLedgerXml(env, { rebuild = false } = {}) {
+  await backfillPaymentLedgerFromPaidRecords(env);
+  if (!rebuild) {
+    const existing = await getSiteContentValue(env, PAYMENT_LEDGER_XML_KEY);
+    if (existing && existing.includes('<payment_ledger')) return existing;
+  }
+  return refreshPaymentLedgerXml(env);
+}
+
 export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
   const row = application || {};
   const id = Number(row.id || 0);
@@ -5703,6 +5951,12 @@ async function handleApi(request, env, url, ctx = null) {
         ...application,
         ...result.application,
       });
+      try {
+        await recordSponsorPaymentLedger(env, {
+          ...application,
+          ...result.application,
+        });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         mock: result.mock,
@@ -5776,6 +6030,14 @@ async function handleApi(request, env, url, ctx = null) {
         square_payment_id: squarePaymentId,
         square_auth_id: squareAuthId,
       });
+      try {
+        await recordSponsorPaymentLedger(env, {
+          ...application,
+          ...result.application,
+          square_payment_id: squarePaymentId,
+          square_auth_id: squareAuthId,
+        });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         created: result.created,
@@ -5877,6 +6139,9 @@ async function handleApi(request, env, url, ctx = null) {
          SET status = 'paid_mock', paid_at = ?, updated_at = ?
          WHERE id = ?`,
       ).bind(paidAt, paidAt, donationId).run();
+      try {
+        await recordDonorPaymentLedger(env, { ...donation, paid_at: paidAt, status: 'paid_mock' });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         mock: true,
@@ -5907,6 +6172,14 @@ async function handleApi(request, env, url, ctx = null) {
        SET square_payment_id = ?, status = 'paid', paid_at = ?, updated_at = ?
        WHERE id = ?`,
     ).bind(payment.payment_id || '', paidAt, paidAt, donationId).run();
+    try {
+      await recordDonorPaymentLedger(env, {
+        ...donation,
+        paid_at: paidAt,
+        status: 'paid',
+        square_payment_id: payment.payment_id || '',
+      });
+    } catch { /* ledger is best-effort */ }
     return jsonResponse({
       ok: true,
       created: true,
@@ -6447,11 +6720,61 @@ async function handleApi(request, env, url, ctx = null) {
     if (isValidEmail(saved.email)) {
       invoice = await sendManualSponsorInvoice(env, saved);
     }
+    try {
+      const amountDisplay = await resolveSponsorTierAmountDisplay(env, saved.level || saved.tier);
+      await recordManualSponsorPaymentLedger(env, saved, {
+        amountDisplay,
+        amountCents: resolveSponsorAmountCents({ amountDisplay }),
+      });
+    } catch { /* ledger is best-effort */ }
     return jsonResponse({
       ...saved,
       invoice_sent: Boolean(invoice.ok),
       invoice_detail: invoice.detail || '',
       invoice_number: invoice.invoice_number || '',
+    });
+  }
+  if (url.pathname === '/api/admin/sponsors/payment-ledger.xml' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    const rebuild = String(url.searchParams.get('rebuild') || '') === '1';
+    const xml = await getPaymentLedgerXml(env, { rebuild });
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'content-type': 'application/xml; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-disposition': 'attachment; filename="efhs-payment-ledger.xml"',
+      },
+    });
+  }
+  if (url.pathname === '/api/admin/sponsors/payment-ledger' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    await backfillPaymentLedgerFromPaidRecords(env);
+    const rebuild = String(url.searchParams.get('rebuild') || '') === '1';
+    if (rebuild) await refreshPaymentLedgerXml(env);
+    const { sponsors, donors } = await loadPaymentLedgerRows(env);
+    const sponsorTotal = sponsors.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+    const donorTotal = donors.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+    return jsonResponse({
+      sponsors,
+      donors,
+      totals: {
+        sponsors_cents: sponsorTotal,
+        sponsors_display: formatSponsorAmountDisplay(sponsorTotal) || '$0',
+        donors_cents: donorTotal,
+        donors_display: formatSponsorAmountDisplay(donorTotal) || '$0',
+        grand_total_cents: sponsorTotal + donorTotal,
+        grand_total_display: formatSponsorAmountDisplay(sponsorTotal + donorTotal) || '$0',
+      },
+      download_url: '/api/admin/sponsors/payment-ledger.xml',
     });
   }
   if (url.pathname === '/api/admin/sponsors/manual' && request.method === 'POST') {
@@ -6562,6 +6885,18 @@ async function handleApi(request, env, url, ctx = null) {
     };
     if (bypassPayment) {
       const result = await activatePaidSponsorApplication(env, application, { mock: true });
+      try {
+        await maybeSendSponsorInvoice(env, {
+          ...application,
+          ...result.application,
+        });
+      } catch { /* invoice is best-effort for bypass */ }
+      try {
+        await recordSponsorPaymentLedger(env, {
+          ...application,
+          ...result.application,
+        });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         bypassed: true,
@@ -7641,6 +7976,16 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <div id="gold-sponsors-print-preview" class="gold-sponsors-print-preview" aria-live="polite"></div>
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
+</div>
+<div class="admin-card stack payment-ledger-card">
+  <h2>Payment ledger XML</h2>
+  <p class="muted">Paid sponsorships and donations are recorded after successful payment (and invoice email for sponsors). Sponsors and donors are listed separately with running totals.</p>
+  <p class="status" id="payment-ledger-summary">Loading ledger totals…</p>
+  <div class="panel-actions" style="justify-content:flex-start;gap:10px;flex-wrap:wrap">
+    <a class="btn outline" id="download-payment-ledger" href="/api/admin/sponsors/payment-ledger.xml">Download payment ledger XML</a>
+    <button class="btn outline" type="button" id="refresh-payment-ledger">Refresh totals</button>
+  </div>
+  <p class="status" id="payment-ledger-status"></p>
 </div>
 <div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section><section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>

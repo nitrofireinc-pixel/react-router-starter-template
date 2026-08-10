@@ -5528,6 +5528,69 @@ function bindForms() {
     printGoldSponsorsPdf();
   });
 
+  async function loadPaymentLedgerSummary() {
+    const summary = document.querySelector('#payment-ledger-summary');
+    const status = document.querySelector('#payment-ledger-status');
+    if (!summary || !canEditSponsors()) return;
+    try {
+      const data = await api('/api/admin/sponsors/payment-ledger');
+      const totals = data?.totals || {};
+      summary.textContent = [
+        `Sponsors: ${Number(data?.sponsors?.length || 0)} totaling ${totals.sponsors_display || '$0'}`,
+        `Donors: ${Number(data?.donors?.length || 0)} totaling ${totals.donors_display || '$0'}`,
+        `Grand total: ${totals.grand_total_display || '$0'}`,
+      ].join(' · ');
+      if (status) status.textContent = '';
+    } catch (error) {
+      summary.textContent = 'Could not load payment ledger totals.';
+      if (status) status.textContent = error.message || 'Ledger unavailable';
+    }
+  }
+
+  document.querySelector('#refresh-payment-ledger')?.addEventListener('click', async () => {
+    const status = document.querySelector('#payment-ledger-status');
+    if (status) status.textContent = 'Refreshing…';
+    try {
+      await api('/api/admin/sponsors/payment-ledger?rebuild=1');
+      await loadPaymentLedgerSummary();
+      if (status) status.textContent = 'Ledger refreshed.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not refresh ledger.';
+    }
+  });
+
+  document.querySelector('#download-payment-ledger')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#payment-ledger-status');
+    if (status) status.textContent = 'Preparing download…';
+    try {
+      const response = await fetch('/api/admin/sponsors/payment-ledger.xml', {
+        credentials: 'same-origin',
+        headers: { accept: 'application/xml' },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Download failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'efhs-payment-ledger.xml';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      if (status) status.textContent = 'XML downloaded.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not download XML.';
+    }
+  });
+
+  if (canEditSponsors()) {
+    loadPaymentLedgerSummary().catch(() => {});
+  }
+
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
     showManualAddSponsorToast();
   });

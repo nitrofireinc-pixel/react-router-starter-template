@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { applyHomeFeatureCards, buildCalendarPushPayload, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildCalendarPushPayload, buildPaymentLedgerXml, buildUserWelcomeInvite, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -745,6 +745,37 @@ test('Blue Regiment mark path is shared by public brand and minutes letterhead',
   assert.match(brand, /efhs-blue-regiment-mark/);
   assert.match(minutes, /efhs-blue-regiment-mark/);
   assert.match(minutes, /letterhead-mark/);
+});
+
+test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
+  assert.equal(escapeXml('A & B <C>'), 'A &amp; B &lt;C&gt;');
+  const xml = buildPaymentLedgerXml({
+    generatedAt: '2026-08-10T12:00:00.000Z',
+    sponsors: [{
+      id: 12,
+      name: 'Acme Music & Co',
+      address: '100 Band Way, Kernersville, NC',
+      amount_cents: 50000,
+      amount_display: '$500',
+      package: 'Gold Sponsor',
+      paid_at: '2026-08-10T11:00:00.000Z',
+    }],
+    donors: [{
+      id: 3,
+      name: 'Jane Donor',
+      address: '',
+      amount_cents: 2500,
+      amount_display: '$25',
+      paid_at: '2026-08-10T11:30:00.000Z',
+    }],
+  });
+  assert.match(xml, /<\?xml version="1.0"/);
+  assert.match(xml, /<sponsors count="1" total_cents="50000" total_display="\$500">/);
+  assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25">/);
+  assert.match(xml, /Acme Music &amp; Co/);
+  assert.match(xml, /Jane Donor/);
+  assert.match(xml, /<package>Gold Sponsor<\/package>/);
+  assert.match(xml, /grand_total cents="52500" display="\$525"/);
 });
 
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
