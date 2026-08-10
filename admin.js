@@ -2777,6 +2777,8 @@ function showAllowedPanels() {
   bindAdminNavToggle();
   renderDashboard();
   activateTab('dashboard');
+  document.body.classList.remove('cms-booting');
+  document.body.classList.add('cms-ready');
 }
 
 function bindAdminNavToggle() {
