@@ -759,6 +759,16 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
       amount_display: '$500',
       package: 'Gold Sponsor',
       paid_at: '2026-08-10T11:00:00.000Z',
+    }, {
+      id: 1,
+      name: 'Nitrofire Computing LLC',
+      address: '4526 Westhill Pl., Kernersville, NC 27284',
+      amount_cents: 826400,
+      amount_display: '$8,264.00',
+      package: 'In-kind donated services',
+      note: 'Fair market value for donated services; no money exchanged.',
+      money_exchanged: false,
+      paid_at: '2026-08-10T12:00:00.000Z',
     }],
     donors: [{
       id: 3,
@@ -770,12 +780,17 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
     }],
   });
   assert.match(xml, /<\?xml version="1.0"/);
-  assert.match(xml, /<sponsors count="1" total_cents="50000" total_display="\$500">/);
-  assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25">/);
+  assert.match(xml, /<sponsors count="2" total_cents="876400" total_display="\$8,764\.00">/);
+  assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25\.00">/);
   assert.match(xml, /Acme Music &amp; Co/);
+  assert.match(xml, /Nitrofire Computing LLC/);
+  assert.match(xml, /money_exchanged="false"/);
+  assert.match(xml, /Fair market value for donated services/);
   assert.match(xml, /Jane Donor/);
   assert.match(xml, /<package>Gold Sponsor<\/package>/);
-  assert.match(xml, /grand_total cents="52500" display="\$525"/);
+  assert.match(xml, /in_kind_total cents="826400" display="\$8,264\.00"/);
+  assert.match(xml, /cash_total cents="52500" display="\$525\.00"/);
+  assert.match(xml, /grand_total cents="878900" display="\$8,789\.00"/);
 });
 
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {

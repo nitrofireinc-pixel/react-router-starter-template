@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'payment-ledger-xml-20260810-1';
+const ASSET_VERSION = 'payment-ledger-xml-20260810-2';
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
@@ -593,7 +593,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, square_payment_id TEXT NOT NULL DEFAULT \'\', square_auth_id TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -678,6 +678,16 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare("ALTER TABLE sponsor_applications ADD COLUMN square_auth_id TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE payment_ledger ADD COLUMN note TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE payment_ledger ADD COLUMN money_exchanged INTEGER NOT NULL DEFAULT 1').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -3858,6 +3868,17 @@ export function escapeXml(value) {
   }[char]));
 }
 
+export function formatLedgerAmountDisplay(cents) {
+  const amount = Number(cents);
+  if (!Number.isFinite(amount) || amount < 0) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount / 100);
+}
+
 export function buildPaymentLedgerXml({
   sponsors = [],
   donors = [],
@@ -3865,36 +3886,45 @@ export function buildPaymentLedgerXml({
 } = {}) {
   const sponsorEntries = Array.isArray(sponsors) ? sponsors : [];
   const donorEntries = Array.isArray(donors) ? donors : [];
-  const sponsorTotalCents = sponsorEntries.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
-  const donorTotalCents = donorEntries.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+  const sumCents = (rows, predicate = null) => rows.reduce((sum, row) => {
+    if (predicate && !predicate(row)) return sum;
+    return sum + (Number(row.amount_cents) || 0);
+  }, 0);
+  const sponsorTotalCents = sumCents(sponsorEntries);
+  const donorTotalCents = sumCents(donorEntries);
+  const inKindTotalCents = sumCents([...sponsorEntries, ...donorEntries], (row) => row.money_exchanged === false || Number(row.money_exchanged) === 0);
+  const cashTotalCents = sumCents([...sponsorEntries, ...donorEntries], (row) => !(row.money_exchanged === false || Number(row.money_exchanged) === 0));
   const grandTotalCents = sponsorTotalCents + donorTotalCents;
   const renderEntry = (row, kind) => {
     const name = escapeXml(row.name || '');
     const address = escapeXml(row.address || '');
-    const amountDisplay = escapeXml(row.amount_display || formatSponsorAmountDisplay(row.amount_cents) || '$0');
+    const amountDisplay = escapeXml(row.amount_display || formatLedgerAmountDisplay(row.amount_cents));
     const cents = Number(row.amount_cents) || 0;
     const paidAt = escapeXml(row.paid_at || '');
     const pkg = escapeXml(row.package || '');
+    const note = escapeXml(row.note || '');
+    const moneyExchanged = !(row.money_exchanged === false || Number(row.money_exchanged) === 0);
     const id = escapeXml(row.id == null ? '' : String(row.id));
-    const packageXml = kind === 'sponsor' && pkg
-      ? `\n      <package>${pkg}</package>`
-      : '';
-    return `    <entry id="${id}" kind="${kind}" paid_at="${paidAt}">
+    const packageXml = pkg ? `\n      <package>${pkg}</package>` : '';
+    const noteXml = note ? `\n      <note>${note}</note>` : '';
+    return `    <entry id="${id}" kind="${kind}" paid_at="${paidAt}" money_exchanged="${moneyExchanged ? 'true' : 'false'}">
       <name>${name}</name>
       <address>${address}</address>
-      <amount cents="${cents}" display="${amountDisplay}"/>${packageXml}
+      <amount cents="${cents}" display="${amountDisplay}"/>${packageXml}${noteXml}
     </entry>`;
   };
   const sponsorXml = sponsorEntries.map((row) => renderEntry(row, 'sponsor')).join('\n');
   const donorXml = donorEntries.map((row) => renderEntry(row, 'donor')).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <payment_ledger generated_at="${escapeXml(generatedAt)}" organization="East Forsyth Band Boosters">
-  <sponsors count="${sponsorEntries.length}" total_cents="${sponsorTotalCents}" total_display="${escapeXml(formatSponsorAmountDisplay(sponsorTotalCents) || '$0')}">
+  <sponsors count="${sponsorEntries.length}" total_cents="${sponsorTotalCents}" total_display="${escapeXml(formatLedgerAmountDisplay(sponsorTotalCents))}">
 ${sponsorXml ? `${sponsorXml}\n` : ''}  </sponsors>
-  <donors count="${donorEntries.length}" total_cents="${donorTotalCents}" total_display="${escapeXml(formatSponsorAmountDisplay(donorTotalCents) || '$0')}">
+  <donors count="${donorEntries.length}" total_cents="${donorTotalCents}" total_display="${escapeXml(formatLedgerAmountDisplay(donorTotalCents))}">
 ${donorXml ? `${donorXml}\n` : ''}  </donors>
   <totals>
-    <grand_total cents="${grandTotalCents}" display="${escapeXml(formatSponsorAmountDisplay(grandTotalCents) || '$0')}"/>
+    <cash_total cents="${cashTotalCents}" display="${escapeXml(formatLedgerAmountDisplay(cashTotalCents))}"/>
+    <in_kind_total cents="${inKindTotalCents}" display="${escapeXml(formatLedgerAmountDisplay(inKindTotalCents))}"/>
+    <grand_total cents="${grandTotalCents}" display="${escapeXml(formatLedgerAmountDisplay(grandTotalCents))}"/>
   </totals>
 </payment_ledger>
 `;
@@ -3909,22 +3939,27 @@ export async function upsertPaymentLedgerEntry(env, {
   amountCents = 0,
   amountDisplay = '',
   packageLabel = '',
+  note = '',
+  moneyExchanged = true,
   paidAt = '',
 } = {}) {
   const normalizedKind = kind === 'donor' ? 'donor' : 'sponsor';
   const cents = Math.max(0, Math.round(Number(amountCents) || 0));
   const display = String(amountDisplay || formatSponsorAmountDisplay(cents) || '$0').trim();
   const paid = String(paidAt || new Date().toISOString()).trim();
+  const exchanged = moneyExchanged === false || moneyExchanged === 0 || moneyExchanged === '0' ? 0 : 1;
   await env.DB.prepare(
     `INSERT INTO payment_ledger
-      (kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, paid_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, note, money_exchanged, paid_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(kind, ref_type, ref_id) DO UPDATE SET
        name=excluded.name,
        address=excluded.address,
        amount_cents=excluded.amount_cents,
        amount_display=excluded.amount_display,
        package=excluded.package,
+       note=excluded.note,
+       money_exchanged=excluded.money_exchanged,
        paid_at=excluded.paid_at`,
   ).bind(
     normalizedKind,
@@ -3935,6 +3970,8 @@ export async function upsertPaymentLedgerEntry(env, {
     cents,
     display.slice(0, 40),
     String(packageLabel || '').trim().slice(0, 80),
+    String(note || '').trim().slice(0, 500),
+    exchanged,
     paid.slice(0, 64),
     new Date().toISOString(),
   ).run();
@@ -4000,30 +4037,25 @@ export async function recordManualSponsorPaymentLedger(env, sponsor = {}, {
 
 export async function loadPaymentLedgerRows(env) {
   const rows = await env.DB.prepare(
-    `SELECT id, kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, paid_at
+    `SELECT id, kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, note, money_exchanged, paid_at
      FROM payment_ledger
      ORDER BY paid_at ASC, id ASC`,
   ).all();
+  const mapRow = (row) => ({
+    id: row.ref_id || row.id,
+    name: row.name,
+    address: row.address,
+    amount_cents: row.amount_cents,
+    amount_display: row.amount_display,
+    package: row.package,
+    note: row.note || '',
+    money_exchanged: Number(row.money_exchanged) !== 0,
+    paid_at: row.paid_at,
+  });
   const all = rows.results || [];
   return {
-    sponsors: all.filter((row) => row.kind === 'sponsor').map((row) => ({
-      id: row.ref_id || row.id,
-      name: row.name,
-      address: row.address,
-      amount_cents: row.amount_cents,
-      amount_display: row.amount_display,
-      package: row.package,
-      paid_at: row.paid_at,
-    })),
-    donors: all.filter((row) => row.kind === 'donor').map((row) => ({
-      id: row.ref_id || row.id,
-      name: row.name,
-      address: row.address,
-      amount_cents: row.amount_cents,
-      amount_display: row.amount_display,
-      package: row.package,
-      paid_at: row.paid_at,
-    })),
+    sponsors: all.filter((row) => row.kind === 'sponsor').map(mapRow),
+    donors: all.filter((row) => row.kind === 'donor').map(mapRow),
   };
 }
 
