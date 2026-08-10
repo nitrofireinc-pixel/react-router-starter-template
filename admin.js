@@ -5533,7 +5533,7 @@ function bindForms() {
     const status = document.querySelector('#payment-ledger-status');
     if (!summary || !canEditSponsors()) return;
     try {
-      const data = await api('/api/admin/sponsors/payment-ledger');
+      const data = await jsonFetch('/api/admin/sponsors/payment-ledger');
       const totals = data?.totals || {};
       summary.textContent = [
         `Sponsors: ${Number(data?.sponsors?.length || 0)} totaling ${totals.sponsors_display || '$0'}`,
@@ -5551,7 +5551,7 @@ function bindForms() {
     const status = document.querySelector('#payment-ledger-status');
     if (status) status.textContent = 'Refreshing…';
     try {
-      await api('/api/admin/sponsors/payment-ledger?rebuild=1');
+      await jsonFetch('/api/admin/sponsors/payment-ledger?rebuild=1');
       await loadPaymentLedgerSummary();
       if (status) status.textContent = 'Ledger refreshed.';
     } catch (error) {
