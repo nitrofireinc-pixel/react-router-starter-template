@@ -5775,7 +5775,7 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {
-    status.textContent = statusText || 'Edit the Fundraising body card only. Use Photo to insert images. Save to close the editor.';
+    status.textContent = statusText || '';
   }
   window.setTimeout(() => {
     const editor = form.querySelector('[data-rich-input="body_html"]');
@@ -6869,6 +6869,8 @@ refreshAll()
   })
   .catch(error => {
   console.error(error);
+  document.body.classList.remove('cms-booting');
+  document.body.classList.add('cms-ready');
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
