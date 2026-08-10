@@ -1458,8 +1458,8 @@ function buildEditablePagePreview(payload = {}) {
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
   const isFundraisingPage = payload.slug === 'fundraising' || payload.original_slug === 'fundraising';
   if (isFundraisingPage) {
-    const previewBody = formatRichText(body || state.fundraisingBodyHtml || '') || '<p class="draft">No fundraising body content yet.</p>';
-    return `${hero}<section class="content"><div class="wrap"><div class="card cms-managed-body-card" data-cms-dynamic-label="Managed in Fundraising Body"><div class="cms-managed-body-note"><p class="kicker">Body content</p><p>Edit campaign copy and photos under <strong>Manage → Fundraising Body</strong>.</p><p><button type="button" class="btn primary" data-open-fundraising-body>Open Fundraising Body</button></p></div><div class="cms-managed-body-preview cms-content">${previewBody}</div></div>${callout}</div></section>`;
+    const previewBody = formatRichText(body || state.fundraisingBodyHtml || '') || '<p class="draft">No fundraising content yet.</p>';
+    return `${hero}<section class="content"><div class="wrap"><div class="card cms-managed-body-card" data-cms-dynamic-label="Managed in Fundraising"><div class="cms-managed-body-note"><p class="kicker">Campaign content</p><p>Edit campaign copy and photos under <strong>Manage → Fundraising</strong>.</p><p><button type="button" class="btn primary" data-open-fundraising-body>Open Fundraising</button></p></div><div class="cms-managed-body-preview cms-content">${previewBody}</div></div>${callout}</div></section>`;
   }
 
   if (layout === 'calendar') {
@@ -2531,7 +2531,7 @@ async function showPagePhotoToast() {
     : getActivePageRichField({ multilineOnly: true });
   savePageRichSelection(preferred);
   if (!pageRichSelection.field) {
-    alert('Open Manage → Fundraising Body, click into the body text, then choose Photo.');
+    alert('Open Manage → Fundraising, click into the text, then choose Photo.');
     return;
   }
   placePageRichCaretMark(pageRichSelection.field);
@@ -3634,7 +3634,7 @@ function renderDashboard() {
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
-    canEditFundraisingBody() && ['Fundraising', 'Edit fundraising campaign copy and insert body photos.', 'fundraising-body', 'Support', 'tab'],
+    canEditFundraisingBody() && ['Fundraising', 'Edit fundraising campaign copy and insert photos.', 'fundraising-body', 'Support', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
@@ -3724,7 +3724,7 @@ function renderPagePermissionBoxes() {
   const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
   box.innerHTML = pages.map((page) => {
     const label = page.slug === 'fundraising'
-      ? `${page.title} (Manage → Fundraising Body)`
+      ? `${page.title} (Manage → Fundraising)`
       : page.slug === 'ensembles'
         ? `${page.title} (Manage → Ensemble Body)`
         : page.title;
@@ -6265,7 +6265,7 @@ function renderFundraisingBodyPreview() {
   const preview = document.querySelector('#fundraising-body-preview');
   if (!preview) return;
   const html = String(state.fundraisingBodyHtml || '').trim();
-  preview.innerHTML = html || '<p class="draft">No fundraising body content yet. Click Edit Body to create it.</p>';
+  preview.innerHTML = html || '<p class="draft">No fundraising content yet. Click Edit to create it.</p>';
 }
 
 function populateFundraisingBodyForm() {
@@ -6315,16 +6315,16 @@ function readFundraisingBodyHtml(form) {
 async function saveFundraisingBodyForm(form) {
   const status = document.querySelector('#fundraising-body-status');
   if (!canEditFundraisingBody()) {
-    if (status) status.textContent = 'You do not have permission to edit Fundraising Body.';
+    if (status) status.textContent = 'You do not have permission to edit Fundraising.';
     return;
   }
   const bodyHtml = readFundraisingBodyHtml(form);
   if (!bodyHtml.replace(/<[^>]+>/g, '').trim() && !/<img\b/i.test(bodyHtml)) {
-    if (status) status.textContent = 'Fundraising body content is required.';
+    if (status) status.textContent = 'Fundraising content is required.';
     form.querySelector('[data-rich-input="body_html"]')?.focus();
     return;
   }
-  if (status) status.textContent = 'Saving fundraising body…';
+  if (status) status.textContent = 'Saving fundraising…';
   try {
     const saved = await jsonFetch('/api/admin/fundraising/body', {
       method: 'PUT',
@@ -6334,9 +6334,9 @@ async function saveFundraisingBodyForm(form) {
     renderFundraisingBodyPreview();
     closeFundraisingBodyEditor();
     const panelStatus = document.querySelector('#fundraising-body-panel-status');
-    if (panelStatus) panelStatus.textContent = 'Fundraising body saved.';
+    if (panelStatus) panelStatus.textContent = 'Fundraising saved.';
   } catch (error) {
-    if (status) status.textContent = error.message || 'Could not save fundraising body.';
+    if (status) status.textContent = error.message || 'Could not save fundraising.';
   }
 }
 
@@ -6350,7 +6350,7 @@ async function loadFundraisingBody() {
     if (panelStatus) panelStatus.textContent = '';
   } catch (error) {
     const panelStatus = document.querySelector('#fundraising-body-panel-status');
-    if (panelStatus) panelStatus.textContent = error.message || 'Could not load fundraising body.';
+    if (panelStatus) panelStatus.textContent = error.message || 'Could not load fundraising.';
   }
 }
 
@@ -6410,7 +6410,7 @@ function bindFundraisingBodyPanel() {
     if (!button) return;
     event.preventDefault();
     if (!canEditFundraisingBody()) {
-      alert('You need the Fundraising page permission to edit Fundraising Body.');
+      alert('You need the Fundraising page permission to edit Fundraising.');
       return;
     }
     activateTab('fundraising-body');
