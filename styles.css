@@ -662,10 +662,11 @@ img{-webkit-touch-callout:none}
     display:block;
     position:sticky;
     top:0;
-    z-index:40;
+    z-index:60;
     padding:12px 16px;
     background:#f6f8fb;
   }
+  .admin-mobile-bar-top{position:relative;z-index:1}
   .admin-nav-toggle{
     display:inline-flex;
     align-items:center;
@@ -712,16 +713,19 @@ img{-webkit-touch-callout:none}
   }
   .admin-mobile-menu{
     display:grid!important;
+    position:absolute;
+    top:calc(100% - 2px);
+    left:16px;
+    z-index:70;
     gap:4px;
-    width:60%;
+    width:min(60vw,14.5rem);
     max-width:14.5rem;
-    margin-top:10px;
-    margin-right:auto;
+    margin:0;
     padding:10px;
     border:1px solid #d5deea;
     border-radius:16px;
     background:#071b34;
-    box-shadow:0 18px 40px rgba(15,34,58,.18);
+    box-shadow:0 18px 40px rgba(15,34,58,.22);
     max-height:min(70vh,560px);
     overflow:auto;
     box-sizing:border-box;
@@ -3912,6 +3916,13 @@ body.minutes-frame-open{overflow:hidden}
 .btn-small{padding:8px 12px;font-size:.85rem;border-radius:10px}
 @media(max-width:1100px){
   .ledger-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:980px){
+  /* Keep ledger headers from sticking to the viewport under the mobile menu. */
+  .ledger-table th{
+    position:static;
+    top:auto;
+  }
 }
 @media(max-width:700px){
   .ledger-summary-grid{grid-template-columns:1fr}
