@@ -896,12 +896,16 @@ function sanitizeRichHtmlClassList(attrs, allowedNames) {
 function sanitizeRichImageWidthPx(attrs = '') {
   const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
   const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const dataMatch = String(attrs || '').match(/\bdata-photo-width\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const dataWidth = Number.parseFloat(String(dataMatch?.[1] || dataMatch?.[2] || dataMatch?.[3] || ''));
   const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
   const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
   const width = Number.isFinite(fromStyle) && fromStyle > 0
     ? fromStyle
-    : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0);
+    : (Number.isFinite(dataWidth) && dataWidth > 0
+      ? dataWidth
+      : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0));
   if (!width) return 0;
   return Math.max(80, Math.min(1600, Math.round(width)));
 }
@@ -926,7 +930,8 @@ function sanitizeRichImageTag(attrs = '') {
   const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
   const widthPx = sanitizeRichImageWidthPx(attrs);
   const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
-  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}>`;
+  const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}${widthData}>`;
 }
 
 function sanitizeRichHtml(dirty) {
@@ -2061,7 +2066,13 @@ function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
   return true;
 }
 
-const fundraisingPhotoResize = { img: null, dragging: false, startX: 0, startWidth: 0 };
+const fundraisingPhotoResize = {
+  img: null,
+  dragging: false,
+  handle: 'se',
+  startX: 0,
+  startWidth: 0,
+};
 
 function ensureFundraisingPhotoResizeHandles() {
   let root = document.querySelector('#cms-photo-resize-handles');
@@ -2086,22 +2097,24 @@ function ensureFundraisingPhotoResizeHandles() {
       fundraisingPhotoResize.dragging = true;
       fundraisingPhotoResize.handle = handle.dataset.photoHandle || 'se';
       fundraisingPhotoResize.startX = event.clientX;
-      fundraisingPhotoResize.startWidth = img.getBoundingClientRect().width;
-      handle.setPointerCapture?.(event.pointerId);
+      fundraisingPhotoResize.startWidth = img.getBoundingClientRect().width || Number.parseFloat(img.style.width) || 320;
+      try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
     });
   });
   window.addEventListener('pointermove', (event) => {
     if (!fundraisingPhotoResize.dragging || !fundraisingPhotoResize.img) return;
+    event.preventDefault();
     const img = fundraisingPhotoResize.img;
     const editor = getFundraisingBodyEditor();
-    const maxWidth = Math.max(80, (editor?.clientWidth || 640) - 8);
+    const maxWidth = Math.max(120, Math.floor((editor?.clientWidth || 640) - 16));
     const delta = event.clientX - fundraisingPhotoResize.startX;
-    const outward = /e$/.test(fundraisingPhotoResize.handle || 'se') ? delta : -delta;
+    const outward = /e$/i.test(fundraisingPhotoResize.handle || 'se') ? delta : -delta;
     const next = Math.max(80, Math.min(maxWidth, Math.round(fundraisingPhotoResize.startWidth + outward)));
     img.style.width = `${next}px`;
     img.style.height = 'auto';
+    img.setAttribute('data-photo-width', String(next));
     positionFundraisingPhotoResizeHandles();
-  });
+  }, { passive: false });
   window.addEventListener('pointerup', () => {
     if (!fundraisingPhotoResize.dragging) return;
     fundraisingPhotoResize.dragging = false;
@@ -2123,57 +2136,88 @@ function clearFundraisingBodyPhotoSelection() {
   fundraisingPhotoResize.img = null;
   fundraisingPhotoResize.dragging = false;
   const handles = document.querySelector('#cms-photo-resize-handles');
-  if (handles) handles.hidden = true;
+  if (handles) {
+    handles.hidden = true;
+    handles.setAttribute('hidden', '');
+  }
 }
 
 function positionFundraisingPhotoResizeHandles() {
-  const root = document.querySelector('#cms-photo-resize-handles');
+  const root = ensureFundraisingPhotoResizeHandles();
   const img = fundraisingPhotoResize.img;
-  if (!root || !img || !document.body.contains(img) || !isFundraisingBodyEditorOpen()) {
-    if (root) root.hidden = true;
+  if (!img || !document.body.contains(img) || !isFundraisingBodyEditorOpen()) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
     return;
   }
   const rect = img.getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) {
     root.hidden = true;
+    root.setAttribute('hidden', '');
     return;
   }
   root.hidden = false;
-  root.style.left = `${rect.left + window.scrollX}px`;
-  root.style.top = `${rect.top + window.scrollY}px`;
-  root.style.width = `${rect.width}px`;
-  root.style.height = `${rect.height}px`;
+  root.removeAttribute('hidden');
+  // Fixed to the viewport so handles track images inside the fixed modal.
+  root.style.left = `${Math.round(rect.left)}px`;
+  root.style.top = `${Math.round(rect.top)}px`;
+  root.style.width = `${Math.round(rect.width)}px`;
+  root.style.height = `${Math.round(rect.height)}px`;
 }
 
 function selectFundraisingBodyPhoto(img) {
-  if (!img || !img.classList.contains('cms-body-photo')) return;
+  if (!img) return;
   const editor = getFundraisingBodyEditor();
   if (!editor || !editor.contains(img)) return;
+  if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
   ensureFundraisingPhotoResizeHandles();
   editor.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
     if (node !== img) node.classList.remove('is-selected');
   });
   img.classList.add('is-selected');
   fundraisingPhotoResize.img = img;
-  if (!img.style.width) {
-    img.style.width = `${Math.round(img.getBoundingClientRect().width)}px`;
-    img.style.height = 'auto';
-  }
-  positionFundraisingPhotoResizeHandles();
+  const applyWidth = () => {
+    const measured = Math.round(img.getBoundingClientRect().width);
+    const existing = Number.parseFloat(img.style.width || img.getAttribute('data-photo-width') || '');
+    const width = Number.isFinite(existing) && existing > 0 ? existing : measured;
+    if (width > 0) {
+      img.style.width = `${width}px`;
+      img.style.height = 'auto';
+      img.setAttribute('data-photo-width', String(width));
+    }
+    positionFundraisingPhotoResizeHandles();
+  };
+  if (img.complete && img.naturalWidth) applyWidth();
+  else img.addEventListener('load', applyWidth, { once: true });
+  applyWidth();
 }
 
 function bindFundraisingBodyPhotoResize() {
   if (document.documentElement.dataset.fundraisingPhotoResizeBound === '1') return;
   document.documentElement.dataset.fundraisingPhotoResizeBound = '1';
+  const onSelectPointer = (event) => {
+    if (!isFundraisingBodyEditorOpen()) return;
+    if (event.target.closest?.('#cms-photo-resize-handles')) return;
+    const editor = getFundraisingBodyEditor();
+    if (!editor) return;
+    const img = event.target.closest?.('img.cms-body-photo, img');
+    if (img && editor.contains(img) && (img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) {
+      // Prefer the actual img even if the user clicked a wrapper paragraph.
+      const target = img.tagName === 'IMG' ? img : img.querySelector('img');
+      if (target) {
+        event.preventDefault();
+        selectFundraisingBodyPhoto(target);
+      }
+      return;
+    }
+  };
+  document.addEventListener('pointerdown', onSelectPointer, true);
   document.addEventListener('click', (event) => {
     if (!isFundraisingBodyEditorOpen()) return;
     if (event.target.closest?.('#cms-photo-resize-handles')) return;
     const editor = getFundraisingBodyEditor();
-    const img = event.target.closest?.('img.cms-body-photo');
-    if (img && editor?.contains(img)) {
-      selectFundraisingBodyPhoto(img);
-      return;
-    }
+    const img = event.target.closest?.('img.cms-body-photo, img');
+    if (img && editor?.contains(img)) return;
     if (!event.target.closest?.('#fundraising-editor-modal')) return;
     clearFundraisingBodyPhotoSelection();
   });

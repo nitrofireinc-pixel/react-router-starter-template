@@ -1479,30 +1479,32 @@ body.cms-ready #current-user{visibility:visible}.panel-head{display:flex;align-i
   outline-offset:2px;
 }
 .cms-photo-resize-handles{
-  position:absolute;
-  z-index:1300;
+  position:fixed;
+  z-index:4000;
   pointer-events:none;
   box-sizing:border-box;
   border:2px solid #014990;
   border-radius:2px;
+  margin:0;
 }
 .cms-photo-resize-handles[hidden]{display:none!important}
 .cms-photo-resize-handle{
   position:absolute;
-  width:12px;
-  height:12px;
+  width:14px;
+  height:14px;
   padding:0;
   border:2px solid #fff;
-  border-radius:2px;
+  border-radius:3px;
   background:#014990;
-  box-shadow:0 0 0 1px rgba(1,73,144,.35);
+  box-shadow:0 0 0 1px rgba(1,73,144,.45);
   pointer-events:auto;
   touch-action:none;
 }
-.cms-photo-resize-handle[data-photo-handle="nw"]{left:-7px;top:-7px;cursor:nwse-resize}
-.cms-photo-resize-handle[data-photo-handle="ne"]{right:-7px;top:-7px;cursor:nesw-resize}
-.cms-photo-resize-handle[data-photo-handle="sw"]{left:-7px;bottom:-7px;cursor:nesw-resize}
-.cms-photo-resize-handle[data-photo-handle="se"]{right:-7px;bottom:-7px;cursor:nwse-resize}
+.cms-photo-resize-handle[data-photo-handle="nw"]{left:-8px;top:-8px;cursor:nwse-resize}
+.cms-photo-resize-handle[data-photo-handle="ne"]{right:-8px;top:-8px;cursor:nesw-resize}
+.cms-photo-resize-handle[data-photo-handle="sw"]{left:-8px;bottom:-8px;cursor:nesw-resize}
+.cms-photo-resize-handle[data-photo-handle="se"]{right:-8px;bottom:-8px;cursor:nwse-resize}
+.fundraising-body-editor img.cms-body-photo{-webkit-user-drag:none;user-select:none}
 .admin-page-photo-toast{
   position:fixed;
   inset:0;

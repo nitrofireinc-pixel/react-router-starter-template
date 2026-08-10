@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'fundraising-photo-resize-20260810-1';
+const ASSET_VERSION = 'fundraising-photo-resize-20260810-2';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -5762,12 +5762,16 @@ function sanitizeRichHtmlClassList(attrs, allowedNames) {
 function sanitizeRichImageWidthPx(attrs = '') {
   const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
   const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const dataMatch = String(attrs || '').match(/\bdata-photo-width\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const dataWidth = Number.parseFloat(String(dataMatch?.[1] || dataMatch?.[2] || dataMatch?.[3] || ''));
   const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
   const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
   const width = Number.isFinite(fromStyle) && fromStyle > 0
     ? fromStyle
-    : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0);
+    : (Number.isFinite(dataWidth) && dataWidth > 0
+      ? dataWidth
+      : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0));
   if (!width) return 0;
   return Math.max(80, Math.min(1600, Math.round(width)));
 }
@@ -5793,7 +5797,8 @@ function sanitizeRichImageTag(attrs = '') {
   const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
   const widthPx = sanitizeRichImageWidthPx(attrs);
   const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
-  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}>`;
+  const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}${widthData}>`;
 }
 
 export function sanitizeRichHtml(dirty) {
