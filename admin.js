@@ -3621,9 +3621,9 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc';
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=fundraising-guide-20260810-6';
   const cards = [
-    ['Website Guide', 'Download the full site and CMS documentation (.doc) covering every feature and permission.', guideHref, 'Documentation', 'link', 'docs'],
+    ['Website Guide', 'Download the full site and CMS documentation (.doc), including Fundraising photo editing.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],

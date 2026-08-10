@@ -45,7 +45,7 @@
   Public site: https://efhsband.org<br>
   Staff CMS: https://efhsband.org/admin<br>
   Document type: Full-site operations guide (public pages, CMS tools, permissions, payments)<br>
-  Last updated: August 10, 2026
+  Last updated: August 10, 2026 (Fundraising editor &amp; body photos)
 </p>
 
 <div class="note">
@@ -66,7 +66,7 @@
   <tr><td>Gallery</td><td>/gallery.html</td><td>Photo gallery with lightbox viewing. Newest photos appear first.</td></tr>
   <tr><td>Sponsors</td><td>/sponsors.html</td><td>Sponsor directory by tier, Become a Sponsor CTA, Donate button, optional map/directions for sponsor addresses.</td></tr>
   <tr><td>Become a Sponsor</td><td>/become-a-sponsor.html</td><td>Bronze / Silver / Gold packages with online Square checkout. Not listed in main nav; linked from Sponsors and footer.</td></tr>
-  <tr><td>Fundraising</td><td>/fundraising.html</td><td>Campaign information and Direct Support Donate flow.</td></tr>
+  <tr><td>Fundraising</td><td>/fundraising.html</td><td>Campaign copy and photos (edited in CMS under Manage → Fundraising), plus the Direct Support Donate flow.</td></tr>
   <tr><td>Student Resources</td><td>/resources.html</td><td>Family/student resource content (handbooks, forms, schedules, etc.).</td></tr>
   <tr><td>Boosters</td><td>/boosters.html</td><td>Booster intro, meetings pulled from calendar, and booster member directory. Meeting minutes are <b>not</b> public.</td></tr>
   <tr><td>Contact</td><td>/contact.html</td><td>School contact details and a topic-based contact form that emails the assigned recipient.</td></tr>
@@ -128,7 +128,7 @@
   <li>Meeting Minutes</li>
   <li>Manage sponsors / Sponsors page / Become a Sponsor</li>
   <li>Ledger</li>
-  <li>Directors &amp; Staff, Ensemble Body, Booster Members</li>
+  <li>Directors &amp; Staff, Ensemble Body, Fundraising, Booster Members</li>
   <li>Contact Form, User Management, Social / Facebook, Calendar Events</li>
   <li><b>Website Guide</b> — downloads this document</li>
 </ul>
@@ -143,6 +143,7 @@
 <h3>6.2 Pages (visual editor)</h3>
 <p><b>Permission:</b> <span class="mono">pages</span> for full page management, or <span class="mono">page:&lt;slug&gt;</span> for a specific page.</p>
 <p>Edit live preview text with formatting (bold, italic, underline, color, size). Site admins can also change page settings (title, slug, path, layout, active flag). Unsaved changes warn before leaving.</p>
+<p><b>Fundraising page note:</b> The Pages editor for Fundraising is for the <b>hero/header only</b>. Campaign copy and photos are edited under <b>Manage → Fundraising</b> (see 6.5).</p>
 
 <h3>6.3 Directors &amp; Staff</h3>
 <p><b>Permission:</b> <span class="mono">staff</span> or <span class="mono">page:directors</span>.</p>
@@ -152,21 +153,35 @@
 <p><b>Permission:</b> <span class="mono">page:ensembles</span> (or pages).</p>
 <p>Edit ensemble cards/body content shown under the Ensembles page hero.</p>
 
-<h3>6.5 Band Boosters → Booster Members</h3>
+<h3>6.5 Fundraising</h3>
+<p><b>Permission:</b> <span class="mono">page:fundraising</span> (or <span class="mono">pages</span> / Super Admin).</p>
+<p>In the CMS sidebar under <b>Manage</b>, open <b>Fundraising</b> (not the Pages hero editor). Click <b>Edit</b> to open the campaign content editor.</p>
+<ul>
+  <li>Write and format campaign copy (bold, italic, underline, color, size).</li>
+  <li>Use <b>Insert line</b> to start a new paragraph/line.</li>
+  <li>Use <b>Photo</b> to insert an image <b>at the cursor</b> (not always at the top). Surrounding text wraps beside the photo.</li>
+  <li>Choose an existing gallery photo or upload a new one. Large uploads are auto-shrunk to fit the about <b>2 MB</b> size limit.</li>
+  <li>Add clear <b>alt text</b> that describes the photo.</li>
+  <li>Click a photo to select it: drag a <b>corner handle</b> to resize; use <b>Delete photo</b> (or Delete/Backspace) to remove it; press Escape or click elsewhere to deselect.</li>
+  <li>Click <b>Save</b> to publish. Cancel closes without saving. The public Direct Support Donate card stays on the Fundraising page automatically.</li>
+</ul>
+<p>In User Management, the Fundraising page checkbox is labeled like <b>Fundraising (Manage → Fundraising)</b> so editors know which tool it unlocks.</p>
+
+<h3>6.6 Band Boosters → Booster Members</h3>
 <p><b>Permission:</b> <span class="mono">boosters</span> or <span class="mono">page:boosters</span>.</p>
 <p>Manage booster officer/member directory (photo, role, bio, drag reorder).</p>
 
-<h3>6.6 Band Boosters → Meeting Minutes</h3>
+<h3>6.7 Band Boosters → Meeting Minutes</h3>
 <p><b>Who can view/print:</b> Any logged-in CMS user.</p>
 <p><b>Who can add/edit:</b> <span class="mono">minutes</span> permission (Meeting Minutes Secretary).</p>
 <p><b>Who can delete:</b> Super Admin only.</p>
 <p>Non–Super Admin editors can edit minutes only within a limited window (about 10 days from the meeting date). Minutes are staff-only; they are not published on the public Boosters page.</p>
 
-<h3>6.7 Calendar Events</h3>
+<h3>6.8 Calendar Events</h3>
 <p><b>Permission:</b> <span class="mono">events</span> to create and manage your own events; <span class="mono">events:manage</span> to edit/delete any event.</p>
 <p>Supports dates, rich descriptions, repeating events, exceptions, and booster-meeting placement. Creating/updating events can trigger Notify Me web push and (when configured) Facebook calendar queue posts.</p>
 
-<h3>6.8 Sponsorship → Manage sponsors</h3>
+<h3>6.9 Sponsorship → Manage sponsors</h3>
 <p><b>Permission:</b> <span class="mono">sponsors</span> (or related page access for some operations).</p>
 <ul>
   <li>Manual Add Sponsor (optional Bypass Payment if granted <span class="mono">sponsors:bypass-payment</span>)</li>
@@ -175,33 +190,34 @@
   <li><b>Pending sponsor applications</b> from the public site, each flagged Pending, with <b>Accept</b> to activate after real-world resolution</li>
 </ul>
 
-<h3>6.9 Ledger (Treasurer)</h3>
+<h3>6.10 Ledger (Treasurer)</h3>
 <p><b>Permission:</b> <span class="mono">treasurer</span> (Super Admins also have access).</p>
 <p>Accountant-style view of sponsors, donors, fundraisers, and expenses. Supports cash and in-kind entries, summary totals, delete, and Excel download (<span class="mono">.xls</span>).</p>
 
-<h3>6.10 Checkout</h3>
+<h3>6.11 Checkout</h3>
 <p><b>Permission:</b> <span class="mono">treasurer</span>, <span class="mono">president</span>, or <span class="mono">vice-president</span>.</p>
 <p>Manual Square card charge for an item and amount (in-person/phone keyed entry). Successful charges post to the Ledger as fundraiser income. Minimum $1.00. Requires Square access token + application id + location.</p>
 
-<h3>6.11 Contact Form</h3>
+<h3>6.12 Contact Form</h3>
 <p><b>Permission:</b> <span class="mono">contact</span> or <span class="mono">page:contact</span>.</p>
 <p>Manage contact topics (A–Z) and the email address each topic delivers to. Review recent contact messages.</p>
 
-<h3>6.12 Users (User Management)</h3>
+<h3>6.13 Users (User Management)</h3>
 <p><b>Permission:</b> <span class="mono">users</span>.</p>
 <p>Create editor accounts, assign permissions, activate/disable users, send welcome invites. Super Admins can also create tester accounts.</p>
 
-<h3>6.13 Social / Facebook</h3>
+<h3>6.14 Social / Facebook</h3>
 <p><b>Permission:</b> <span class="mono">site</span>.</p>
 <p>Connect the band Facebook Page through Zernio, publish or schedule posts, and manage calendar-to-Facebook queue items when configured.</p>
 
-<h3>6.14 Site Settings</h3>
+<h3>6.15 Site Settings</h3>
 <p><b>Permission:</b> <span class="mono">site</span> (utility/home link editing also available with pages or page:home).</p>
 <p>Edit site title, hero text, footer note, logo, maintenance mode, top utility links, and footer social links.</p>
 
-<h3>6.15 Photos</h3>
+<h3>6.16 Photos</h3>
 <p><b>Permission:</b> <span class="mono">photos</span>.</p>
 <p>Upload/delete/reorder gallery photos with alt text and captions. Home shows the newest photos; Gallery shows the full set. Brand/logo utility uploads are kept out of the public gallery.</p>
+<p>Gallery photos can also be reused when inserting images into <b>Manage → Fundraising</b> campaign content (see 6.5).</p>
 
 <h2>7. Permissions Reference</h2>
 <p>CMS accounts are either <b>Super Admin</b> (<span class="mono">role = admin</span>) or <b>Editor</b> with an assigned permission list.</p>
@@ -219,7 +235,7 @@
   <tr><th>Permission</th><th>What it unlocks</th></tr>
   <tr><td><span class="mono">site</span></td><td>Site Settings, Social/Facebook, logo, maintenance, social links</td></tr>
   <tr><td><span class="mono">pages</span></td><td>Add/remove/manage all CMS pages and page settings</td></tr>
-  <tr><td><span class="mono">page:&lt;slug&gt;</span></td><td>Edit that one page’s content (example: <span class="mono">page:home</span>, <span class="mono">page:calendar</span>)</td></tr>
+  <tr><td><span class="mono">page:&lt;slug&gt;</span></td><td>Edit that one page’s content (example: <span class="mono">page:home</span>, <span class="mono">page:calendar</span>). <span class="mono">page:ensembles</span> unlocks Manage → Ensemble Body. <span class="mono">page:fundraising</span> unlocks Manage → Fundraising (campaign copy and photos).</td></tr>
   <tr><td><span class="mono">sponsors</span></td><td>Manage sponsors, pending applications, Accept</td></tr>
   <tr><td><span class="mono">sponsors:bypass-payment</span></td><td>Manual Add Sponsor without collecting payment</td></tr>
   <tr><td><span class="mono">treasurer</span></td><td>Ledger + Checkout</td></tr>
@@ -245,6 +261,7 @@
   <tr><td>Vice President</td><td><span class="mono">vice-president</span> (Checkout). Add other scopes as needed.</td></tr>
   <tr><td>Minutes Secretary</td><td><span class="mono">minutes</span></td></tr>
   <tr><td>Calendar editor</td><td><span class="mono">events</span> (or <span class="mono">events:manage</span> for full control)</td></tr>
+  <tr><td>Fundraising editor</td><td><span class="mono">page:fundraising</span> (Manage → Fundraising campaign content and photos)</td></tr>
   <tr><td>Sponsors coordinator</td><td><span class="mono">sponsors</span> (+ optional <span class="mono">sponsors:bypass-payment</span>)</td></tr>
 </table>
 
@@ -291,10 +308,11 @@
 
 <h2>12. Photos &amp; Media</h2>
 <ul>
-  <li>Supported uploads: common image formats within CMS size limits</li>
+  <li>Supported uploads: common image formats within CMS size limits (about 2 MB; larger Fundraising inserts are auto-shrunk when possible)</li>
   <li>Always include alt text</li>
   <li>Home shows newest photos; Gallery shows the full public set</li>
   <li>Protect brand marks/logos from appearing as gallery photos</li>
+  <li>Fundraising campaign photos: insert at the cursor under Manage → Fundraising, wrap text beside them, resize with corner handles, and delete from the selection toolbar</li>
 </ul>
 
 <h2>13. Facebook / Zernio (optional)</h2>
@@ -313,6 +331,9 @@
   <tr><td>Site shows maintenance page</td><td>Site Settings → maintenance mode; only Super Admins preview live content</td></tr>
   <tr><td>Staff Email Reply-To wrong</td><td>Sender username must be a valid email address</td></tr>
   <tr><td>Mobile menu jumps on Ledger</td><td>Hard-refresh; menu should overlay without scrolling the page</td></tr>
+  <tr><td>Cannot find Fundraising content editor</td><td>Use Manage → Fundraising (not only the Pages hero editor). Requires <span class="mono">page:fundraising</span></td></tr>
+  <tr><td>Photo always inserts at the top</td><td>Click into the text where the photo should go, then choose Photo. Hard-refresh if the CMS still shows older behavior</td></tr>
+  <tr><td>Cannot resize or delete a Fundraising photo</td><td>Click the photo once so the blue selection box stays open; drag a corner to resize, or use Delete photo / Delete key</td></tr>
 </table>
 
 <h2>16. Important URLs</h2>
