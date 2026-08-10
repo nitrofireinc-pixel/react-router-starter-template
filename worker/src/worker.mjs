@@ -6972,6 +6972,10 @@ async function handleApi(request, env, url, ctx = null) {
       }
       try {
         const result = await activatePaidSponsorApplication(env, application, { accepted: true });
+        const invoice = await maybeSendSponsorInvoice(env, {
+          ...application,
+          ...result.application,
+        });
         try {
           await recordSponsorPaymentLedger(env, {
             ...application,
@@ -6984,6 +6988,8 @@ async function handleApi(request, env, url, ctx = null) {
           accepted: true,
           sponsor: result.sponsor,
           application: mapSponsorApplicationRow(result.application),
+          invoice_sent: Boolean(invoice.ok && !invoice.skipped),
+          invoice_detail: invoice.detail || '',
           detail: result.created
             ? `${result.sponsor.level} accepted for ${result.sponsor.name}.`
             : 'Sponsorship was already activated.',
