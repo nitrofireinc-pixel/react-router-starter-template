@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'cms-load-flash-20260810-1';
+const ASSET_VERSION = 'fundraising-save-label-20260810-1';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -8871,7 +8871,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <form id="fundraising-body-form" class="stack minutes-editor-form fundraising-editor-form" novalidate>
       <label class="full form-rich-label"><span>Fundraising body</span>${FUNDRAISING_BODY_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich fundraising-body-editor" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter fundraising body content and photos…" aria-label="Fundraising body content"></div><input type="hidden" name="body_html"></label>
       <div class="panel-actions minutes-form-actions">
-        <button class="btn primary" data-fundraising-submit type="submit">Save body</button>
+        <button class="btn primary" data-fundraising-submit type="submit">Save</button>
         <button class="btn outline" type="button" id="cancel-fundraising-edit">Cancel</button>
       </div>
       <p class="status" id="fundraising-body-status"></p>
