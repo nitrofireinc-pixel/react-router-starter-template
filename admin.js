@@ -5775,7 +5775,7 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {
-    status.textContent = statusText || '';
+    status.textContent = statusText || 'Use Photo to insert images. Save to close the editor.';
   }
   window.setTimeout(() => {
     const editor = form.querySelector('[data-rich-input="body_html"]');
