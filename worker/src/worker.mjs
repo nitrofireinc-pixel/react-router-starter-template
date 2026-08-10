@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'fundraising-body-photos-20260810-1';
+const ASSET_VERSION = 'fundraising-body-editor-20260810-1';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -315,6 +315,7 @@ const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
 const ZERNIO_FACEBOOK_EVENTS_KEY = 'zernio_facebook_events';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
+const FUNDRAISING_BODY_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-fundraising-insert-line title="Insert a new line">Insert line</button><button type="button" data-fundraising-insert-photo title="Insert a photo on its own line">Photo</button></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
 const MAIL_ATTACHMENT_MAX_FILES = 5;
 const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
@@ -5034,6 +5035,82 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
+function extractElementInnerByAttr(source, attrPattern) {
+  const openRe = /<(div|article)\b[^>]*>/gi;
+  let match;
+  while ((match = openRe.exec(source))) {
+    const openTag = match[0];
+    if (!attrPattern.test(openTag)) continue;
+    const tag = match[1].toLowerCase();
+    let depth = 1;
+    let index = match.index + openTag.length;
+    const tokenRe = new RegExp(`</?${tag}\\b[^>]*>`, 'gi');
+    tokenRe.lastIndex = index;
+    let token;
+    while ((token = tokenRe.exec(source))) {
+      if (token[0].startsWith('</')) {
+        depth -= 1;
+        if (depth === 0) {
+          return {
+            openTag,
+            tag,
+            start: match.index,
+            innerStart: match.index + openTag.length,
+            end: token.index + token[0].length,
+            innerEnd: token.index,
+            inner: source.slice(match.index + openTag.length, token.index),
+          };
+        }
+      } else if (!/\/\s*>$/.test(token[0])) {
+        depth += 1;
+      }
+    }
+  }
+  return null;
+}
+
+export function extractFundraisingBodyHtml(pageHtml = '') {
+  const source = String(pageHtml || '');
+  const field = extractElementInnerByAttr(source, /data-cms-field\s*=\s*["']body_text["']/i);
+  if (field) return field.inner.trim();
+
+  const content = source.match(/<section\b[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>([\s\S]*?)<\/section>/i);
+  if (!content) {
+    return source.replace(/<section\b[^>]*class="[^"]*\bpage-hero\b[\s\S]*?<\/section>/i, '').trim();
+  }
+  let inner = content[1];
+  const wrap = extractElementInnerByAttr(inner, /class\s*=\s*["'][^"']*\bwrap\b[^"']*["']/i);
+  if (wrap) inner = wrap.inner;
+  return String(inner || '')
+    .replace(/<article\b[^>]*(?:data-square-donate|data-donate-open)[^>]*>[\s\S]*?<\/article>/gi, '')
+    .replace(/<div\b[^>]*(?:data-square-donate|data-donate-open)[^>]*>[\s\S]*?<\/div>/gi, '')
+    .trim();
+}
+
+export function applyFundraisingBodyHtml(pageHtml = '', bodyInnerHtml = '') {
+  const cleanInner = sanitizeRichHtml(bodyInnerHtml) || '<p></p>';
+  let source = String(pageHtml || '');
+  const field = extractElementInnerByAttr(source, /data-cms-field\s*=\s*["']body_text["']/i);
+  if (field) {
+    source = `${source.slice(0, field.innerStart)}${cleanInner}${source.slice(field.innerEnd)}`;
+  } else if (/<section\b[^>]*class="[^"]*\bcontent\b/i.test(source)) {
+    source = source.replace(
+      /<section\b[^>]*class="[^"]*\bcontent\b[^"]*"[^>]*>[\s\S]*?<\/section>/i,
+      `<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${cleanInner}</div></div></section>`,
+    );
+  } else {
+    const hero = source.match(/<section\b[^>]*class="[^"]*\bpage-hero\b[\s\S]*?<\/section>/i);
+    const bodySection = `<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${cleanInner}</div></div></section>`;
+    if (hero) {
+      const withoutHero = source.replace(hero[0], '').trim();
+      source = withoutHero ? `${hero[0]}${bodySection}${withoutHero}` : `${hero[0]}${bodySection}`;
+    } else {
+      source = source ? `${source}${bodySection}` : bodySection;
+    }
+  }
+  return ensureFundraisingDonateSlot(source);
+}
+
 function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
@@ -6934,6 +7011,39 @@ async function handleApi(request, env, url, ctx = null) {
     });
   }
 
+  if (url.pathname === '/api/admin/fundraising/body' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditPage(auth.user, 'fundraising')) {
+      return jsonResponse({ detail: 'Permission required: page:fundraising' }, 403);
+    }
+    const page = await getPageBySlug(env, 'fundraising', true);
+    if (!page) return jsonResponse({ detail: 'Fundraising page not found' }, 404);
+    return jsonResponse({
+      body_html: extractFundraisingBodyHtml(page.body_html || ''),
+      updated_at: page.updated_at || null,
+    });
+  }
+  if (url.pathname === '/api/admin/fundraising/body' && request.method === 'PUT') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditPage(auth.user, 'fundraising')) {
+      return jsonResponse({ detail: 'Permission required: page:fundraising' }, 403);
+    }
+    const page = await getPageBySlug(env, 'fundraising', true);
+    if (!page) return jsonResponse({ detail: 'Fundraising page not found' }, 404);
+    const payload = await request.json().catch(() => ({}));
+    const nextBody = applyFundraisingBodyHtml(page.body_html || '', payload.body_html || '');
+    await env.DB.prepare(
+      'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(nextBody, page.id).run();
+    const updated = await getPageBySlug(env, 'fundraising', true);
+    return jsonResponse({
+      body_html: extractFundraisingBodyHtml(updated?.body_html || nextBody),
+      updated_at: updated?.updated_at || null,
+    });
+  }
+
   if (url.pathname === '/api/admin/sponsors/settings' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -8559,12 +8669,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger">Ledger</button><button type="button" data-tab="checkout">Checkout</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><button type="button" data-tab="fundraising-body" hidden>Fundraising Body</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger">Ledger</button><button type="button" data-tab="checkout">Checkout</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/index.html">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
-<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich-insert-line title="Insert a new line">Insert line</button><button type="button" data-rich-insert-photo title="Insert a photo on its own line" hidden>Photo</button></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting. On Fundraising, use Photo to insert images into the body.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
+<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich-insert-line title="Insert a new line">Insert line</button></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting. Fundraising body content is edited under Manage → Fundraising Body.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-fundraising-hint hidden>Click into the Fundraising body card, place the cursor where the photo should appear, then use Formatting → Photo to upload or pick an image. Insert line adds a blank line, like a Word document.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>Edit the Gallery page header here. Photos are managed in the Photos tab and appear newest-first on the public Gallery page.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview. Home shows the 6 newest photos with a link to the full Gallery.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="gallery">Photo gallery page</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-fundraising-hint hidden>Fundraising body content (including photos) is edited under Manage → Fundraising Body. This page editor is for the hero/header only.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>Edit the Gallery page header here. Photos are managed in the Photos tab and appear newest-first on the public Gallery page.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview. Home shows the 6 newest photos with a link to the full Gallery.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="gallery">Photo gallery page</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Pending public sign-ups appear below with a Pending flag until you accept them.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
@@ -8744,6 +8854,28 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <button class="btn outline" type="button" id="cancel-ensembles-edit">Cancel</button>
       </div>
       <p class="status" id="ensembles-body-status"></p>
+    </form>
+  </div>
+</div>
+</section>
+<section id="tab-fundraising-body" class="cms-panel fundraising-body-panel"><div class="panel-head"><div><p class="kicker">Support</p><h1>Fundraising Body</h1><p>Edit the Fundraising page body card here. Requires the Fundraising page permission. Click the red Edit Body button to open the editor.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-fundraising-body">Edit Body</button></div></div><div class="admin-card stack fundraising-body-card"><h2>Current body</h2><p class="muted">Open the editor to update campaign copy and insert photos on their own lines. The Direct Support donate card stays on the public page automatically.</p><div id="fundraising-body-preview" class="cms-content fundraising-body-preview"></div><p class="status" id="fundraising-body-panel-status"></p></div>
+<div id="fundraising-editor-modal" class="minutes-frame-modal fundraising-editor-modal" hidden>
+  <button type="button" class="minutes-frame-backdrop" data-fundraising-editor-dismiss aria-label="Close fundraising body editor"></button>
+  <div class="minutes-editor-dialog fundraising-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="fundraising-editor-title">
+    <div class="minutes-editor-head">
+      <div>
+        <p class="kicker">Support</p>
+        <h2 id="fundraising-editor-title">Edit Fundraising Body</h2>
+      </div>
+      <button class="btn outline" type="button" data-fundraising-editor-dismiss>Close</button>
+    </div>
+    <form id="fundraising-body-form" class="stack minutes-editor-form fundraising-editor-form" novalidate>
+      <label class="full form-rich-label"><span>Fundraising body</span>${FUNDRAISING_BODY_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich fundraising-body-editor" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter fundraising body content and photos…" aria-label="Fundraising body content"></div><input type="hidden" name="body_html"></label>
+      <div class="panel-actions minutes-form-actions">
+        <button class="btn primary" data-fundraising-submit type="submit">Save body</button>
+        <button class="btn outline" type="button" id="cancel-fundraising-edit">Cancel</button>
+      </div>
+      <p class="status" id="fundraising-body-status"></p>
     </form>
   </div>
 </div>

@@ -1440,6 +1440,30 @@ img{-webkit-touch-callout:none}
 .content div.cms-body-photo{
   margin:1rem 0;
 }
+.cms-managed-body-card{
+  display:grid;
+  gap:14px;
+}
+.cms-managed-body-note{
+  display:grid;
+  gap:8px;
+  padding:14px 16px;
+  border:1px dashed #9db4d0;
+  border-radius:16px;
+  background:#f5f9ff;
+}
+.cms-managed-body-note .kicker{margin:0}
+.cms-managed-body-note p{margin:0;color:#334155}
+.fundraising-body-preview img.cms-body-photo,
+.fundraising-body-editor img.cms-body-photo{
+  display:block;
+  width:min(100%,640px);
+  max-width:100%;
+  height:auto;
+  margin:1rem 0;
+  border-radius:16px;
+  border:1px solid #d5deea;
+}
 .admin-page-photo-toast{
   position:fixed;
   inset:0;

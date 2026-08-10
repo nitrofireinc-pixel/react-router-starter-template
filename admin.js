@@ -485,7 +485,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], pendingSponsorApplications: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], pendingSponsorApplications: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', fundraisingBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -1420,6 +1420,11 @@ function buildEditablePagePreview(payload = {}) {
   const sponsorsCallout = showCallout
     ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
+  const isFundraisingPage = payload.slug === 'fundraising' || payload.original_slug === 'fundraising';
+  if (isFundraisingPage) {
+    const previewBody = formatRichText(body || state.fundraisingBodyHtml || '') || '<p class="draft">No fundraising body content yet.</p>';
+    return `${hero}<section class="content"><div class="wrap"><div class="card cms-managed-body-card" data-cms-dynamic-label="Managed in Fundraising Body"><div class="cms-managed-body-note"><p class="kicker">Body content</p><p>Edit campaign copy and photos under <strong>Manage → Fundraising Body</strong>.</p><p><button type="button" class="btn primary" data-open-fundraising-body>Open Fundraising Body</button></p></div><div class="cms-managed-body-preview cms-content">${previewBody}</div></div>${callout}</div></section>`;
+  }
 
   if (layout === 'calendar') {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
@@ -1861,12 +1866,30 @@ function currentEditorPageSlug() {
   return String(form?.elements?.original_slug?.value || form?.elements?.slug?.value || '').trim();
 }
 
+function canEditFundraisingBody() {
+  return canEditPage('fundraising');
+}
+
 function canInsertPageBodyPhotos() {
-  const slug = currentEditorPageSlug();
-  return slug === 'fundraising' && canEditPage('fundraising');
+  return canEditFundraisingBody();
+}
+
+function getFundraisingBodyEditor() {
+  return document.querySelector('#fundraising-body-form [data-rich-input="body_html"]');
 }
 
 function getActivePageRichField({ multilineOnly = false } = {}) {
+  const fundraisingEditor = getFundraisingBodyEditor();
+  if (fundraisingEditor && isFundraisingBodyEditorOpen()) {
+    if (
+      fundraisingEditor.classList.contains('is-focused')
+      || document.activeElement === fundraisingEditor
+      || fundraisingEditor.contains(document.activeElement)
+      || pageRichSelection.field === fundraisingEditor
+    ) {
+      return fundraisingEditor;
+    }
+  }
   const preview = document.querySelector('#page-preview');
   if (!preview) return null;
   const field = preview.querySelector('.cms-edit-rich.is-focused')
@@ -1891,7 +1914,9 @@ function savePageRichSelection(field = getActivePageRichField()) {
 }
 
 function restorePageRichSelection() {
-  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  const field = pageRichSelection.field
+    || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
+    || getActivePageRichField({ multilineOnly: true });
   if (!field) return null;
   field.focus();
   field.classList.add('is-focused');
@@ -1909,16 +1934,12 @@ function setRichToolbarVisible(activeField = false) {
   // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
-  const photoBtn = toolbar.querySelector('[data-rich-insert-photo]');
-  if (photoBtn) {
-    const field = getActivePageRichField({ multilineOnly: true });
-    const showPhoto = Boolean(activeField) && canInsertPageBodyPhotos() && Boolean(field || pageRichSelection.field);
-    photoBtn.hidden = !showPhoto;
-  }
 }
 
 function insertPhotoIntoPageBody(url, altText = 'Photo') {
-  const field = restorePageRichSelection() || getActivePageRichField({ multilineOnly: true });
+  const field = restorePageRichSelection()
+    || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
+    || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
   const cleaned = sanitizeRichHtml(
     `<p class="cms-body-photo"><img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo"></p>`,
@@ -1926,9 +1947,12 @@ function insertPhotoIntoPageBody(url, altText = 'Photo') {
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
   field.focus();
   document.execCommand('insertHTML', false, cleaned);
-  syncFieldFromPreview(field);
+  if (field.closest('#fundraising-body-form')) {
+    syncFormRichEditors(field.closest('form'));
+  } else {
+    syncFieldFromPreview(field);
+  }
   savePageRichSelection(field);
-  setRichToolbarVisible(true);
   return true;
 }
 
@@ -2007,12 +2031,15 @@ async function loadPagePhotoPickerList() {
 
 async function showPagePhotoToast() {
   if (!canInsertPageBodyPhotos()) {
-    alert('Photo insert is available on the Fundraising page body.');
+    alert('Photo insert requires the Fundraising page permission.');
     return;
   }
-  savePageRichSelection(getActivePageRichField({ multilineOnly: true }));
+  const preferred = isFundraisingBodyEditorOpen()
+    ? (getActivePageRichField({ multilineOnly: true }) || getFundraisingBodyEditor())
+    : getActivePageRichField({ multilineOnly: true });
+  savePageRichSelection(preferred);
   if (!pageRichSelection.field) {
-    alert('Click into the Fundraising body text first, then choose Photo.');
+    alert('Open Manage → Fundraising Body, click into the body text, then choose Photo.');
     return;
   }
   const root = ensurePagePhotoToast();
@@ -2512,6 +2539,7 @@ function activateTab(name) {
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
     if (name !== 'ensembles') closeEnsemblesBodyEditor();
+    if (name !== 'fundraising-body') closeFundraisingBodyEditor();
     document.querySelectorAll('.cms-panel').forEach(panel => { panel.hidden = true; });
     document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
     markAdminNavActive({ tab: name });
@@ -2534,6 +2562,11 @@ function activateTab(name) {
     if (name === 'ensembles') {
       loadEnsemblesBody()
         .then(() => openEnsemblesBodyEditor())
+        .catch(() => {});
+    }
+    if (name === 'fundraising-body') {
+      loadFundraisingBody()
+        .then(() => openFundraisingBodyEditor())
         .catch(() => {});
     }
     if (name === 'mail') {
@@ -2681,6 +2714,7 @@ function showAllowedPanels() {
     checkout: canAccessCheckout(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
+    'fundraising-body': canEditFundraisingBody(),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
     contact: canEditContact(),
@@ -3089,6 +3123,7 @@ function renderDashboard() {
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
+    canEditFundraisingBody() && ['Fundraising Body', 'Edit fundraising campaign copy and insert body photos.', 'fundraising-body', 'Support', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
@@ -3176,7 +3211,14 @@ function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
   const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
-  box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+  box.innerHTML = pages.map((page) => {
+    const label = page.slug === 'fundraising'
+      ? `${page.title} (Manage → Fundraising Body)`
+      : page.slug === 'ensembles'
+        ? `${page.title} (Manage → Ensemble Body)`
+        : page.title;
+    return `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(label)}</label>`;
+  }).join('');
 }
 
 async function loadSponsorAdSettings() {
@@ -5294,7 +5336,10 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
+  const open = isMinutesViewOpen()
+    || isMinutesEditorOpen()
+    || isEnsemblesBodyEditorOpen()
+    || isFundraisingBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
@@ -5569,8 +5614,16 @@ function isEnsemblesBodyEditorOpen() {
   return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
+function isFundraisingBodyEditorOpen() {
+  const modal = document.querySelector('#fundraising-editor-modal');
+  return Boolean(modal && !modal.hasAttribute('hidden'));
+}
+
 function syncEnsemblesFrameBodyLock() {
-  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
+  document.body.classList.toggle(
+    'minutes-frame-open',
+    isEnsemblesBodyEditorOpen() || isFundraisingBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen(),
+  );
 }
 
 function closeEnsemblesBodyEditor() {
@@ -5685,6 +5738,159 @@ function bindEnsemblesBodyPanel() {
   });
 }
 
+function closeFundraisingBodyEditor() {
+  const modal = document.querySelector('#fundraising-editor-modal');
+  if (modal) modal.toggleAttribute('hidden', true);
+  syncEnsemblesFrameBodyLock();
+  syncMinutesFrameBodyLock();
+}
+
+function renderFundraisingBodyPreview() {
+  const preview = document.querySelector('#fundraising-body-preview');
+  if (!preview) return;
+  const html = String(state.fundraisingBodyHtml || '').trim();
+  preview.innerHTML = html || '<p class="draft">No fundraising body content yet. Click Edit Body to create it.</p>';
+}
+
+function populateFundraisingBodyForm() {
+  const form = document.querySelector('#fundraising-body-form');
+  if (!form) return;
+  setFormRichEditorValue(form, 'body_html', state.fundraisingBodyHtml || '');
+}
+
+function openFundraisingBodyEditor({ statusText = '' } = {}) {
+  if (!canEditFundraisingBody()) return;
+  const modal = document.querySelector('#fundraising-editor-modal');
+  const form = document.querySelector('#fundraising-body-form');
+  if (!modal || !form) return;
+  populateFundraisingBodyForm();
+  modal.toggleAttribute('hidden', false);
+  syncEnsemblesFrameBodyLock();
+  const status = document.querySelector('#fundraising-body-status');
+  if (status) {
+    status.textContent = statusText || 'Edit the Fundraising body card only. Use Photo to insert images. Save to close the editor.';
+  }
+  window.setTimeout(() => {
+    const editor = form.querySelector('[data-rich-input="body_html"]');
+    editor?.focus();
+    if (editor) {
+      editor.classList.add('is-focused');
+      savePageRichSelection(editor);
+    }
+  }, 30);
+}
+
+function readFundraisingBodyHtml(form) {
+  syncFormRichEditors(form);
+  const control = formControl(form, 'body_html');
+  let html = String(control?.value || '').trim();
+  if (!html.replace(/<[^>]+>/g, '').trim() && !/<img\b/i.test(html)) {
+    const editor = form?.querySelector('[data-rich-input="body_html"]');
+    const fromEditor = String(editor?.innerHTML || '').trim();
+    if (fromEditor.replace(/<[^>]+>/g, '').trim() || /<img\b/i.test(fromEditor)) {
+      html = fromEditor;
+      if (control) control.value = fromEditor;
+    }
+  }
+  return html;
+}
+
+async function saveFundraisingBodyForm(form) {
+  const status = document.querySelector('#fundraising-body-status');
+  if (!canEditFundraisingBody()) {
+    if (status) status.textContent = 'You do not have permission to edit Fundraising Body.';
+    return;
+  }
+  const bodyHtml = readFundraisingBodyHtml(form);
+  if (!bodyHtml.replace(/<[^>]+>/g, '').trim() && !/<img\b/i.test(bodyHtml)) {
+    if (status) status.textContent = 'Fundraising body content is required.';
+    form.querySelector('[data-rich-input="body_html"]')?.focus();
+    return;
+  }
+  if (status) status.textContent = 'Saving fundraising body…';
+  try {
+    const saved = await jsonFetch('/api/admin/fundraising/body', {
+      method: 'PUT',
+      body: JSON.stringify({ body_html: bodyHtml }),
+    });
+    state.fundraisingBodyHtml = String(saved?.body_html || bodyHtml);
+    renderFundraisingBodyPreview();
+    closeFundraisingBodyEditor();
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = 'Fundraising body saved.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save fundraising body.';
+  }
+}
+
+async function loadFundraisingBody() {
+  if (!canEditFundraisingBody()) return;
+  try {
+    const result = await jsonFetch('/api/admin/fundraising/body');
+    state.fundraisingBodyHtml = String(result?.body_html || '');
+    renderFundraisingBodyPreview();
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = '';
+  } catch (error) {
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = error.message || 'Could not load fundraising body.';
+  }
+}
+
+function bindFundraisingBodyPanel() {
+  document.querySelector('#edit-fundraising-body')?.addEventListener('click', () => {
+    if (!canEditFundraisingBody()) return;
+    openFundraisingBodyEditor();
+  });
+  document.querySelectorAll('[data-fundraising-editor-dismiss], #cancel-fundraising-edit').forEach((button) => {
+    button.addEventListener('click', () => closeFundraisingBodyEditor());
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isFundraisingBodyEditorOpen()) return;
+    closeFundraisingBodyEditor();
+  });
+  document.querySelector('#fundraising-body-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await saveFundraisingBodyForm(event.currentTarget);
+  });
+  const form = document.querySelector('#fundraising-body-form');
+  form?.querySelector('[data-fundraising-insert-line]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  form?.querySelector('[data-fundraising-insert-line]')?.addEventListener('click', () => {
+    const editor = restorePageRichSelection() || getFundraisingBodyEditor();
+    if (!editor) return;
+    insertRichEditorLineBreak(editor);
+    syncFormRichEditors(form);
+    savePageRichSelection(editor);
+  });
+  form?.querySelector('[data-fundraising-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  form?.querySelector('[data-fundraising-insert-photo]')?.addEventListener('click', () => {
+    const editor = getFundraisingBodyEditor();
+    if (editor) savePageRichSelection(editor);
+    showPagePhotoToast();
+  });
+  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('focusin', (event) => {
+    const editor = event.currentTarget;
+    editor.classList.add('is-focused');
+    savePageRichSelection(editor);
+  });
+  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('keyup', (event) => {
+    savePageRichSelection(event.currentTarget);
+  });
+  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('mouseup', (event) => {
+    savePageRichSelection(event.currentTarget);
+  });
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-open-fundraising-body]');
+    if (!button) return;
+    event.preventDefault();
+    if (!canEditFundraisingBody()) {
+      alert('You need the Fundraising page permission to edit Fundraising Body.');
+      return;
+    }
+    activateTab('fundraising-body');
+  });
+}
+
 function bindMinutesPanel() {
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
@@ -5776,7 +5982,7 @@ function bindMinutesPanel() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody(), loadFundraisingBody()]);
   if (mustChangePassword()) {
     showPasswordToast({ required: true });
   }
@@ -6649,6 +6855,7 @@ bindForms();
 bindMailComposer();
 bindMinutesPanel();
 bindEnsemblesBodyPanel();
+bindFundraisingBodyPanel();
 refreshAll()
   .then(() => {
     applyZernioQueryFeedback();
