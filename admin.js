@@ -893,6 +893,19 @@ function sanitizeRichHtmlClassList(attrs, allowedNames) {
     .join(' ');
 }
 
+function sanitizeRichImageWidthPx(attrs = '') {
+  const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
+  const width = Number.isFinite(fromStyle) && fromStyle > 0
+    ? fromStyle
+    : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0);
+  if (!width) return 0;
+  return Math.max(80, Math.min(1600, Math.round(width)));
+}
+
 function sanitizeRichImageTag(attrs = '') {
   const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
@@ -911,7 +924,9 @@ function sanitizeRichImageTag(attrs = '') {
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
   const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
-  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}">`;
+  const widthPx = sanitizeRichImageWidthPx(attrs);
+  const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}>`;
 }
 
 function sanitizeRichHtml(dirty) {
@@ -1936,24 +1951,232 @@ function setRichToolbarVisible(activeField = false) {
   toolbar.classList.toggle('is-active', Boolean(activeField));
 }
 
-function insertPhotoIntoPageBody(url, altText = 'Photo') {
+const IMAGE_UPLOAD_CLIENT_MAX_BYTES = 1_900_000;
+const IMAGE_UPLOAD_CLIENT_MAX_LABEL = '2 MB';
+
+async function canvasToImageBlob(canvas, mimeType, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Could not compress the image.'));
+        return;
+      }
+      resolve(blob);
+    }, mimeType, quality);
+  });
+}
+
+async function compressImageFileForUpload(file, {
+  maxBytes = IMAGE_UPLOAD_CLIENT_MAX_BYTES,
+  maxDimension = 2400,
+} = {}) {
+  if (!(file instanceof File) || !file.size) return file;
+  if (file.size <= maxBytes) return file;
+  const type = String(file.type || '').toLowerCase();
+  if (!type.startsWith('image/') || type === 'image/svg+xml') {
+    throw new Error(`Image is larger than ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}. Choose a smaller file.`);
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`Could not read that image for resizing. Please upload a file under ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}.`);
+  }
+
+  try {
+    let width = bitmap.width || 1;
+    let height = bitmap.height || 1;
+    const fit = Math.min(maxDimension / width, maxDimension / height, 1);
+    width = Math.max(1, Math.round(width * fit));
+    height = Math.max(1, Math.round(height * fit));
+    const preferJpeg = type !== 'image/png' && type !== 'image/webp';
+    const mimeCandidates = preferJpeg
+      ? ['image/jpeg', 'image/webp', 'image/png']
+      : (type === 'image/png' ? ['image/webp', 'image/jpeg', 'image/png'] : ['image/webp', 'image/jpeg', 'image/png']);
+
+    let bestBlob = null;
+    for (const mimeType of mimeCandidates) {
+      let scale = 1;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const outW = Math.max(1, Math.round(width * scale));
+        const outH = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) break;
+        if (mimeType === 'image/jpeg') {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, outW, outH);
+        }
+        ctx.drawImage(bitmap, 0, 0, outW, outH);
+        const qualitySteps = mimeType === 'image/png' ? [undefined] : [0.9, 0.82, 0.72, 0.62, 0.5];
+        for (const quality of qualitySteps) {
+          const blob = await canvasToImageBlob(canvas, mimeType, quality);
+          if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
+          if (blob.size <= maxBytes) {
+            const ext = mimeType === 'image/png' ? '.png' : (mimeType === 'image/webp' ? '.webp' : '.jpg');
+            const base = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+            return new File([blob], `${base}${ext}`, { type: mimeType, lastModified: Date.now() });
+          }
+        }
+        scale *= 0.82;
+        if (outW <= 640 && outH <= 640) break;
+      }
+    }
+    if (bestBlob && bestBlob.size <= maxBytes) {
+      const ext = bestBlob.type === 'image/png' ? '.png' : (bestBlob.type === 'image/webp' ? '.webp' : '.jpg');
+      const base = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+      return new File([bestBlob], `${base}${ext}`, { type: bestBlob.type || 'image/jpeg', lastModified: Date.now() });
+    }
+    throw new Error(`Could not shrink that image under ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}. Try a smaller photo.`);
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
   const field = restorePageRichSelection()
     || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
     || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
+  const widthStyle = Number(widthPx) > 0
+    ? ` style="width: ${Math.round(Number(widthPx))}px; height: auto;"`
+    : '';
   const cleaned = sanitizeRichHtml(
-    `<p class="cms-body-photo"><img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo"></p>`,
+    `<p class="cms-body-photo"><img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo"${widthStyle}></p>`,
   );
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
   field.focus();
   document.execCommand('insertHTML', false, cleaned);
   if (field.closest('#fundraising-body-form')) {
     syncFormRichEditors(field.closest('form'));
+    const inserted = [...field.querySelectorAll('img.cms-body-photo')].pop();
+    if (inserted) selectFundraisingBodyPhoto(inserted);
   } else {
     syncFieldFromPreview(field);
   }
   savePageRichSelection(field);
   return true;
+}
+
+const fundraisingPhotoResize = { img: null, dragging: false, startX: 0, startWidth: 0 };
+
+function ensureFundraisingPhotoResizeHandles() {
+  let root = document.querySelector('#cms-photo-resize-handles');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'cms-photo-resize-handles';
+  root.className = 'cms-photo-resize-handles';
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="nw" aria-label="Resize from top left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="ne" aria-label="Resize from top right"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="sw" aria-label="Resize from bottom left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="se" aria-label="Resize from bottom right"></button>
+  `;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-photo-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (!fundraisingPhotoResize.img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const img = fundraisingPhotoResize.img;
+      fundraisingPhotoResize.dragging = true;
+      fundraisingPhotoResize.handle = handle.dataset.photoHandle || 'se';
+      fundraisingPhotoResize.startX = event.clientX;
+      fundraisingPhotoResize.startWidth = img.getBoundingClientRect().width;
+      handle.setPointerCapture?.(event.pointerId);
+    });
+  });
+  window.addEventListener('pointermove', (event) => {
+    if (!fundraisingPhotoResize.dragging || !fundraisingPhotoResize.img) return;
+    const img = fundraisingPhotoResize.img;
+    const editor = getFundraisingBodyEditor();
+    const maxWidth = Math.max(80, (editor?.clientWidth || 640) - 8);
+    const delta = event.clientX - fundraisingPhotoResize.startX;
+    const outward = /e$/.test(fundraisingPhotoResize.handle || 'se') ? delta : -delta;
+    const next = Math.max(80, Math.min(maxWidth, Math.round(fundraisingPhotoResize.startWidth + outward)));
+    img.style.width = `${next}px`;
+    img.style.height = 'auto';
+    positionFundraisingPhotoResizeHandles();
+  });
+  window.addEventListener('pointerup', () => {
+    if (!fundraisingPhotoResize.dragging) return;
+    fundraisingPhotoResize.dragging = false;
+    const editor = getFundraisingBodyEditor();
+    const form = editor?.closest('form');
+    if (form) syncFormRichEditors(form);
+    positionFundraisingPhotoResizeHandles();
+  });
+  window.addEventListener('scroll', () => positionFundraisingPhotoResizeHandles(), true);
+  window.addEventListener('resize', () => positionFundraisingPhotoResizeHandles());
+  return root;
+}
+
+function clearFundraisingBodyPhotoSelection() {
+  const editor = getFundraisingBodyEditor();
+  editor?.querySelectorAll('img.cms-body-photo.is-selected').forEach((img) => {
+    img.classList.remove('is-selected');
+  });
+  fundraisingPhotoResize.img = null;
+  fundraisingPhotoResize.dragging = false;
+  const handles = document.querySelector('#cms-photo-resize-handles');
+  if (handles) handles.hidden = true;
+}
+
+function positionFundraisingPhotoResizeHandles() {
+  const root = document.querySelector('#cms-photo-resize-handles');
+  const img = fundraisingPhotoResize.img;
+  if (!root || !img || !document.body.contains(img) || !isFundraisingBodyEditorOpen()) {
+    if (root) root.hidden = true;
+    return;
+  }
+  const rect = img.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) {
+    root.hidden = true;
+    return;
+  }
+  root.hidden = false;
+  root.style.left = `${rect.left + window.scrollX}px`;
+  root.style.top = `${rect.top + window.scrollY}px`;
+  root.style.width = `${rect.width}px`;
+  root.style.height = `${rect.height}px`;
+}
+
+function selectFundraisingBodyPhoto(img) {
+  if (!img || !img.classList.contains('cms-body-photo')) return;
+  const editor = getFundraisingBodyEditor();
+  if (!editor || !editor.contains(img)) return;
+  ensureFundraisingPhotoResizeHandles();
+  editor.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
+    if (node !== img) node.classList.remove('is-selected');
+  });
+  img.classList.add('is-selected');
+  fundraisingPhotoResize.img = img;
+  if (!img.style.width) {
+    img.style.width = `${Math.round(img.getBoundingClientRect().width)}px`;
+    img.style.height = 'auto';
+  }
+  positionFundraisingPhotoResizeHandles();
+}
+
+function bindFundraisingBodyPhotoResize() {
+  if (document.documentElement.dataset.fundraisingPhotoResizeBound === '1') return;
+  document.documentElement.dataset.fundraisingPhotoResizeBound = '1';
+  document.addEventListener('click', (event) => {
+    if (!isFundraisingBodyEditorOpen()) return;
+    if (event.target.closest?.('#cms-photo-resize-handles')) return;
+    const editor = getFundraisingBodyEditor();
+    const img = event.target.closest?.('img.cms-body-photo');
+    if (img && editor?.contains(img)) {
+      selectFundraisingBodyPhoto(img);
+      return;
+    }
+    if (!event.target.closest?.('#fundraising-editor-modal')) return;
+    clearFundraisingBodyPhotoSelection();
+  });
 }
 
 function ensurePagePhotoToast() {
@@ -1971,7 +2194,7 @@ function ensurePagePhotoToast() {
     <div class="admin-page-photo-toast-panel">
       <div class="admin-page-photo-toast-card">
         <h3 id="admin-page-photo-toast-title">Insert photo</h3>
-        <p class="admin-page-photo-toast-copy">Upload a new image or pick one from the gallery. It will be inserted on its own line at the cursor.</p>
+        <p class="admin-page-photo-toast-copy">Upload a new image or pick one from the gallery. Large photos are auto-shrunk to fit the ${IMAGE_UPLOAD_CLIENT_MAX_LABEL} limit. After insert, drag a corner to resize.</p>
         <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
         <label class="admin-page-photo-file">Upload image
           <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
@@ -2073,14 +2296,24 @@ async function uploadAndInsertPagePhoto() {
     return;
   }
   const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
-  const body = new FormData();
-  body.append('file', file);
-  body.append('alt_text', alt);
-  body.append('caption', alt);
-  // Negative sort_order keeps page-body uploads out of the public gallery grid.
-  body.append('sort_order', '-600');
-  if (status) status.textContent = 'Uploading…';
+  if (status) {
+    status.textContent = file.size > IMAGE_UPLOAD_CLIENT_MAX_BYTES
+      ? `Shrinking image to fit ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}…`
+      : 'Uploading…';
+  }
   try {
+    const uploadFile = await compressImageFileForUpload(file);
+    if (status && uploadFile !== file) {
+      status.textContent = `Uploading resized image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
+    } else if (status) {
+      status.textContent = 'Uploading…';
+    }
+    const body = new FormData();
+    body.append('file', uploadFile);
+    body.append('alt_text', alt);
+    body.append('caption', alt);
+    // Negative sort_order keeps page-body uploads out of the public gallery grid.
+    body.append('sort_order', '-600');
     const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body });
     if (!insertPhotoIntoPageBody(stored.url, stored.alt_text || alt)) {
       if (status) status.textContent = 'Uploaded, but could not insert into the body. Click the body and try again.';
@@ -5746,6 +5979,7 @@ function closeFundraisingBodyEditor() {
     modal.hidden = true;
     modal.setAttribute('hidden', '');
   }
+  clearFundraisingBodyPhotoSelection();
   hidePagePhotoToast();
   syncEnsemblesFrameBodyLock();
   syncMinutesFrameBodyLock();
@@ -5775,7 +6009,7 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {
-    status.textContent = statusText || 'Use Photo to insert images. Save to close the editor.';
+    status.textContent = statusText || 'Use Photo to insert images. Drag a photo corner to resize. Save to close the editor.';
   }
   window.setTimeout(() => {
     const editor = form.querySelector('[data-rich-input="body_html"]');
@@ -5845,6 +6079,7 @@ async function loadFundraisingBody() {
 }
 
 function bindFundraisingBodyPanel() {
+  bindFundraisingBodyPhotoResize();
   document.querySelector('#edit-fundraising-body')?.addEventListener('click', () => {
     if (!canEditFundraisingBody()) return;
     openFundraisingBodyEditor();
@@ -5854,6 +6089,10 @@ function bindFundraisingBodyPanel() {
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || !isFundraisingBodyEditorOpen()) return;
+    if (fundraisingPhotoResize.img) {
+      clearFundraisingBodyPhotoSelection();
+      return;
+    }
     closeFundraisingBodyEditor();
   });
   document.querySelector('#fundraising-body-form')?.addEventListener('submit', async (event) => {
@@ -5875,17 +6114,21 @@ function bindFundraisingBodyPanel() {
     if (editor) savePageRichSelection(editor);
     showPagePhotoToast();
   });
-  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('focusin', (event) => {
-    const editor = event.currentTarget;
-    editor.classList.add('is-focused');
-    savePageRichSelection(editor);
-  });
-  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('keyup', (event) => {
+  const editor = form?.querySelector('[data-rich-input="body_html"]');
+  editor?.addEventListener('focusin', (event) => {
+    event.currentTarget.classList.add('is-focused');
     savePageRichSelection(event.currentTarget);
   });
-  form?.querySelector('[data-rich-input="body_html"]')?.addEventListener('mouseup', (event) => {
+  editor?.addEventListener('keyup', (event) => {
     savePageRichSelection(event.currentTarget);
   });
+  editor?.addEventListener('mouseup', (event) => {
+    savePageRichSelection(event.currentTarget);
+  });
+  editor?.addEventListener('scroll', () => positionFundraisingPhotoResizeHandles());
+  document.querySelector('#fundraising-editor-modal')?.addEventListener('scroll', () => {
+    positionFundraisingPhotoResizeHandles();
+  }, true);
   document.addEventListener('click', (event) => {
     const button = event.target.closest?.('[data-open-fundraising-body]');
     if (!button) return;
@@ -6835,13 +7078,23 @@ function bindForms() {
       status.textContent = 'Choose a photo file first.';
       return;
     }
-    const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
-    status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
     try {
-      await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      if (file.size > IMAGE_UPLOAD_CLIENT_MAX_BYTES) {
+        status.textContent = `Shrinking ${file.name || 'photo'} to fit ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}…`;
+      }
+      const uploadFile = await compressImageFileForUpload(file);
+      const sizeKb = Math.max(1, Math.round(Number(uploadFile.size || 0) / 1024));
+      status.textContent = `Uploading ${uploadFile.name || 'photo'} (${sizeKb} KB)…`;
+      const body = new FormData();
+      body.append('file', uploadFile);
+      body.append('alt_text', altText);
+      body.append('caption', caption);
+      await jsonFetch('/api/admin/photos', { method: 'POST', body });
       resetPhotoForm();
       await loadPhotos();
-      status.textContent = 'Photo uploaded.';
+      status.textContent = uploadFile !== file
+        ? 'Photo uploaded (auto-resized to fit the size limit).'
+        : 'Photo uploaded.';
     } catch (error) {
       const detail = String(error?.message || '').trim() || 'Unknown error';
       status.textContent = `Photo upload failed: ${detail}`;

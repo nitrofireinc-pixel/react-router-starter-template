@@ -1471,6 +1471,38 @@ body.cms-ready #current-user{visibility:visible}.panel-head{display:flex;align-i
   border-radius:16px;
   border:1px solid #d5deea;
 }
+.fundraising-body-editor img.cms-body-photo{
+  cursor:pointer;
+}
+.fundraising-body-editor img.cms-body-photo.is-selected{
+  outline:2px solid #014990;
+  outline-offset:2px;
+}
+.cms-photo-resize-handles{
+  position:absolute;
+  z-index:1300;
+  pointer-events:none;
+  box-sizing:border-box;
+  border:2px solid #014990;
+  border-radius:2px;
+}
+.cms-photo-resize-handles[hidden]{display:none!important}
+.cms-photo-resize-handle{
+  position:absolute;
+  width:12px;
+  height:12px;
+  padding:0;
+  border:2px solid #fff;
+  border-radius:2px;
+  background:#014990;
+  box-shadow:0 0 0 1px rgba(1,73,144,.35);
+  pointer-events:auto;
+  touch-action:none;
+}
+.cms-photo-resize-handle[data-photo-handle="nw"]{left:-7px;top:-7px;cursor:nwse-resize}
+.cms-photo-resize-handle[data-photo-handle="ne"]{right:-7px;top:-7px;cursor:nesw-resize}
+.cms-photo-resize-handle[data-photo-handle="sw"]{left:-7px;bottom:-7px;cursor:nesw-resize}
+.cms-photo-resize-handle[data-photo-handle="se"]{right:-7px;bottom:-7px;cursor:nwse-resize}
 .admin-page-photo-toast{
   position:fixed;
   inset:0;

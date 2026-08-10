@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'fundraising-status-copy-20260810-2';
+const ASSET_VERSION = 'fundraising-photo-resize-20260810-1';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -5759,6 +5759,19 @@ function sanitizeRichHtmlClassList(attrs, allowedNames) {
     .join(' ');
 }
 
+function sanitizeRichImageWidthPx(attrs = '') {
+  const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
+  const width = Number.isFinite(fromStyle) && fromStyle > 0
+    ? fromStyle
+    : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0);
+  if (!width) return 0;
+  return Math.max(80, Math.min(1600, Math.round(width)));
+}
+
 function sanitizeRichImageTag(attrs = '') {
   const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
@@ -5778,7 +5791,9 @@ function sanitizeRichImageTag(attrs = '') {
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
   const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
-  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}">`;
+  const widthPx = sanitizeRichImageWidthPx(attrs);
+  const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}>`;
 }
 
 export function sanitizeRichHtml(dirty) {
@@ -9017,7 +9032,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="panel-actions" style="justify-content:space-between;width:100%"><h2 style="margin:0">All saved events</h2><span class="status" id="events-count"></span></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images. Large photos are auto-shrunk to fit about 2 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">

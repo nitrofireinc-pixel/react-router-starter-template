@@ -226,6 +226,14 @@ test('sanitizeRichHtml keeps safe upload images and strips unsafe image sources'
   assert.doesNotMatch(html, /evil\.example/);
 });
 
+test('sanitizeRichHtml preserves body photo width for editor resizing', () => {
+  const html = sanitizeRichHtml(
+    '<p class="cms-body-photo"><img src="/uploads/spring.jpg" alt="Spring" class="cms-body-photo" style="width: 320px; height: auto; color: red"></p>',
+  );
+  assert.match(html, /style="width: 320px; height: auto;"/);
+  assert.doesNotMatch(html, /color:\s*red/);
+});
+
 test('generateStructuredPageHtml preserves body photo inserts', () => {
   const html = generateStructuredPageHtml({
     layout: 'standard',
