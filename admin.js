@@ -485,7 +485,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], pendingSponsorApplications: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2258,6 +2258,9 @@ function activateTab(name) {
     if (name === 'ledger') {
       loadLedger().catch(() => {});
     }
+    if (name === 'checkout') {
+      initCheckoutPanel().catch(() => {});
+    }
     if (name === 'booster-members' || name === 'minutes') {
       setBoostersMenuOpen(true);
     }
@@ -2353,6 +2356,10 @@ function canAccessLedger() {
   return hasPermission('treasurer');
 }
 
+function canAccessCheckout() {
+  return hasPermission('treasurer') || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canAccessBoostersMenu() {
   return canEditBoosterMembers() || canViewMinutes();
 }
@@ -2407,6 +2414,7 @@ function showAllowedPanels() {
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
     ledger: canAccessLedger(),
+    checkout: canAccessCheckout(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
@@ -2805,6 +2813,7 @@ function renderDashboard() {
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
   const cards = [
+    canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -2822,9 +2831,11 @@ function renderDashboard() {
   ].filter(Boolean);
 
   dashboard.innerHTML = cards.length
-    ? cards.map(([title, text, target, kicker, kind]) => {
+    ? cards.map((card) => {
+      const [title, copy, target, kicker, kind, theme = ''] = card;
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
-      return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
+      const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
+      return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
@@ -2905,7 +2916,89 @@ async function loadSponsors() {
   if (!canEditSponsors()) return;
   state.sponsors = await jsonFetch('/api/admin/sponsors');
   renderSponsors();
+  await loadPendingSponsorApplications();
   await loadSponsorAdSettings();
+}
+
+function pendingSponsorStatusLabel(status) {
+  const key = String(status || '').trim().toLowerCase();
+  if (key === 'checkout_ready') return 'Awaiting payment';
+  if (key === 'payment_setup_needed') return 'Payment setup needed';
+  if (key === 'pending_payment') return 'Pending payment';
+  return key.replace(/_/g, ' ') || 'Pending';
+}
+
+async function loadPendingSponsorApplications() {
+  const list = document.querySelector('#pending-sponsors-list');
+  const status = document.querySelector('#pending-sponsors-status');
+  if (!list || !canEditSponsors()) return;
+  try {
+    const data = await jsonFetch('/api/admin/sponsor-applications?pending=1');
+    state.pendingSponsorApplications = Array.isArray(data?.applications) ? data.applications : [];
+    renderPendingSponsorApplications();
+    if (status) {
+      const count = state.pendingSponsorApplications.length;
+      status.textContent = count
+        ? `${count} pending application${count === 1 ? '' : 's'} need review.`
+        : 'No pending sponsor applications.';
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="draft">Could not load pending applications: ${escapeHtml(error.message || 'error')}</p>`;
+    if (status) status.textContent = error.message || 'Could not load pending applications.';
+  }
+}
+
+function renderPendingSponsorApplications() {
+  const list = document.querySelector('#pending-sponsors-list');
+  if (!list) return;
+  const rows = Array.isArray(state.pendingSponsorApplications) ? state.pendingSponsorApplications : [];
+  if (!rows.length) {
+    list.innerHTML = '<p class="draft">No pending public sponsor sign-ups right now.</p>';
+    return;
+  }
+  list.innerHTML = rows.map((app) => {
+    const tier = app.tier || 'bronze';
+    const tierLabel = app.tier_label || (tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor');
+    const logo = app.logo_url
+      ? `<img src="${escapeHtml(app.logo_url)}" alt="">`
+      : escapeHtml(String(app.business_name || '?').slice(0, 1).toUpperCase());
+    return `
+    <article class="admin-row sponsor-admin-row is-pending" data-application-id="${escapeAttr(String(app.id || ''))}">
+      <div class="mini-logo">${logo}</div>
+      <div>
+        <b>${escapeHtml(app.business_name || 'Unnamed business')} <span class="pending-flag">Pending</span></b>
+        <span>${escapeHtml(app.address || 'No address')}</span>
+        <span>${escapeHtml([
+          app.phone ? `Phone: ${app.phone}` : '',
+          app.email ? `Email: ${app.email}` : '',
+        ].filter(Boolean).join(' · ') || 'No phone/email on file')}</span>
+        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${escapeHtml(app.amount_display || '')} · ${escapeHtml(pendingSponsorStatusLabel(app.status))}</small>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn primary btn-small" data-accept-application="${escapeAttr(String(app.id || ''))}">Accept</button>
+      </div>
+    </article>`;
+  }).join('');
+  list.querySelectorAll('[data-accept-application]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = String(button.dataset.acceptApplication || '').trim();
+      if (!id) return;
+      if (!window.confirm('Accept this sponsor and add them to the public listing now?')) return;
+      const status = document.querySelector('#pending-sponsors-status');
+      button.disabled = true;
+      if (status) status.textContent = 'Accepting…';
+      try {
+        const result = await jsonFetch(`/api/admin/sponsor-applications/${id}/accept`, { method: 'POST', body: '{}' });
+        showSavedToast(result.detail || 'Sponsor accepted.');
+        await loadSponsors();
+      } catch (error) {
+        const detail = error?.message || 'Could not accept sponsor.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 async function loadLedger() {
@@ -2972,6 +3065,64 @@ async function loadLedger() {
     body.innerHTML = `<tr><td colspan="8" class="draft">${escapeHtml(error.message || 'Ledger unavailable')}</td></tr>`;
     if (status) status.textContent = error.message || 'Ledger unavailable';
   }
+}
+
+
+function loadAdminSquareWebSdk(environment = 'production') {
+  const existing = document.querySelector('script[data-square-web-sdk]');
+  if (existing && window.Square) return Promise.resolve(window.Square);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = environment === 'sandbox'
+      ? 'https://sandbox.web.squareupsandbox.com/v1/square.js'
+      : 'https://web.squarecdn.com/v1/square.js';
+    script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+    script.onerror = () => reject(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+let checkoutCardController = null;
+let checkoutInitPromise = null;
+
+async function initCheckoutPanel() {
+  if (!canAccessCheckout()) return;
+  if (checkoutInitPromise) return checkoutInitPromise;
+  checkoutInitPromise = (async () => {
+    const form = document.querySelector('#checkout-form');
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const host = document.querySelector('#admin-square-card');
+    if (!form || !host) return;
+    if (status) status.textContent = 'Loading Square…';
+    if (submit) submit.disabled = true;
+    try {
+      if (checkoutCardController) {
+        try { await checkoutCardController.destroy(); } catch { /* ignore */ }
+        checkoutCardController = null;
+      }
+      host.innerHTML = '';
+      const config = await jsonFetch('/api/admin/checkout/config');
+      if (!config.web_payments) {
+        if (status) status.textContent = config.detail || 'Square card checkout is not configured.';
+        return;
+      }
+      const Square = await loadAdminSquareWebSdk(config.environment || 'production');
+      const payments = Square.payments(config.application_id, config.location_id);
+      const card = await payments.card();
+      await card.attach('#admin-square-card');
+      checkoutCardController = card;
+      if (status) status.textContent = 'Square secure card form ready.';
+      if (submit) submit.disabled = false;
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not load Square checkout.';
+      if (submit) submit.disabled = true;
+    } finally {
+      checkoutInitPromise = null;
+    }
+  })();
+  return checkoutInitPromise;
 }
 
 async function loadStaff() {
@@ -4240,7 +4391,9 @@ function ensureUserFormToast() {
             <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
-            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, expenses)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, expenses) + Checkout</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Square Checkout)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label>
@@ -5751,6 +5904,74 @@ function bindForms() {
 
   document.querySelector('#new-ledger-entry')?.addEventListener('click', () => {
     showLedgerEntryToast();
+  });
+
+  document.querySelector('#checkout-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAccessCheckout()) return;
+    const form = event.currentTarget;
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const item = String(form.elements.item?.value || '').trim();
+    const amountDisplay = String(form.elements.amount_display?.value || '').trim();
+    const payerName = String(form.elements.payer_name?.value || '').trim();
+    const note = String(form.elements.note?.value || '').trim();
+    if (!item) {
+      if (status) status.textContent = 'Item or description is required.';
+      return;
+    }
+    if (!amountDisplay) {
+      if (status) status.textContent = 'Amount is required.';
+      return;
+    }
+    if (!checkoutCardController) {
+      if (status) status.textContent = 'Square card form is not ready.';
+      await initCheckoutPanel();
+      return;
+    }
+    if (submit) submit.disabled = true;
+    if (status) status.textContent = 'Processing payment…';
+    try {
+      const amountCents = Math.round(Number(String(amountDisplay).replace(/[^0-9.]/g, '')) * 100);
+      if (!Number.isFinite(amountCents) || amountCents < 100) {
+        throw new Error('Amount must be at least $1.00');
+      }
+      const verificationDetails = {
+        amount: (amountCents / 100).toFixed(2),
+        currencyCode: 'USD',
+        intent: 'CHARGE',
+        customerInitiated: false,
+        sellerKeyedIn: true,
+        billingContact: {
+          givenName: (payerName || item).slice(0, 100),
+          countryCode: 'US',
+        },
+      };
+      const tokenResult = await checkoutCardController.tokenize(verificationDetails);
+      if (tokenResult.status !== 'OK' || !tokenResult.token) {
+        throw new Error(tokenResult.errors?.[0]?.message || 'Card could not be processed.');
+      }
+      const paid = await jsonFetch('/api/admin/checkout/pay', {
+        method: 'POST',
+        body: JSON.stringify({
+          item,
+          amount_display: amountDisplay,
+          amount_cents: amountCents,
+          payer_name: payerName,
+          note,
+          source_id: tokenResult.token,
+        }),
+      });
+      form.reset();
+      showSavedToast(paid.detail || 'Payment charged.');
+      if (status) status.textContent = paid.detail || 'Payment charged.';
+      await initCheckoutPanel();
+    } catch (error) {
+      const detail = error?.message || 'Payment failed.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+      if (submit) submit.disabled = false;
+    }
   });
 
   const ledgerToast = ensureLedgerEntryToast();

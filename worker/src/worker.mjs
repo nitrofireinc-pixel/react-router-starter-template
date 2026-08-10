@@ -202,8 +202,9 @@ const SESSION_COOKIE = 'efband_session';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'treasurer-ledger-excel-20260810-1';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
+const ASSET_VERSION = 'pending-sponsors-checkout-20260810-1';
+export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 
@@ -427,6 +428,14 @@ export function hasPermission(user, scope) {
 
 export function canAccessTreasurerLedger(user) {
   return hasPermission(user, 'treasurer');
+}
+
+export function canAccessCheckout(user) {
+  return (
+    hasPermission(user, 'treasurer')
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
 }
 
 export function canManageAllEvents(user) {
@@ -4275,7 +4284,7 @@ export async function getPaymentLedgerXml(env, { rebuild = false } = {}) {
   return refreshPaymentLedgerXml(env);
 }
 
-export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
+export async function activatePaidSponsorApplication(env, application, { mock = false, accepted = false } = {}) {
   const row = application || {};
   const id = Number(row.id || 0);
   if (!id) throw new Error('Application not found');
@@ -4289,6 +4298,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
         sponsor: hydrateSponsor(existing),
         created: false,
         mock: Boolean(mock),
+        accepted: Boolean(accepted),
       };
     }
   }
@@ -4326,24 +4336,53 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   ).run();
   const sponsorId = inserted.meta.last_row_id;
   const paidAt = new Date().toISOString();
+  const status = accepted ? 'accepted' : (mock ? 'paid_mock' : 'paid');
   await env.DB.prepare(
     `UPDATE sponsor_applications
      SET status = ?, sponsor_id = ?, paid_at = ?, updated_at = ?
      WHERE id = ?`,
-  ).bind(mock ? 'paid_mock' : 'paid', sponsorId, paidAt, paidAt, id).run();
+  ).bind(status, sponsorId, paidAt, paidAt, id).run();
   const saved = await env.DB.prepare(
     'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
   ).bind(sponsorId).first();
   return {
     application: {
       ...row,
-      status: mock ? 'paid_mock' : 'paid',
+      status,
       sponsor_id: sponsorId,
       paid_at: paidAt,
     },
     sponsor: hydrateSponsor(saved),
     created: true,
     mock: Boolean(mock),
+    accepted: Boolean(accepted),
+  };
+}
+
+export function isPendingSponsorApplicationStatus(status) {
+  return PENDING_SPONSOR_APPLICATION_STATUSES.includes(String(status || '').trim());
+}
+
+export function mapSponsorApplicationRow(row = {}) {
+  const tier = normalizeSponsorTierKey(row.tier) || String(row.tier || '').trim().toLowerCase();
+  return {
+    id: Number(row.id || 0),
+    tier,
+    tier_label: sponsorLevelFromTierKey(tier) || (tier ? `${tier} Sponsor` : 'Sponsor'),
+    amount_cents: Number(row.amount_cents || 0),
+    amount_display: String(row.amount_display || formatLedgerAmountDisplay(row.amount_cents || 0)),
+    business_name: String(row.business_name || ''),
+    address: String(row.address || ''),
+    phone: String(row.phone || ''),
+    email: String(row.email || ''),
+    logo_url: String(row.logo_url || ''),
+    status: String(row.status || ''),
+    pending: isPendingSponsorApplicationStatus(row.status),
+    square_checkout_url: String(row.square_checkout_url || ''),
+    sponsor_id: row.sponsor_id == null ? null : Number(row.sponsor_id),
+    paid_at: String(row.paid_at || ''),
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || ''),
   };
 }
 
@@ -6879,6 +6918,177 @@ async function handleApi(request, env, url, ctx = null) {
       .run();
     return jsonResponse({ sponsor_ad_seconds: seconds });
   }
+  if (url.pathname === '/api/admin/sponsor-applications' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    const pendingOnly = String(url.searchParams.get('pending') || '1') !== '0';
+    const rows = await env.DB.prepare(
+      `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+              square_checkout_url, sponsor_id, paid_at, created_at, updated_at
+       FROM sponsor_applications
+       ORDER BY datetime(created_at) DESC, id DESC`,
+    ).all();
+    const applications = (rows.results || [])
+      .map(mapSponsorApplicationRow)
+      .filter((row) => (pendingOnly ? row.pending : true));
+    return jsonResponse({
+      applications,
+      pending_count: applications.filter((row) => row.pending).length,
+    });
+  }
+  {
+    const acceptMatch = url.pathname.match(/^\/api\/admin\/sponsor-applications\/(\d+)\/accept$/);
+    if (acceptMatch && request.method === 'POST') {
+      const auth = await requireLogin(request, env);
+      if (auth.response) return auth.response;
+      if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+        return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+      }
+      const applicationId = Number(acceptMatch[1] || 0);
+      if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
+      const application = await env.DB.prepare(
+        `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+                square_payment_link_id, square_checkout_url, completion_token, sponsor_id, paid_at, invoice_sent_at
+         FROM sponsor_applications WHERE id = ?`,
+      ).bind(applicationId).first();
+      if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
+      if (application.sponsor_id) {
+        const existing = await env.DB.prepare(
+          'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+        ).bind(application.sponsor_id).first();
+        return jsonResponse({
+          ok: true,
+          created: false,
+          sponsor: existing ? hydrateSponsor(existing) : null,
+          application: mapSponsorApplicationRow(application),
+          detail: 'Sponsorship was already activated.',
+        });
+      }
+      if (!isPendingSponsorApplicationStatus(application.status) && !['paid', 'paid_mock', 'accepted'].includes(String(application.status || ''))) {
+        return jsonResponse({ detail: 'This application cannot be accepted' }, 422);
+      }
+      try {
+        const result = await activatePaidSponsorApplication(env, application, { accepted: true });
+        try {
+          await recordSponsorPaymentLedger(env, {
+            ...application,
+            ...result.application,
+          });
+        } catch { /* ledger is best-effort */ }
+        return jsonResponse({
+          ok: true,
+          created: result.created,
+          accepted: true,
+          sponsor: result.sponsor,
+          application: mapSponsorApplicationRow(result.application),
+          detail: result.created
+            ? `${result.sponsor.level} accepted for ${result.sponsor.name}.`
+            : 'Sponsorship was already activated.',
+        });
+      } catch (error) {
+        return jsonResponse({ detail: error.message || 'Could not accept sponsorship' }, 422);
+      }
+    }
+  }
+  if (url.pathname === '/api/admin/checkout/config' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessCheckout(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer, president, or vice-president' }, 403);
+    }
+    const applicationId = squareApplicationId(env);
+    const location = await resolveSquareLocationId(env);
+    const configured = squareCheckoutConfigured(env);
+    const webPayments = Boolean(applicationId && location.ok && location.location_id);
+    return jsonResponse({
+      configured,
+      web_payments: webPayments,
+      environment: String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
+      application_id: applicationId || '',
+      location_id: location.ok ? location.location_id : '',
+      mock_enabled: squareMockPayEnabled(env),
+      detail: !configured
+        ? 'Square access token is not connected.'
+        : (!applicationId
+          ? 'Square access token is connected. Add SQUARE_APPLICATION_ID to enable card checkout.'
+          : (!location.ok
+            ? (location.detail || 'Square location could not be determined.')
+            : 'Square checkout is ready.')),
+    });
+  }
+  if (url.pathname === '/api/admin/checkout/pay' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessCheckout(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer, president, or vice-president' }, 403);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const item = String(payload.item || payload.description || payload.name || '').trim();
+    const payerName = String(payload.payer_name || payload.name || '').trim();
+    const note = String(payload.note || '').trim();
+    const sourceId = String(payload.source_id || payload.sourceId || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || payload.amount,
+    });
+    if (!item || item.length > 200) {
+      return jsonResponse({ detail: 'Item or description is required' }, 422);
+    }
+    if (!amountCents || amountCents < 100) {
+      return jsonResponse({ detail: 'Amount must be at least $1.00' }, 422);
+    }
+    if (amountCents > 25_000_000) {
+      return jsonResponse({ detail: 'Amount cannot exceed $250,000' }, 422);
+    }
+    if (!sourceId) {
+      return jsonResponse({ detail: 'Payment card token is required' }, 422);
+    }
+    const payment = await createSquareCardPayment(env, {
+      sourceId,
+      amountCents,
+      referenceId: `admin-checkout-${Date.now().toString(36)}`.slice(0, 40),
+      note: [item, payerName ? `Payer: ${payerName}` : '', note].filter(Boolean).join(' — ').slice(0, 500),
+    });
+    if (!payment.ok) {
+      return jsonResponse({ detail: payment.detail || 'Square payment failed' }, 422);
+    }
+    const amountDisplay = formatLedgerAmountDisplay(amountCents);
+    const paidAt = new Date().toISOString();
+    try {
+      const nextRef = await env.DB.prepare(
+        "SELECT COALESCE(MAX(ref_id), 0) + 1 AS next_id FROM payment_ledger WHERE kind = 'fundraiser' AND ref_type = 'square_checkout'",
+      ).first();
+      await upsertPaymentLedgerEntry(env, {
+        kind: 'fundraiser',
+        refType: 'square_checkout',
+        refId: Number(nextRef?.next_id || 1),
+        name: payerName || item,
+        address: '',
+        amountCents,
+        amountDisplay,
+        packageLabel: item,
+        note: note || `Square payment ${payment.payment_id || ''}`.trim(),
+        moneyExchanged: true,
+        paidAt,
+      });
+      await refreshPaymentLedgerXml(env);
+    } catch { /* ledger is best-effort */ }
+    return jsonResponse({
+      ok: true,
+      payment_id: payment.payment_id,
+      auth_id: payment.auth_id,
+      status: payment.status,
+      receipt_url: payment.receipt_url,
+      amount_cents: amountCents,
+      amount_display: amountDisplay,
+      item,
+      payer_name: payerName,
+      detail: `Charged ${amountDisplay} for ${item}.`,
+    });
+  }
   if (url.pathname === '/api/admin/sponsors' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -8300,7 +8510,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger">Ledger</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger">Ledger</button><button type="button" data-tab="checkout">Checkout</button><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/index.html">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -8308,12 +8518,17 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>Edit the Gallery page header here. Photos are managed in the Photos tab and appear newest-first on the public Gallery page.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview. Home shows the 6 newest photos with a link to the full Gallery.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="gallery">Photo gallery page</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
-<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Pending public sign-ups appear below with a Pending flag until you accept them.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
   <h2>Gold sponsors for advertising</h2>
   <p class="muted">Active Gold sponsors with logos for programs, flyers, and handouts. Print builds a PDF in the background, then opens the print dialog in this page (no pop-up window).</p>
   <div id="gold-sponsors-print-preview" class="gold-sponsors-print-preview" aria-live="polite"></div>
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
+</div>
+<div class="admin-card stack pending-sponsors-card">
+  <div class="pending-sponsors-head"><h2>Pending sponsor applications</h2><p class="muted">Public Become a Sponsor sign-ups waiting on payment or staff review. Accept once the issue is resolved in the real world.</p></div>
+  <div id="pending-sponsors-list" class="admin-list sponsor-list pending-sponsors-list" aria-live="polite"></div>
+  <p class="status" id="pending-sponsors-status"></p>
 </div>
 <div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-ledger" class="cms-panel ledger-panel" hidden><div class="panel-head"><div><p class="kicker">Treasurer</p><h1>Ledger</h1><p>Accountant view for donors, sponsors, fundraisers, and expenses. Cash and in-kind entries update the downloadable Excel ledger.</p></div><div class="panel-actions"><a class="btn outline" id="download-ledger-excel" href="/api/admin/ledger.xls">Download Excel</a><button class="btn outline" type="button" id="refresh-ledger">Refresh</button><button class="btn primary" type="button" id="new-ledger-entry">Add entry</button></div></div>
@@ -8329,6 +8544,32 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </table>
   </div>
   <p class="status" id="ledger-status"></p>
+</div>
+</section>
+<section id="tab-checkout" class="cms-panel checkout-panel" hidden><div class="panel-head"><div><p class="kicker">Payments</p><h1>Checkout</h1><p>Manually charge a card through Square for an item or amount. Available to Treasurer, President, and Vice President.</p></div></div>
+<div class="checkout-layout">
+  <form id="checkout-form" class="admin-card stack checkout-form-card" novalidate>
+    <h2>Charge a card</h2>
+    <p class="muted">Enter the item, amount, and card details. Square processes the payment immediately.</p>
+    <label>Item / description<input name="item" required maxlength="200" placeholder="Uniform deposit, trailer rental, donation…"></label>
+    <label>Amount<input name="amount_display" required inputmode="decimal" placeholder="$25.00"></label>
+    <label>Payer name <span class="muted">(optional)</span><input name="payer_name" maxlength="160" placeholder="Name on receipt" autocomplete="name"></label>
+    <label>Note <span class="muted">(optional)</span><textarea name="note" rows="2" maxlength="500" placeholder="Optional internal note"></textarea></label>
+    <div class="checkout-card-box">
+      <div id="admin-square-card" class="checkout-card-host" aria-label="Square card entry"></div>
+    </div>
+    <p class="status" id="checkout-status" aria-live="polite">Loading Square…</p>
+    <button class="btn primary checkout-charge-btn" type="submit" id="checkout-submit" disabled>Charge card</button>
+  </form>
+  <div class="admin-card stack checkout-help-card">
+    <h2>How this works</h2>
+    <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges are recorded in the Treasurer ledger as fundraiser income.</p>
+    <ul class="checkout-help-list">
+      <li>Requires Square card checkout to be connected</li>
+      <li>Minimum charge is $1.00</li>
+      <li>Card data stays with Square — it is never stored in the CMS</li>
+    </ul>
+  </div>
 </div>
 </section><section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>

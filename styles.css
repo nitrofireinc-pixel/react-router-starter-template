@@ -3918,3 +3918,68 @@ body.minutes-frame-open{overflow:hidden}
   .ledger-table th,
   .ledger-table td{padding:10px}
 }
+
+
+/* Pending sponsors + green Checkout dashboard card */
+.pending-flag{
+  display:inline-block;
+  margin-left:8px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#fff4df;
+  color:#8a5a00;
+  font-size:.72rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  vertical-align:middle;
+}
+.admin-row.is-pending{
+  border-color:#f0d39a;
+  background:linear-gradient(180deg,#fffdf8 0%,#fff8ec 100%);
+}
+.pending-sponsors-card{margin-bottom:18px}
+.pending-sponsors-head{display:grid;gap:4px}
+.dash-card-money{
+  background:linear-gradient(160deg,#0f7a45 0%,#14945a 48%,#0c5f36 100%);
+  border-color:#0c5f36;
+  color:#fff;
+  box-shadow:0 18px 44px rgba(12,95,54,.28);
+}
+.dash-card-money span{
+  color:rgba(220,255,232,.9);
+}
+.dash-card-money b,
+.dash-card-money small{color:#fff}
+.dash-card-money small{color:rgba(255,255,255,.86)}
+.dash-card-money:hover{
+  filter:brightness(1.04);
+  transform:translateY(-1px);
+}
+.checkout-layout{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);
+  gap:18px;
+  align-items:start;
+}
+.checkout-form-card .checkout-charge-btn{
+  background:linear-gradient(160deg,#0f7a45,#14945a);
+  border-color:#0c5f36;
+}
+.checkout-card-box{
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:14px;
+  background:#f7fafc;
+}
+.checkout-card-host{min-height:90px}
+.checkout-help-list{
+  margin:0;
+  padding-left:1.2rem;
+  color:#5b6f86;
+  display:grid;
+  gap:8px;
+}
+@media(max-width:900px){
+  .checkout-layout{grid-template-columns:1fr}
+}
