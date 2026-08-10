@@ -5740,7 +5740,11 @@ function bindEnsemblesBodyPanel() {
 
 function closeFundraisingBodyEditor() {
   const modal = document.querySelector('#fundraising-editor-modal');
-  if (modal) modal.toggleAttribute('hidden', true);
+  if (modal) {
+    modal.hidden = true;
+    modal.setAttribute('hidden', '');
+  }
+  hidePagePhotoToast();
   syncEnsemblesFrameBodyLock();
   syncMinutesFrameBodyLock();
 }
@@ -5764,7 +5768,8 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   const form = document.querySelector('#fundraising-body-form');
   if (!modal || !form) return;
   populateFundraisingBodyForm();
-  modal.toggleAttribute('hidden', false);
+  modal.hidden = false;
+  modal.removeAttribute('hidden');
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {

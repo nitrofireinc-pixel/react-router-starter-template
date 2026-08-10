@@ -3616,6 +3616,7 @@ body.sponsor-signup-open{overflow:hidden}
 #print-minutes[hidden],
 #edit-minutes[hidden],
 #delete-minutes[hidden]{display:none!important}
+.minutes-frame-modal[hidden]{display:none!important}
 .minutes-frame-modal{
   position:fixed;
   inset:0;
