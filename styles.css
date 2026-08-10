@@ -666,7 +666,6 @@ img{-webkit-touch-callout:none}
     padding:12px 16px;
     background:#f6f8fb;
   }
-  .admin-mobile-bar-top{position:relative;z-index:1}
   .admin-nav-toggle{
     display:inline-flex;
     align-items:center;
@@ -690,6 +689,8 @@ img{-webkit-touch-callout:none}
     align-items:center;
     justify-content:space-between;
     gap:10px;
+    position:relative;
+    z-index:1;
   }
   .admin-mobile-logout-form{margin:0;flex:0 0 auto}
   .admin-mobile-logout-btn{
@@ -3951,6 +3952,21 @@ body.minutes-frame-open{overflow:hidden}
 }
 .pending-sponsors-card{margin-bottom:18px}
 .pending-sponsors-head{display:grid;gap:4px}
+.dash-card-docs{
+  background:linear-gradient(160deg,#12365f 0%,#1d4f86 48%,#0d2744 100%);
+  border-color:#0d2744;
+  color:#fff;
+  box-shadow:0 18px 44px rgba(13,39,68,.25);
+  text-decoration:none;
+}
+.dash-card-docs span{color:rgba(214,230,255,.92)}
+.dash-card-docs b,
+.dash-card-docs small{color:#fff}
+.dash-card-docs small{color:rgba(255,255,255,.86)}
+.dash-card-docs:hover{
+  filter:brightness(1.04);
+  transform:translateY(-1px);
+}
 .dash-card-money{
   background:linear-gradient(160deg,#0f7a45 0%,#14945a 48%,#0c5f36 100%);
   border-color:#0c5f36;

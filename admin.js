@@ -2812,7 +2812,9 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc';
   const cards = [
+    ['Website Guide', 'Download the full site and CMS documentation (.doc) covering every feature and permission.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -2833,8 +2835,11 @@ function renderDashboard() {
   dashboard.innerHTML = cards.length
     ? cards.map((card) => {
       const [title, copy, target, kicker, kind, theme = ''] = card;
-      const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
+      if (kind === 'link') {
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.doc"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+      }
+      const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
