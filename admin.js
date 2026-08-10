@@ -2260,12 +2260,28 @@ function ensureFundraisingPhotoResizeHandles() {
   root.className = 'cms-photo-resize-handles';
   root.hidden = true;
   root.innerHTML = `
+    <div class="cms-photo-resize-toolbar">
+      <button type="button" class="cms-photo-delete-btn" data-photo-delete>Delete photo</button>
+    </div>
     <button type="button" class="cms-photo-resize-handle" data-photo-handle="nw" aria-label="Resize from top left"></button>
     <button type="button" class="cms-photo-resize-handle" data-photo-handle="ne" aria-label="Resize from top right"></button>
     <button type="button" class="cms-photo-resize-handle" data-photo-handle="sw" aria-label="Resize from bottom left"></button>
     <button type="button" class="cms-photo-resize-handle" data-photo-handle="se" aria-label="Resize from bottom right"></button>
   `;
   document.body.appendChild(root);
+  root.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.querySelector('[data-photo-delete]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedFundraisingBodyPhoto();
+  });
   root.querySelectorAll('[data-photo-handle]').forEach((handle) => {
     handle.addEventListener('pointerdown', (event) => {
       if (!fundraisingPhotoResize.img) return;
@@ -2304,6 +2320,21 @@ function ensureFundraisingPhotoResizeHandles() {
   window.addEventListener('scroll', () => positionFundraisingPhotoResizeHandles(), true);
   window.addEventListener('resize', () => positionFundraisingPhotoResizeHandles());
   return root;
+}
+
+function deleteSelectedFundraisingBodyPhoto() {
+  const img = fundraisingPhotoResize.img;
+  const editor = getFundraisingBodyEditor();
+  if (!img || !editor || !editor.contains(img)) return false;
+  const form = editor.closest('form');
+  img.remove();
+  clearFundraisingBodyPhotoSelection();
+  if (form) syncFormRichEditors(form);
+  editor.focus();
+  savePageRichSelection(editor);
+  const status = document.querySelector('#fundraising-body-status');
+  if (status) status.textContent = 'Photo removed. Save to keep this change.';
+  return true;
 }
 
 function clearFundraisingBodyPhotoSelection() {
@@ -2348,6 +2379,11 @@ function selectFundraisingBodyPhoto(img) {
   const editor = getFundraisingBodyEditor();
   if (!editor || !editor.contains(img)) return;
   if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
+  if (!img.classList.contains('cms-body-photo-left')
+    && !img.classList.contains('cms-body-photo-right')
+    && !img.classList.contains('cms-body-photo-block')) {
+    img.classList.add('cms-body-photo-left');
+  }
   ensureFundraisingPhotoResizeHandles();
   editor.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
     if (node !== img) node.classList.remove('is-selected');
@@ -2355,6 +2391,7 @@ function selectFundraisingBodyPhoto(img) {
   img.classList.add('is-selected');
   fundraisingPhotoResize.img = img;
   const applyWidth = () => {
+    if (fundraisingPhotoResize.img !== img) return;
     const measured = Math.round(img.getBoundingClientRect().width);
     const existing = Number.parseFloat(img.style.width || img.getAttribute('data-photo-width') || '');
     const width = Number.isFinite(existing) && existing > 0 ? existing : measured;
@@ -2368,37 +2405,47 @@ function selectFundraisingBodyPhoto(img) {
   if (img.complete && img.naturalWidth) applyWidth();
   else img.addEventListener('load', applyWidth, { once: true });
   applyWidth();
+  requestAnimationFrame(() => positionFundraisingPhotoResizeHandles());
 }
 
 function bindFundraisingBodyPhotoResize() {
   if (document.documentElement.dataset.fundraisingPhotoResizeBound === '1') return;
   document.documentElement.dataset.fundraisingPhotoResizeBound = '1';
+  const isPhotoTarget = (editor, node) => {
+    const img = node?.closest?.('img.cms-body-photo, img');
+    if (!img || !editor?.contains(img)) return null;
+    if (!(img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) return null;
+    return img.tagName === 'IMG' ? img : img.querySelector('img');
+  };
   const onSelectPointer = (event) => {
     if (!isFundraisingBodyEditorOpen()) return;
     if (event.target.closest?.('#cms-photo-resize-handles')) return;
     const editor = getFundraisingBodyEditor();
     if (!editor) return;
-    const img = event.target.closest?.('img.cms-body-photo, img');
-    if (img && editor.contains(img) && (img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) {
-      // Prefer the actual img even if the user clicked a wrapper paragraph.
-      const target = img.tagName === 'IMG' ? img : img.querySelector('img');
-      if (target) {
-        event.preventDefault();
-        selectFundraisingBodyPhoto(target);
-      }
+    const target = isPhotoTarget(editor, event.target);
+    if (target) {
+      event.preventDefault();
+      event.stopPropagation();
+      selectFundraisingBodyPhoto(target);
       return;
     }
+    if (!event.target.closest?.('#fundraising-editor-modal')) return;
+    // Keep selection while using the editor chrome (toolbar / save actions).
+    if (event.target.closest?.('.form-rich-toolbar, .minutes-form-actions, .minutes-editor-head, .panel-actions')) {
+      return;
+    }
+    // Deselect when clicking elsewhere in the body editor or modal.
+    if (fundraisingPhotoResize.img) clearFundraisingBodyPhotoSelection();
   };
   document.addEventListener('pointerdown', onSelectPointer, true);
-  document.addEventListener('click', (event) => {
-    if (!isFundraisingBodyEditorOpen()) return;
-    if (event.target.closest?.('#cms-photo-resize-handles')) return;
-    const editor = getFundraisingBodyEditor();
-    const img = event.target.closest?.('img.cms-body-photo, img');
-    if (img && editor?.contains(img)) return;
-    if (!event.target.closest?.('#fundraising-editor-modal')) return;
-    clearFundraisingBodyPhotoSelection();
-  });
+  document.addEventListener('keydown', (event) => {
+    if (!isFundraisingBodyEditorOpen() || !fundraisingPhotoResize.img) return;
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+    if (event.target.closest?.('input, textarea, select')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedFundraisingBodyPhoto();
+  }, true);
 }
 
 function ensurePagePhotoToast() {
@@ -6238,7 +6285,7 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {
-    status.textContent = statusText || 'Click in the text where the photo should go, then use Photo. Text wraps around the image — drag a corner to resize.';
+    status.textContent = statusText || 'Click where the photo should go, then use Photo. Click a photo to resize or delete it.';
   }
   window.setTimeout(() => {
     const editor = form.querySelector('[data-rich-input="body_html"]');

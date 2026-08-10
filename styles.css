@@ -1528,6 +1528,34 @@ body.cms-ready #current-user{visibility:visible}.panel-head{display:flex;align-i
   margin:0;
 }
 .cms-photo-resize-handles[hidden]{display:none!important}
+.cms-photo-resize-toolbar{
+  position:absolute;
+  right:0;
+  top:-40px;
+  display:flex;
+  gap:8px;
+  pointer-events:auto;
+}
+.cms-photo-delete-btn{
+  appearance:none;
+  border:1px solid #b42318;
+  background:#fff;
+  color:#b42318;
+  font:inherit;
+  font-size:.82rem;
+  font-weight:800;
+  line-height:1;
+  padding:8px 12px;
+  border-radius:10px;
+  box-shadow:0 8px 18px rgba(0,33,66,.16);
+  cursor:pointer;
+}
+.cms-photo-delete-btn:hover,
+.cms-photo-delete-btn:focus-visible{
+  background:#b42318;
+  color:#fff;
+  outline:none;
+}
 .cms-photo-resize-handle{
   position:absolute;
   width:14px;
