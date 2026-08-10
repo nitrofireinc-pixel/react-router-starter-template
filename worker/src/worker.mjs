@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'payment-ledger-xml-20260810-2';
+const ASSET_VERSION = 'payment-ledger-inkind-20260810-1';
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
@@ -6795,18 +6795,97 @@ async function handleApi(request, env, url, ctx = null) {
     const { sponsors, donors } = await loadPaymentLedgerRows(env);
     const sponsorTotal = sponsors.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
     const donorTotal = donors.reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+    const inKindTotal = [...sponsors, ...donors]
+      .filter((row) => row.money_exchanged === false)
+      .reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+    const cashTotal = (sponsorTotal + donorTotal) - inKindTotal;
     return jsonResponse({
       sponsors,
       donors,
       totals: {
         sponsors_cents: sponsorTotal,
-        sponsors_display: formatSponsorAmountDisplay(sponsorTotal) || '$0',
+        sponsors_display: formatLedgerAmountDisplay(sponsorTotal),
         donors_cents: donorTotal,
-        donors_display: formatSponsorAmountDisplay(donorTotal) || '$0',
+        donors_display: formatLedgerAmountDisplay(donorTotal),
+        cash_cents: cashTotal,
+        cash_display: formatLedgerAmountDisplay(cashTotal),
+        in_kind_cents: inKindTotal,
+        in_kind_display: formatLedgerAmountDisplay(inKindTotal),
         grand_total_cents: sponsorTotal + donorTotal,
-        grand_total_display: formatSponsorAmountDisplay(sponsorTotal + donorTotal) || '$0',
+        grand_total_display: formatLedgerAmountDisplay(sponsorTotal + donorTotal),
       },
       download_url: '/api/admin/sponsors/payment-ledger.xml',
+    });
+  }
+  if (url.pathname === '/api/admin/sponsors/payment-ledger/in-kind' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+      return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const kind = String(payload.kind || 'sponsor').trim().toLowerCase() === 'donor' ? 'donor' : 'sponsor';
+    const name = String(payload.name || payload.business_name || '').trim();
+    const address = String(payload.address || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || payload.amount,
+    });
+    const amountDisplay = String(payload.amount_display || formatLedgerAmountDisplay(amountCents)).trim();
+    const note = String(payload.note || 'Fair market value for donated services; no money exchanged.').trim();
+    const packageLabel = String(payload.package || payload.package_label || 'In-kind donated services').trim()
+      || 'In-kind donated services';
+    if (!name || name.length > 200) {
+      return jsonResponse({ detail: 'Name or business is required' }, 422);
+    }
+    if (address.length > 400) {
+      return jsonResponse({ detail: 'Address is too long' }, 422);
+    }
+    if (!amountCents || amountCents < 1) {
+      return jsonResponse({ detail: 'Enter a fair-market amount greater than $0' }, 422);
+    }
+    if (amountCents > 25_000_000) {
+      return jsonResponse({ detail: 'Amount cannot exceed $250,000' }, 422);
+    }
+    if (note.length > 500) {
+      return jsonResponse({ detail: 'Note is too long' }, 422);
+    }
+    const nextRef = await env.DB.prepare(
+      "SELECT COALESCE(MAX(ref_id), 0) + 1 AS next_id FROM payment_ledger WHERE ref_type = 'in_kind'",
+    ).first();
+    const refId = Number(nextRef?.next_id || 1);
+    const paidAt = String(payload.paid_at || new Date().toISOString()).trim();
+    await upsertPaymentLedgerEntry(env, {
+      kind,
+      refType: 'in_kind',
+      refId,
+      name,
+      address,
+      amountCents,
+      amountDisplay,
+      packageLabel,
+      note,
+      moneyExchanged: false,
+      paidAt,
+    });
+    const xml = await refreshPaymentLedgerXml(env);
+    return jsonResponse({
+      ok: true,
+      entry: {
+        kind,
+        ref_type: 'in_kind',
+        ref_id: refId,
+        name,
+        address,
+        amount_cents: amountCents,
+        amount_display: amountDisplay,
+        package: packageLabel,
+        note,
+        money_exchanged: false,
+        paid_at: paidAt,
+      },
+      xml_updated: Boolean(xml),
+      detail: `In-kind ${kind} recorded for ${name}.`,
     });
   }
   if (url.pathname === '/api/admin/sponsors/manual' && request.method === 'POST') {
@@ -8002,7 +8081,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>Edit the Gallery page header here. Photos are managed in the Photos tab and appear newest-first on the public Gallery page.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview. Home shows the 6 newest photos with a link to the full Gallery.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="gallery">Photo gallery page</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
-<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
+<section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-inkind">Add In-Kind Donation</button><button class="btn primary" type="button" id="new-sponsor">Manual Add Sponsor</button></div></div><div class="editor-layout sponsors-manage-layout"><div class="admin-card stack gold-sponsors-print-card">
   <h2>Gold sponsors for advertising</h2>
   <p class="muted">Active Gold sponsors with logos for programs, flyers, and handouts. Print builds a PDF in the background, then opens the print dialog in this page (no pop-up window).</p>
   <div id="gold-sponsors-print-preview" class="gold-sponsors-print-preview" aria-live="polite"></div>

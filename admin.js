@@ -3318,6 +3318,82 @@ function resetSponsorForm() {
   // Legacy no-op kept for older call sites; form lives in the toast now.
 }
 
+function ensureInKindFormToast() {
+  let root = document.querySelector('#admin-inkind-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-inkind-form-toast';
+  root.className = 'admin-sponsor-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-inkind-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-inkind-form-dismiss aria-label="Close in-kind form"></button>
+    <div class="admin-sponsor-form-toast-panel">
+      <div class="admin-sponsor-form-toast-card">
+        <h3 id="admin-inkind-form-toast-title">Add In-Kind Donation</h3>
+        <p class="muted">Records fair-market value for donated goods or services with no money exchanged. This updates the payment ledger XML only.</p>
+        <form id="inkind-manual-form" class="admin-sponsor-manual-form" novalidate>
+          <label>Record as
+            <select name="kind" required>
+              <option value="sponsor" selected>Sponsor / organization</option>
+              <option value="donor">Donor / individual</option>
+            </select>
+          </label>
+          <label>Name or business<input name="name" required autocomplete="organization" maxlength="200" placeholder="Business or donor name"></label>
+          <label>Address <span class="muted">(optional)</span><input name="address" maxlength="400" placeholder="Street, city, state ZIP" autocomplete="street-address"></label>
+          <label>Fair market amount<input name="amount_display" required inputmode="decimal" placeholder="$8,264.00"></label>
+          <label>Package / description<input name="package" maxlength="80" value="In-kind donated services" placeholder="In-kind donated services"></label>
+          <label>Note<textarea name="note" rows="3" maxlength="500">Fair market value for donated services; no money exchanged.</textarea></label>
+          <p class="admin-sponsor-form-toast-status" id="inkind-manual-status" aria-live="polite"></p>
+          <div class="admin-sponsor-form-toast-actions">
+            <button class="btn outline" type="button" data-inkind-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit">Save In-Kind Entry</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-inkind-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideInKindFormToast());
+  });
+  return root;
+}
+
+function showInKindFormToast() {
+  const root = ensureInKindFormToast();
+  const form = root.querySelector('#inkind-manual-form');
+  const status = root.querySelector('#inkind-manual-status');
+  if (form) {
+    form.reset();
+    if (form.elements.kind) form.elements.kind.value = 'sponsor';
+    if (form.elements.package) form.elements.package.value = 'In-kind donated services';
+    if (form.elements.note) {
+      form.elements.note.value = 'Fair market value for donated services; no money exchanged.';
+    }
+  }
+  if (status) status.textContent = '';
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  window.setTimeout(() => form?.elements.name?.focus(), 40);
+  return root;
+}
+
+function hideInKindFormToast() {
+  const root = document.querySelector('#admin-inkind-form-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
 function goldPrintSponsors() {
   return orderedSponsors().filter((sponsor) => (
     Number(sponsor.active) !== 0
@@ -5536,9 +5612,11 @@ function bindForms() {
       const data = await jsonFetch('/api/admin/sponsors/payment-ledger');
       const totals = data?.totals || {};
       summary.textContent = [
-        `Sponsors: ${Number(data?.sponsors?.length || 0)} totaling ${totals.sponsors_display || '$0'}`,
-        `Donors: ${Number(data?.donors?.length || 0)} totaling ${totals.donors_display || '$0'}`,
-        `Grand total: ${totals.grand_total_display || '$0'}`,
+        `Sponsors: ${Number(data?.sponsors?.length || 0)} totaling ${totals.sponsors_display || '$0.00'}`,
+        `Donors: ${Number(data?.donors?.length || 0)} totaling ${totals.donors_display || '$0.00'}`,
+        `Cash: ${totals.cash_display || '$0.00'}`,
+        `In-kind: ${totals.in_kind_display || '$0.00'}`,
+        `Grand total: ${totals.grand_total_display || '$0.00'}`,
       ].join(' · ');
       if (status) status.textContent = '';
     } catch (error) {
@@ -5593,6 +5671,55 @@ function bindForms() {
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
     showManualAddSponsorToast();
+  });
+
+  document.querySelector('#new-inkind')?.addEventListener('click', () => {
+    showInKindFormToast();
+  });
+
+  const inKindToast = ensureInKindFormToast();
+  inKindToast.querySelector('#inkind-manual-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#inkind-manual-status');
+    const kind = String(form.elements.kind?.value || 'sponsor').trim().toLowerCase() === 'donor'
+      ? 'donor'
+      : 'sponsor';
+    const name = String(form.elements.name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const amountDisplay = String(form.elements.amount_display?.value || '').trim();
+    const packageLabel = String(form.elements.package?.value || '').trim() || 'In-kind donated services';
+    const note = String(form.elements.note?.value || '').trim()
+      || 'Fair market value for donated services; no money exchanged.';
+    if (!name) {
+      if (status) status.textContent = 'Name or business is required.';
+      return;
+    }
+    if (!amountDisplay) {
+      if (status) status.textContent = 'Fair market amount is required.';
+      return;
+    }
+    if (status) status.textContent = 'Saving…';
+    try {
+      await jsonFetch('/api/admin/sponsors/payment-ledger/in-kind', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind,
+          name,
+          address,
+          amount_display: amountDisplay,
+          package: packageLabel,
+          note,
+        }),
+      });
+      hideInKindFormToast();
+      showSavedToast('In-kind donation saved to ledger.');
+      await loadPaymentLedgerSummary();
+    } catch (error) {
+      const detail = error?.message || 'Could not save in-kind entry.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+    }
   });
 
   const sponsorToast = ensureSponsorFormToast();
