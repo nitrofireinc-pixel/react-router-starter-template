@@ -910,6 +910,18 @@ function sanitizeRichImageWidthPx(attrs = '') {
   return Math.max(80, Math.min(1600, Math.round(width)));
 }
 
+function sanitizeRichImageFloatClass(attrs = '') {
+  const className = String(attrs || '');
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  if (/\bcms-body-photo-block\b/i.test(className) || /(?:^|;)\s*float\s*:\s*none\b/i.test(style)) return 'cms-body-photo-block';
+  if (/\bcms-body-photo-right\b/i.test(className) || /(?:^|;)\s*float\s*:\s*right\b/i.test(style)) return 'cms-body-photo-right';
+  if (/\bcms-body-photo-left\b/i.test(className) || /(?:^|;)\s*float\s*:\s*left\b/i.test(style)) return 'cms-body-photo-left';
+  // Sized photos default to left wrap; unsized legacy photos stay full-width block.
+  if (sanitizeRichImageWidthPx(attrs) > 0) return 'cms-body-photo-left';
+  return 'cms-body-photo-block';
+}
+
 function sanitizeRichImageTag(attrs = '') {
   const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
@@ -927,7 +939,8 @@ function sanitizeRichImageTag(attrs = '') {
   if (/[<>"\s]/.test(src)) return '';
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
-  const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
+  const floatClass = sanitizeRichImageFloatClass(attrs);
+  const className = ['cms-body-photo', floatClass].filter(Boolean).join(' ');
   const widthPx = sanitizeRichImageWidthPx(attrs);
   const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
   const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
@@ -973,11 +986,14 @@ function sanitizeRichHtml(dirty) {
     return `<${tag}>`;
   });
   html = html
+    .replace(/<span[^>]*\bdata-cms-caret-mark\b[^>]*>[\s\S]*?<\/span>/gi, '')
+    .replace(/<(p|div)\s+class="cms-body-photo">\s*(<img\b[^>]*>)\s*<\/\1>/gi, '$2')
     .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .trim();
   if (!html) return '';
-  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  // Keep a lone floated <img> unwrapped so it can insert mid-paragraph and wrap text.
+  if (!/<(?:p|div|h2|h3|ul|ol|img)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
@@ -1920,17 +1936,115 @@ function getActivePageRichField({ multilineOnly = false } = {}) {
   return field;
 }
 
-const pageRichSelection = { field: null, range: null };
+const pageRichSelection = { field: null, range: null, offset: null };
+
+function getCaretCharacterOffsetWithin(element) {
+  const selection = window.getSelection();
+  if (!element || !selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) return null;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(element);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function setCaretCharacterOffsetWithin(element, offset) {
+  if (!element) return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const target = Math.max(0, Number(offset) || 0);
+  let current = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode();
+  while (node) {
+    const next = current + node.textContent.length;
+    if (target <= next) {
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, target - current));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+    current = next;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function clearPageRichCaretMarks(root = null) {
+  const roots = root
+    ? [root]
+    : [...document.querySelectorAll('.cms-edit-rich, .fundraising-body-editor')];
+  roots.forEach((node) => {
+    node?.querySelectorAll?.('[data-cms-caret-mark]').forEach((mark) => mark.remove());
+  });
+}
+
+function placePageRichCaretMark(field) {
+  if (!field) return false;
+  clearPageRichCaretMarks(field);
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  if (!selection) return false;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    if (pageRichSelection.range) {
+      try {
+        selection.removeAllRanges();
+        selection.addRange(pageRichSelection.range);
+      } catch {
+        /* fall through */
+      }
+    } else if (pageRichSelection.offset != null) {
+      setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) return false;
+  const range = selection.getRangeAt(0);
+  range.collapse(true);
+  const mark = document.createElement('span');
+  mark.setAttribute('data-cms-caret-mark', '1');
+  mark.setAttribute('aria-hidden', 'true');
+  mark.style.cssText = 'display:inline-block;width:0;height:0;overflow:hidden;font-size:0;line-height:0;';
+  mark.appendChild(document.createTextNode('\u200b'));
+  range.insertNode(mark);
+  const after = document.createRange();
+  after.setStartAfter(mark);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
+  pageRichSelection.field = field;
+  return true;
+}
 
 function savePageRichSelection(field = getActivePageRichField()) {
   pageRichSelection.field = field || null;
   pageRichSelection.range = null;
+  pageRichSelection.offset = null;
   if (!field) return;
   const selection = window.getSelection();
   if (!selection?.rangeCount) return;
   const range = selection.getRangeAt(0);
   if (!field.contains(range.commonAncestorContainer)) return;
-  pageRichSelection.range = range.cloneRange();
+  try {
+    pageRichSelection.range = range.cloneRange();
+  } catch {
+    pageRichSelection.range = null;
+  }
+  pageRichSelection.offset = getCaretCharacterOffsetWithin(field);
 }
 
 function restorePageRichSelection() {
@@ -1941,11 +2055,73 @@ function restorePageRichSelection() {
   field.focus();
   field.classList.add('is-focused');
   const selection = window.getSelection();
-  if (pageRichSelection.range && selection) {
+  const mark = field.querySelector('[data-cms-caret-mark]');
+  if (mark && selection) {
+    const range = document.createRange();
+    range.setStartBefore(mark);
+    range.collapse(true);
     selection.removeAllRanges();
-    selection.addRange(pageRichSelection.range);
+    selection.addRange(range);
+    mark.remove();
+    return field;
+  }
+  let restored = false;
+  if (pageRichSelection.range && selection) {
+    try {
+      selection.removeAllRanges();
+      selection.addRange(pageRichSelection.range);
+      restored = field.contains(selection.anchorNode);
+    } catch {
+      restored = false;
+    }
+  }
+  if (!restored && pageRichSelection.offset != null) {
+    restored = setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+  }
+  if (!restored && selection) {
+    // Prefer end over start so inserts never jump to the top of the editor.
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
   return field;
+}
+
+function insertHtmlAtCaret(field, html) {
+  if (!field || !html) return null;
+  restorePageRichSelection();
+  field.focus();
+  const selection = window.getSelection();
+  if (!selection) return null;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  let node = null;
+  try {
+    const frag = range.createContextualFragment(html);
+    node = frag.lastChild;
+    range.insertNode(frag);
+  } catch {
+    document.execCommand('insertHTML', false, html);
+    node = [...field.querySelectorAll('img.cms-body-photo')].pop() || null;
+  }
+  if (node) {
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(after);
+  }
+  savePageRichSelection(field);
+  return node;
 }
 
 function setRichToolbarVisible(activeField = false) {
@@ -2042,28 +2218,30 @@ async function compressImageFileForUpload(file, {
 }
 
 function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
-  const field = restorePageRichSelection()
+  const field = pageRichSelection.field
     || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
     || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
-  const widthStyle = Number(widthPx) > 0
-    ? ` style="width: ${Math.round(Number(widthPx))}px; height: auto;"`
-    : '';
+  // Default width leaves room for text wrap beside the photo.
+  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : 280;
   const cleaned = sanitizeRichHtml(
-    `<p class="cms-body-photo"><img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo"${widthStyle}></p>`,
+    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo cms-body-photo-left" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
   );
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
-  field.focus();
-  document.execCommand('insertHTML', false, cleaned);
+  // Avoid block <p> wrappers so the image can sit at the caret and wrap text.
+  const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
+  const insertedNode = insertHtmlAtCaret(field, html);
+  const inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+    ? insertedNode
+    : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
   if (field.closest('#fundraising-body-form')) {
     syncFormRichEditors(field.closest('form'));
-    const inserted = [...field.querySelectorAll('img.cms-body-photo')].pop();
     if (inserted) selectFundraisingBodyPhoto(inserted);
   } else {
     syncFieldFromPreview(field);
   }
   savePageRichSelection(field);
-  return true;
+  return Boolean(inserted || html);
 }
 
 const fundraisingPhotoResize = {
@@ -2238,7 +2416,7 @@ function ensurePagePhotoToast() {
     <div class="admin-page-photo-toast-panel">
       <div class="admin-page-photo-toast-card">
         <h3 id="admin-page-photo-toast-title">Insert photo</h3>
-        <p class="admin-page-photo-toast-copy">Upload a new image or pick one from the gallery. Large photos are auto-shrunk to fit the ${IMAGE_UPLOAD_CLIENT_MAX_LABEL} limit. After insert, drag a corner to resize.</p>
+        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are auto-shrunk to fit the ${IMAGE_UPLOAD_CLIENT_MAX_LABEL} limit. After insert, drag a corner to resize.</p>
         <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
         <label class="admin-page-photo-file">Upload image
           <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
@@ -2309,6 +2487,7 @@ async function showPagePhotoToast() {
     alert('Open Manage → Fundraising Body, click into the body text, then choose Photo.');
     return;
   }
+  placePageRichCaretMark(pageRichSelection.field);
   const root = ensurePagePhotoToast();
   const status = root.querySelector('[data-page-photo-status]');
   const altInput = root.querySelector('[name="page_photo_alt"]');
@@ -2323,6 +2502,12 @@ async function showPagePhotoToast() {
 }
 
 function hidePagePhotoToast() {
+  const markedField = pageRichSelection.field;
+  if (markedField?.querySelector?.('[data-cms-caret-mark]')) {
+    restorePageRichSelection();
+  } else {
+    clearPageRichCaretMarks();
+  }
   const root = document.querySelector('#admin-page-photo-toast');
   if (!root || root.hidden) return;
   playOverlayLeave(root, { ms: 380, hide: true });
@@ -6053,7 +6238,7 @@ function openFundraisingBodyEditor({ statusText = '' } = {}) {
   syncEnsemblesFrameBodyLock();
   const status = document.querySelector('#fundraising-body-status');
   if (status) {
-    status.textContent = statusText || 'Use Photo to insert images. Drag a photo corner to resize. Save to close the editor.';
+    status.textContent = statusText || 'Click in the text where the photo should go, then use Photo. Text wraps around the image — drag a corner to resize.';
   }
   window.setTimeout(() => {
     const editor = form.querySelector('[data-rich-input="body_html"]');

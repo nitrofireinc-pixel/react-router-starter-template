@@ -220,7 +220,7 @@ test('sanitizeRichHtml keeps safe upload images and strips unsafe image sources'
   );
   assert.match(html, /src="\/uploads\/fundraiser\.jpg"/);
   assert.match(html, /alt="Cookie dough"/);
-  assert.match(html, /class="cms-body-photo"/);
+  assert.match(html, /class="cms-body-photo cms-body-photo-block"/);
   assert.doesNotMatch(html, /onerror/i);
   assert.doesNotMatch(html, /javascript:/i);
   assert.doesNotMatch(html, /evil\.example/);
@@ -231,7 +231,27 @@ test('sanitizeRichHtml preserves body photo width for editor resizing', () => {
     '<p class="cms-body-photo"><img src="/uploads/spring.jpg" alt="Spring" class="cms-body-photo" style="width: 320px; height: auto; color: red"></p>',
   );
   assert.match(html, /style="width: 320px; height: auto;"/);
+  assert.match(html, /cms-body-photo-left/);
   assert.doesNotMatch(html, /color:\s*red/);
+  assert.doesNotMatch(html, /<p class="cms-body-photo">/);
+});
+
+test('sanitizeRichHtml keeps floated body photos inline for text wrap', () => {
+  const html = sanitizeRichHtml(
+    '<p>Hello <img src="/uploads/a.jpg" alt="A" class="cms-body-photo cms-body-photo-left" style="width: 280px; height: auto;"> world</p>',
+  );
+  assert.match(html, /cms-body-photo-left/);
+  assert.match(html, /Hello/);
+  assert.match(html, /world/);
+  assert.match(html, /width: 280px/);
+});
+
+test('sanitizeRichHtml leaves a lone sized image unwrapped for mid-paragraph insert', () => {
+  const html = sanitizeRichHtml(
+    '<img src="/uploads/a.jpg" alt="A" class="cms-body-photo cms-body-photo-left" style="width: 280px; height: auto;">',
+  );
+  assert.match(html, /^<img\b/i);
+  assert.doesNotMatch(html, /<p>/);
 });
 
 test('generateStructuredPageHtml preserves body photo inserts', () => {

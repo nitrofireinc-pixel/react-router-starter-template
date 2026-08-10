@@ -1430,22 +1430,72 @@ body.cms-ready #current-user{visibility:visible}.panel-head{display:flex;align-i
 .cms-edit-rich div.cms-body-photo img,
 .content img.cms-body-photo,
 .content p.cms-body-photo img,
-.content div.cms-body-photo img{
-  display:block;
-  width:min(100%,720px);
-  max-width:100%;
+.content div.cms-body-photo img,
+.fundraising-body-preview img.cms-body-photo,
+.fundraising-body-editor img.cms-body-photo,
+.cms-managed-body-preview img.cms-body-photo{
   height:auto;
-  margin:1rem 0;
-  border-radius:18px;
+  border-radius:16px;
   border:1px solid var(--line,#d5deea);
   box-shadow:0 10px 28px rgba(0,33,66,.08);
   background:#fff;
+}
+.cms-edit-rich img.cms-body-photo-left,
+.content img.cms-body-photo-left,
+.fundraising-body-preview img.cms-body-photo-left,
+.fundraising-body-editor img.cms-body-photo-left,
+.cms-managed-body-preview img.cms-body-photo-left{
+  float:left;
+  display:inline;
+  width:var(--cms-body-photo-width,280px);
+  max-width:min(48%,420px);
+  margin:0.35rem 1.1rem 0.85rem 0;
+}
+.cms-edit-rich img.cms-body-photo-right,
+.content img.cms-body-photo-right,
+.fundraising-body-preview img.cms-body-photo-right,
+.fundraising-body-editor img.cms-body-photo-right,
+.cms-managed-body-preview img.cms-body-photo-right{
+  float:right;
+  display:inline;
+  width:var(--cms-body-photo-width,280px);
+  max-width:min(48%,420px);
+  margin:0.35rem 0 0.85rem 1.1rem;
+}
+.cms-edit-rich img.cms-body-photo-block,
+.cms-edit-rich img.cms-body-photo:not(.cms-body-photo-left):not(.cms-body-photo-right),
+.cms-edit-rich p.cms-body-photo img,
+.cms-edit-rich div.cms-body-photo img,
+.content img.cms-body-photo-block,
+.content img.cms-body-photo:not(.cms-body-photo-left):not(.cms-body-photo-right),
+.content p.cms-body-photo img,
+.content div.cms-body-photo img,
+.fundraising-body-preview img.cms-body-photo-block,
+.fundraising-body-preview img.cms-body-photo:not(.cms-body-photo-left):not(.cms-body-photo-right),
+.fundraising-body-editor img.cms-body-photo-block,
+.fundraising-body-editor img.cms-body-photo:not(.cms-body-photo-left):not(.cms-body-photo-right),
+.cms-managed-body-preview img.cms-body-photo-block,
+.cms-managed-body-preview img.cms-body-photo:not(.cms-body-photo-left):not(.cms-body-photo-right){
+  float:none;
+  display:block;
+  width:min(100%,var(--cms-body-photo-width,720px));
+  max-width:100%;
+  margin:1rem auto;
 }
 .cms-edit-rich p.cms-body-photo,
 .cms-edit-rich div.cms-body-photo,
 .content p.cms-body-photo,
 .content div.cms-body-photo{
   margin:1rem 0;
+}
+.cms-edit-rich::after,
+.content .card::after,
+.fundraising-body-editor::after,
+.fundraising-body-preview::after,
+.cms-managed-body-preview::after{
+  content:"";
+  display:table;
+  clear:both;
 }
 .cms-managed-body-card{
   display:grid;
@@ -1461,16 +1511,6 @@ body.cms-ready #current-user{visibility:visible}.panel-head{display:flex;align-i
 }
 .cms-managed-body-note .kicker{margin:0}
 .cms-managed-body-note p{margin:0;color:#334155}
-.fundraising-body-preview img.cms-body-photo,
-.fundraising-body-editor img.cms-body-photo{
-  display:block;
-  width:min(100%,640px);
-  max-width:100%;
-  height:auto;
-  margin:1rem 0;
-  border-radius:16px;
-  border:1px solid #d5deea;
-}
 .fundraising-body-editor img.cms-body-photo{
   cursor:pointer;
 }

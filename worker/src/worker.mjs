@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'fundraising-photo-resize-20260810-2';
+const ASSET_VERSION = 'fundraising-photo-wrap-20260810-3';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -5776,6 +5776,18 @@ function sanitizeRichImageWidthPx(attrs = '') {
   return Math.max(80, Math.min(1600, Math.round(width)));
 }
 
+function sanitizeRichImageFloatClass(attrs = '') {
+  const className = String(attrs || '');
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  if (/\bcms-body-photo-block\b/i.test(className) || /(?:^|;)\s*float\s*:\s*none\b/i.test(style)) return 'cms-body-photo-block';
+  if (/\bcms-body-photo-right\b/i.test(className) || /(?:^|;)\s*float\s*:\s*right\b/i.test(style)) return 'cms-body-photo-right';
+  if (/\bcms-body-photo-left\b/i.test(className) || /(?:^|;)\s*float\s*:\s*left\b/i.test(style)) return 'cms-body-photo-left';
+  // Sized photos default to left wrap; unsized legacy photos stay full-width block.
+  if (sanitizeRichImageWidthPx(attrs) > 0) return 'cms-body-photo-left';
+  return 'cms-body-photo-block';
+}
+
 function sanitizeRichImageTag(attrs = '') {
   const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
@@ -5794,7 +5806,8 @@ function sanitizeRichImageTag(attrs = '') {
   if (/[<>"\s]/.test(src)) return '';
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
-  const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
+  const floatClass = sanitizeRichImageFloatClass(attrs);
+  const className = ['cms-body-photo', floatClass].filter(Boolean).join(' ');
   const widthPx = sanitizeRichImageWidthPx(attrs);
   const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
   const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
@@ -5842,11 +5855,14 @@ export function sanitizeRichHtml(dirty) {
   });
 
   html = html
+    .replace(/<span[^>]*\bdata-cms-caret-mark\b[^>]*>[\s\S]*?<\/span>/gi, '')
+    .replace(/<(p|div)\s+class="cms-body-photo">\s*(<img\b[^>]*>)\s*<\/\1>/gi, '$2')
     .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .trim();
   if (!html) return '';
-  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  // Keep a lone floated <img> unwrapped so it can sit mid-paragraph and wrap text.
+  if (!/<(?:p|div|h2|h3|ul|ol|img)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
