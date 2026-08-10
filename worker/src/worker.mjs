@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'fundraising-status-copy-20260810-1';
+const ASSET_VERSION = 'fundraising-status-copy-20260810-2';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -8858,7 +8858,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-fundraising-body" class="cms-panel fundraising-body-panel" hidden><div class="panel-head"><div><p class="kicker">Support</p><h1>Fundraising Body</h1><p>Edit the Fundraising page body card here. Requires the Fundraising page permission. Click the red Edit Body button to open the editor.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-fundraising-body">Edit Body</button></div></div><div class="admin-card stack fundraising-body-card"><h2>Current body</h2><p class="muted">Open the editor to update campaign copy and insert photos on their own lines. The Direct Support donate card stays on the public page automatically.</p><div id="fundraising-body-preview" class="cms-content fundraising-body-preview"></div><p class="status" id="fundraising-body-panel-status"></p></div>
+<section id="tab-fundraising-body" class="cms-panel fundraising-body-panel" hidden><div class="panel-head"><div><p class="kicker">Support</p><h1>Fundraising Body</h1><p>Requires the Fundraising page permission. Click the red Edit Body button to open the editor.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="edit-fundraising-body">Edit Body</button></div></div><div class="admin-card stack fundraising-body-card"><h2>Current body</h2><p class="muted">Open the editor to update campaign copy and insert photos on their own lines. The Direct Support donate card stays on the public page automatically.</p><div id="fundraising-body-preview" class="cms-content fundraising-body-preview"></div><p class="status" id="fundraising-body-panel-status"></p></div>
 <div id="fundraising-editor-modal" class="minutes-frame-modal fundraising-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-fundraising-editor-dismiss aria-label="Close fundraising body editor"></button>
   <div class="minutes-editor-dialog fundraising-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="fundraising-editor-title">
