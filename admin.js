@@ -885,16 +885,49 @@ function normalizeCssEmphasisMarkup(dirty) {
     });
 }
 
+function sanitizeRichHtmlClassList(attrs, allowedNames) {
+  const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  return String(classMatch?.[1] || classMatch?.[2] || '')
+    .split(/\s+/)
+    .filter((name) => allowedNames.includes(name))
+    .join(' ');
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
+  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+  try {
+    if (/^https?:\/\//i.test(src)) {
+      const parsed = new URL(src);
+      if (!parsed.pathname.startsWith('/uploads/')) return '';
+      src = parsed.pathname + (parsed.search || '');
+    }
+  } catch {
+    return '';
+  }
+  if (!src.startsWith('/uploads/')) return '';
+  if (/[<>"\s]/.test(src)) return '';
+  const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
+  const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']) || 'cms-body-photo';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}">`;
+}
+
 function sanitizeRichHtml(dirty) {
   let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a', 'img']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
+    if (tag === 'img') {
+      if (match.startsWith('</')) return '';
+      return sanitizeRichImageTag(attrs);
+    }
     if (match.startsWith('</')) return `</${tag}>`;
     if (tag === 'br') return '<br>';
     if (tag === 'a') {
@@ -909,12 +942,12 @@ function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'p') {
+      const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']);
+      return className ? `<p class="${className}">` : '<p>';
+    }
     if (tag === 'div') {
-      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const className = String(classMatch?.[1] || classMatch?.[2] || '')
-        .split(/\s+/)
-        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
-        .join(' ');
+      const className = sanitizeRichHtmlClassList(attrs, ['kicker', 'tag', 'draft', 'cms-body-photo']);
       return className ? `<div class="${className}">` : '<div>';
     }
     return `<${tag}>`;
@@ -1823,12 +1856,213 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
+function currentEditorPageSlug() {
+  const form = document.querySelector('#page-form');
+  return String(form?.elements?.original_slug?.value || form?.elements?.slug?.value || '').trim();
+}
+
+function canInsertPageBodyPhotos() {
+  const slug = currentEditorPageSlug();
+  return slug === 'fundraising' && canEditPage('fundraising');
+}
+
+function getActivePageRichField({ multilineOnly = false } = {}) {
+  const preview = document.querySelector('#page-preview');
+  if (!preview) return null;
+  const field = preview.querySelector('.cms-edit-rich.is-focused')
+    || preview.querySelector('.cms-edit-rich:focus')
+    || (document.activeElement?.closest?.('.cms-edit-rich') || null);
+  if (!field || !preview.contains(field)) return null;
+  if (multilineOnly && field.classList.contains('cms-edit-inline')) return null;
+  return field;
+}
+
+const pageRichSelection = { field: null, range: null };
+
+function savePageRichSelection(field = getActivePageRichField()) {
+  pageRichSelection.field = field || null;
+  pageRichSelection.range = null;
+  if (!field) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!field.contains(range.commonAncestorContainer)) return;
+  pageRichSelection.range = range.cloneRange();
+}
+
+function restorePageRichSelection() {
+  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  if (!field) return null;
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  if (pageRichSelection.range && selection) {
+    selection.removeAllRanges();
+    selection.addRange(pageRichSelection.range);
+  }
+  return field;
+}
+
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
   // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
+  const photoBtn = toolbar.querySelector('[data-rich-insert-photo]');
+  if (photoBtn) {
+    const field = getActivePageRichField({ multilineOnly: true });
+    const showPhoto = Boolean(activeField) && canInsertPageBodyPhotos() && Boolean(field || pageRichSelection.field);
+    photoBtn.hidden = !showPhoto;
+  }
+}
+
+function insertPhotoIntoPageBody(url, altText = 'Photo') {
+  const field = restorePageRichSelection() || getActivePageRichField({ multilineOnly: true });
+  if (!field) return false;
+  const cleaned = sanitizeRichHtml(
+    `<p class="cms-body-photo"><img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo"></p>`,
+  );
+  if (!cleaned || !/<img\b/i.test(cleaned)) return false;
+  field.focus();
+  document.execCommand('insertHTML', false, cleaned);
+  syncFieldFromPreview(field);
+  savePageRichSelection(field);
+  setRichToolbarVisible(true);
+  return true;
+}
+
+function ensurePagePhotoToast() {
+  let root = document.querySelector('#admin-page-photo-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-page-photo-toast';
+  root.className = 'admin-page-photo-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-page-photo-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-page-photo-toast-backdrop" data-page-photo-dismiss aria-label="Close insert photo"></button>
+    <div class="admin-page-photo-toast-panel">
+      <div class="admin-page-photo-toast-card">
+        <h3 id="admin-page-photo-toast-title">Insert photo</h3>
+        <p class="admin-page-photo-toast-copy">Upload a new image or pick one from the gallery. It will be inserted on its own line at the cursor.</p>
+        <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
+        <label class="admin-page-photo-file">Upload image
+          <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
+        </label>
+        <div class="admin-page-photo-toast-actions">
+          <button class="btn primary" type="button" data-page-photo-upload>Upload &amp; insert</button>
+          <button class="btn outline" type="button" data-page-photo-dismiss>Cancel</button>
+        </div>
+        <p class="admin-page-photo-toast-status" data-page-photo-status aria-live="polite"></p>
+        <div class="admin-page-photo-picker" data-page-photo-picker></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-page-photo-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePagePhotoToast());
+  });
+  root.querySelector('[data-page-photo-upload]')?.addEventListener('click', () => uploadAndInsertPagePhoto());
+  return root;
+}
+
+async function loadPagePhotoPickerList() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  const picker = root?.querySelector('[data-page-photo-picker]');
+  if (!picker) return;
+  picker.innerHTML = '<p class="draft">Loading photos…</p>';
+  try {
+    const photos = await jsonFetch('/api/photos');
+    const ordered = [...photos].sort((a, b) => (
+      Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      || Number(b.id || 0) - Number(a.id || 0)
+    ));
+    if (!ordered.length) {
+      picker.innerHTML = '<p class="draft">No gallery photos yet. Upload one above.</p>';
+      return;
+    }
+    picker.innerHTML = `
+      <p class="admin-page-photo-picker-label">Or choose an existing photo</p>
+      <div class="admin-page-photo-grid">
+        ${ordered.map((photo) => `
+          <button type="button" class="admin-page-photo-thumb" data-page-photo-pick="${escapeAttr(photo.url)}" data-page-photo-alt="${escapeAttr(photo.alt_text || plainTextFromHtml(photo.caption) || 'Photo')}" title="${escapeAttr(plainTextFromHtml(photo.caption) || photo.original_name || 'Photo')}">
+            <img src="${escapeAttr(photo.url)}" alt="${escapeAttr(photo.alt_text || 'Photo')}">
+          </button>
+        `).join('')}
+      </div>`;
+    picker.querySelectorAll('[data-page-photo-pick]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const altInput = root.querySelector('[name="page_photo_alt"]');
+        const alt = String(altInput?.value || button.dataset.pagePhotoAlt || 'Photo').trim() || 'Photo';
+        if (insertPhotoIntoPageBody(button.dataset.pagePhotoPick, alt)) hidePagePhotoToast();
+      });
+    });
+  } catch (error) {
+    picker.innerHTML = `<p class="draft">Could not load photos: ${escapeHtml(error.message || 'error')}</p>`;
+  }
+}
+
+async function showPagePhotoToast() {
+  if (!canInsertPageBodyPhotos()) {
+    alert('Photo insert is available on the Fundraising page body.');
+    return;
+  }
+  savePageRichSelection(getActivePageRichField({ multilineOnly: true }));
+  if (!pageRichSelection.field) {
+    alert('Click into the Fundraising body text first, then choose Photo.');
+    return;
+  }
+  const root = ensurePagePhotoToast();
+  const status = root.querySelector('[data-page-photo-status]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  if (status) status.textContent = '';
+  if (altInput) altInput.value = '';
+  if (fileInput) fileInput.value = '';
+  root.hidden = false;
+  playOverlayEnter(root);
+  await loadPagePhotoPickerList();
+  window.setTimeout(() => altInput?.focus(), 40);
+}
+
+function hidePagePhotoToast() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root || root.hidden) return;
+  playOverlayLeave(root, { ms: 380, hide: true });
+}
+
+async function uploadAndInsertPagePhoto() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root) return;
+  const status = root.querySelector('[data-page-photo-status]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = 'Choose an image file to upload.';
+    return;
+  }
+  const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
+  const body = new FormData();
+  body.append('file', file);
+  body.append('alt_text', alt);
+  body.append('caption', alt);
+  // Negative sort_order keeps page-body uploads out of the public gallery grid.
+  body.append('sort_order', '-600');
+  if (status) status.textContent = 'Uploading…';
+  try {
+    const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body });
+    if (!insertPhotoIntoPageBody(stored.url, stored.alt_text || alt)) {
+      if (status) status.textContent = 'Uploaded, but could not insert into the body. Click the body and try again.';
+      return;
+    }
+    hidePagePhotoToast();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not upload photo.';
+  }
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1973,14 +2207,31 @@ function bindPageVisualEditor() {
 
   preview.addEventListener('focusin', event => {
     const field = event.target.closest?.('.cms-edit-rich');
+    if (field) {
+      preview.querySelectorAll('.cms-edit-rich.is-focused').forEach((node) => {
+        if (node !== field) node.classList.remove('is-focused');
+      });
+      field.classList.add('is-focused');
+      savePageRichSelection(field);
+    }
     setRichToolbarVisible(Boolean(field));
+  });
+  preview.addEventListener('mouseup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
+  });
+  preview.addEventListener('keyup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
   });
   preview.addEventListener('focusout', event => {
     const next = event.relatedTarget;
-    if (next?.closest?.('#rich-text-toolbar')) return;
+    if (next?.closest?.('#rich-text-toolbar') || next?.closest?.('#admin-page-photo-toast')) return;
     setTimeout(() => {
       const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-      setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
+      const toolbarFocus = Boolean(document.activeElement?.closest?.('#rich-text-toolbar')
+        || document.activeElement?.closest?.('#admin-page-photo-toast'));
+      setRichToolbarVisible(Boolean(active) || toolbarFocus);
     }, 0);
   });
 
@@ -2026,6 +2277,19 @@ function bindPageVisualEditor() {
     const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
     if (field) syncFieldFromPreview(field);
     event.target.value = '';
+  });
+  toolbar?.querySelector('[data-rich-insert-line]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-line]')?.addEventListener('click', () => {
+    const field = restorePageRichSelection() || getActivePageRichField({ multilineOnly: true });
+    if (!field) return;
+    insertRichEditorLineBreak(field);
+    syncFieldFromPreview(field);
+    savePageRichSelection(field);
+    setRichToolbarVisible(true);
+  });
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('click', () => {
+    showPagePhotoToast();
   });
 
   document.querySelector('#add-page-callout')?.addEventListener('click', () => {
@@ -2878,6 +3142,8 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
     const boostersHint = form.querySelector('[data-boosters-hint]');
     if (boostersHint) boostersHint.hidden = page.slug !== 'boosters';
+    const fundraisingHint = form.querySelector('[data-fundraising-hint]');
+    if (fundraisingHint) fundraisingHint.hidden = page.slug !== 'fundraising';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
     const galleryHint = form.querySelector('[data-gallery-hint]');

@@ -214,6 +214,31 @@ test('sanitizeRichHtml converts CSS bold/italic spans into semantic tags', () =>
   assert.doesNotMatch(html, /font-style/);
 });
 
+test('sanitizeRichHtml keeps safe upload images and strips unsafe image sources', () => {
+  const html = sanitizeRichHtml(
+    '<p>Campaign</p><p class="cms-body-photo"><img src="/uploads/fundraiser.jpg" alt="Cookie dough" class="cms-body-photo" onerror="alert(1)"></p><img src="javascript:alert(1)"><img src="https://evil.example/x.jpg">',
+  );
+  assert.match(html, /src="\/uploads\/fundraiser\.jpg"/);
+  assert.match(html, /alt="Cookie dough"/);
+  assert.match(html, /class="cms-body-photo"/);
+  assert.doesNotMatch(html, /onerror/i);
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.doesNotMatch(html, /evil\.example/);
+});
+
+test('generateStructuredPageHtml preserves body photo inserts', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'standard',
+    kicker: 'Support',
+    heading: 'Fundraising',
+    intro: 'Help the band',
+    body_text: '<p>Spring campaign</p><p class="cms-body-photo"><img src="/uploads/spring.jpg" alt="Spring fundraiser" class="cms-body-photo"></p>',
+  });
+  assert.match(html, /data-cms-field="body_text"/);
+  assert.match(html, /src="\/uploads\/spring\.jpg"/);
+  assert.match(html, /alt="Spring fundraiser"/);
+});
+
 test('sanitizeInlineRichHtml keeps color spans for headings without block wrappers', () => {
   const html = sanitizeInlineRichHtml('<span style="color: #E71321">Fundraising</span><script>alert(1)</script><p>extra</p>');
   assert.match(html, /style="color: #E71321"/);
