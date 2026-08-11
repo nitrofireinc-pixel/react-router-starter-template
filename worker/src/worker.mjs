@@ -1,4 +1,9 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
+import {
+  INVOICE_LOGO_HEIGHT,
+  INVOICE_LOGO_RGB_FLATE_BASE64,
+  INVOICE_LOGO_WIDTH,
+} from './invoice-logo-rgb.mjs';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -184,11 +189,17 @@ export function extractSponsorTierFields(html = '') {
 }
 
 const SESSION_COOKIE = 'efband_session';
+export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
-const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const ASSET_VERSION = 'invoice-logo-rgb-fix-20260807-1';
+/** Shared Blue Regiment mark used by the public title and minutes letterhead. */
+const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
+const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const INVOICE_LOGO_PUBLIC_URL = `https://efhsband.org${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
+export { BLUE_REGIMENT_MARK_PATH, MINUTES_LETTERHEAD_MARK, PUBLIC_BRAND_MARK };
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -407,6 +418,20 @@ async function makeSession(user, env) {
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
 
+export function isSessionFresh(issuedAtSeconds, nowSeconds = Math.floor(Date.now() / 1000), ttlSeconds = SESSION_TTL_SECONDS) {
+  const issued = Number(issuedAtSeconds);
+  const now = Number(nowSeconds);
+  const ttl = Number(ttlSeconds);
+  if (!Number.isFinite(issued) || !Number.isFinite(now) || !Number.isFinite(ttl)) return false;
+  if (issued > now + 60) return false; // reject far-future timestamps
+  return (now - issued) <= ttl;
+}
+
+export function sessionCookieHeader(token, { maxAge = SESSION_TTL_SECONDS } = {}) {
+  const age = Math.max(0, Number(maxAge) || 0);
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+}
+
 async function currentUser(request, env) {
   const value = getCookie(request, SESSION_COOKIE);
   if (!value || !value.includes('.')) return null;
@@ -415,6 +440,7 @@ async function currentUser(request, env) {
   if (supplied !== expected) return null;
   try {
     const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    if (!isSessionFresh(data.t)) return null;
     if (data.uid) return getUserById(env, Number(data.uid));
     if (data.u) return getUserByUsername(env, data.u);
   } catch {
@@ -459,7 +485,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, original_name TEXT NOT NULL, alt_text TEXT NOT NULL, caption TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, content_type TEXT NOT NULL DEFAULT \'application/octet-stream\', data_base64 TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -547,6 +573,16 @@ async function initDb(env) {
   } catch {
     // Column already exists on upgraded databases.
   }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN phone TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN email TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
     const rawAddress = String(row.address || '');
@@ -581,7 +617,7 @@ async function initDb(env) {
   }
   const sponsorCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sponsors').first();
   if (!sponsorCount?.count) {
-    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
+    await env.DB.batch(DEFAULT_SPONSORS.map((sponsor) => env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city || 'Kernersville', sponsor.state || 'NC', sponsor.phone || '', sponsor.email || '', sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad ?? 0)));
   }
   const staffCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM staff_members').first();
   if (!staffCount?.count) {
@@ -636,6 +672,15 @@ async function initDb(env) {
         .run();
     }
   }
+  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
+  if (calendarPageRow?.body_html) {
+    const nextCalendarHtml = ensureCalendarMonthMount(calendarPageRow.body_html);
+    if (nextCalendarHtml !== calendarPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextCalendarHtml, calendarPageRow.id)
+        .run();
+    }
+  }
   const userCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
   if (!userCount?.count) {
     const previousHash = await env.DB.prepare("SELECT value FROM auth_settings WHERE key = 'admin_password_hash'").first();
@@ -660,10 +705,19 @@ export function isPublicHtmlPath(pathname = '/') {
   return path.endsWith('.html');
 }
 
-export function shouldRedirectToMaintenance(pathname = '/', site = {}) {
+export function shouldRedirectToMaintenance(pathname = '/', site = {}, { bypass = false } = {}) {
+  if (bypass) return false;
   if (!isMaintenanceMode(site)) return false;
   if (isMaintenancePath(pathname)) return false;
   return isPublicHtmlPath(pathname);
+}
+
+export function renderMaintenancePreviewBanner() {
+  return `<div class="maintenance-preview-banner" role="status" data-maintenance-preview-banner>
+  <strong>Maintenance mode is on.</strong>
+  <span>Super Admin preview — the public and other users still see the maintenance page.</span>
+  <a href="/admin">Back to CMS</a>
+</div>`;
 }
 
 export function sanitizeMaintenanceReturnPath(value = '/') {
@@ -2182,6 +2236,53 @@ async function getEventById(env, id) {
   return row ? hydrateEventRow(row) : null;
 }
 
+/** Replace the old upcoming-events timeline with a month-calendar mount on the Calendar page. */
+export function ensureCalendarMonthMount(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  const mount = '<div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>';
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(source)) !== null) {
+    const start = match.index;
+    let depth = 1;
+    let i = start + match[0].length;
+    while (i < source.length && depth > 0) {
+      const nextOpen = source.toLowerCase().indexOf('<div', i);
+      const nextClose = source.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) ranges.push([start, i]);
+      }
+    }
+  }
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const [start, end] = ranges[index];
+    next = `${next.slice(0, start)}${mount}${next.slice(end)}`;
+  }
+  if (/data-month-calendar/i.test(next)) {
+    // Collapse duplicate mounts if a page was migrated more than once.
+    return next.replace(
+      /(?:<div class="month-calendar" data-month-calendar aria-label="Program calendar"><\/div>\s*){2,}/gi,
+      `${mount}\n`,
+    );
+  }
+  if (/<div class="wrap">/i.test(next)) {
+    return next.replace(
+      /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${mount}$3`,
+    );
+  }
+  return `${next}${mount}`;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -2603,6 +2704,8 @@ export function hydrateSponsor(sponsor) {
     address,
     city,
     state,
+    phone: String(source.phone || '').trim(),
+    email: String(source.email || '').trim().toLowerCase(),
     level,
     ...benefits,
     homepage_ad: benefits.show_flyin ? 1 : 0,
@@ -2614,7 +2717,7 @@ export function hydrateSponsor(sponsor) {
 
 async function getSponsors(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
+  const rows = await env.DB.prepare(`SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
   return (rows.results || []).map((row) => hydrateSponsor(row));
 }
 
@@ -2664,10 +2767,12 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
   const logos = items.map((sponsor) => {
+    const tier = normalizeSponsorTier(sponsor.tier || sponsor.level) || '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
@@ -2685,6 +2790,213 @@ export function squareMockPayEnabled(env = {}) {
 
 export const SPONSOR_INVOICE_FROM_EMAIL = 'no-reply@efhsband.org';
 export const SPONSOR_INVOICE_FROM_NAME = 'East Forsyth Band Boosters';
+
+export function pdfSafeText(value = '') {
+  return String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, '?')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function pdfBinaryFromBase64(base64 = '') {
+  const raw = atob(String(base64 || ''));
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) out += String.fromCharCode(raw.charCodeAt(i) & 0xff);
+  return out;
+}
+
+function assemblePdfBase64(objects = []) {
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const obj of objects) {
+    offsets.push(pdf.length);
+    pdf += obj;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  for (let i = 1; i < offsets.length; i += 1) {
+    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  let binary = '';
+  for (let i = 0; i < pdf.length; i += 1) binary += String.fromCharCode(pdf.charCodeAt(i) & 0xff);
+  return btoa(binary);
+}
+
+function pdfTextAt(x, y, text, { font = 'F1', size = 11 } = {}) {
+  return `BT /${font} ${size} Tf ${x} ${y} Td (${pdfSafeText(text)}) Tj ET`;
+}
+
+export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
+  const content = ['BT', '/F1 18 Tf', '50 760 Td', `(${pdfSafeText(title)}) Tj`, '/F1 11 Tf'];
+  for (const line of lines) {
+    content.push('0 -16 Td');
+    content.push(`(${pdfSafeText(line)}) Tj`);
+  }
+  content.push('ET');
+  const stream = `${content.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+  ]);
+}
+
+export function buildSponsorInvoicePdfBase64({
+  invoiceNumber = '',
+  paidLabel = '',
+  businessName = '',
+  address = '',
+  phone = '',
+  email = '',
+  tierLabel = '',
+  amountDisplay = '',
+} = {}) {
+  const logoBytes = pdfBinaryFromBase64(INVOICE_LOGO_RGB_FLATE_BASE64);
+  const logoW = Number(INVOICE_LOGO_WIDTH) || 120;
+  const logoH = Number(INVOICE_LOGO_HEIGHT) || 120;
+  const drawLogo = 56;
+  const left = 48;
+  const right = 564;
+  const headerBottom = 702;
+  const headerTop = 770;
+  const navy = '0.063 0.176 0.365';
+  const slate = '0.392 0.455 0.545';
+  const soft = '0.961 0.973 0.988';
+
+  const ops = [];
+  // Letterhead bar
+  ops.push(`${soft} rg ${left} ${headerBottom} ${right - left} ${headerTop - headerBottom} re f`);
+  ops.push(`${navy} RG 1.5 w ${left} ${headerBottom} m ${right} ${headerBottom} l S`);
+  // Blue Regiment mark (same asset as public title). DeviceRGB samples are top-to-bottom; draw upright.
+  const logoX = left + 8;
+  const logoY = headerBottom + 6;
+  ops.push(`q ${drawLogo} 0 0 ${drawLogo} ${logoX} ${logoY} cm /Im1 Do Q`);
+  // Org block
+  const textX = logoX + drawLogo + 12;
+  ops.push(pdfTextAt(textX, 748, 'East Forsyth Band Boosters', { font: 'F2', size: 16 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(textX, 732, 'East Forsyth High School Band', { size: 10 }));
+  ops.push(pdfTextAt(textX, 718, 'efhsband.org', { size: 10 }));
+  ops.push('0 g');
+  // Invoice title block (right)
+  ops.push(pdfTextAt(430, 748, 'DONATION INVOICE', { font: 'F2', size: 13 }));
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(430, 732, `Invoice ${invoiceNumber}`, { size: 10 }));
+  ops.push(pdfTextAt(430, 718, `Date ${paidLabel}`, { size: 10 }));
+  ops.push('0 g');
+
+  // Bill to / status
+  ops.push(pdfTextAt(left, 680, 'BILL TO', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(360, 680, 'PAYMENT STATUS', { font: 'F2', size: 9 }));
+  ops.push(pdfTextAt(left, 662, businessName || 'Sponsor', { font: 'F2', size: 12 }));
+  ops.push(`${navy} rg`);
+  ops.push(pdfTextAt(360, 662, 'PAID', { font: 'F2', size: 14 }));
+  ops.push('0 g');
+  let y = 644;
+  for (const line of [address, phone, email].map((value) => String(value || '').trim()).filter(Boolean)) {
+    ops.push(`${slate} rg`);
+    ops.push(pdfTextAt(left, y, line, { size: 10 }));
+    ops.push('0 g');
+    y -= 14;
+  }
+
+  // Table header
+  const tableTop = Math.min(y - 18, 600);
+  ops.push(`${navy} rg ${left} ${tableTop - 4} ${right - left} 22 re f`);
+  ops.push('1 g');
+  ops.push(pdfTextAt(left + 10, tableTop + 3, 'Description', { font: 'F2', size: 10 }));
+  ops.push(pdfTextAt(470, tableTop + 3, 'Amount', { font: 'F2', size: 10 }));
+  ops.push('0 g');
+  // Table row
+  const rowTop = tableTop - 28;
+  ops.push(`${soft} rg ${left} ${rowTop - 8} ${right - left} 28 re f`);
+  ops.push(pdfTextAt(left + 10, rowTop + 2, `${tierLabel || 'Sponsor package'} sponsorship donation`, { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop + 2, amountDisplay || '$0', { font: 'F2', size: 11 }));
+
+  // Totals
+  ops.push(`${navy} RG 1 w ${360} ${rowTop - 36} m ${right} ${rowTop - 36} l S`);
+  ops.push(pdfTextAt(360, rowTop - 54, 'Total donation', { size: 11 }));
+  ops.push(pdfTextAt(470, rowTop - 54, amountDisplay || '$0', { font: 'F2', size: 12 }));
+
+  // Notes
+  const noteTop = rowTop - 100;
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, noteTop, 'Thank you for your donation supporting the East Forsyth High School Band.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 14, 'This payment is recorded as a donation to the East Forsyth Band Boosters.', { size: 10 }));
+  ops.push(pdfTextAt(left, noteTop - 28, 'A copy of this invoice was emailed for your records.', { size: 10 }));
+  ops.push('0 g');
+
+  // Footer
+  ops.push(`${navy} RG 1 w ${left} 72 m ${right} 72 l S`);
+  ops.push(`${slate} rg`);
+  ops.push(pdfTextAt(left, 56, 'East Forsyth Band Boosters  ·  Kernersville, NC  ·  https://efhsband.org', { size: 9 }));
+  ops.push('0 g');
+
+  const stream = `${ops.join('\n')}\n`;
+  return assemblePdfBase64([
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R /F2 6 0 R >> /XObject<< /Im1 7 0 R >> >> >>endobj\n',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}endstream\nendobj\n`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+    '6 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>endobj\n',
+    `7 0 obj<< /Type /XObject /Subtype /Image /Width ${logoW} /Height ${logoH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${logoBytes.length} >>stream\n${logoBytes}endstream\nendobj\n`,
+  ]);
+}
+
+export function defaultSponsorTierAmountDisplay(tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier);
+  if (key === 'gold') return SPONSOR_TIER_FIELD_DEFAULTS.gold_amount;
+  if (key === 'silver') return SPONSOR_TIER_FIELD_DEFAULTS.silver_amount;
+  if (key === 'bronze') return SPONSOR_TIER_FIELD_DEFAULTS.bronze_amount;
+  return '';
+}
+
+export async function resolveSponsorTierAmountDisplay(env, tier = '') {
+  const key = normalizeSponsorTierKey(tier) || normalizeSponsorTier(tier) || 'bronze';
+  try {
+    const page = await env.DB.prepare("SELECT body_html FROM cms_pages WHERE slug = 'become-a-sponsor'").first();
+    if (page?.body_html) {
+      const fields = extractSponsorTierFields(page.body_html);
+      const amount = String(fields[`${key}_amount`] || '').trim();
+      if (amount) return amount;
+    }
+  } catch {
+    // Fall through to defaults when page lookup is unavailable.
+  }
+  return defaultSponsorTierAmountDisplay(key);
+}
+
+export function applicationFromSponsorRecord(sponsor = {}, {
+  amountDisplay = '',
+  amountCents = 0,
+  paidAt = '',
+  invoicePrefix = 'MS',
+} = {}) {
+  const hydrated = hydrateSponsor(sponsor);
+  const tier = hydrated.tier || normalizeSponsorTier(hydrated.level) || 'bronze';
+  const display = String(amountDisplay || '').trim() || defaultSponsorTierAmountDisplay(tier);
+  const cents = Number(amountCents) > 0
+    ? Number(amountCents)
+    : resolveSponsorAmountCents({ amountDisplay: display });
+  return {
+    id: Number(hydrated.id || 0) || 0,
+    tier,
+    amount_cents: cents || 0,
+    amount_display: display || formatSponsorAmountDisplay(cents) || '$0',
+    business_name: hydrated.name || 'Sponsor',
+    address: hydrated.formatted_address || formatSponsorAddress(hydrated) || hydrated.address || '',
+    phone: hydrated.phone || '',
+    email: hydrated.email || '',
+    paid_at: paidAt || new Date().toISOString(),
+    invoice_prefix: invoicePrefix,
+  };
+}
 
 export function formatSponsorInvoiceDate(value = '') {
   const raw = String(value || '').trim();
@@ -2706,7 +3018,7 @@ export function formatSponsorInvoiceDate(value = '') {
 }
 
 export function buildSponsorDonationInvoice(application = {}) {
-  const tier = normalizeSponsorTierKey(application.tier);
+  const tier = normalizeSponsorTierKey(application.tier) || normalizeSponsorTier(application.tier);
   const tierLabel = tier
     ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} Sponsor`
     : 'Sponsor package';
@@ -2717,15 +3029,11 @@ export function buildSponsorDonationInvoice(application = {}) {
   const address = String(application.address || '').trim() || '—';
   const phone = String(application.phone || '').trim() || '—';
   const email = String(application.email || '').trim().toLowerCase();
-  const invoiceNumber = `SP-${Number(application.id || 0) || 'pending'}`;
+  const prefix = String(application.invoice_prefix || 'SP').trim().toUpperCase() || 'SP';
+  const invoiceNumber = `${prefix}-${Number(application.id || 0) || 'pending'}`;
   const paidLabel = formatSponsorInvoiceDate(application.paid_at);
   const subject = `Invoice — Donation to East Forsyth Band Boosters (${tierLabel})`;
-  const text = [
-    'Thank you for your donation to the East Forsyth Band Boosters.',
-    '',
-    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
-    '',
-    'Invoice details',
+  const detailLines = [
     `Invoice number: ${invoiceNumber}`,
     `Date: ${paidLabel}`,
     `Business / organization: ${businessName}`,
@@ -2735,30 +3043,56 @@ export function buildSponsorDonationInvoice(application = {}) {
     `Package: ${tierLabel}`,
     `Amount: ${amountDisplay}`,
     'Payment status: Paid',
+  ];
+  const text = [
+    'Thank you for your donation to the East Forsyth Band Boosters.',
+    '',
+    'This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.',
+    '',
+    'A PDF copy of this invoice is attached.',
+    '',
+    'Invoice details',
+    ...detailLines,
     '',
     'East Forsyth Band Boosters',
     'East Forsyth High School Band',
     'https://efhsband.org',
   ].join('\n');
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
-      <h1 style="font-size:22px;margin:0 0 12px">Donation invoice</h1>
-      <p style="margin:0 0 14px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
-      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation to the East Forsyth Band Boosters in support of the East Forsyth High School Band program.</p>
-      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
-        <tr><td style="padding:6px 0;color:#64748b">Invoice number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Business / organization</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(businessName)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Address</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(address)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Phone</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(phone)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Package</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
-        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+    <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#10233c;max-width:640px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-bottom:3px solid #102d5e">
+        <img src="${escapeHtml(INVOICE_LOGO_PUBLIC_URL)}" width="64" height="64" alt="East Forsyth Blue Regiment" style="display:block;border:0;border-radius:50%">
+        <div>
+          <div style="font-size:20px;font-weight:700;color:#102d5e">East Forsyth Band Boosters</div>
+          <div style="font-size:13px;color:#64748b">Donation invoice · ${escapeHtml(invoiceNumber)}</div>
+        </div>
+      </div>
+      <p style="margin:18px 0 12px">Thank you for your donation to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This invoice confirms that your sponsorship payment is a donation in support of the East Forsyth High School Band program. A PDF copy is attached for your records.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#f5f8fc;border:1px solid #d9e2ef">
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Invoice number</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(invoiceNumber)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Date</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(paidLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Business / organization</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(businessName)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Address</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(address)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Phone</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(phone)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Email</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Package</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(tierLabel)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b;border-bottom:1px solid #e2e8f0">Amount</td><td style="padding:10px 12px;text-align:right;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        <tr><td style="padding:10px 12px;color:#64748b">Payment status</td><td style="padding:10px 12px;text-align:right"><strong style="color:#102d5e">Paid</strong></td></tr>
       </table>
-      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+      <p style="margin:0;color:#64748b;font-size:13px">East Forsyth Band Boosters · <a href="https://efhsband.org" style="color:#102d5e">efhsband.org</a></p>
     </div>
   `.trim();
+  const pdfBase64 = buildSponsorInvoicePdfBase64({
+    invoiceNumber,
+    paidLabel,
+    businessName,
+    address,
+    phone,
+    email: email || '—',
+    tierLabel,
+    amountDisplay,
+  });
   return {
     to: email,
     subject,
@@ -2767,10 +3101,12 @@ export function buildSponsorDonationInvoice(application = {}) {
     invoice_number: invoiceNumber,
     from_email: SPONSOR_INVOICE_FROM_EMAIL,
     from_name: SPONSOR_INVOICE_FROM_NAME,
+    pdf_filename: `${invoiceNumber}.pdf`,
+    pdf_base64: pdfBase64,
   };
 }
 
-export async function sendSponsorDonationInvoice(env, application = {}) {
+export async function sendSponsorDonationInvoice(env, application = {}, { markApplicationSent = true } = {}) {
   const invoice = buildSponsorDonationInvoice(application);
   if (!isValidEmail(invoice.to)) {
     return { ok: false, detail: 'Invoice email is missing or invalid' };
@@ -2786,18 +3122,36 @@ export async function sendSponsorDonationInvoice(env, application = {}) {
       html: invoice.html,
       fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
       fromName: SPONSOR_INVOICE_FROM_NAME,
+      attachments: invoice.pdf_base64 ? [{
+        filename: invoice.pdf_filename || `${invoice.invoice_number}.pdf`,
+        content: invoice.pdf_base64,
+        content_type: 'application/pdf',
+      }] : [],
     });
     const id = Number(application.id || 0);
-    if (id) {
+    if (markApplicationSent && id && !application.invoice_prefix) {
       const sentAt = new Date().toISOString();
       await env.DB.prepare(
         'UPDATE sponsor_applications SET invoice_sent_at = ?, updated_at = ? WHERE id = ?',
       ).bind(sentAt, sentAt, id).run();
     }
-    return { ok: true, detail: 'Invoice emailed', invoice_number: invoice.invoice_number };
+    return { ok: true, detail: 'Invoice emailed with PDF attachment', invoice_number: invoice.invoice_number };
   } catch (error) {
     return { ok: false, detail: error?.message || 'Could not send invoice email' };
   }
+}
+
+export async function sendManualSponsorInvoice(env, sponsor = {}) {
+  if (!sponsor?.email || !isValidEmail(sponsor.email)) {
+    return { ok: false, detail: 'Sponsor email is missing or invalid' };
+  }
+  const amountDisplay = await resolveSponsorTierAmountDisplay(env, sponsor.level || sponsor.tier);
+  const application = applicationFromSponsorRecord(sponsor, {
+    amountDisplay,
+    invoicePrefix: 'MS',
+    paidAt: new Date().toISOString(),
+  });
+  return sendSponsorDonationInvoice(env, application, { markApplicationSent: false });
 }
 
 async function maybeSendSponsorInvoice(env, application, { force = false } = {}) {
@@ -2814,7 +3168,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   if (!id) throw new Error('Application not found');
   if (row.sponsor_id) {
     const existing = await env.DB.prepare(
-      'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+      'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
     ).bind(row.sponsor_id).first();
     if (existing) {
       return {
@@ -2830,6 +3184,8 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
   const sponsor = normalizeSponsorPayload({
     name: row.business_name,
     address: row.address,
+    phone: row.phone || '',
+    email: row.email || '',
     logo_url: row.logo_url || '',
     level,
     active: 1,
@@ -2840,12 +3196,14 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
     sponsor.sort_order = Number(max?.max_order || 0) + 1;
   }
   const inserted = await env.DB.prepare(
-    'INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).bind(
     sponsor.name,
     sponsor.address,
     sponsor.city,
     sponsor.state,
+    sponsor.phone,
+    sponsor.email,
     sponsor.logo_url,
     sponsor.level,
     sponsor.mark_text,
@@ -2861,7 +3219,7 @@ export async function activatePaidSponsorApplication(env, application, { mock = 
      WHERE id = ?`,
   ).bind(mock ? 'paid_mock' : 'paid', sponsorId, paidAt, paidAt, id).run();
   const saved = await env.DB.prepare(
-    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+    'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
   ).bind(sponsorId).first();
   return {
     application: {
@@ -2890,11 +3248,15 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
     homepageAd: payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad,
   });
   const benefits = sponsorBenefitsFromLevel(level);
+  const phone = String(payload.phone ?? existing?.phone ?? '').trim().slice(0, 40);
+  const emailRaw = String(payload.email ?? existing?.email ?? '').trim().toLowerCase().slice(0, 160);
   return {
     name,
     address,
     city,
     state,
+    phone,
+    email: emailRaw,
     logo_url: String(payload.logo_url ?? existing?.logo_url ?? '').trim(),
     level,
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
@@ -3316,7 +3678,18 @@ export async function normalizeMailAttachments(files = []) {
   return attachments;
 }
 
-export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
+export function normalizeAdminMailExtraEmails(value) {
+  const raw = Array.isArray(value)
+    ? value.flatMap((item) => String(item || '').split(/[,;\n]+/))
+    : String(value || '').split(/[,;\n]+/);
+  return [...new Set(
+    raw
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((email) => isValidEmail(email)),
+  )];
+}
+
+export function normalizeAdminMailPayload({ subject, html, userIds, extraEmails } = {}) {
   const cleanSubject = String(subject || '').trim();
   const cleanHtml = sanitizeRichHtml(html || '');
   const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
@@ -3327,6 +3700,7 @@ export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
     html: cleanHtml,
     text: htmlToPlainText(cleanHtml),
     user_ids: ids,
+    extra_emails: normalizeAdminMailExtraEmails(extraEmails),
   };
 }
 
@@ -3344,6 +3718,7 @@ async function parseAdminMailRequest(request) {
         subject: form.get('subject'),
         html: form.get('html'),
         userIds,
+        extraEmails: form.get('extra_emails') || form.get('manual_emails') || '',
       }),
       attachments: await normalizeMailAttachments(files),
     };
@@ -3354,6 +3729,7 @@ async function parseAdminMailRequest(request) {
       subject: payload.subject,
       html: payload.html || payload.body_html || payload.message,
       userIds: payload.user_ids || payload.userIds || [],
+      extraEmails: payload.extra_emails || payload.extraEmails || payload.manual_emails || [],
     }),
     attachments: [],
   };
@@ -3733,6 +4109,8 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       display: block;
       width: 1.45in;
       height: 1.45in;
+      object-fit: contain;
+      border-radius: 50%;
       opacity: 0.28;
       -webkit-user-drag: none;
     }
@@ -3794,7 +4172,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
   <main class="sheet">
     <header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="East Forsyth Blue Regiment" draggable="false">
     </header>
     <p class="doc-kicker">${escapeHtml(title)}</p>
     <h1>Booster Meeting Minutes</h1>
@@ -4152,7 +4530,7 @@ export function generateStructuredPageHtml(payload = {}) {
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section>`;
 
   if (layout === 'calendar') {
-    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="timeline" data-events data-limit="5"></div>${callout}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>${callout}</div></section>`;
   }
 
   if (layout === 'contact') {
@@ -4239,8 +4617,19 @@ async function handleApi(request, env, url) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+  if (url.pathname === '/api/session' && request.method === 'GET') {
+    const user = await currentUser(request, env);
+    return jsonResponse({
+      logged_in: Boolean(user),
+      is_super_admin: Boolean(user) && isSuperAdmin(user),
+    });
+  }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+  }
+  if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
+    // Full month view needs past and future months, not only upcoming rows.
+    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
@@ -4490,7 +4879,7 @@ async function handleApi(request, env, url) {
     }
     if (application.sponsor_id) {
       const existing = await env.DB.prepare(
-        'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
+        'SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?',
       ).bind(application.sponsor_id).first();
       return jsonResponse({
         ok: true,
@@ -5106,8 +5495,18 @@ async function handleApi(request, env, url) {
       const max = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM sponsors').first();
       sponsor.sort_order = Number(max?.max_order || 0) + 1;
     }
-    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first()));
+    const result = await env.DB.prepare('INSERT INTO sponsors (name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad).run();
+    const saved = hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(result.meta.last_row_id).first());
+    let invoice = { ok: false, detail: 'Invoice not sent' };
+    if (isValidEmail(saved.email)) {
+      invoice = await sendManualSponsorInvoice(env, saved);
+    }
+    return jsonResponse({
+      ...saved,
+      invoice_sent: Boolean(invoice.ok),
+      invoice_detail: invoice.detail || '',
+      invoice_number: invoice.invoice_number || '',
+    });
   }
   if (url.pathname === '/api/admin/sponsors/reorder' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
@@ -5140,8 +5539,8 @@ async function handleApi(request, env, url) {
     if (!existing) return jsonResponse({ detail: 'Sponsor not found' }, 404);
     const sponsor = normalizeSponsorPayload(await request.json(), existing);
     if (!sponsor.name) return jsonResponse({ detail: 'Sponsor name is required' }, 422);
-    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
-    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
+    await env.DB.prepare('UPDATE sponsors SET name = ?, address = ?, city = ?, state = ?, phone = ?, email = ?, logo_url = ?, level = ?, mark_text = ?, sort_order = ?, active = ?, homepage_ad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(sponsor.name, sponsor.address, sponsor.city, sponsor.state, sponsor.phone, sponsor.email, sponsor.logo_url, sponsor.level, sponsor.mark_text, sponsor.sort_order, sponsor.active, sponsor.homepage_ad, id).run();
+    return jsonResponse(hydrateSponsor(await env.DB.prepare('SELECT id, name, address, city, state, phone, email, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors WHERE id = ?').bind(id).first()));
   }
 
   if (url.pathname === '/api/admin/staff' && request.method === 'GET') {
@@ -5534,7 +5933,9 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (!mail.user_ids.length && !mail.extra_emails.length) {
+      return jsonResponse({ detail: 'Choose a recipient or enter at least one email address.' }, 422);
+    }
     if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
     if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
     if (resolveContactEmailProvider(env) !== 'resend') {
@@ -5543,19 +5944,36 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
-    const placeholders = mail.user_ids.map(() => '?').join(', ');
-    const rows = await env.DB.prepare(
-      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
-    ).bind(...mail.user_ids).all();
-    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
-
-    const results = [];
+    const users = [];
+    if (mail.user_ids.length) {
+      const placeholders = mail.user_ids.map(() => '?').join(', ');
+      const rows = await env.DB.prepare(
+        `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
+      ).bind(...mail.user_ids).all();
+      users.push(...(rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username)));
+    }
+    const seenEmails = new Set();
+    const recipients = [];
     for (const user of users) {
       const email = String(user.username).trim().toLowerCase();
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: user.id, email });
+    }
+    for (const email of mail.extra_emails) {
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: null, email });
+    }
+    if (!recipients.length) {
+      return jsonResponse({ detail: 'No valid recipient emails were found.' }, 422);
+    }
+
+    const results = [];
+    for (const recipient of recipients) {
       try {
         await sendAdminUserMail(env, {
-          to: email,
+          to: recipient.email,
           replyTo: sender.replyTo,
           fromName: sender.fromName,
           subject: mail.subject,
@@ -5563,9 +5981,14 @@ async function handleApi(request, env, url) {
           text: mail.text || htmlToPlainText(mail.html),
           attachments: mail.attachments,
         });
-        results.push({ user_id: user.id, email, ok: true });
+        results.push({ user_id: recipient.user_id, email: recipient.email, ok: true });
       } catch (error) {
-        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
+        results.push({
+          user_id: recipient.user_id,
+          email: recipient.email,
+          ok: false,
+          error: String(error?.message || error || 'Send failed'),
+        });
       }
     }
     const sent = results.filter((item) => item.ok).length;
@@ -5574,6 +5997,7 @@ async function handleApi(request, env, url) {
       ok: failed === 0,
       sent,
       failed,
+      reply_to: sender.replyTo,
       results,
       detail: failed
         ? `Sent ${sent} of ${results.length}. ${failed} failed.`
@@ -5762,7 +6186,7 @@ async function handleUploadGet(env, url) {
 }
 
 function clearSessionCookie() {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+  return sessionCookieHeader('', { maxAge: 0 });
 }
 
 function renderLoginHtml(nextPath = '/admin') {
@@ -5797,7 +6221,7 @@ async function handleLogin(request, env) {
     );
   }
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', `${SESSION_COOKIE}=${await makeSession(user, env)}; HttpOnly; Secure; SameSite=Lax; Path=/`);
+  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
   return response;
 }
 
@@ -5813,18 +6237,35 @@ function logout() {
   return response;
 }
 
-function renderNav(pages) {
-  return pages
-    .filter((page) => page.slug !== 'become-a-sponsor')
-    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
+export function renderStaffAuthNavLink(loggedIn = false) {
+  if (loggedIn) {
+    return '<a href="/admin" data-staff-auth-link>Staff Menu</a>';
+  }
+  return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null) {
+export function renderNav(pages, { loggedIn = false } = {}) {
+  const pageLinks = (Array.isArray(pages) ? pages : [])
+    .filter((page) => page.slug !== 'become-a-sponsor')
+    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`)
+    .join('');
+  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}`;
+}
+
+export function renderPublicBrand(site = {}) {
+  const title = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const logo = String(site?.logo_url || '/assets/efhs-logo.png').trim() || '/assets/efhs-logo.png';
+  return `<a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(logo)}" alt="${escapeAttr(title)} logo"><span data-site-field="title">${escapeHtml(title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a>`;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { loggedIn = false, maintenancePreview = false } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
+  const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
+  const bodyClass = maintenancePreview ? ' class="maintenance-preview"' : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -5838,10 +6279,11 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
 </head>
-<body>
+<body${bodyClass}>
+${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
+<header class="site-header"><div class="header-inner">${renderPublicBrand(site)}<button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
@@ -5926,6 +6368,9 @@ async function serveStaticOrCms(request, env, url) {
   await initDb(env);
   const site = await getSite(env);
   const maintenanceOn = isMaintenanceMode(site);
+  const user = await currentUser(request, env);
+  const loggedIn = Boolean(user);
+  const superAdmin = loggedIn && isSuperAdmin(user);
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
@@ -5939,10 +6384,20 @@ async function serveStaticOrCms(request, env, url) {
         },
       });
     }
+    // Super admins preview the real site; everyone else stays on the public maintenance page.
+    if (superAdmin) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: '/',
+          'cache-control': 'no-store',
+        },
+      });
+    }
     return htmlResponse(renderMaintenancePage(site));
   }
-  // Keep admin/API available; send every public HTML page to maintenance while enabled.
-  if (shouldRedirectToMaintenance(url.pathname, site)) {
+  // Public + non-super-admin users get the maintenance page. Super admins can preview.
+  if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
     return new Response(null, {
       status: 302,
@@ -5965,7 +6420,10 @@ async function serveStaticOrCms(request, env, url) {
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
-      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors));
+      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
+        loggedIn,
+        maintenancePreview: maintenanceOn && superAdmin,
+      }));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
@@ -6011,12 +6469,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
-<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/index.html">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsorship → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-tier-benefits-card">
@@ -6036,7 +6494,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
-<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
+<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label>Phone<input name="phone" type="tel" autocomplete="tel" placeholder="(336) 555-0100"></label><label>Email<input name="email" type="email" autocomplete="email" placeholder="hello@business.com"></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div><div class="live-preview"><span>Live Preview</span><div id="sponsor-preview" class="sponsor-directory"></div></div></div></div></section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>
@@ -6063,7 +6521,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="button" data-open-social-tab>Open Social / Facebook</button>
   </div>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, all public pages redirect to maintenance.html. Admin login and the CMS stay available.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Publish</p><h1>Social / Facebook</h1><p>Connect the band Facebook Page through Zernio, then publish or schedule posts from the CMS.</p></div></div>
 <div class="editor-layout">
@@ -6210,20 +6668,21 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section><section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to CMS users or any email address. Reply-To is always set to the logged-in user’s email.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
 <div class="mail-recipients">
-  <div class="mail-recipients-head">
-    <h2>Recipients</h2>
-    <div class="panel-actions">
-      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
-      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
-    </div>
-  </div>
-  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
-  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+  <label class="mail-recipient-select-label">Send to
+    <select name="recipient" id="mail-recipient-select">
+      <option value="">Select a recipient…</option>
+      <option value="__all__">All users</option>
+    </select>
+  </label>
+  <label class="mail-extra-emails-label">Also send to <small>Optional · other people outside the CMS user list</small>
+    <input name="extra_emails" id="mail-extra-emails" type="text" maxlength="500" placeholder="name@example.com, another@example.com" autocomplete="email">
+  </label>
+  <p class="muted">CMS users are listed by name and emailed at their login username. Replies always return to your account email.</p>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
