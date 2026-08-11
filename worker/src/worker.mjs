@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
+const ASSET_VERSION = 'staff-email-recipients-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -633,6 +633,15 @@ async function initDb(env) {
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
+        .run();
+    }
+  }
+  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
+  if (calendarPageRow?.body_html) {
+    const nextCalendarHtml = ensureCalendarMonthMount(calendarPageRow.body_html);
+    if (nextCalendarHtml !== calendarPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextCalendarHtml, calendarPageRow.id)
         .run();
     }
   }
@@ -2182,6 +2191,53 @@ async function getEventById(env, id) {
   return row ? hydrateEventRow(row) : null;
 }
 
+/** Replace the old upcoming-events timeline with a month-calendar mount on the Calendar page. */
+export function ensureCalendarMonthMount(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  const mount = '<div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>';
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(source)) !== null) {
+    const start = match.index;
+    let depth = 1;
+    let i = start + match[0].length;
+    while (i < source.length && depth > 0) {
+      const nextOpen = source.toLowerCase().indexOf('<div', i);
+      const nextClose = source.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) ranges.push([start, i]);
+      }
+    }
+  }
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const [start, end] = ranges[index];
+    next = `${next.slice(0, start)}${mount}${next.slice(end)}`;
+  }
+  if (/data-month-calendar/i.test(next)) {
+    // Collapse duplicate mounts if a page was migrated more than once.
+    return next.replace(
+      /(?:<div class="month-calendar" data-month-calendar aria-label="Program calendar"><\/div>\s*){2,}/gi,
+      `${mount}\n`,
+    );
+  }
+  if (/<div class="wrap">/i.test(next)) {
+    return next.replace(
+      /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${mount}$3`,
+    );
+  }
+  return `${next}${mount}`;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -2664,10 +2720,12 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
   const logos = items.map((sponsor) => {
+    const tier = normalizeSponsorTier(sponsor.tier || sponsor.level) || '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
@@ -3316,7 +3374,18 @@ export async function normalizeMailAttachments(files = []) {
   return attachments;
 }
 
-export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
+export function normalizeAdminMailExtraEmails(value) {
+  const raw = Array.isArray(value)
+    ? value.flatMap((item) => String(item || '').split(/[,;\n]+/))
+    : String(value || '').split(/[,;\n]+/);
+  return [...new Set(
+    raw
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((email) => isValidEmail(email)),
+  )];
+}
+
+export function normalizeAdminMailPayload({ subject, html, userIds, extraEmails } = {}) {
   const cleanSubject = String(subject || '').trim();
   const cleanHtml = sanitizeRichHtml(html || '');
   const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
@@ -3327,6 +3396,7 @@ export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
     html: cleanHtml,
     text: htmlToPlainText(cleanHtml),
     user_ids: ids,
+    extra_emails: normalizeAdminMailExtraEmails(extraEmails),
   };
 }
 
@@ -3344,6 +3414,7 @@ async function parseAdminMailRequest(request) {
         subject: form.get('subject'),
         html: form.get('html'),
         userIds,
+        extraEmails: form.get('extra_emails') || form.get('manual_emails') || '',
       }),
       attachments: await normalizeMailAttachments(files),
     };
@@ -3354,6 +3425,7 @@ async function parseAdminMailRequest(request) {
       subject: payload.subject,
       html: payload.html || payload.body_html || payload.message,
       userIds: payload.user_ids || payload.userIds || [],
+      extraEmails: payload.extra_emails || payload.extraEmails || payload.manual_emails || [],
     }),
     attachments: [],
   };
@@ -4152,7 +4224,7 @@ export function generateStructuredPageHtml(payload = {}) {
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section>`;
 
   if (layout === 'calendar') {
-    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="timeline" data-events data-limit="5"></div>${callout}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>${callout}</div></section>`;
   }
 
   if (layout === 'contact') {
@@ -4241,6 +4313,10 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+  }
+  if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
+    // Full month view needs past and future months, not only upcoming rows.
+    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
@@ -5534,7 +5610,9 @@ async function handleApi(request, env, url) {
     } catch (error) {
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (!mail.user_ids.length && !mail.extra_emails.length) {
+      return jsonResponse({ detail: 'Choose a recipient or enter at least one email address.' }, 422);
+    }
     if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
     if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
     if (resolveContactEmailProvider(env) !== 'resend') {
@@ -5543,19 +5621,36 @@ async function handleApi(request, env, url) {
     const sender = resolveAdminMailSender(auth.user);
     if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
-    const placeholders = mail.user_ids.map(() => '?').join(', ');
-    const rows = await env.DB.prepare(
-      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
-    ).bind(...mail.user_ids).all();
-    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
-
-    const results = [];
+    const users = [];
+    if (mail.user_ids.length) {
+      const placeholders = mail.user_ids.map(() => '?').join(', ');
+      const rows = await env.DB.prepare(
+        `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
+      ).bind(...mail.user_ids).all();
+      users.push(...(rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username)));
+    }
+    const seenEmails = new Set();
+    const recipients = [];
     for (const user of users) {
       const email = String(user.username).trim().toLowerCase();
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: user.id, email });
+    }
+    for (const email of mail.extra_emails) {
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+      recipients.push({ user_id: null, email });
+    }
+    if (!recipients.length) {
+      return jsonResponse({ detail: 'No valid recipient emails were found.' }, 422);
+    }
+
+    const results = [];
+    for (const recipient of recipients) {
       try {
         await sendAdminUserMail(env, {
-          to: email,
+          to: recipient.email,
           replyTo: sender.replyTo,
           fromName: sender.fromName,
           subject: mail.subject,
@@ -5563,9 +5658,14 @@ async function handleApi(request, env, url) {
           text: mail.text || htmlToPlainText(mail.html),
           attachments: mail.attachments,
         });
-        results.push({ user_id: user.id, email, ok: true });
+        results.push({ user_id: recipient.user_id, email: recipient.email, ok: true });
       } catch (error) {
-        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
+        results.push({
+          user_id: recipient.user_id,
+          email: recipient.email,
+          ok: false,
+          error: String(error?.message || error || 'Send failed'),
+        });
       }
     }
     const sent = results.filter((item) => item.ok).length;
@@ -5574,6 +5674,7 @@ async function handleApi(request, env, url) {
       ok: failed === 0,
       sent,
       failed,
+      reply_to: sender.replyTo,
       results,
       detail: failed
         ? `Sent ${sent} of ${results.length}. ${failed} failed.`
@@ -6210,20 +6311,21 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section><section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to CMS users or any email address. Reply-To is always set to the logged-in user’s email.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
 <label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
 <div class="mail-recipients">
-  <div class="mail-recipients-head">
-    <h2>Recipients</h2>
-    <div class="panel-actions">
-      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
-      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
-    </div>
-  </div>
-  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
-  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+  <label class="mail-recipient-select-label">Send to
+    <select name="recipient" id="mail-recipient-select">
+      <option value="">Select a recipient…</option>
+      <option value="__all__">All users</option>
+    </select>
+  </label>
+  <label class="mail-extra-emails-label">Also send to <small>Optional · other people outside the CMS user list</small>
+    <input name="extra_emails" id="mail-extra-emails" type="text" maxlength="500" placeholder="name@example.com, another@example.com" autocomplete="email">
+  </label>
+  <p class="muted">CMS users are listed by name and emailed at their login username. Replies always return to your account email.</p>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
