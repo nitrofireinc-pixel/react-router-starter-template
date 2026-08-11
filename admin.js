@@ -4,6 +4,163 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 380, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+function datasetKeyToAttr(key) {
+  return String(key || '').replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+}
+
+function bindAdminRowDragAndDrop(list, {
+  idAttr,
+  getOrdered,
+  applyLocalOrder,
+  saveOrder,
+  reload,
+  errorStatusSelector,
+  errorMessage,
+  successStatusSelector,
+  successMessage,
+} = {}) {
+  if (!list || !idAttr) return;
+  let dragId = null;
+  let allowRowDrag = false;
+  const attr = datasetKeyToAttr(idAttr);
+  const rowSelector = `[data-${attr}]`;
+
+  list.querySelectorAll(rowSelector).forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset[idAttr]);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset[idAttr]) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset[idAttr]);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = typeof getOrdered === 'function' ? getOrdered() : [];
+      const fromIndex = ordered.findIndex((item) => item.id === fromId);
+      const toIndex = ordered.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((item) => item.id);
+      applyLocalOrder?.(next);
+      try {
+        await saveOrder?.(ids);
+        if (successStatusSelector && successMessage) {
+          const status = document.querySelector(successStatusSelector);
+          if (status) status.textContent = successMessage;
+        }
+      } catch (error) {
+        console.error(error);
+        if (typeof reload === 'function') await reload();
+        if (errorStatusSelector) {
+          const status = document.querySelector(errorStatusSelector);
+          if (status) status.textContent = errorMessage || 'Could not save the new order.';
+        }
+      }
+    });
+  });
+}
+
+function wireEditPageButton(selector, slug, canEdit) {
+  const button = document.querySelector(selector);
+  if (!button) return;
+  button.hidden = !canEdit;
+  button.onclick = () => editPage(slug);
+}
+
+function setAdminSubmenuOpen(key, open) {
+  const menuSel = `[data-${key}-menu]`;
+  const toggleSel = `[data-${key}-toggle]`;
+  const subSel = `[data-${key}-sub]`;
+  document.querySelectorAll(menuSel).forEach((menu) => {
+    const toggle = menu.querySelector(toggleSel);
+    const sub = menu.querySelector(subSel);
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindAdminSubmenu(key, { onItemClick, itemSelector } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  const toggle = menu?.querySelector(`[data-${key}-toggle]`);
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setAdminSubmenuOpen(key, open);
+  });
+  if (typeof onItemClick !== 'function') return;
+  const nodes = itemSelector
+    ? menu.querySelectorAll(itemSelector)
+    : menu.querySelectorAll(`button:not([data-${key}-toggle])`);
+  nodes.forEach((button) => {
+    if (button.dataset.boundNav === '1') return;
+    button.dataset.boundNav = '1';
+    button.addEventListener('click', () => onItemClick(button));
+  });
+}
+
+function syncAdminSubmenuAccess(key, { canAccess, children = [] } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  if (!menu) return false;
+  menu.hidden = !canAccess;
+  const toggle = menu.querySelector(`[data-${key}-toggle]`);
+  if (toggle) toggle.hidden = !canAccess;
+  children.forEach(({ selector, visible }) => {
+    const node = menu.querySelector(selector);
+    if (node) node.hidden = !visible;
+  });
+  return Boolean(canAccess);
+}
+
+
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
@@ -62,8 +219,10 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
   const passwordSuccess = Boolean(options.passwordSuccess);
+  const isError = Boolean(options.error);
   root.classList.toggle('has-icon', Boolean(iconKind));
   root.classList.toggle('is-password-success', passwordSuccess);
+  root.classList.toggle('is-error', isError);
   if (icon) {
     if (iconKind === 'envelope') {
       icon.hidden = false;
@@ -78,19 +237,23 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   savedToastTimer = window.setTimeout(() => {
-    root.classList.add('is-leaving');
-    root.classList.remove('is-visible');
-    savedToastLeaveTimer = window.setTimeout(() => {
-      root.classList.remove('is-leaving');
-      root.classList.remove('is-password-success');
-      root.classList.remove('has-icon');
-    }, 380);
-  }, 3000);
+    savedToastLeaveTimer = playOverlayLeave(root, {
+      ms: 380,
+      onDone: () => {
+        root.classList.remove('is-password-success');
+        root.classList.remove('is-error');
+        root.classList.remove('has-icon');
+      },
+    });
+  }, isError ? 4200 : 3000);
+}
+
+function showFailedToast(detail = '') {
+  const reason = String(detail || 'Something went wrong.').trim();
+  const short = reason.length > 120 ? `${reason.slice(0, 117)}…` : reason;
+  showSavedToast(`Failed — ${short}`, { error: true });
 }
 
 let passwordToastLeaveTimer = null;
@@ -129,31 +292,41 @@ function ensurePasswordToast() {
   return root;
 }
 
-function showPasswordToast() {
+function mustChangePassword() {
+  return Boolean(state.me?.user?.must_change_password);
+}
+
+function showPasswordToast({ required = false } = {}) {
   const root = ensurePasswordToast();
   const form = root.querySelector('#password-form');
   const status = root.querySelector('#password-status');
+  const forceRequired = required || mustChangePassword();
   form?.reset();
-  if (status) status.textContent = '';
+  if (status) {
+    status.textContent = forceRequired
+      ? 'Please choose a new password before continuing.'
+      : '';
+  }
+  root.classList.toggle('is-required', forceRequired);
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = forceRequired;
+  });
   window.clearTimeout(passwordToastLeaveTimer);
   root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
 }
 
 function hidePasswordToast() {
+  if (mustChangePassword()) return;
   const root = document.querySelector('#admin-password-toast');
   if (!root || root.hidden) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
+  root.classList.remove('is-required');
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = false;
+  });
   window.clearTimeout(passwordToastLeaveTimer);
-  passwordToastLeaveTimer = window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    root.hidden = true;
-  }, 380);
+  passwordToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
 }
 
 function formDataHasFiles(formData) {
@@ -202,10 +375,8 @@ function setUploadProgress(percent) {
 
 function showUploadingOverlay() {
   const root = ensureUploadToast();
-  root.classList.remove('is-leaving');
   setUploadProgress(0);
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   document.body.classList.add('admin-upload-open');
 }
 
@@ -213,12 +384,10 @@ function hideUploadingOverlay() {
   const root = document.querySelector('#admin-upload-toast');
   document.body.classList.remove('admin-upload-open');
   if (!root) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
-  window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    setUploadProgress(0);
-  }, 380);
+  playOverlayLeave(root, {
+    ms: 380,
+    onDone: () => setUploadProgress(0),
+  });
 }
 
 function jsonFetchViaXhr(url, options = {}) {
@@ -393,6 +562,10 @@ function canEditPage(pageOrSlug) {
 
 function canEditSponsors() {
   return hasPermission('sponsors') || canEditPage('sponsors');
+}
+
+function canBypassSponsorPayment() {
+  return hasPermission('sponsors:bypass-payment');
 }
 
 function canEditStaff() {
@@ -1160,7 +1333,7 @@ function buildEditablePagePreview(payload = {}) {
   const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
     : '';
   const sponsorsCallout = showCallout
     ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
@@ -1862,16 +2035,28 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
+  const isMenuParentToggle = (button) => (
+    button?.hasAttribute('data-sponsors-toggle')
+    || button?.hasAttribute('data-boosters-toggle')
+  );
+
+  const isGroupActionButton = (button, group) => (
+    Boolean(button)
+    && !button.hidden
+    && !isMenuParentToggle(button)
+    && Boolean(group)
+    && !group.hidden
+    && group.contains(button)
+  );
+
   const isVisibleButton = (button) => (
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
+    && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button) => {
-    if (!isVisibleButton(button)) return;
+  const actionButtonHtml = (button) => {
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1879,7 +2064,12 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+  };
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    parts.push(actionButtonHtml(button));
   };
 
   const pushLabel = (text) => {
@@ -1888,8 +2078,26 @@ function renderMobileAdminMenu() {
     parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
   };
 
+  const pushMenuGroup = (group) => {
+    if (!group || group.hidden) return;
+    const parent = group.querySelector('.admin-menu-parent');
+    const children = [...group.querySelectorAll('button')].filter((button) => isGroupActionButton(button, group));
+    if (!parent || parent.hidden || !children.length) return;
+    const expanded = parent.getAttribute('aria-expanded') === 'true';
+    const childHtml = children.map((button) => actionButtonHtml(button)).join('');
+    parts.push(
+      `<div class="admin-mobile-menu-group">`
+      + `<button type="button" class="admin-menu-parent admin-mobile-menu-parent" data-mobile-submenu-toggle aria-expanded="${expanded ? 'true' : 'false'}">${escapeHtml(parent.textContent.trim())}</button>`
+      + `<div class="admin-mobile-menu-sub" data-mobile-submenu ${expanded ? '' : 'hidden'}>${childHtml}</div>`
+      + `</div>`
+    );
+  };
+
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
     if (node.matches?.('button')) return isVisibleButton(node);
+    if (node.matches?.('.admin-menu-group') && !node.hidden) {
+      return [...node.querySelectorAll('button')].some((button) => isGroupActionButton(button, node));
+    }
     return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
   });
 
@@ -1904,7 +2112,6 @@ function renderMobileAdminMenu() {
         const shortcuts = document.querySelector('#admin-page-shortcuts');
         if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
       } else {
-        // Manage label: only show when at least one following manage control is visible.
         const following = [];
         let sibling = child.nextElementSibling;
         while (sibling) {
@@ -1922,8 +2129,7 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('.admin-menu-group')) {
-      if (child.hidden) return;
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      pushMenuGroup(child);
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
@@ -1932,6 +2138,20 @@ function renderMobileAdminMenu() {
   menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
   <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
+
+  menu.querySelectorAll('[data-mobile-submenu-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const group = toggle.closest('.admin-mobile-menu-group');
+      const sub = group?.querySelector('[data-mobile-submenu]');
+      if (!sub) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      sub.hidden = !open;
+    });
+  });
+
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -2071,51 +2291,27 @@ function canAccessBoostersMenu() {
 }
 
 function setSponsorsMenuOpen(open) {
-  document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-sponsors-toggle]');
-    const sub = menu.querySelector('[data-sponsors-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('sponsors', open);
 }
 
 function setBoostersMenuOpen(open) {
-  document.querySelectorAll('[data-boosters-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-boosters-toggle]');
-    const sub = menu.querySelector('[data-boosters-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('boosters', open);
 }
 
 function bindSponsorsMenu() {
-  const menu = document.querySelector('[data-sponsors-menu]');
-  const toggle = menu?.querySelector('[data-sponsors-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setSponsorsMenuOpen(open);
-  });
-  menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
-    button.addEventListener('click', () => {
+  bindAdminSubmenu('sponsors', {
+    itemSelector: '[data-sponsor-nav]',
+    onItemClick: (button) => {
       const key = button.dataset.sponsorNav;
       setSponsorsMenuOpen(true);
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
-    });
+    },
   });
 }
 
 function bindBoostersMenu() {
-  const menu = document.querySelector('[data-boosters-menu]');
-  const toggle = menu?.querySelector('[data-boosters-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setBoostersMenuOpen(open);
-  });
+  bindAdminSubmenu('boosters');
 }
 
 function renderPageShortcuts() {
@@ -2160,33 +2356,25 @@ function showAllowedPanels() {
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
-  const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
-  if (boostersMenu) {
-    boostersMenu.hidden = !boostersAccess;
-    if (boostersAccess) manageVisible = true;
-    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
-    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
-    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
-    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
-    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
-  }
+  const boostersAccess = syncAdminSubmenuAccess('boosters', {
+    canAccess: canAccessBoostersMenu(),
+    children: [
+      { selector: '[data-tab="booster-members"]', visible: canEditBoosterMembers() },
+      { selector: '[data-tab="minutes"]', visible: canViewMinutes() },
+    ],
+  });
+  if (boostersAccess) manageVisible = true;
   bindBoostersMenu();
-  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
-  const sponsorsAccess = canAccessSponsorsMenu();
-  if (sponsorsMenu) {
-    sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
-    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
-    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
-    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
-    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
-    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
-    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
-  }
+  const sponsorsAccess = syncAdminSubmenuAccess('sponsors', {
+    canAccess: canAccessSponsorsMenu(),
+    children: [
+      { selector: '[data-tab="sponsors"]', visible: canEditSponsors() },
+      { selector: '[data-sponsor-nav="sponsors-page"]', visible: canEditPage('sponsors') },
+      { selector: '[data-sponsor-nav="become-a-sponsor"]', visible: canEditPage('become-a-sponsor') },
+    ],
+  });
+  if (sponsorsAccess) manageVisible = true;
+  else setSponsorsMenuOpen(false);
   bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
@@ -2194,26 +2382,10 @@ function showAllowedPanels() {
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
-  const editCalendarPage = document.querySelector('#edit-calendar-page');
-  if (editCalendarPage) {
-    editCalendarPage.hidden = !canEditPage('calendar');
-    editCalendarPage.onclick = () => editPage('calendar');
-  }
-  const editDirectorsPage = document.querySelector('#edit-directors-page');
-  if (editDirectorsPage) {
-    editDirectorsPage.hidden = !canEditPage('directors');
-    editDirectorsPage.onclick = () => editPage('directors');
-  }
-  const editBoostersPage = document.querySelector('#edit-boosters-page');
-  if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditBoostersPage();
-    editBoostersPage.onclick = () => editPage('boosters');
-  }
-  const editContactPage = document.querySelector('#edit-contact-page');
-  if (editContactPage) {
-    editContactPage.hidden = !canEditPage('contact');
-    editContactPage.onclick = () => editPage('contact');
-  }
+  wireEditPageButton('#edit-calendar-page', 'calendar', canEditPage('calendar'));
+  wireEditPageButton('#edit-directors-page', 'directors', canEditPage('directors'));
+  wireEditPageButton('#edit-boosters-page', 'boosters', canEditBoostersPage());
+  wireEditPageButton('#edit-contact-page', 'contact', canEditPage('contact'));
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
@@ -2654,17 +2826,7 @@ function renderPagePermissionBoxes() {
 }
 
 async function loadSponsorAdSettings() {
-  if (!canEditSponsors()) return;
-  const form = document.querySelector('#sponsor-ad-settings-form');
-  if (!form) return;
-  try {
-    const settings = await jsonFetch('/api/admin/sponsors/settings');
-    const input = formControl(form, 'sponsor_ad_seconds');
-    if (input) input.value = String(settings.sponsor_ad_seconds ?? 6);
-  } catch (error) {
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    if (status) status.textContent = `Could not load ad timing: ${error.message}`;
-  }
+  // Homepage fly-in duration is fixed at 6 seconds; settings UI removed.
 }
 
 async function loadSponsors() {
@@ -2752,65 +2914,17 @@ async function saveStaffOrder(ids) {
 }
 
 function bindStaffDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-staff-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.staffId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.staffId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.staffId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedStaff();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'staffId',
+    getOrdered: orderedStaff,
+    applyLocalOrder: (next) => {
       state.staff = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderStaff();
-      try {
-        await saveStaffOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadStaff();
-        const status = document.querySelector('#staff-status');
-        if (status) status.textContent = 'Could not save the new staff order.';
-      }
-    });
+    },
+    saveOrder: saveStaffOrder,
+    reload: loadStaff,
+    errorStatusSelector: '#staff-status',
+    errorMessage: 'Could not save the new staff order.',
   });
 }
 
@@ -2871,65 +2985,17 @@ async function saveBoosterMemberOrder(ids) {
 }
 
 function bindBoosterMemberDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-booster-member-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.boosterMemberId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.boosterMemberId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.boosterMemberId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedBoosterMembers();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'boosterMemberId',
+    getOrdered: orderedBoosterMembers,
+    applyLocalOrder: (next) => {
       state.boosterMembers = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderBoosterMembers();
-      try {
-        await saveBoosterMemberOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadBoosterMembers();
-        const status = document.querySelector('#booster-member-status');
-        if (status) status.textContent = 'Could not save the new booster member order.';
-      }
-    });
+    },
+    saveOrder: saveBoosterMemberOrder,
+    reload: loadBoosterMembers,
+    errorStatusSelector: '#booster-member-status',
+    errorMessage: 'Could not save the new booster member order.',
   });
 }
 
@@ -2939,6 +3005,18 @@ function formatAdminSponsorAddress(sponsor = {}) {
   const city = String(sponsor.city || '').trim();
   const state = String(sponsor.state || '').trim().toUpperCase();
   return [street, city, state].filter(Boolean).join(', ');
+}
+
+
+function formatAdminSponsorContactLines(sponsor = {}) {
+  const address = formatAdminSponsorAddress(sponsor);
+  const phone = String(sponsor.phone || '').trim();
+  const email = String(sponsor.email || '').trim();
+  return [
+    address || 'No address on file',
+    phone ? `Phone: ${phone}` : 'Phone: —',
+    email ? `Email: ${email}` : 'Email: —',
+  ];
 }
 
 function sponsorPreviewCard(sponsor, index = 0) {
@@ -2968,18 +3046,213 @@ function orderedSponsors() {
   return [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 }
 
-function resetSponsorForm(form) {
-  if (!form) return;
-  form.reset();
-  formControl(form, 'id').value = '';
-  formControl(form, 'city').value = 'Kernersville';
-  setSelectValue(formControl(form, 'state'), 'NC');
-  form.elements.active.checked = true;
-  form.elements.level.value = 'Bronze Sponsor';
-  const file = formControl(form, 'logo_file');
-  if (file) file.value = '';
-  syncSponsorLogoPreview(form, '');
-  syncSponsorTierBenefits(form);
+const MANUAL_SPONSOR_TIER_AMOUNTS = {
+  bronze: { cents: 10000, display: '$100' },
+  silver: { cents: 25000, display: '$250' },
+  gold: { cents: 50000, display: '$500' },
+};
+
+let sponsorFormToastLeaveTimer = null;
+
+function ensureSponsorFormToast() {
+  let root = document.querySelector('#admin-sponsor-form-toast');
+  if (root && root.querySelector('[data-sponsor-form-confirm]')) return root;
+  if (root) root.remove();
+  root = document.createElement('div');
+  root.id = 'admin-sponsor-form-toast';
+  root.className = 'admin-sponsor-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-sponsor-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-sponsor-form-dismiss aria-label="Close sponsor form"></button>
+    <div class="admin-sponsor-form-toast-panel">
+      <div class="admin-sponsor-form-toast-card">
+        <p class="admin-sponsor-form-edit-note" data-sponsor-edit-note hidden>Editing existing sponsor</p>
+        <h3 id="admin-sponsor-form-toast-title">Manual Add Sponsor</h3>
+        <form id="sponsor-manual-form" class="admin-sponsor-manual-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <input type="hidden" name="logo_url" value="">
+          <input type="hidden" name="active" value="1">
+          <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Address<input name="address" required maxlength="400" placeholder="Street, city, state" autocomplete="street-address"></label>
+          <label data-sponsor-phone-field>Phone<input name="phone" required maxlength="40" placeholder="(336) 555-0100" autocomplete="tel"></label>
+          <label data-sponsor-email-field>Invoice email<input name="email" type="email" required maxlength="160" placeholder="billing@business.com" autocomplete="email"></label>
+          <label>Sponsor package
+            <select name="tier" required>
+              <option value="bronze">Bronze — $100</option>
+              <option value="silver">Silver — $250</option>
+              <option value="gold" selected>Gold — $500</option>
+            </select>
+          </label>
+          <label class="admin-sponsor-manual-logo">Company logo <span data-logo-optional-label>(optional)</span>
+            <input name="logo" type="file" accept="image/*,.svg">
+          </label>
+          <p class="admin-sponsor-current-logo" data-current-logo hidden></p>
+          <label class="checkline admin-sponsor-bypass" data-bypass-payment-row hidden>
+            <input name="bypass_payment" type="checkbox" value="1"> Bypass payment (activate sponsor now)
+          </label>
+          <p class="admin-sponsor-form-toast-status" id="sponsor-manual-status" aria-live="polite"></p>
+          <div class="admin-sponsor-form-toast-actions">
+            <button class="btn outline" type="button" data-sponsor-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" data-sponsor-submit-label>Save Sponsor</button>
+          </div>
+        </form>
+        <div class="admin-sponsor-form-confirm" data-sponsor-form-confirm hidden>
+          <div class="admin-sponsor-form-confirm-card" role="alertdialog" aria-labelledby="admin-sponsor-form-confirm-title" aria-describedby="admin-sponsor-form-confirm-copy">
+            <h4 id="admin-sponsor-form-confirm-title">Are you sure?</h4>
+            <p id="admin-sponsor-form-confirm-copy">Canceling returns you to Manage sponsors and discards this form.</p>
+            <div class="admin-sponsor-form-confirm-actions">
+              <button class="btn outline" type="button" data-sponsor-confirm-no>No</button>
+              <button class="btn primary" type="button" data-sponsor-confirm-yes>Yes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-sponsor-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => showSponsorFormCancelConfirm(root));
+  });
+  root.querySelector('[data-sponsor-confirm-no]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+  });
+  root.querySelector('[data-sponsor-confirm-yes]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+    hideSponsorFormToast();
+  });
+  return root;
+}
+
+function showSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-sponsor-confirm-yes]')?.focus();
+}
+
+function hideSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast'), { editing = false } = {}) {
+  const row = root?.querySelector('[data-bypass-payment-row]');
+  if (!row) return;
+  const allowed = !editing && canBypassSponsorPayment();
+  row.hidden = !allowed;
+  const input = row.querySelector('input[name="bypass_payment"]');
+  if (input && !allowed) input.checked = false;
+}
+
+function openSponsorFormToast() {
+  const root = ensureSponsorFormToast();
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  hideSponsorFormCancelConfirm(root);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  return root;
+}
+
+function showManualAddSponsorToast() {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  if (title) title.textContent = 'Manual Add Sponsor';
+  if (note) note.hidden = true;
+  if (submit) submit.textContent = 'Save Sponsor';
+  if (currentLogo) {
+    currentLogo.hidden = true;
+    currentLogo.textContent = '';
+  }
+  if (form) {
+    form.dataset.mode = 'add';
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.logo_url.value = '';
+    form.elements.active.value = '1';
+    if (form.elements.tier) form.elements.tier.value = 'gold';
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  syncBypassPaymentVisibility(root, { editing: false });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function showEditSponsorToast(sponsor) {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  const tier = sponsorTierFromLevel(sponsor.level || sponsor.tier) || 'bronze';
+  const address = String(sponsor.formatted_address || [
+    sponsor.address,
+    sponsor.city,
+    sponsor.state,
+  ].filter(Boolean).join(', ')).trim();
+  if (title) title.textContent = 'Edit Sponsor';
+  if (note) {
+    note.hidden = false;
+    note.textContent = 'Editing existing sponsor';
+  }
+  if (submit) submit.textContent = 'Save Changes';
+  if (form) {
+    form.dataset.mode = 'edit';
+    form.reset();
+    form.elements.id.value = String(sponsor.id || '');
+    form.elements.logo_url.value = String(sponsor.logo_url || '');
+    form.elements.active.value = Number(sponsor.active) === 0 ? '0' : '1';
+    form.elements.business_name.value = String(sponsor.name || '');
+    form.elements.address.value = address;
+    form.elements.phone.value = '';
+    form.elements.email.value = '';
+    form.elements.phone.required = false;
+    form.elements.email.required = false;
+    if (form.elements.tier) form.elements.tier.value = tier;
+    if (form.elements.logo) form.elements.logo.value = '';
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  if (currentLogo) {
+    if (sponsor.logo_url) {
+      currentLogo.hidden = false;
+      currentLogo.textContent = `Current logo: ${sponsor.logo_url}`;
+    } else {
+      currentLogo.hidden = true;
+      currentLogo.textContent = '';
+    }
+  }
+  syncBypassPaymentVisibility(root, { editing: true });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function hideSponsorFormToast() {
+  const root = document.querySelector('#admin-sponsor-form-toast');
+  if (!root || root.hidden) return;
+  hideSponsorFormCancelConfirm(root);
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  sponsorFormToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
+function resetSponsorForm() {
+  // Legacy no-op kept for older call sites; form lives in the toast now.
 }
 
 function goldPrintSponsors() {
@@ -3002,10 +3275,16 @@ function renderGoldSponsorsPrintPreview() {
     const logo = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
       : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    const contact = formatAdminSponsorContactLines(sponsor)
+      .map((line) => `<span>${escapeHtml(line)}</span>`)
+      .join('');
     return `
       <article class="gold-sponsor-print-row">
         <div class="gold-sponsor-print-logo">${logo}</div>
-        <b>${escapeHtml(sponsor.name)}</b>
+        <div class="gold-sponsor-print-copy">
+          <b>${escapeHtml(sponsor.name)}</b>
+          ${contact}
+        </div>
       </article>
     `;
   }).join('');
@@ -3134,13 +3413,14 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
-    const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    const addressLines = doc.splitTextToSize(address, textWidth);
-    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const contactLines = formatAdminSponsorContactLines(sponsor).flatMap((line) => (
+      doc.splitTextToSize(String(line), textWidth)
+    ));
+    const textBlockHeight = nameLines.length * 18 + 4 + contactLines.length * 14;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
-    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
+    const rowHeight = Math.max(72, logoBasedHeight, textBlockHeight + 24);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -3179,7 +3459,7 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(91, 111, 136);
-    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
+    doc.text(contactLines, nameX, textTop + nameLines.length * 18 + 2);
 
     y += rowHeight + 10;
   }
@@ -3247,7 +3527,10 @@ function printGoldSponsorsHtmlFallback(sponsors) {
       const logo = sponsor.logo_url
         ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
         : `<span class="mark">${mark}</span>`;
-      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+      const contact = formatAdminSponsorContactLines(sponsor)
+        .map((line) => `<span>${escapeHtml(line)}</span>`)
+        .join('');
+      return `<li><div class="logo">${logo}</div><div class="copy"><strong>${escapeHtml(sponsor.name)}</strong>${contact}</div></li>`;
     }).join('')
     : '<li><strong>No active Gold sponsors yet.</strong></li>';
   const html = `<!doctype html>
@@ -3264,6 +3547,8 @@ function printGoldSponsorsHtmlFallback(sponsors) {
     .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
     .logo img{max-width:100%;max-height:100%;object-fit:contain}
     .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    .copy{display:grid;gap:4px}
+    .copy span{display:block;color:#445;font:400 .95rem/1.35 Helvetica,Arial,sans-serif}
     strong{font-size:1.15rem}
     @media print{body{margin:.55in} li{break-inside:avoid}}
   </style>
@@ -3371,30 +3656,8 @@ function renderSponsors() {
   renderGoldSponsorsPrintPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
-    const form = document.querySelector('#sponsor-form');
-    fillForm(form, {
-      ...sponsor,
-      city: sponsor.city || 'Kernersville',
-      state: sponsor.state || 'NC',
-    });
-    setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
-    const levelSelect = formControl(form, 'level');
-    if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
-      if (![...levelSelect.options].some((option) => option.value === level)) {
-        const option = document.createElement('option');
-        option.value = level;
-        option.textContent = level;
-        levelSelect.appendChild(option);
-      }
-      setSelectValue(levelSelect, level);
-    }
-    form.elements.active.checked = Boolean(Number(sponsor.active));
-    const file = formControl(form, 'logo_file');
-    if (file) file.value = '';
-    syncSponsorLogoPreview(form, sponsor.logo_url || '');
-    syncSponsorTierBenefits(form);
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!sponsor) return;
+    showEditSponsorToast(sponsor);
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this sponsor?')) return;
@@ -3413,65 +3676,17 @@ async function saveSponsorOrder(ids) {
 }
 
 function bindSponsorDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-sponsor-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.sponsorId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.sponsorId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.sponsorId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedSponsors();
-      const fromIndex = ordered.findIndex((sponsor) => sponsor.id === fromId);
-      const toIndex = ordered.findIndex((sponsor) => sponsor.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((sponsor) => sponsor.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'sponsorId',
+    getOrdered: orderedSponsors,
+    applyLocalOrder: (next) => {
       state.sponsors = next.map((sponsor, index) => ({ ...sponsor, sort_order: index + 1 }));
       renderSponsors();
-      try {
-        await saveSponsorOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadSponsors();
-        const status = document.querySelector('#sponsor-status');
-        if (status) status.textContent = 'Could not save the new sponsor order.';
-      }
-    });
+    },
+    saveOrder: saveSponsorOrder,
+    reload: loadSponsors,
+    errorStatusSelector: '#sponsor-status',
+    errorMessage: 'Could not save the new sponsor order.',
   });
 }
 
@@ -3493,30 +3708,91 @@ async function loadMailDeliveryStatus() {
   }
 }
 
+function mailPeopleOptions(select) {
+  return [...(select?.options || [])].filter((option) => option.value && !option.disabled);
+}
+
+function mailEveryoneSelected(select) {
+  const people = mailPeopleOptions(select);
+  return Boolean(people.length) && people.every((option) => option.selected);
+}
+
+function updateMailAllUsersButton(select = document.querySelector('#mail-recipient-select')) {
+  const button = document.querySelector('#mail-toggle-all-users');
+  if (!button) return;
+  const people = mailPeopleOptions(select);
+  const allSelected = mailEveryoneSelected(select);
+  button.disabled = !people.length;
+  button.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+  button.classList.toggle('is-active', allSelected);
+  button.textContent = allSelected ? 'Clear all users' : 'All users';
+}
+
+function toggleMailAllUsers(select = document.querySelector('#mail-recipient-select')) {
+  if (!select) return;
+  const people = mailPeopleOptions(select);
+  if (!people.length) return;
+  const selectAll = !mailEveryoneSelected(select);
+  people.forEach((option) => { option.selected = selectAll; });
+  updateMailAllUsersButton(select);
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
-  }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
+  const select = document.querySelector('#mail-recipient-select');
+  if (!select) return;
+  const previous = new Set(
+    [...select.selectedOptions]
+      .map((option) => String(option.value || ''))
+      .filter((value) => value && value !== '__all__'),
+  );
+  select.replaceChildren();
+
+  state.mailRecipients.forEach((user) => {
+    const name = String(user.display_name || user.email || 'User').trim();
+    const email = String(user.email || '').trim();
+    const value = String(user.id);
+    const option = new Option(name, value, false, previous.has(value));
+    if (email) option.title = email;
+    select.add(option);
+  });
+
+  updateMailAllUsersButton(select);
 }
 
 async function loadMailRecipients() {
   if (!canSendMail()) return;
-  state.mailRecipients = await jsonFetch('/api/admin/mail/recipients');
+  try {
+    const data = await jsonFetch('/api/admin/mail/recipients');
+    state.mailRecipients = Array.isArray(data) ? data : [];
+  } catch (error) {
+    state.mailRecipients = [];
+    const status = document.querySelector('#mail-status');
+    if (status) status.textContent = error?.message || 'Could not load recipients.';
+  }
   renderMailRecipients();
   await loadMailDeliveryStatus();
 }
 
 function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
+  if (!select) return [];
+  return [...new Set(
+    [...select.selectedOptions]
+      .map((option) => Number(String(option.value || '').trim()))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  )];
+}
+
+function selectedMailExtraEmails(form) {
+  const raw = String(form?.elements.extra_emails?.value || '').trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;\n]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )];
 }
 
 function bindMailComposer() {
@@ -3525,6 +3801,37 @@ function bindMailComposer() {
   const toolbar = document.querySelector('#mail-rich-toolbar');
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+
+  const recipientSelect = form.querySelector('#mail-recipient-select');
+  const allUsersButton = form.querySelector('#mail-toggle-all-users');
+  if (allUsersButton && allUsersButton.dataset.boundAllUsers !== '1') {
+    allUsersButton.dataset.boundAllUsers = '1';
+    allUsersButton.addEventListener('click', () => {
+      toggleMailAllUsers(recipientSelect);
+    });
+  }
+  if (recipientSelect && !recipientSelect.dataset.boundRecipientGuard) {
+    recipientSelect.dataset.boundRecipientGuard = '1';
+    // Tap/click toggles options without requiring Ctrl/Cmd when the browser
+    // exposes the option as the event target (Chrome/Edge). Firefox falls back
+    // to native multi-select (Ctrl/Cmd).
+    recipientSelect.addEventListener('mousedown', (event) => {
+      const direct = event.target?.tagName === 'OPTION' ? event.target : null;
+      const fromPoint = !direct && typeof document.elementFromPoint === 'function'
+        ? document.elementFromPoint(event.clientX, event.clientY)
+        : null;
+      const option = direct || (fromPoint?.tagName === 'OPTION' ? fromPoint : null);
+      if (!option || option.disabled || option.parentElement !== recipientSelect) return;
+      event.preventDefault();
+      recipientSelect.focus();
+      option.selected = !option.selected;
+      updateMailAllUsersButton(recipientSelect);
+      recipientSelect.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    recipientSelect.addEventListener('change', () => {
+      updateMailAllUsersButton(recipientSelect);
+    });
+  }
 
   toolbar?.querySelectorAll('[data-mail-rich]').forEach((button) => {
     button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -3540,21 +3847,20 @@ function bindMailComposer() {
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
-  });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
     const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const extraEmails = selectedMailExtraEmails(form);
+    const rawExtra = String(form.elements.extra_emails?.value || '').trim();
+    if (!userIds.length && !extraEmails.length) {
+      if (status) {
+        status.textContent = rawExtra
+          ? 'Enter a valid email address, or choose a recipient from the list.'
+          : 'Choose a recipient or enter at least one email address.';
+      }
       return;
     }
     if (!subject) {
@@ -3570,6 +3876,7 @@ function bindMailComposer() {
     payload.set('subject', subject);
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
+    if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
     [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
 
     if (status) status.textContent = 'Sending…';
@@ -3579,7 +3886,12 @@ function bindMailComposer() {
         if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+        if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+        const recipientSelectEl = form.querySelector('#mail-recipient-select');
+        if (recipientSelectEl) {
+          [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
+          updateMailAllUsersButton(recipientSelectEl);
+        }
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
         showSavedToast('Sent.', { icon: 'envelope' });
@@ -3607,17 +3919,163 @@ function canEditManagedUser(user) {
   return !isSuperAdmin(user);
 }
 
-async function loadUsers() {
-  if (!hasPermission('users')) return;
-  state.users = await jsonFetch('/api/admin/users');
-  const list = document.querySelector('#users-list');
-  const roleSelect = document.querySelector('#user-form [name="role"]');
+let userFormToastLeaveTimer = null;
+
+function ensureUserFormToast() {
+  let root = document.querySelector('#admin-user-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-user-form-toast';
+  root.className = 'admin-user-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-user-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-user-form-toast-backdrop" data-user-form-dismiss aria-label="Close user form"></button>
+    <div class="admin-user-form-toast-panel">
+      <div class="admin-user-form-toast-card">
+        <h3 id="admin-user-form-toast-title">New User</h3>
+        <form id="user-form" class="admin-user-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <label>Email / Username<input name="username" type="email" required autocomplete="username" placeholder="editor@example.com"></label>
+          <label>Display name<input name="display_name" required placeholder="Full name"></label>
+          <label id="user-password-label">Password <small id="user-password-hint">required · min 8 characters</small>
+            <input name="password" type="password" autocomplete="new-password" minlength="8">
+          </label>
+          <label>Role
+            <select name="role">
+              <option value="editor">Editor</option>
+              <option value="admin">Super Admin - all permissions</option>
+            </select>
+          </label>
+          <label class="checkline"><input name="active" type="checkbox" checked> Active</label>
+          <fieldset>
+            <legend>Global permissions</legend>
+            <label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Page edit permissions</legend>
+            <div id="page-permission-boxes"></div>
+          </fieldset>
+          <p class="admin-user-form-toast-status" id="user-status" aria-live="polite"></p>
+          <div class="admin-user-form-toast-actions">
+            <button class="btn outline" type="button" data-user-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" id="user-submit">Send Invite</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-user-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideUserFormToast());
+  });
+  return root;
+}
+
+function syncUserFormMode(form = document.querySelector('#user-form')) {
+  if (!form) return;
+  const editing = Boolean(String(formControl(form, 'id')?.value || '').trim());
+  const title = document.querySelector('#admin-user-form-toast-title');
+  const submit = document.querySelector('#user-submit');
+  const passwordHint = document.querySelector('#user-password-hint');
+  const passwordInput = formControl(form, 'password');
+  const roleSelect = formControl(form, 'role');
+  if (title) title.textContent = editing ? 'Edit User' : 'New User';
+  if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
+  if (passwordHint) {
+    passwordHint.textContent = editing
+      ? 'optional · leave blank to keep current password'
+      : 'required · min 8 characters';
+  }
+  if (passwordInput) {
+    passwordInput.required = !editing;
+    passwordInput.placeholder = editing ? 'Leave blank to keep current password' : '';
+  }
   if (roleSelect) {
     [...roleSelect.options].forEach((option) => {
       if (option.value === 'admin') option.hidden = !isSuperAdmin();
     });
     if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
   }
+  form.dataset.mode = editing ? 'edit' : 'create';
+}
+
+function openUserFormToast({ editing = false } = {}) {
+  const root = ensureUserFormToast();
+  renderPagePermissionBoxes();
+  window.clearTimeout(userFormToastLeaveTimer);
+  root.hidden = false;
+  playOverlayEnter(root);
+  syncUserFormMode(root.querySelector('#user-form'));
+  const focusName = editing ? 'display_name' : 'username';
+  window.setTimeout(() => root.querySelector(`[name="${focusName}"]`)?.focus(), 40);
+}
+
+function hideUserFormToast() {
+  const root = document.querySelector('#admin-user-form-toast');
+  if (!root || root.hidden) return;
+  window.clearTimeout(userFormToastLeaveTimer);
+  userFormToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
+}
+
+function resetUserForm(form = document.querySelector('#user-form')) {
+  if (!form) return;
+  form.reset();
+  formControl(form, 'id').value = '';
+  if (form.elements.active) form.elements.active.checked = true;
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => { input.checked = false; });
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = '';
+  syncUserFormMode(form);
+}
+
+function openNewUserToast() {
+  ensureUserFormToast();
+  resetUserForm();
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = 'Saving will email a welcome invite with login details.';
+  openUserFormToast({ editing: false });
+}
+
+function openEditUserToast(user) {
+  if (!user || !canEditManagedUser(user)) return;
+  const root = ensureUserFormToast();
+  const form = root.querySelector('#user-form');
+  renderPagePermissionBoxes();
+  fillForm(form, {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    password: '',
+  });
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+    input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+  });
+  form.elements.active.checked = Boolean(user.active);
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = 'Changes save only — no email is sent.';
+  openUserFormToast({ editing: true });
+}
+
+async function loadUsers() {
+  if (!hasPermission('users')) return;
+  state.users = await jsonFetch('/api/admin/users');
+  const list = document.querySelector('#users-list');
+  if (!list) return;
   list.innerHTML = state.users.length
     ? state.users.map(user => {
       const editable = canEditManagedUser(user);
@@ -3633,23 +4091,7 @@ async function loadUsers() {
     : '<p class="draft">No users found.</p>';
   list.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => {
     const user = state.users.find(item => item.id === Number(button.dataset.editUser));
-    if (!user || !canEditManagedUser(user)) return;
-    const form = document.querySelector('#user-form');
-    fillForm(form, {
-      id: user.id,
-      username: user.username,
-      display_name: user.display_name,
-      role: user.role,
-      password: '',
-    });
-    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
-    });
-    form.elements.active.checked = Boolean(user.active);
-    const status = document.querySelector('#user-status');
-    if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    formControl(form, 'display_name')?.focus();
+    openEditUserToast(user);
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
@@ -3936,67 +4378,19 @@ async function savePhotoOrder(ids) {
 }
 
 function bindPhotoDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-photo-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.photoId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.photoId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.photoId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedPhotos();
-      const fromIndex = ordered.findIndex((photo) => photo.id === fromId);
-      const toIndex = ordered.findIndex((photo) => photo.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((photo) => photo.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'photoId',
+    getOrdered: orderedPhotos,
+    applyLocalOrder: (next) => {
       state.photos = next.map((photo, index) => ({ ...photo, sort_order: index + 1 }));
       renderPhotos();
-      try {
-        await savePhotoOrder(ids);
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Photo order saved.';
-      } catch (error) {
-        console.error(error);
-        await loadPhotos();
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Could not save the new photo order.';
-      }
-    });
+    },
+    saveOrder: savePhotoOrder,
+    reload: loadPhotos,
+    errorStatusSelector: '#photo-status',
+    errorMessage: 'Could not save the new photo order.',
+    successStatusSelector: '#photo-status',
+    successMessage: 'Photo order saved.',
   });
 }
 
@@ -4624,6 +5018,9 @@ function bindMinutesPanel() {
 async function refreshAll() {
   await loadMe();
   await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
+  if (mustChangePassword()) {
+    showPasswordToast({ required: true });
+  }
 }
 
 function bindPasswordControls() {
@@ -4665,6 +5062,7 @@ function bindPasswordControls() {
           confirm_password: confirmPassword,
         }),
       });
+      if (state.me?.user) state.me.user.must_change_password = false;
       form.reset();
       if (status) status.textContent = '';
       hidePasswordToast();
@@ -4689,7 +5087,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. All public pages now redirect to maintenance.html.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });
@@ -4971,89 +5369,77 @@ function bindForms() {
     formControl(form, 'name')?.focus();
   });
 
-  document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-status');
-    const payload = formPayload(form);
-    delete payload.homepage_ad;
-    payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
-    payload.state = String(payload.state || 'NC').trim() || 'NC';
-    const id = payload.id;
-    delete payload.id;
-    delete payload.logo_file;
-    delete payload.sort_order;
-    if (status) status.textContent = 'Saving…';
-    try {
-      const file = formControl(form, 'logo_file')?.files?.[0];
-      if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Sponsor logo');
-        upload.set('caption', payload.level || 'Sponsor');
-        // Negative sort keeps sponsor logos out of the public Photo gallery listing.
-        upload.set('sort_order', '-400');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
-        payload.logo_url = stored.url;
-        formControl(form, 'logo_url').value = stored.url;
-        syncSponsorLogoPreview(form, stored.url);
-      }
-      await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (status) status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
-      resetSponsorForm(form);
-      await loadSponsors();
-    } catch (error) {
-      if (status) status.textContent = `Could not save sponsor: ${error.message}`;
-    }
-  });
-
-  document.querySelector('#sponsor-form [name="logo_url"]')?.addEventListener('input', (event) => {
-    syncSponsorLogoPreview(event.currentTarget.form, event.currentTarget.value);
-  });
-  document.querySelector('#sponsor-form [name="logo_file"]')?.addEventListener('change', (event) => {
-    const form = event.currentTarget.form;
-    const file = event.currentTarget.files?.[0];
-    if (!file) {
-      syncSponsorLogoPreview(form);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(file);
-    syncSponsorLogoPreview(form, objectUrl);
-  });
-  document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
-    syncSponsorTierBenefits(event.currentTarget.form);
-  });
   document.querySelector('#print-gold-sponsors')?.addEventListener('click', () => {
     printGoldSponsorsPdf();
   });
-  syncSponsorTierBenefits();
-
-  document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    const seconds = Number(formControl(form, 'sponsor_ad_seconds')?.value);
-    if (!Number.isFinite(seconds)) {
-      if (status) status.textContent = 'Enter a valid number of seconds.';
-      return;
-    }
-    if (status) status.textContent = 'Saving…';
-    try {
-      const saved = await jsonFetch('/api/admin/sponsors/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ sponsor_ad_seconds: seconds }),
-      });
-      formControl(form, 'sponsor_ad_seconds').value = String(saved.sponsor_ad_seconds);
-      if (status) status.textContent = `Homepage fly-in will close after ${saved.sponsor_ad_seconds} seconds.`;
-    } catch (error) {
-      if (status) status.textContent = `Could not save ad timing: ${error.message}`;
-    }
-  });
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
-    resetSponsorForm(document.querySelector('#sponsor-form'));
-    document.querySelector('#sponsor-status').textContent = 'Creating a new sponsor.';
-    formControl(document.querySelector('#sponsor-form'), 'name')?.focus();
+    showManualAddSponsorToast();
+  });
+
+  const sponsorToast = ensureSponsorFormToast();
+  sponsorToast.querySelector('#sponsor-manual-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#sponsor-manual-status');
+    const mode = form.dataset.mode === 'edit' ? 'edit' : 'add';
+    const tier = String(form.elements.tier?.value || '').trim().toLowerCase();
+    const businessName = String(form.elements.business_name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim();
+    const logo = form.elements.logo?.files?.[0];
+    if (status) status.textContent = 'Saving…';
+    try {
+      if (mode === 'edit') {
+        const id = String(form.elements.id?.value || '').trim();
+        if (!id) {
+          showFailedToast('Missing sponsor id.');
+          return;
+        }
+        const level = tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor';
+        let logoUrl = String(form.elements.logo_url?.value || '').trim();
+        if (logo) {
+          const upload = new FormData();
+          upload.set('file', logo);
+          upload.set('alt_text', businessName || 'Sponsor logo');
+          upload.set('caption', level);
+          upload.set('sort_order', '-400');
+          const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+          logoUrl = stored.url || logoUrl;
+        }
+        await jsonFetch(`/api/admin/sponsors/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: businessName,
+            address,
+            logo_url: logoUrl,
+            level,
+            active: form.elements.active?.value !== '0',
+          }),
+        });
+      } else {
+        const amounts = MANUAL_SPONSOR_TIER_AMOUNTS[tier] || MANUAL_SPONSOR_TIER_AMOUNTS.gold;
+        const bypass = Boolean(form.elements.bypass_payment?.checked) && canBypassSponsorPayment();
+        const body = new FormData();
+        body.set('business_name', businessName);
+        body.set('address', address);
+        body.set('phone', phone);
+        body.set('email', email);
+        body.set('tier', tier);
+        body.set('amount_cents', String(amounts.cents));
+        body.set('amount_display', amounts.display);
+        if (bypass) body.set('bypass_payment', '1');
+        if (logo) body.set('logo', logo);
+        await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
+      }
+      hideSponsorFormToast();
+      await loadSponsors();
+    } catch (error) {
+      const detail = error?.message || 'Could not save sponsor.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+    }
   });
 
   document.querySelector('#contact-topic-form')?.addEventListener('submit', async (event) => {
@@ -5097,59 +5483,80 @@ function bindForms() {
     formControl(form, 'label')?.focus();
   });
 
-  document.querySelector('#user-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#user-status');
-    const payload = formPayload(form);
-    payload.username = String(payload.username || '').trim();
-    payload.display_name = String(payload.display_name || '').trim();
-    payload.password = String(payload.password || '');
-    if (!payload.username) {
-      status.textContent = 'Username is required.';
-      return;
-    }
-    if (!payload.display_name) {
-      status.textContent = 'Display name is required.';
-      return;
-    }
-    const id = payload.id;
-    if (!id && !payload.password) {
-      status.textContent = 'Password is required for new users.';
-      return;
-    }
-    if (payload.password && payload.password.length < 8) {
-      status.textContent = 'Password must be at least 8 characters.';
-      return;
-    }
-    payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
-    delete payload.id;
-    if (!payload.password) delete payload.password;
-    status.textContent = 'Saving…';
-    try {
-      await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      status.textContent = 'User saved.';
-      form.reset();
-      form.elements.active.checked = true;
-      form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
-      await loadUsers();
-    } catch (error) {
-      let message = 'Could not save user.';
-      try {
-        const parsed = JSON.parse(String(error.message || ''));
-        if (parsed?.detail) message = parsed.detail;
-      } catch {
-        if (error?.message) message = error.message;
+  const bindUserForm = () => {
+    const form = ensureUserFormToast().querySelector('#user-form');
+    if (!form || form.dataset.boundUserSubmit === '1') return;
+    form.dataset.boundUserSubmit = '1';
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = document.querySelector('#user-status');
+      const listStatus = document.querySelector('#users-list-status');
+      const payload = formPayload(form);
+      payload.username = String(payload.username || '').trim();
+      payload.display_name = String(payload.display_name || '').trim();
+      payload.password = String(payload.password || '');
+      if (!payload.username) {
+        if (status) status.textContent = 'Username is required.';
+        return;
       }
-      status.textContent = message;
-    }
-  });
+      if (!payload.display_name) {
+        if (status) status.textContent = 'Display name is required.';
+        return;
+      }
+      const id = payload.id;
+      if (!id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
+        if (status) status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
+        return;
+      }
+      if (!id && !payload.password) {
+        if (status) status.textContent = 'Password is required for new users.';
+        return;
+      }
+      if (payload.password && payload.password.length < 8) {
+        if (status) status.textContent = 'Password must be at least 8 characters.';
+        return;
+      }
+      payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
+      delete payload.id;
+      if (!payload.password) delete payload.password;
+      if (status) status.textContent = id ? 'Updating…' : 'Sending invite…';
+      try {
+        const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', {
+          method: id ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        });
+        let message = id ? 'User updated.' : 'User saved.';
+        if (!id && result?.invite_detail) {
+          message = result.invite_sent
+            ? result.invite_detail
+            : `User saved, but invite email failed: ${result.invite_detail}`;
+        }
+        if (listStatus) listStatus.textContent = message;
+        if (status) status.textContent = message;
+        hideUserFormToast();
+        resetUserForm(form);
+        await loadUsers();
+        if (!id && result?.invite_sent) {
+          showSavedToast('Invite sent.', { icon: 'envelope' });
+        } else if (id) {
+          showSavedToast('User updated.');
+        }
+      } catch (error) {
+        let message = id ? 'Could not update user.' : 'Could not save user.';
+        try {
+          const parsed = JSON.parse(String(error.message || ''));
+          if (parsed?.detail) message = parsed.detail;
+        } catch {
+          if (error?.message) message = error.message;
+        }
+        if (status) status.textContent = message;
+      }
+    });
+  };
+  bindUserForm();
 
   document.querySelector('#new-user')?.addEventListener('click', () => {
-    const form = document.querySelector('#user-form');
-    form.reset();
-    form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    openNewUserToast();
   });
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
