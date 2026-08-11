@@ -1147,7 +1147,7 @@ function openSponsorSignupModal(pkg) {
           <label>Phone<input name="phone" type="tel" required autocomplete="tel" maxlength="40" placeholder="(336) 555-0100"></label>
           <label>Invoice email<input name="email" type="email" required autocomplete="email" maxlength="160" placeholder="billing@example.com"></label>
           <p class="sponsor-signup-pay-note">Required so we can email your donation invoice from the East Forsyth Band Boosters.</p>
-          <label class="sponsor-signup-logo">Company logo <span>(optional, image under 2 MB)</span>
+          <label class="sponsor-signup-logo">Company logo <span>(optional · auto-compressed under 1.8 MB · server max 2 MB)</span>
             <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
           </label>
           <p class="sponsor-signup-logo-name" data-logo-name hidden></p>
@@ -1482,16 +1482,11 @@ function openSponsorSignupModal(pkg) {
       }
       return;
     }
-    if (file.size > 1_900_000) {
-      logoInput.value = '';
-      if (status) status.textContent = 'Logo must be an image under 2 MB.';
-      if (logoName) {
-        logoName.hidden = true;
-        logoName.textContent = '';
-      }
-      return;
+    if (status) {
+      status.textContent = file.size > (window.EfhsImageUpload?.CLIENT_TARGET_BYTES || 1_800_000)
+        ? 'Large logo selected — it will be auto-compressed before upload.'
+        : '';
     }
-    if (status) status.textContent = '';
     if (logoName) {
       logoName.hidden = false;
       logoName.textContent = file.name;
@@ -1505,7 +1500,7 @@ function openSponsorSignupModal(pkg) {
     const address = String(form.elements.address?.value || '').trim();
     const phone = String(form.elements.phone?.value || '').trim();
     const email = String(form.elements.email?.value || '').trim().toLowerCase();
-    const logo = form.elements.logo?.files?.[0] || null;
+    let logo = form.elements.logo?.files?.[0] || null;
     if (!businessName || !address || !phone || !email) {
       if (status) status.textContent = 'Business / organization name, address, phone, and invoice email are required.';
       return;
@@ -1520,9 +1515,22 @@ function openSponsorSignupModal(pkg) {
       addressInput?.focus();
       return;
     }
-    if (logo && logo.size > 1_900_000) {
-      if (status) status.textContent = 'Logo must be an image under 2 MB.';
-      return;
+    if (logo) {
+      const prepare = window.EfhsImageUpload?.prepareImageFileForUpload;
+      if (typeof prepare !== 'function') {
+        if (status) status.textContent = 'Image upload helper failed to load. Refresh the page and try again.';
+        return;
+      }
+      try {
+        if (logo.size > (window.EfhsImageUpload.CLIENT_TARGET_BYTES || 1_800_000)) {
+          status.textContent = `Compressing logo to fit ${window.EfhsImageUpload.CLIENT_TARGET_LABEL || '1.8 MB'}…`;
+        }
+        logo = await prepare(logo);
+        if (status) status.textContent = '';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not prepare that logo for upload.';
+        return;
+      }
     }
     sponsorSignupState.draft = { businessName, address, phone, email, logo };
     sponsorSignupState.application = null;

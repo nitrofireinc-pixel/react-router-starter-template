@@ -24,6 +24,7 @@ for (const name of [
   'styles.css',
   'script.js',
   'site-content.js',
+  'image-upload.js',
   'admin.js',
   'push-sw.js',
   'manifest.webmanifest',

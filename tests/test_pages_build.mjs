@@ -19,6 +19,7 @@ test('pages build contains advanced worker and runtime module', () => {
   assert.equal(existsSync(join(OUTPUT, 'default-pages.mjs')), true);
   assert.equal(existsSync(join(OUTPUT, 'invoice-logo-rgb.mjs')), true);
   assert.equal(existsSync(join(OUTPUT, 'admin.js')), true);
+  assert.equal(existsSync(join(OUTPUT, 'image-upload.js')), true);
   assert.equal(existsSync(join(OUTPUT, 'styles.css')), true);
   assert.equal(existsSync(join(OUTPUT, 'vendor/jspdf.umd.min.js')), true);
 

@@ -160,7 +160,7 @@
   <li>Write and format campaign copy (bold, italic, underline, color, size).</li>
   <li>Use <b>Insert line</b> to start a new paragraph/line.</li>
   <li>Use <b>Photo</b> to insert an image <b>at the cursor</b> (not always at the top). Surrounding text wraps beside the photo.</li>
-  <li>Choose an existing gallery photo or upload a new one. Large uploads are auto-shrunk to fit the about <b>2 MB</b> size limit.</li>
+  <li>Choose an existing gallery photo or upload a new one. Large uploads are auto-compressed in the browser to about <b>1.8 MB</b> before upload (server max about <b>2 MB</b>).</li>
   <li>Add clear <b>alt text</b> that describes the photo.</li>
   <li>Click a photo to select it: drag a <b>corner handle</b> to resize; use <b>Delete photo</b> (or Delete/Backspace) to remove it; press Escape or click elsewhere to deselect.</li>
   <li>Click <b>Save</b> to publish. Cancel closes without saving. The public Direct Support Donate card stays on the Fundraising page automatically.</li>
@@ -308,7 +308,8 @@
 
 <h2>12. Photos &amp; Media</h2>
 <ul>
-  <li>Supported uploads: common image formats within CMS size limits (about 2 MB; larger Fundraising inserts are auto-shrunk when possible)</li>
+  <li>Supported image uploads (Photos, Fundraising, staff/booster photos, logos, sponsor logos): server max about <b>2 MB</b>. The browser auto-compresses larger files to about <b>1.8 MB</b> before upload when possible</li>
+  <li>Staff Email attachments are separate and remain up to <b>4 MB</b> each (not the image 1.8 MB workflow)</li>
   <li>Always include alt text</li>
   <li>Home shows newest photos; Gallery shows the full public set</li>
   <li>Protect brand marks/logos from appearing as gallery photos</li>

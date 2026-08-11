@@ -2132,89 +2132,22 @@ function setRichToolbarVisible(activeField = false) {
   toolbar.classList.toggle('is-active', Boolean(activeField));
 }
 
-const IMAGE_UPLOAD_CLIENT_MAX_BYTES = 1_900_000;
-const IMAGE_UPLOAD_CLIENT_MAX_LABEL = '2 MB';
+// 2 MB image endpoints: browser prepares files to <= 1.8 MB before upload.
+// Staff Email attachments (4 MB) must never use these helpers.
+const IMAGE_UPLOAD_CLIENT_TARGET_BYTES = window.EfhsImageUpload?.CLIENT_TARGET_BYTES || 1_800_000;
+const IMAGE_UPLOAD_CLIENT_TARGET_LABEL = window.EfhsImageUpload?.CLIENT_TARGET_LABEL || '1.8 MB';
+const IMAGE_UPLOAD_SERVER_MAX_LABEL = window.EfhsImageUpload?.SERVER_MAX_LABEL || '2 MB';
 
-async function canvasToImageBlob(canvas, mimeType, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('Could not compress the image.'));
-        return;
-      }
-      resolve(blob);
-    }, mimeType, quality);
+async function prepareImageFileForUpload(file, options = {}) {
+  const helper = window.EfhsImageUpload?.prepareImageFileForUpload;
+  if (typeof helper !== 'function') {
+    throw new Error('Image upload helper failed to load. Refresh the page and try again.');
+  }
+  return helper(file, {
+    maxBytes: IMAGE_UPLOAD_CLIENT_TARGET_BYTES,
+    targetLabel: IMAGE_UPLOAD_CLIENT_TARGET_LABEL,
+    ...options,
   });
-}
-
-async function compressImageFileForUpload(file, {
-  maxBytes = IMAGE_UPLOAD_CLIENT_MAX_BYTES,
-  maxDimension = 2400,
-} = {}) {
-  if (!(file instanceof File) || !file.size) return file;
-  if (file.size <= maxBytes) return file;
-  const type = String(file.type || '').toLowerCase();
-  if (!type.startsWith('image/') || type === 'image/svg+xml') {
-    throw new Error(`Image is larger than ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}. Choose a smaller file.`);
-  }
-
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(file);
-  } catch {
-    throw new Error(`Could not read that image for resizing. Please upload a file under ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}.`);
-  }
-
-  try {
-    let width = bitmap.width || 1;
-    let height = bitmap.height || 1;
-    const fit = Math.min(maxDimension / width, maxDimension / height, 1);
-    width = Math.max(1, Math.round(width * fit));
-    height = Math.max(1, Math.round(height * fit));
-    const preferJpeg = type !== 'image/png' && type !== 'image/webp';
-    const mimeCandidates = preferJpeg
-      ? ['image/jpeg', 'image/webp', 'image/png']
-      : (type === 'image/png' ? ['image/webp', 'image/jpeg', 'image/png'] : ['image/webp', 'image/jpeg', 'image/png']);
-
-    let bestBlob = null;
-    for (const mimeType of mimeCandidates) {
-      let scale = 1;
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        const outW = Math.max(1, Math.round(width * scale));
-        const outH = Math.max(1, Math.round(height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = outW;
-        canvas.height = outH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) break;
-        if (mimeType === 'image/jpeg') {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, outW, outH);
-        }
-        ctx.drawImage(bitmap, 0, 0, outW, outH);
-        const qualitySteps = mimeType === 'image/png' ? [undefined] : [0.9, 0.82, 0.72, 0.62, 0.5];
-        for (const quality of qualitySteps) {
-          const blob = await canvasToImageBlob(canvas, mimeType, quality);
-          if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
-          if (blob.size <= maxBytes) {
-            const ext = mimeType === 'image/png' ? '.png' : (mimeType === 'image/webp' ? '.webp' : '.jpg');
-            const base = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
-            return new File([blob], `${base}${ext}`, { type: mimeType, lastModified: Date.now() });
-          }
-        }
-        scale *= 0.82;
-        if (outW <= 640 && outH <= 640) break;
-      }
-    }
-    if (bestBlob && bestBlob.size <= maxBytes) {
-      const ext = bestBlob.type === 'image/png' ? '.png' : (bestBlob.type === 'image/webp' ? '.webp' : '.jpg');
-      const base = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
-      return new File([bestBlob], `${base}${ext}`, { type: bestBlob.type || 'image/jpeg', lastModified: Date.now() });
-    }
-    throw new Error(`Could not shrink that image under ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}. Try a smaller photo.`);
-  } finally {
-    bitmap.close?.();
-  }
 }
 
 function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
@@ -2463,7 +2396,7 @@ function ensurePagePhotoToast() {
     <div class="admin-page-photo-toast-panel">
       <div class="admin-page-photo-toast-card">
         <h3 id="admin-page-photo-toast-title">Insert photo</h3>
-        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are auto-shrunk to fit the ${IMAGE_UPLOAD_CLIENT_MAX_LABEL} limit. After insert, drag a corner to resize.</p>
+        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are auto-compressed in your browser to about ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL} before upload (server max ${IMAGE_UPLOAD_SERVER_MAX_LABEL}). After insert, drag a corner to resize.</p>
         <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
         <label class="admin-page-photo-file">Upload image
           <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
@@ -2573,14 +2506,14 @@ async function uploadAndInsertPagePhoto() {
   }
   const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
   if (status) {
-    status.textContent = file.size > IMAGE_UPLOAD_CLIENT_MAX_BYTES
-      ? `Shrinking image to fit ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}…`
+    status.textContent = file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+      ? `Compressing image to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
       : 'Uploading…';
   }
   try {
-    const uploadFile = await compressImageFileForUpload(file);
+    const uploadFile = await prepareImageFileForUpload(file);
     if (status && uploadFile !== file) {
-      status.textContent = `Uploading resized image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
+      status.textContent = `Uploading compressed image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
     } else if (status) {
       status.textContent = 'Uploading…';
     }
@@ -3621,9 +3554,9 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=fundraising-guide-20260810-6';
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=image-upload-1p8mb-20260811-1';
   const cards = [
-    ['Website Guide', 'Download the full site and CMS documentation (.doc), including Fundraising photo editing.', guideHref, 'Documentation', 'link', 'docs'],
+    ['Website Guide', 'Download the full site and CMS documentation (.doc), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -6587,11 +6520,27 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#logo-status');
-    status.textContent = 'Uploading...';
-    const result = await jsonFetch('/api/admin/logo', { method: 'POST', body: new FormData(form) });
-    form.reset();
-    fillForm(document.querySelector('#site-form'), result.site);
-    status.textContent = 'Logo uploaded and saved.';
+    const file = form.elements.file?.files?.[0];
+    if (!file) {
+      status.textContent = 'Choose a logo image first.';
+      return;
+    }
+    try {
+      status.textContent = file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+        ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+        : 'Uploading…';
+      const uploadFile = await prepareImageFileForUpload(file);
+      const body = new FormData();
+      body.set('file', uploadFile);
+      const result = await jsonFetch('/api/admin/logo', { method: 'POST', body });
+      form.reset();
+      fillForm(document.querySelector('#site-form'), result.site);
+      status.textContent = uploadFile !== file
+        ? 'Logo uploaded (auto-compressed) and saved.'
+        : 'Logo uploaded and saved.';
+    } catch (error) {
+      status.textContent = error.message || 'Could not upload logo.';
+    }
   });
 
   document.querySelector('#page-form')?.addEventListener('submit', async event => {
@@ -6775,8 +6724,12 @@ function bindForms() {
       delete payload.sort_order;
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
+        if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+          status.textContent = `Compressing photo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
+        }
+        const uploadFile = await prepareImageFileForUpload(file);
         const upload = new FormData();
-        upload.set('file', file);
+        upload.set('file', uploadFile);
         upload.set('alt_text', payload.name || 'Staff photo');
         upload.set('caption', plainTextFromHtml(payload.role) || 'Directors & Staff');
         // Negative sort keeps staff photos out of the public Photo gallery listing.
@@ -6825,8 +6778,12 @@ function bindForms() {
       delete payload.sort_order;
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
+        if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+          status.textContent = `Compressing photo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
+        }
+        const uploadFile = await prepareImageFileForUpload(file);
         const upload = new FormData();
-        upload.set('file', file);
+        upload.set('file', uploadFile);
         upload.set('alt_text', payload.name || 'Booster member photo');
         upload.set('caption', plainTextFromHtml(payload.role) || 'Booster Members');
         upload.set('sort_order', '-500');
@@ -7052,8 +7009,14 @@ function bindForms() {
         const level = tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor';
         let logoUrl = String(form.elements.logo_url?.value || '').trim();
         if (logo) {
+          if (status) {
+            status.textContent = logo.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+              ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+              : 'Uploading logo…';
+          }
+          const uploadFile = await prepareImageFileForUpload(logo);
           const upload = new FormData();
-          upload.set('file', logo);
+          upload.set('file', uploadFile);
           upload.set('alt_text', businessName || 'Sponsor logo');
           upload.set('caption', level);
           upload.set('sort_order', '-400');
@@ -7094,7 +7057,14 @@ function bindForms() {
         body.set('amount_cents', String(amounts.cents));
         body.set('amount_display', amounts.display);
         if (bypass) body.set('bypass_payment', '1');
-        if (logo) body.set('logo', logo);
+        if (logo) {
+          if (status) {
+            status.textContent = logo.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+              ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+              : 'Uploading logo…';
+          }
+          body.set('logo', await prepareImageFileForUpload(logo));
+        }
         await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
       }
       hideSponsorFormToast();
@@ -7355,10 +7325,10 @@ function bindForms() {
       return;
     }
     try {
-      if (file.size > IMAGE_UPLOAD_CLIENT_MAX_BYTES) {
-        status.textContent = `Shrinking ${file.name || 'photo'} to fit ${IMAGE_UPLOAD_CLIENT_MAX_LABEL}…`;
+      if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+        status.textContent = `Compressing ${file.name || 'photo'} to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
       }
-      const uploadFile = await compressImageFileForUpload(file);
+      const uploadFile = await prepareImageFileForUpload(file);
       const sizeKb = Math.max(1, Math.round(Number(uploadFile.size || 0) / 1024));
       status.textContent = `Uploading ${uploadFile.name || 'photo'} (${sizeKb} KB)…`;
       const body = new FormData();
@@ -7369,7 +7339,7 @@ function bindForms() {
       resetPhotoForm();
       await loadPhotos();
       status.textContent = uploadFile !== file
-        ? 'Photo uploaded (auto-resized to fit the size limit).'
+        ? `Photo uploaded (auto-compressed under ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}).`
         : 'Photo uploaded.';
     } catch (error) {
       const detail = String(error?.message || '').trim() || 'Unknown error';
