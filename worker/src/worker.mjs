@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
+const ASSET_VERSION = 'sponsor-tier-colors-20260807-1';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
@@ -633,6 +633,15 @@ async function initDb(env) {
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
+        .run();
+    }
+  }
+  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
+  if (calendarPageRow?.body_html) {
+    const nextCalendarHtml = ensureCalendarMonthMount(calendarPageRow.body_html);
+    if (nextCalendarHtml !== calendarPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextCalendarHtml, calendarPageRow.id)
         .run();
     }
   }
@@ -2182,6 +2191,53 @@ async function getEventById(env, id) {
   return row ? hydrateEventRow(row) : null;
 }
 
+/** Replace the old upcoming-events timeline with a month-calendar mount on the Calendar page. */
+export function ensureCalendarMonthMount(html) {
+  const source = String(html || '');
+  if (!source.trim()) return source;
+  const mount = '<div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>';
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(source)) !== null) {
+    const start = match.index;
+    let depth = 1;
+    let i = start + match[0].length;
+    while (i < source.length && depth > 0) {
+      const nextOpen = source.toLowerCase().indexOf('<div', i);
+      const nextClose = source.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) ranges.push([start, i]);
+      }
+    }
+  }
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const [start, end] = ranges[index];
+    next = `${next.slice(0, start)}${mount}${next.slice(end)}`;
+  }
+  if (/data-month-calendar/i.test(next)) {
+    // Collapse duplicate mounts if a page was migrated more than once.
+    return next.replace(
+      /(?:<div class="month-calendar" data-month-calendar aria-label="Program calendar"><\/div>\s*){2,}/gi,
+      `${mount}\n`,
+    );
+  }
+  if (/<div class="wrap">/i.test(next)) {
+    return next.replace(
+      /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${mount}$3`,
+    );
+  }
+  return `${next}${mount}`;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -2664,10 +2720,12 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
   const logos = items.map((sponsor) => {
+    const tier = normalizeSponsorTier(sponsor.tier || sponsor.level) || '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
@@ -4152,7 +4210,7 @@ export function generateStructuredPageHtml(payload = {}) {
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section>`;
 
   if (layout === 'calendar') {
-    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="timeline" data-events data-limit="5"></div>${callout}</div></section>`;
+    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>${callout}</div></section>`;
   }
 
   if (layout === 'contact') {
@@ -4241,6 +4299,10 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+  }
+  if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
+    // Full month view needs past and future months, not only upcoming rows.
+    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
