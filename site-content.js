@@ -4,6 +4,55 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function showTransientToast(message, { className = 'sponsor-signup-toast', ms = 4200, leaveMs = 280 } = {}) {
+  const toast = document.createElement('div');
+  toast.className = className;
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('is-visible'));
+  window.setTimeout(() => {
+    toast.classList.remove('is-visible');
+    window.setTimeout(() => toast.remove(), leaveMs);
+  }, ms);
+}
+
+function loadSquareWebSdk(environment = 'production') {
+  const existing = document.querySelector('script[data-square-web-sdk]');
+  if (existing && window.Square) return Promise.resolve(window.Square);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = environment === 'sandbox'
+      ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+      : 'https://web.squarecdn.com/v1/square.js';
+    script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+    script.onerror = () => reject(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 280, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+
 function decodeBasicHtmlEntities(value) {
   let text = String(value ?? '');
   for (let i = 0; i < 3; i += 1) {
@@ -176,18 +225,29 @@ function normalizeSponsorAdSeconds(value, fallback = 6) {
   return Math.min(30, Math.max(2, seconds));
 }
 
+function resolveSponsorTierKey(sponsor = {}) {
+  const raw = String(sponsor.tier || sponsor.level || sponsor.tier_label || '').toLowerCase();
+  if (/\bgold\b/.test(raw)) return 'gold';
+  if (/\bsilver\b/.test(raw)) return 'silver';
+  if (/\bbronze\b/.test(raw)) return 'bronze';
+  return '';
+}
+
 function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   if (!sponsor || document.querySelector('.sponsor-flyin')) return;
 
+  const tier = resolveSponsorTierKey(sponsor);
+  const tierClass = tier ? ` tier-${tier}` : '';
   const logo = sponsor.logo_url
     ? `<span class="sponsor-flyin-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>`
     : `<span class="sponsor-flyin-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
 
   const root = document.createElement('aside');
-  root.className = 'sponsor-flyin';
+  root.className = `sponsor-flyin${tierClass}`;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
+  if (tier) root.dataset.sponsorTier = tier;
   root.innerHTML = `
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">
@@ -197,7 +257,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
         <div class="sponsor-flyin-copy">
           <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
           <strong>${escapeHtml(sponsor.name)}</strong>
-          <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
+          <span class="sponsor-flyin-tier">${escapeHtml(sponsor.level || 'Sponsor')}</span>
           <em>View all sponsors</em>
         </div>
       </a>
@@ -236,7 +296,7 @@ function sponsorShowsMarquee(sponsor = {}) {
   return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
-const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v1';
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v2';
 
 function readMarqueeCache() {
   try {
@@ -260,10 +320,12 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
+    const tier = resolveSponsorTierKey(sponsor);
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
   }).join('');
   return `
     <div class="wrap sponsor-marquee-bar">
@@ -460,13 +522,228 @@ function ensureBoosterMeetingsContainers() {
   }
 }
 
+const MONTH_CALENDAR_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_CALENDAR_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTH_CALENDAR_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function getPublicZonedYmd(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(date);
+  const read = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return { year: read('year'), month: read('month'), day: read('day') };
+}
+
+function eventYearForCalendar(event) {
+  const year = Number(event?.event_year);
+  if (Number.isFinite(year) && year >= 2000 && year <= 2100) return year;
+  return getPublicZonedYmd().year;
+}
+
+function eventDayNumber(event) {
+  const detail = String(event?.date_detail || '').trim();
+  if (/^\d{1,2}$/.test(detail)) return Number(detail);
+  return null;
+}
+
+function eventBelongsToMonth(event, year, monthIndex) {
+  return eventYearForCalendar(event) === year
+    && String(event?.date_label || '').trim() === MONTH_CALENDAR_LABELS[monthIndex];
+}
+
+function daysInCalendarMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+let calendarDayToastLeaveTimer = null;
+
+function ensureCalendarDayToast() {
+  let root = document.querySelector('#calendar-day-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'calendar-day-toast';
+  root.className = 'calendar-day-toast';
+  root.hidden = true;
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'calendar-day-toast-title');
+  root.innerHTML = `
+    <div class="calendar-day-toast-backdrop" aria-hidden="true"></div>
+    <div class="calendar-day-toast-panel">
+      <button type="button" class="sponsor-flyin-close calendar-day-toast-close" data-calendar-day-close aria-label="Close day events">×</button>
+      <div class="calendar-day-toast-card">
+        <h3 id="calendar-day-toast-title"></h3>
+        <div class="calendar-day-toast-list" data-calendar-day-list></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelector('[data-calendar-day-close]')?.addEventListener('click', () => hideCalendarDayToast());
+  return root;
+}
+
+function hideCalendarDayToast() {
+  const root = document.querySelector('#calendar-day-toast');
+  if (!root || root.hidden) return;
+  window.clearTimeout(calendarDayToastLeaveTimer);
+  calendarDayToastLeaveTimer = playOverlayLeave(root, { ms: 280, hide: true });
+}
+
+function showCalendarDayToast(title, dayEvents) {
+  const root = ensureCalendarDayToast();
+  const titleEl = root.querySelector('#calendar-day-toast-title');
+  const list = root.querySelector('[data-calendar-day-list]');
+  if (titleEl) titleEl.textContent = title;
+  if (list) {
+    if (!dayEvents.length) {
+      list.innerHTML = '<p class="draft">No events on this day.</p>';
+    } else {
+      list.innerHTML = dayEvents.map((event) => `
+        <article class="calendar-day-toast-event">
+          <h4>${formatInlineRichText(event.title)}</h4>
+          <div class="event-description">${formatRichText(event.description)}</div>
+        </article>
+      `).join('');
+    }
+  }
+  window.clearTimeout(calendarDayToastLeaveTimer);
+  root.hidden = false;
+  playOverlayEnter(root);
+  window.setTimeout(() => root.querySelector('[data-calendar-day-close]')?.focus(), 40);
+}
+
+function renderMonthCalendar(container, allEvents, view) {
+  const { year, monthIndex } = view;
+  const today = getPublicZonedYmd();
+  const monthEvents = (Array.isArray(allEvents) ? allEvents : []).filter((event) => (
+    eventBelongsToMonth(event, year, monthIndex)
+  ));
+  const byDay = new Map();
+  const undated = [];
+  for (const event of monthEvents) {
+    const day = eventDayNumber(event);
+    if (day == null) {
+      undated.push(event);
+      continue;
+    }
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(event);
+  }
+
+  const dim = daysInCalendarMonth(year, monthIndex);
+  const firstDow = new Date(year, monthIndex, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstDow; i += 1) {
+    cells.push('<div class="month-calendar-cell is-empty" aria-hidden="true"></div>');
+  }
+  for (let day = 1; day <= dim; day += 1) {
+    const dayEvents = byDay.get(day) || [];
+    const hasEvents = dayEvents.length > 0;
+    const isToday = today.year === year && today.month === monthIndex + 1 && today.day === day;
+    const classes = [
+      'month-calendar-cell',
+      hasEvents ? 'has-events' : '',
+      isToday ? 'is-today' : '',
+    ].filter(Boolean).join(' ');
+    const label = `${MONTH_CALENDAR_NAMES[monthIndex]} ${day}, ${year}${hasEvents ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`;
+    if (hasEvents) {
+      cells.push(`
+        <button type="button" class="${classes}" data-calendar-day="${day}" aria-label="${escapeHtml(label)}">
+          <span class="month-calendar-daynum">${day}</span>
+          <span class="month-calendar-dot" aria-hidden="true"></span>
+        </button>`);
+    } else {
+      cells.push(`
+        <div class="${classes}" aria-label="${escapeHtml(label)}">
+          <span class="month-calendar-daynum">${day}</span>
+        </div>`);
+    }
+  }
+
+  const undatedHtml = undated.length
+    ? `<div class="month-calendar-undated">
+        <h3>Also this month</h3>
+        <div class="month-calendar-undated-list">
+          ${undated.map((event) => `
+            <article class="event">
+              <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+              <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
+            </article>
+          `).join('')}
+        </div>
+      </div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="month-calendar-shell">
+      <div class="month-calendar-toolbar">
+        <button type="button" class="month-calendar-nav" data-calendar-prev aria-label="Previous month">‹</button>
+        <h2 class="month-calendar-title">${MONTH_CALENDAR_NAMES[monthIndex]} ${year}</h2>
+        <button type="button" class="month-calendar-nav" data-calendar-next aria-label="Next month">›</button>
+      </div>
+      <div class="month-calendar-weekdays" aria-hidden="true">
+        ${MONTH_CALENDAR_WEEKDAYS.map((day) => `<span>${day}</span>`).join('')}
+      </div>
+      <div class="month-calendar-grid" role="grid" aria-label="${escapeHtml(`${MONTH_CALENDAR_NAMES[monthIndex]} ${year}`)}">
+        ${cells.join('')}
+      </div>
+      ${undatedHtml}
+    </div>`;
+
+  container.querySelector('[data-calendar-prev]')?.addEventListener('click', () => {
+    const next = { ...view };
+    next.monthIndex -= 1;
+    if (next.monthIndex < 0) {
+      next.monthIndex = 11;
+      next.year -= 1;
+    }
+    container._calendarView = next;
+    renderMonthCalendar(container, allEvents, next);
+  });
+  container.querySelector('[data-calendar-next]')?.addEventListener('click', () => {
+    const next = { ...view };
+    next.monthIndex += 1;
+    if (next.monthIndex > 11) {
+      next.monthIndex = 0;
+      next.year += 1;
+    }
+    container._calendarView = next;
+    renderMonthCalendar(container, allEvents, next);
+  });
+  container.querySelectorAll('[data-calendar-day]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const day = Number(button.dataset.calendarDay);
+      const dayEvents = byDay.get(day) || [];
+      showCalendarDayToast(`${MONTH_CALENDAR_NAMES[monthIndex]} ${day}, ${year}`, dayEvents);
+    });
+  });
+}
+
+function initMonthCalendars(allEvents) {
+  const today = getPublicZonedYmd();
+  document.querySelectorAll('[data-month-calendar]').forEach((container) => {
+    const view = container._calendarView || {
+      year: today.year,
+      monthIndex: today.month - 1,
+    };
+    container._calendarView = view;
+    renderMonthCalendar(container, allEvents, view);
+  });
+}
+
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
-  const [site, events, photos] = await Promise.all([
+  const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
+  const [site, events, photos, calendarEvents] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    needsMonthCalendar
+      ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   if (site) {
@@ -480,12 +757,13 @@ async function loadPublicContent() {
       }
       if (key === 'hero_subtitle' || key === 'footer_note') {
         const html = formatRichText(value);
-        if (element.tagName === 'P') {
-          const match = html.match(/^<p>([\s\S]*)<\/p>$/i);
-          element.innerHTML = match ? match[1] : sanitizeInlineRichHtml(html);
-        } else {
+        // Footer note is a div so rich <p> blocks can render once without nested-p duplication.
+        if (key === 'footer_note' || element.tagName !== 'P') {
           element.innerHTML = html;
+          return;
         }
+        const match = html.match(/^<p>([\s\S]*)<\/p>$/i);
+        element.innerHTML = match ? match[1] : sanitizeInlineRichHtml(html);
         return;
       }
       element.textContent = value;
@@ -514,6 +792,8 @@ async function loadPublicContent() {
     `).join('');
   });
 
+  if (needsMonthCalendar) initMonthCalendars(calendarEvents);
+
   ensureBoosterMeetingsContainers();
   const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => (
     Number(event.show_on_boosters) === 1
@@ -533,17 +813,146 @@ async function loadPublicContent() {
     `).join('');
   });
 
-  document.querySelectorAll('[data-photo-gallery]').forEach(container => {
-    if (!photos.length) return;
-    container.innerHTML = photos.map(photo => `
-      <figure class="gallery-item"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}"><figcaption>${formatInlineRichText(photo.caption || photo.alt_text)}</figcaption></figure>
-    `).join('');
+  document.querySelectorAll('[data-photo-gallery]').forEach((container) => {
+    renderPhotoGallery(container, photos);
   });
+  bindPhotoGalleries();
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
   bindDonateButtons();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
+}
+
+function sortPhotosByRecent(photos = []) {
+  return [...(Array.isArray(photos) ? photos : [])].sort((a, b) => {
+    const aTime = Date.parse(a?.created_at || '') || 0;
+    const bTime = Date.parse(b?.created_at || '') || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+}
+
+function isBrandGalleryPlaceholder(src = '') {
+  const value = String(src || '').toLowerCase();
+  return /efhs-photo-[12]\.png|efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/.test(value);
+}
+
+function renderPhotoGallery(container, photos = []) {
+  if (!container) return;
+  // Drop any brand/logo placeholders immediately so they never flash on Gallery.
+  container.querySelectorAll('.gallery-item img').forEach((img) => {
+    if (isBrandGalleryPlaceholder(img.getAttribute('src') || img.src)) {
+      img.closest('.gallery-item')?.remove();
+    }
+  });
+  let list = Array.isArray(photos) ? [...photos] : [];
+  const sortMode = String(container.dataset.sort || '').trim().toLowerCase();
+  if (sortMode === 'recent') list = sortPhotosByRecent(list);
+  const rawLimit = container.dataset.limit;
+  if (rawLimit !== undefined && rawLimit !== '') {
+    const limit = Math.max(0, Number(rawLimit) || 0);
+    list = list.slice(0, limit);
+  }
+  if (!list.length) {
+    container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
+    return;
+  }
+  container.innerHTML = list.map((photo) => `
+    <figure class="gallery-item" data-photo-open>
+      <button type="button" class="gallery-item-trigger" aria-label="View ${escapeHtml(photo.alt_text || photo.caption || 'photo')}">
+        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" draggable="false">
+      </button>
+      <figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>
+    </figure>
+  `).join('');
+}
+
+function protectPhotoMedia(root = document) {
+  const block = (event) => {
+    event.preventDefault();
+    return false;
+  };
+  root.querySelectorAll('.gallery-item img, .photo-lightbox-image, .photo-lightbox-frame').forEach((el) => {
+    if (el.dataset.photoProtected === '1') return;
+    el.dataset.photoProtected = '1';
+    el.setAttribute('draggable', 'false');
+    el.addEventListener('contextmenu', block);
+    el.addEventListener('dragstart', block);
+  });
+}
+
+function closePhotoLightbox() {
+  const modal = document.querySelector('.photo-lightbox');
+  if (!modal) return;
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  document.body.classList.remove('photo-lightbox-open');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+  }, 280);
+}
+
+function openPhotoLightbox({ src, alt = '', caption = '' } = {}) {
+  if (!src) return;
+  closePhotoLightbox();
+  const modal = document.createElement('aside');
+  modal.className = 'photo-lightbox';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', caption || alt || 'Photo');
+  modal.innerHTML = `
+    <button type="button" class="photo-lightbox-backdrop" aria-label="Close photo"></button>
+    <div class="photo-lightbox-panel">
+      <button type="button" class="photo-lightbox-close" aria-label="Close photo">×</button>
+      <div class="photo-lightbox-frame">
+        <img class="photo-lightbox-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt || caption || 'Band photo')}" draggable="false">
+      </div>
+      ${caption || alt ? `<p class="photo-lightbox-caption">${escapeHtml(caption || alt)}</p>` : ''}
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add('photo-lightbox-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+  protectPhotoMedia(modal);
+  modal.querySelector('.photo-lightbox-close')?.addEventListener('click', closePhotoLightbox);
+  modal.querySelector('.photo-lightbox-backdrop')?.addEventListener('click', closePhotoLightbox);
+  modal.querySelector('.photo-lightbox-close')?.focus();
+}
+
+function bindPhotoGalleries(root = document) {
+  if (!window.__efPhotoLightboxKeysBound) {
+    window.__efPhotoLightboxKeysBound = true;
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && document.querySelector('.photo-lightbox')) {
+        closePhotoLightbox();
+      }
+    });
+    document.addEventListener('contextmenu', (event) => {
+      if (event.target?.closest?.('.gallery-item, .photo-lightbox')) {
+        event.preventDefault();
+      }
+    });
+  }
+  root.querySelectorAll('[data-photo-gallery]').forEach((container) => {
+    if (container.dataset.photoBound === '1') return;
+    container.dataset.photoBound = '1';
+    container.addEventListener('click', (event) => {
+      const trigger = event.target.closest?.('[data-photo-open], .gallery-item-trigger');
+      if (!trigger || !container.contains(trigger)) return;
+      const item = trigger.closest('.gallery-item') || trigger;
+      const img = item.querySelector('img');
+      if (!img?.src) return;
+      event.preventDefault();
+      const caption = item.querySelector('figcaption')?.textContent?.trim() || '';
+      openPhotoLightbox({
+        src: img.currentSrc || img.src,
+        alt: img.alt || '',
+        caption,
+      });
+    });
+  });
+  protectPhotoMedia(root);
 }
 
 function buildContactFormHtml(topics = []) {
@@ -939,32 +1348,8 @@ function openSponsorSignupModal(pkg) {
     const note = detail || (sponsor?.name
       ? `${sponsor.name} is now listed as ${sponsor.level || 'a sponsor'}.`
       : 'Sponsorship activated. Thank you!');
-    const toast = document.createElement('div');
-    toast.className = 'sponsor-signup-toast';
-    toast.setAttribute('role', 'status');
-    toast.textContent = note;
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('is-visible'));
-    window.setTimeout(() => {
-      toast.classList.remove('is-visible');
-      window.setTimeout(() => toast.remove(), 280);
-    }, 4200);
+    showTransientToast(note);
     loadSponsorMarquee();
-  }
-
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
   }
 
   async function embedCardCheckout(application, config) {
@@ -1375,31 +1760,7 @@ function openDonateModal() {
 
   function finishDonateSuccess(detail) {
     closeDonateModal({ immediate: true });
-    const toast = document.createElement('div');
-    toast.className = 'sponsor-signup-toast';
-    toast.setAttribute('role', 'status');
-    toast.textContent = detail || 'Thank you for your donation!';
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('is-visible'));
-    window.setTimeout(() => {
-      toast.classList.remove('is-visible');
-      window.setTimeout(() => toast.remove(), 280);
-    }, 4200);
-  }
-
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
+    showTransientToast(detail || 'Thank you for your donation!');
   }
 
   async function embedCardCheckout(donation, config) {
