@@ -176,15 +176,25 @@ function normalizeSponsorAdSeconds(value, fallback = 6) {
   return Math.min(30, Math.max(2, seconds));
 }
 
+function resolveSponsorTierKey(sponsor = {}) {
+  const raw = String(sponsor.tier || sponsor.level || sponsor.tier_label || '').toLowerCase();
+  if (/\bgold\b/.test(raw)) return 'gold';
+  if (/\bsilver\b/.test(raw)) return 'silver';
+  if (/\bbronze\b/.test(raw)) return 'bronze';
+  return '';
+}
+
 function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   if (!sponsor || document.querySelector('.sponsor-flyin')) return;
 
+  const tier = resolveSponsorTierKey(sponsor);
+  const tierClass = tier ? ` tier-${tier}` : '';
   const logo = sponsor.logo_url
     ? `<span class="sponsor-flyin-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>`
     : `<span class="sponsor-flyin-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
 
   const root = document.createElement('aside');
-  root.className = 'sponsor-flyin';
+  root.className = `sponsor-flyin${tierClass}`;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
@@ -197,7 +207,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
         <div class="sponsor-flyin-copy">
           <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
           <strong>${escapeHtml(sponsor.name)}</strong>
-          <span>${escapeHtml(sponsor.level || 'Sponsor')}</span>
+          <span class="sponsor-flyin-tier">${escapeHtml(sponsor.level || 'Sponsor')}</span>
           <em>View all sponsors</em>
         </div>
       </a>
@@ -236,7 +246,7 @@ function sponsorShowsMarquee(sponsor = {}) {
   return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
-const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v1';
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v2';
 
 function readMarqueeCache() {
   try {
@@ -260,10 +270,12 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
+    const tier = resolveSponsorTierKey(sponsor);
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeHtml(sponsor.name)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeHtml(sponsor.name)}" data-sponsor-tier="${escapeHtml(tier)}">${visual}<span>${escapeHtml(sponsor.name)}</span></a>`;
   }).join('');
   return `
     <div class="wrap sponsor-marquee-bar">
@@ -460,13 +472,236 @@ function ensureBoosterMeetingsContainers() {
   }
 }
 
+const MONTH_CALENDAR_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_CALENDAR_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTH_CALENDAR_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function getPublicZonedYmd(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(date);
+  const read = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return { year: read('year'), month: read('month'), day: read('day') };
+}
+
+function eventYearForCalendar(event) {
+  const year = Number(event?.event_year);
+  if (Number.isFinite(year) && year >= 2000 && year <= 2100) return year;
+  return getPublicZonedYmd().year;
+}
+
+function eventDayNumber(event) {
+  const detail = String(event?.date_detail || '').trim();
+  if (/^\d{1,2}$/.test(detail)) return Number(detail);
+  return null;
+}
+
+function eventBelongsToMonth(event, year, monthIndex) {
+  return eventYearForCalendar(event) === year
+    && String(event?.date_label || '').trim() === MONTH_CALENDAR_LABELS[monthIndex];
+}
+
+function daysInCalendarMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+let calendarDayToastLeaveTimer = null;
+
+function ensureCalendarDayToast() {
+  let root = document.querySelector('#calendar-day-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'calendar-day-toast';
+  root.className = 'calendar-day-toast';
+  root.hidden = true;
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'calendar-day-toast-title');
+  root.innerHTML = `
+    <div class="calendar-day-toast-backdrop" aria-hidden="true"></div>
+    <div class="calendar-day-toast-panel">
+      <button type="button" class="sponsor-flyin-close calendar-day-toast-close" data-calendar-day-close aria-label="Close day events">×</button>
+      <div class="calendar-day-toast-card">
+        <h3 id="calendar-day-toast-title"></h3>
+        <div class="calendar-day-toast-list" data-calendar-day-list></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelector('[data-calendar-day-close]')?.addEventListener('click', () => hideCalendarDayToast());
+  return root;
+}
+
+function hideCalendarDayToast() {
+  const root = document.querySelector('#calendar-day-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(calendarDayToastLeaveTimer);
+  calendarDayToastLeaveTimer = window.setTimeout(() => {
+    root.hidden = true;
+    root.classList.remove('is-leaving');
+  }, 280);
+}
+
+function showCalendarDayToast(title, dayEvents) {
+  const root = ensureCalendarDayToast();
+  const titleEl = root.querySelector('#calendar-day-toast-title');
+  const list = root.querySelector('[data-calendar-day-list]');
+  if (titleEl) titleEl.textContent = title;
+  if (list) {
+    if (!dayEvents.length) {
+      list.innerHTML = '<p class="draft">No events on this day.</p>';
+    } else {
+      list.innerHTML = dayEvents.map((event) => `
+        <article class="calendar-day-toast-event">
+          <h4>${formatInlineRichText(event.title)}</h4>
+          <div class="event-description">${formatRichText(event.description)}</div>
+        </article>
+      `).join('');
+    }
+  }
+  window.clearTimeout(calendarDayToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  window.setTimeout(() => root.querySelector('[data-calendar-day-close]')?.focus(), 40);
+}
+
+function renderMonthCalendar(container, allEvents, view) {
+  const { year, monthIndex } = view;
+  const today = getPublicZonedYmd();
+  const monthEvents = (Array.isArray(allEvents) ? allEvents : []).filter((event) => (
+    eventBelongsToMonth(event, year, monthIndex)
+  ));
+  const byDay = new Map();
+  const undated = [];
+  for (const event of monthEvents) {
+    const day = eventDayNumber(event);
+    if (day == null) {
+      undated.push(event);
+      continue;
+    }
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(event);
+  }
+
+  const dim = daysInCalendarMonth(year, monthIndex);
+  const firstDow = new Date(year, monthIndex, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstDow; i += 1) {
+    cells.push('<div class="month-calendar-cell is-empty" aria-hidden="true"></div>');
+  }
+  for (let day = 1; day <= dim; day += 1) {
+    const dayEvents = byDay.get(day) || [];
+    const hasEvents = dayEvents.length > 0;
+    const isToday = today.year === year && today.month === monthIndex + 1 && today.day === day;
+    const classes = [
+      'month-calendar-cell',
+      hasEvents ? 'has-events' : '',
+      isToday ? 'is-today' : '',
+    ].filter(Boolean).join(' ');
+    const label = `${MONTH_CALENDAR_NAMES[monthIndex]} ${day}, ${year}${hasEvents ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`;
+    if (hasEvents) {
+      cells.push(`
+        <button type="button" class="${classes}" data-calendar-day="${day}" aria-label="${escapeHtml(label)}">
+          <span class="month-calendar-daynum">${day}</span>
+          <span class="month-calendar-dot" aria-hidden="true"></span>
+        </button>`);
+    } else {
+      cells.push(`
+        <div class="${classes}" aria-label="${escapeHtml(label)}">
+          <span class="month-calendar-daynum">${day}</span>
+        </div>`);
+    }
+  }
+
+  const undatedHtml = undated.length
+    ? `<div class="month-calendar-undated">
+        <h3>Also this month</h3>
+        <div class="month-calendar-undated-list">
+          ${undated.map((event) => `
+            <article class="event">
+              <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+              <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
+            </article>
+          `).join('')}
+        </div>
+      </div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="month-calendar-shell">
+      <div class="month-calendar-toolbar">
+        <button type="button" class="month-calendar-nav" data-calendar-prev aria-label="Previous month">‹</button>
+        <h2 class="month-calendar-title">${MONTH_CALENDAR_NAMES[monthIndex]} ${year}</h2>
+        <button type="button" class="month-calendar-nav" data-calendar-next aria-label="Next month">›</button>
+      </div>
+      <div class="month-calendar-weekdays" aria-hidden="true">
+        ${MONTH_CALENDAR_WEEKDAYS.map((day) => `<span>${day}</span>`).join('')}
+      </div>
+      <div class="month-calendar-grid" role="grid" aria-label="${escapeHtml(`${MONTH_CALENDAR_NAMES[monthIndex]} ${year}`)}">
+        ${cells.join('')}
+      </div>
+      ${undatedHtml}
+    </div>`;
+
+  container.querySelector('[data-calendar-prev]')?.addEventListener('click', () => {
+    const next = { ...view };
+    next.monthIndex -= 1;
+    if (next.monthIndex < 0) {
+      next.monthIndex = 11;
+      next.year -= 1;
+    }
+    container._calendarView = next;
+    renderMonthCalendar(container, allEvents, next);
+  });
+  container.querySelector('[data-calendar-next]')?.addEventListener('click', () => {
+    const next = { ...view };
+    next.monthIndex += 1;
+    if (next.monthIndex > 11) {
+      next.monthIndex = 0;
+      next.year += 1;
+    }
+    container._calendarView = next;
+    renderMonthCalendar(container, allEvents, next);
+  });
+  container.querySelectorAll('[data-calendar-day]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const day = Number(button.dataset.calendarDay);
+      const dayEvents = byDay.get(day) || [];
+      showCalendarDayToast(`${MONTH_CALENDAR_NAMES[monthIndex]} ${day}, ${year}`, dayEvents);
+    });
+  });
+}
+
+function initMonthCalendars(allEvents) {
+  const today = getPublicZonedYmd();
+  document.querySelectorAll('[data-month-calendar]').forEach((container) => {
+    const view = container._calendarView || {
+      year: today.year,
+      monthIndex: today.month - 1,
+    };
+    container._calendarView = view;
+    renderMonthCalendar(container, allEvents, view);
+  });
+}
+
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
-  const [site, events, photos] = await Promise.all([
+  const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
+  const [site, events, photos, calendarEvents] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    needsMonthCalendar
+      ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   if (site) {
@@ -513,6 +748,8 @@ async function loadPublicContent() {
       </article>
     `).join('');
   });
+
+  if (needsMonthCalendar) initMonthCalendars(calendarEvents);
 
   ensureBoosterMeetingsContainers();
   const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => (
