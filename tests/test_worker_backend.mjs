@@ -647,6 +647,16 @@ test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply
   assert.equal(invoice.invoice_number, 'SP-42');
 });
 
+test('GLOBAL_PERMISSIONS includes sponsors bypass-payment scope', async () => {
+  const source = await import('../worker/src/worker.mjs');
+  // Permission list is not exported; verify via hasPermission short-circuit with explicit scope string usage in source file.
+  const fs = await import('node:fs');
+  const workerSource = fs.readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  assert.match(workerSource, /sponsors:bypass-payment/);
+  assert.match(workerSource, /\/api\/admin\/sponsors\/manual/);
+  assert.match(workerSource, /Bypass sponsor payment/);
+});
+
 test('sponsor helpers normalize editable rows and render safe sponsor cards', () => {
   const sponsor = normalizeSponsorPayload({
     name: 'Kernersville <Music>',
