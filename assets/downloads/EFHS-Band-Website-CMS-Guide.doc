@@ -286,6 +286,7 @@
   <li>It appears under Manage sponsors as <b>Pending</b> with status such as Pending payment, Awaiting payment, or Payment setup needed.</li>
   <li>When the real-world issue is resolved, click <b>Accept</b>.</li>
   <li>Accept activates the sponsor in the correct tier, attempts invoice email, and records the Ledger entry.</li>
+  <li>Use <b>Delete</b> on a pending card to remove test or invalid applications without accepting them.</li>
 </ol>
 
 <h2>10. Square Requirements</h2>

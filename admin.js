@@ -3554,7 +3554,7 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=image-upload-1p8mb-20260811-1';
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=pending-sponsor-delete-20260811-2';
   const cards = [
     ['Website Guide', 'Download the full site and CMS documentation (.doc), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
@@ -3733,6 +3733,7 @@ function renderPendingSponsorApplications() {
       </div>
       <div class="row-actions">
         <button type="button" class="btn primary btn-small" data-accept-application="${escapeAttr(String(app.id || ''))}">Accept</button>
+        <button type="button" class="btn outline btn-small" data-delete-application="${escapeAttr(String(app.id || ''))}">Delete</button>
       </div>
     </article>`;
   }).join('');
@@ -3750,6 +3751,28 @@ function renderPendingSponsorApplications() {
         await loadSponsors();
       } catch (error) {
         const detail = error?.message || 'Could not accept sponsor.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
+        button.disabled = false;
+      }
+    });
+  });
+  list.querySelectorAll('[data-delete-application]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = String(button.dataset.deleteApplication || '').trim();
+      if (!id) return;
+      const app = (state.pendingSponsorApplications || []).find((item) => String(item.id) === id);
+      const name = app?.business_name || 'this pending application';
+      if (!window.confirm(`Delete ${name}? This removes the unfinished sign-up and cannot be undone.`)) return;
+      const status = document.querySelector('#pending-sponsors-status');
+      button.disabled = true;
+      if (status) status.textContent = 'Deleting…';
+      try {
+        const result = await jsonFetch(`/api/admin/sponsor-applications/${id}`, { method: 'DELETE' });
+        showSavedToast(result.detail || 'Pending application deleted.');
+        await loadPendingSponsorApplications();
+      } catch (error) {
+        const detail = error?.message || 'Could not delete pending application.';
         if (status) status.textContent = detail;
         showFailedToast(detail);
         button.disabled = false;

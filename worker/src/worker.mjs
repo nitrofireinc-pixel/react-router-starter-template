@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'image-upload-1p8mb-20260811-1';
+const ASSET_VERSION = 'pending-sponsor-delete-20260811-2';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -4364,6 +4364,13 @@ export function isPendingSponsorApplicationStatus(status) {
   return PENDING_SPONSOR_APPLICATION_STATUSES.includes(String(status || '').trim());
 }
 
+export function canDeleteSponsorApplication(row = {}) {
+  if (!row || row.sponsor_id) return false;
+  // Allow staff to remove unfinished public sign-ups / test applications.
+  return isPendingSponsorApplicationStatus(row.status)
+    || ['cancelled', 'abandoned', 'expired'].includes(String(row.status || '').trim());
+}
+
 export function mapSponsorApplicationRow(row = {}) {
   const tier = normalizeSponsorTierKey(row.tier) || String(row.tier || '').trim().toLowerCase();
   return {
@@ -7179,6 +7186,38 @@ async function handleApi(request, env, url, ctx = null) {
       }
     }
   }
+  {
+    const deleteMatch = url.pathname.match(/^\/api\/admin\/sponsor-applications\/(\d+)$/);
+    if (deleteMatch && request.method === 'DELETE') {
+      const auth = await requireLogin(request, env);
+      if (auth.response) return auth.response;
+      if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) {
+        return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
+      }
+      const applicationId = Number(deleteMatch[1] || 0);
+      if (!applicationId) return jsonResponse({ detail: 'Application not found' }, 404);
+      const application = await env.DB.prepare(
+        `SELECT id, tier, amount_cents, amount_display, business_name, address, phone, email, logo_url, status,
+                square_checkout_url, sponsor_id, paid_at, created_at, updated_at
+         FROM sponsor_applications WHERE id = ?`,
+      ).bind(applicationId).first();
+      if (!application) return jsonResponse({ detail: 'Application not found' }, 404);
+      if (!canDeleteSponsorApplication(application)) {
+        return jsonResponse({
+          detail: application.sponsor_id
+            ? 'This application already created a sponsor. Delete the sponsor from the list below instead.'
+            : 'Only pending or unfinished applications can be deleted.',
+        }, 422);
+      }
+      await env.DB.prepare('DELETE FROM sponsor_applications WHERE id = ?').bind(applicationId).run();
+      return jsonResponse({
+        ok: true,
+        deleted: true,
+        id: applicationId,
+        detail: `Removed pending application for ${application.business_name || 'sponsor'}.`,
+      });
+    }
+  }
   if (url.pathname === '/api/admin/checkout/config' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -8721,7 +8760,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
 <div class="admin-card stack pending-sponsors-card">
-  <div class="pending-sponsors-head"><h2>Pending sponsor applications</h2><p class="muted">Public Become a Sponsor sign-ups waiting on payment or staff review. Accept once the issue is resolved in the real world.</p></div>
+  <div class="pending-sponsors-head"><h2>Pending sponsor applications</h2><p class="muted">Public Become a Sponsor sign-ups waiting on payment or staff review. Accept once resolved, or Delete to remove test / invalid applications.</p></div>
   <div id="pending-sponsors-list" class="admin-list sponsor-list pending-sponsors-list" aria-live="polite"></div>
   <p class="status" id="pending-sponsors-status"></p>
 </div>
