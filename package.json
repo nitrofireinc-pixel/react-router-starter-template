@@ -7,6 +7,7 @@
     "test:pages-build": "node --test tests/test_pages_build.mjs",
     "test:image-upload": "node --test tests/test_image_upload_limits.mjs tests/test_image_upload_compress_browser.mjs",
     "sync:worker-assets": "node worker/scripts/sync-public.mjs",
+    "build:cms-guide-pdf": "node worker/scripts/build-cms-guide-pdf.mjs",
     "build:pages": "npm run sync:worker-assets && node worker/scripts/build-pages.mjs",
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name=efhsband",
     "deploy:worker": "npm run sync:worker-assets && wrangler deploy"

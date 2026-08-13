@@ -3554,9 +3554,9 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc?v=pending-sponsor-delete-20260811-2';
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=cms-guide-pdf-20260813';
   const cards = [
-    ['Website Guide', 'Download the full site and CMS documentation (.doc), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
+    ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -3580,7 +3580,7 @@ function renderDashboard() {
       const [title, copy, target, kicker, kind, theme = ''] = card;
       const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
       if (kind === 'link') {
-        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.doc"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.pdf"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
       }
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;

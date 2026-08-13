@@ -1,40 +1,54 @@
-<html xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:w="urn:schemas-microsoft-com:office:word"
- xmlns="http://www.w3.org/TR/REC-html40">
+<!doctype html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="ProgId" content="Word.Document">
-<meta name="Generator" content="East Forsyth Band CMS">
 <title>East Forsyth Band Website &amp; CMS Guide</title>
-<!--[if gte mso 9]>
-<xml>
- <w:WordDocument>
-  <w:View>Print</w:View>
-  <w:Zoom>100</w:Zoom>
- </w:WordDocument>
-</xml>
-<![endif]-->
 <style>
-  @page { margin: 1in; }
+  @page { size: letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
   body {
-    font-family: Calibri, "Segoe UI", Arial, sans-serif;
-    font-size: 11pt;
-    line-height: 1.45;
+    font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.4;
     color: #10233c;
+    margin: 0;
   }
-  h1 { font-size: 22pt; color: #002142; margin: 0 0 8pt; }
-  h2 { font-size: 16pt; color: #002142; margin: 22pt 0 8pt; border-bottom: 1px solid #c9d4e2; padding-bottom: 4pt; }
-  h3 { font-size: 13pt; color: #0f2f4d; margin: 16pt 0 6pt; }
-  h4 { font-size: 11.5pt; color: #184a8c; margin: 12pt 0 4pt; }
-  p, li { margin: 0 0 8pt; }
-  .meta { color: #5b6f86; margin-bottom: 18pt; }
-  table { border-collapse: collapse; width: 100%; margin: 8pt 0 14pt; }
-  th, td { border: 1px solid #c9d4e2; padding: 6pt 8pt; vertical-align: top; text-align: left; }
+  h1 { font-size: 20pt; color: #002142; margin: 0 0 8pt; }
+  h2 {
+    font-size: 14pt;
+    color: #002142;
+    margin: 18pt 0 8pt;
+    border-bottom: 1px solid #c9d4e2;
+    padding-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12pt; color: #0f2f4d; margin: 14pt 0 6pt; page-break-after: avoid; }
+  h4 { font-size: 11pt; color: #184a8c; margin: 10pt 0 4pt; page-break-after: avoid; }
+  p, li { margin: 0 0 7pt; }
+  .meta { color: #5b6f86; margin-bottom: 14pt; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 6pt 0 12pt;
+    page-break-inside: auto;
+  }
+  tr { page-break-inside: avoid; }
+  th, td {
+    border: 1px solid #c9d4e2;
+    padding: 5pt 7pt;
+    vertical-align: top;
+    text-align: left;
+  }
   th { background: #0f2f4d; color: #fff; }
   tr:nth-child(even) td { background: #f7fafc; }
-  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 10pt; }
-  ul { margin: 0 0 10pt 18pt; }
-  .note { background: #fff8dc; border: 1px solid #f1d45b; padding: 10pt 12pt; margin: 10pt 0 14pt; }
+  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
+  ul, ol { margin: 0 0 10pt 18pt; padding: 0; }
+  .note {
+    background: #fff8dc;
+    border: 1px solid #f1d45b;
+    padding: 8pt 10pt;
+    margin: 8pt 0 12pt;
+  }
 </style>
 </head>
 <body>
@@ -44,12 +58,12 @@
   Organization: East Forsyth Band Boosters / East Forsyth High School Band (Blue Regiment)<br>
   Public site: https://efhsband.org<br>
   Staff CMS: https://efhsband.org/admin<br>
-  Document type: Full-site operations guide (public pages, CMS tools, permissions, payments)<br>
-  Last updated: August 10, 2026 (Fundraising editor &amp; body photos)
+  Document type: Full-site operations guide (PDF)<br>
+  Last updated: August 13, 2026
 </p>
 
 <div class="note">
-  <p><b>Who this is for:</b> Super Admins, editors, officers (President, Vice President, Treasurer), and anyone helping run the band website. This file is linked from the CMS Dashboard and can be opened or downloaded by any logged-in staff user.</p>
+  <p><b>Who this is for:</b> Super Admins, editors, officers (President, Vice President, Treasurer), and anyone helping run the band website. This PDF is linked from the CMS Dashboard and can be opened or downloaded by any logged-in staff user.</p>
 </div>
 
 <h2>1. Overview</h2>
@@ -130,7 +144,7 @@
   <li>Ledger</li>
   <li>Directors &amp; Staff, Ensemble Body, Fundraising, Booster Members</li>
   <li>Contact Form, User Management, Social / Facebook, Calendar Events</li>
-  <li><b>Website Guide</b> — downloads this document</li>
+  <li><b>Website Guide</b> — downloads this PDF</li>
 </ul>
 <p>Use <b>View Site</b> to open the public homepage in the same window.</p>
 
@@ -187,7 +201,7 @@
   <li>Manual Add Sponsor (optional Bypass Payment if granted <span class="mono">sponsors:bypass-payment</span>)</li>
   <li>Edit / delete / drag-reorder sponsors and logos</li>
   <li>Gold sponsors print/PDF sheet for advertising</li>
-  <li><b>Pending sponsor applications</b> from the public site, each flagged Pending, with <b>Accept</b> to activate after real-world resolution</li>
+  <li><b>Pending sponsor applications</b> from the public site, each flagged Pending, with <b>Accept</b> to activate after real-world resolution, or <b>Delete</b> to remove test/invalid applications</li>
 </ul>
 
 <h3>6.10 Ledger (Treasurer)</h3>
@@ -236,7 +250,7 @@
   <tr><td><span class="mono">site</span></td><td>Site Settings, Social/Facebook, logo, maintenance, social links</td></tr>
   <tr><td><span class="mono">pages</span></td><td>Add/remove/manage all CMS pages and page settings</td></tr>
   <tr><td><span class="mono">page:&lt;slug&gt;</span></td><td>Edit that one page’s content (example: <span class="mono">page:home</span>, <span class="mono">page:calendar</span>). <span class="mono">page:ensembles</span> unlocks Manage → Ensemble Body. <span class="mono">page:fundraising</span> unlocks Manage → Fundraising (campaign copy and photos).</td></tr>
-  <tr><td><span class="mono">sponsors</span></td><td>Manage sponsors, pending applications, Accept</td></tr>
+  <tr><td><span class="mono">sponsors</span></td><td>Manage sponsors, pending applications, Accept, Delete pending</td></tr>
   <tr><td><span class="mono">sponsors:bypass-payment</span></td><td>Manual Add Sponsor without collecting payment</td></tr>
   <tr><td><span class="mono">treasurer</span></td><td>Ledger + Checkout</td></tr>
   <tr><td><span class="mono">president</span></td><td>Checkout only</td></tr>
@@ -280,7 +294,7 @@
 <p><b>Invite flow:</b> New User → set email username, temporary password, permissions → Send Invite → welcome email points to https://efhsband.org/admin.</p>
 <p><b>User “stats” available in CMS today:</b> the Users list shows each account’s role, active state, and permission summary. There is no separate analytics dashboard for login counts or page views; operational status is managed from the Users list and each tool’s own screens (for example pending sponsor count on Manage sponsors, ledger entry counts on Ledger).</p>
 
-<h2>9. Pending Sponsors &amp; Accept</h2>
+<h2>9. Pending Sponsors &amp; Accept / Delete</h2>
 <ol>
   <li>A public Become a Sponsor signup is saved even if Square payment is incomplete.</li>
   <li>It appears under Manage sponsors as <b>Pending</b> with status such as Pending payment, Awaiting payment, or Payment setup needed.</li>
@@ -336,19 +350,20 @@
   <tr><td>Cannot find Fundraising content editor</td><td>Use Manage → Fundraising (not only the Pages hero editor). Requires <span class="mono">page:fundraising</span></td></tr>
   <tr><td>Photo always inserts at the top</td><td>Click into the text where the photo should go, then choose Photo. Hard-refresh if the CMS still shows older behavior</td></tr>
   <tr><td>Cannot resize or delete a Fundraising photo</td><td>Click the photo once so the blue selection box stays open; drag a corner to resize, or use Delete photo / Delete key</td></tr>
+  <tr><td>Website Guide will not open</td><td>Download the PDF from the Dashboard Website Guide card. Prefer the <span class="mono">.pdf</span> file; the old <span class="mono">.doc</span> link redirects to the PDF</td></tr>
 </table>
 
 <h2>16. Important URLs</h2>
 <ul>
   <li>Public site: https://efhsband.org</li>
   <li>CMS login / dashboard: https://efhsband.org/admin</li>
-  <li>This guide: https://efhsband.org/assets/downloads/EFHS-Band-Website-CMS-Guide.doc</li>
+  <li>This guide (PDF): https://efhsband.org/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf</li>
   <li>Become a Sponsor: https://efhsband.org/become-a-sponsor.html</li>
   <li>Sponsors: https://efhsband.org/sponsors.html</li>
   <li>Calendar: https://efhsband.org/calendar.html</li>
 </ul>
 
-<p class="meta" style="margin-top:24pt;">End of guide — East Forsyth Band Website &amp; CMS</p>
+<p class="meta" style="margin-top:20pt;">End of guide — East Forsyth Band Website &amp; CMS</p>
 
 </body>
 </html>
