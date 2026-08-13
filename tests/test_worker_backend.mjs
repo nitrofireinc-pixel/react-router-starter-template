@@ -821,6 +821,8 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
   assert.equal(escapeXml('A & B <C>'), 'A &amp; B &lt;C&gt;');
   assert.equal(canAccessTreasurerLedger({ role: 'admin' }), true);
   assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["treasurer"]' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["president"]' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["vice-president"]' }), false);
   assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: '["sponsors"]' }), false);
   assert.equal(canAccessCheckout({ role: 'editor', permissions: '["treasurer"]' }), true);
   assert.equal(canAccessCheckout({ role: 'editor', permissions: '["president"]' }), true);

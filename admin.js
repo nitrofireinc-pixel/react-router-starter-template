@@ -3121,7 +3121,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessLedger() {
-  return hasPermission('treasurer');
+  return hasPermission('treasurer') || hasPermission('president');
 }
 
 function canAccessCheckout() {
@@ -5224,7 +5224,7 @@ function ensureUserFormToast() {
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, expenses) + Checkout</label>
-            <label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Square Checkout)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>

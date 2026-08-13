@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'checkout-required-fields-20260813';
+const ASSET_VERSION = 'ledger-president-access-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -428,7 +428,7 @@ export function hasPermission(user, scope) {
 }
 
 export function canAccessTreasurerLedger(user) {
-  return hasPermission(user, 'treasurer');
+  return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
 }
 
 export function canAccessCheckout(user) {
