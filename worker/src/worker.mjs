@@ -8923,7 +8923,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <p class="kicker">Program</p>
         <h2 id="ensembles-editor-title">Edit Ensemble Body</h2>
       </div>
-      <button class="btn outline" type="button" data-ensembles-editor-dismiss>Close</button>
     </div>
     <form id="ensembles-body-form" class="stack minutes-editor-form ensembles-editor-form" novalidate>
       <label class="full form-rich-label"><span>Ensemble body</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich ensembles-body-editor" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter ensemble cards and body content…" aria-label="Ensemble body content"></div><input type="hidden" name="body_html"></label>
