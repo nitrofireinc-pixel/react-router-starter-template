@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'remove-ensemble-close-20260813';
+const ASSET_VERSION = 'person-initials-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -4573,14 +4573,39 @@ export function normalizeStaffReorderIds(payload = {}) {
   return [...new Set(raw.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
 }
 
+/** Initials for staff/booster photo placeholders (first + last name, or up to 2 letters). */
+export function personInitials(name = '', fallback = '?') {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !/^(dr|mr|mrs|ms|miss|prof)\.?$/i.test(word));
+  if (!words.length) return fallback;
+  if (words.length === 1) {
+    const letters = (words[0].match(/[a-z0-9]/gi) || []).slice(0, 2).map((ch) => ch.toUpperCase()).join('');
+    return letters || fallback;
+  }
+  const first = words[0].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  const last = words[words.length - 1].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  return [first, last].filter(Boolean).join('') || fallback;
+}
+
+export function renderPersonAvatar(member = {}) {
+  const name = String(member.name || '').trim();
+  const photoUrl = String(member.photo_url || '').trim();
+  if (photoUrl) {
+    return `<div class="avatar"><img src="${escapeAttr(photoUrl)}" alt="${escapeAttr(name || 'Profile photo')}"></div>`;
+  }
+  const initials = personInitials(name);
+  return `<div class="avatar avatar-initials" aria-hidden="true"><span>${escapeHtml(initials)}</span></div>`;
+}
+
 export function renderStaffDirectory(staff = []) {
   if (!staff.length) {
     return '<div class="staff-empty"><h3>No staff listed yet.</h3><p>Use the admin Directors &amp; Staff page to add photos, names, and roles.</p></div>';
   }
   return staff.map((member) => {
-    const photo = member.photo_url
-      ? `<div class="avatar"><img src="${escapeAttr(member.photo_url)}" alt="${escapeAttr(member.name)}"></div>`
-      : '<div class="avatar" aria-hidden="true"></div>';
+    const photo = renderPersonAvatar(member);
     const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
     const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
     return `<article class="person" data-staff-id="${escapeAttr(member.id || '')}">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;
@@ -4640,9 +4665,7 @@ export function renderBoosterMembersDirectory(members = []) {
     return '<div class="staff-empty"><h3>No booster members listed yet.</h3><p>Use the admin Booster Members page to add photos, names, and roles.</p></div>';
   }
   return members.map((member) => {
-    const photo = member.photo_url
-      ? `<div class="avatar"><img src="${escapeAttr(member.photo_url)}" alt="${escapeAttr(member.name)}"></div>`
-      : '<div class="avatar" aria-hidden="true"></div>';
+    const photo = renderPersonAvatar(member);
     const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
     const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
     return `<article class="person" data-booster-member-id="${escapeAttr(member.id || '')}">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;

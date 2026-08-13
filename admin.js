@@ -3917,10 +3917,33 @@ async function loadBoosterMembers() {
   renderBoosterMembers();
 }
 
+function personInitials(name = '', fallback = '?') {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !/^(dr|mr|mrs|ms|miss|prof)\.?$/i.test(word));
+  if (!words.length) return fallback;
+  if (words.length === 1) {
+    const letters = (words[0].match(/[a-z0-9]/gi) || []).slice(0, 2).map((ch) => ch.toUpperCase()).join('');
+    return letters || fallback;
+  }
+  const first = words[0].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  const last = words[words.length - 1].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  return [first, last].filter(Boolean).join('') || fallback;
+}
+
+function personAvatarHtml(member = {}) {
+  const name = String(member.name || '').trim();
+  const photoUrl = String(member.photo_url || '').trim();
+  if (photoUrl) {
+    return `<div class="avatar"><img src="${escapeHtml(photoUrl)}" alt="${escapeHtml(name || 'Profile photo')}"></div>`;
+  }
+  return `<div class="avatar avatar-initials" aria-hidden="true"><span>${escapeHtml(personInitials(name))}</span></div>`;
+}
+
 function staffPreviewCard(member) {
-  const photo = member.photo_url
-    ? `<div class="avatar"><img src="${escapeHtml(member.photo_url)}" alt="${escapeHtml(member.name)}"></div>`
-    : '<div class="avatar" aria-hidden="true"></div>';
+  const photo = personAvatarHtml(member);
   const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
   const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
   return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;
@@ -3938,7 +3961,7 @@ function renderStaff() {
   list.innerHTML = ordered.map((member) => `
     <article class="admin-row staff-admin-row" data-staff-id="${member.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'staff member')}" title="Drag to reorder">⋮⋮</button>
-      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml(personInitials(member.name, 'S'))}</div>
       <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Staff')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
     </article>
@@ -4009,7 +4032,7 @@ function renderBoosterMembers() {
   list.innerHTML = ordered.map((member) => `
     <article class="admin-row staff-admin-row" data-booster-member-id="${member.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'booster member')}" title="Drag to reorder">⋮⋮</button>
-      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'B').trim().charAt(0).toUpperCase())}</div>
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml(personInitials(member.name, 'B'))}</div>
       <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Booster member')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-booster-member="${member.id}">Edit</button><button type="button" data-delete-booster-member="${member.id}">Delete</button></div>
     </article>
