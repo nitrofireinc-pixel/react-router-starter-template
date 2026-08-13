@@ -335,7 +335,12 @@
 <p>With <span class="mono">site</span> permission and a configured Zernio API key, staff can connect the band Facebook Page, publish or schedule posts, and push calendar digests when that workflow is enabled.</p>
 
 <h2>14. Mobile Calendar App</h2>
-<p>A Flutter companion app (“EFHS Band Calendar”) can read public calendar events from the website API and optionally receive push updates. APK builds are maintained separately for sideload installs when published under site downloads.</p>
+<p>A Flutter companion app (“EFHS Band Calendar”) can read public calendar events from the website API and receive update alerts. Sideload install:</p>
+<ul>
+  <li>Android APK: <span class="mono">https://efhsband.org/assets/downloads/EFHS-Band-Calendar.apk</span></li>
+  <li>After install, open <strong>Settings → Allow background checks</strong> so Android will let the app poll for calendar updates while closed (notification permission + battery exemption).</li>
+  <li>Without Firebase/FCM secrets, alerts come from background revision checks (~15 minutes) and whenever the app is opened. Instant push still needs Firebase + <span class="mono">FCM_SERVICE_ACCOUNT_JSON</span>.</li>
+</ul>
 
 <h2>15. Quick Troubleshooting</h2>
 <table>

@@ -3584,8 +3584,10 @@ function renderDashboard() {
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
   const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=cms-guide-pdf-20260813';
+  const calendarApkHref = '/assets/downloads/EFHS-Band-Calendar.apk?v=calendar-background-push-20260813';
   const cards = [
-    ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
+    ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs', 'EFHS-Band-Website-CMS-Guide.pdf'],
+    ['Calendar Android app', 'Sideload the EFHS Band Calendar APK. After install, use Settings → Allow background checks so alerts work while the app is closed.', calendarApkHref, 'Mobile', 'link', 'android', 'EFHS-Band-Calendar.apk'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -3606,10 +3608,13 @@ function renderDashboard() {
 
   dashboard.innerHTML = cards.length
     ? cards.map((card) => {
-      const [title, copy, target, kicker, kind, theme = ''] = card;
+      const [title, copy, target, kicker, kind, theme = '', downloadName = ''] = card;
       const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
       if (kind === 'link') {
-        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.pdf"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+        const downloadAttr = downloadName
+          ? ` download="${escapeAttr(downloadName)}"`
+          : '';
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}"${downloadAttr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
       }
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;

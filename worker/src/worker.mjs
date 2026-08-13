@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'ledger-president-access-20260813';
+const ASSET_VERSION = 'calendar-background-push-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -8715,6 +8715,13 @@ async function serveStaticOrCms(request, env, url) {
     const headers = new Headers(assetResponse.headers);
     headers.set('content-type', 'application/pdf');
     headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide.pdf"');
+    headers.set('cache-control', 'public, max-age=300');
+    return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
+  }
+  if (assetUrl.pathname === '/assets/downloads/EFHS-Band-Calendar.apk' && assetResponse.ok) {
+    const headers = new Headers(assetResponse.headers);
+    headers.set('content-type', 'application/vnd.android.package-archive');
+    headers.set('content-disposition', 'attachment; filename="EFHS-Band-Calendar.apk"');
     headers.set('cache-control', 'public, max-age=300');
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
   }

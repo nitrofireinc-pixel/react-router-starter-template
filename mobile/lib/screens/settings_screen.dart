@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../services/background_permissions.dart';
 import '../services/push_service.dart';
 import '../services/settings_store.dart';
 import '../theme/app_theme.dart';
@@ -25,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _apiBaseController;
   late bool _pushEnabled;
   bool _saving = false;
+  bool _requestingBackground = false;
   String? _status;
 
   @override
@@ -33,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sourceController = TextEditingController(text: widget.settings.sourceUrl);
     _apiBaseController = TextEditingController(text: widget.settings.apiBaseUrl);
     _pushEnabled = widget.settings.pushEnabled;
+    _refreshPermissionFlags();
   }
 
   @override
@@ -40,6 +45,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sourceController.dispose();
     _apiBaseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshPermissionFlags() async {
+    await widget.pushService.ensureNotificationPermission();
+    await widget.pushService.ensureBackgroundPermission(prompt: false);
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _save() async {
@@ -63,6 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       await widget.pushService.setEnabled(_pushEnabled);
       await widget.onChanged();
+      await _refreshPermissionFlags();
       if (!mounted) return;
       setState(() => _status = 'Saved.');
     } catch (error) {
@@ -71,6 +84,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _allowBackgroundChecks() async {
+    setState(() {
+      _requestingBackground = true;
+      _status = null;
+    });
+    try {
+      await widget.pushService.ensureNotificationPermission();
+      await widget.pushService.ensureBackgroundPermission(prompt: true);
+      await widget.pushService.syncPermissionsAndRegistration();
+      await _refreshPermissionFlags();
+      if (!mounted) return;
+      setState(() {
+        _status = widget.pushService.batteryUnrestricted
+            ? 'Background checks allowed. The app can look for calendar updates while closed.'
+            : 'Still restricted. In the system dialog, choose Allow / No restrictions for EFHS Band Calendar.';
+      });
+    } finally {
+      if (mounted) setState(() => _requestingBackground = false);
+    }
+  }
+
+  String get _pushSubtitle {
+    if (widget.pushService.firebaseReady) {
+      return 'Instant FCM topic ${PushService.topic} plus background revision checks.';
+    }
+    final notes = <String>[
+      'Checks the band site about every 15 minutes in the background, and again when you open the app.',
+    ];
+    if (!widget.pushService.notificationsAllowed) {
+      notes.add('Notification permission is still off.');
+    }
+    if (Platform.isAndroid && !widget.pushService.batteryUnrestricted) {
+      notes.add('Battery optimization is still limiting background checks.');
+    }
+    return notes.join(' ');
   }
 
   @override
@@ -121,14 +171,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Calendar push notifications'),
-            subtitle: Text(
-              widget.pushService.firebaseReady
-                  ? 'FCM topic ${PushService.topic} + revision checks'
-                  : 'Checks every ~15 minutes in the background, and again when you open the app. Instant FCM push needs a Firebase project.',
-            ),
+            subtitle: Text(_pushSubtitle),
             value: _pushEnabled,
             onChanged: (value) => setState(() => _pushEnabled = value),
           ),
+          if (Platform.isAndroid && _pushEnabled) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _requestingBackground ? null : _allowBackgroundChecks,
+              icon: const Icon(Icons.bolt_outlined),
+              label: Text(
+                _requestingBackground
+                    ? 'Requesting…'
+                    : widget.pushService.batteryUnrestricted
+                        ? 'Background checks allowed'
+                        : 'Allow background checks',
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: BackgroundPermissions.openAppNotificationSettings,
+                child: const Text('Open notification settings'),
+              ),
+            ),
+          ],
           if (widget.pushService.lastError != null) ...[
             const SizedBox(height: 8),
             Text(

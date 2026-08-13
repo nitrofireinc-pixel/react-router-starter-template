@@ -34,7 +34,13 @@ Optional: `FCM_PROJECT_ID` if the service-account JSON omits `project_id`.
 3. Run `flutterfire configure` (or paste options into `lib/firebase_options.dart`)
 4. Rebuild the APK
 
-Until Firebase is real, the placeholder project still builds, and revision-based local alerts still work after the worker is deployed.
+Until Firebase is real, the placeholder project still builds. The APK still:
+
+- requests notification permission
+- asks Android to ignore battery optimizations for background calendar checks
+- polls `/api/calendar-push-state` about every 15 minutes via Workmanager (plus on open/resume)
+
+Use **Settings → Allow background checks** after install so OEM battery policies do not block polling while the app is closed. Instant alerts still require Firebase + Cloudflare FCM secrets.
 
 ## Build a sideload APK
 
