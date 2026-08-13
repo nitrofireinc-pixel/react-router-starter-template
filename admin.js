@@ -3591,7 +3591,7 @@ function renderDashboard() {
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
-    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, and expenses; view and download Excel.', 'ledger', 'Treasurer', 'tab'],
+    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, and expenses; view and download Excel.', 'ledger', 'Finance', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
