@@ -6951,12 +6951,19 @@ function bindForms() {
     const amountDisplay = String(form.elements.amount_display?.value || '').trim();
     const payerName = String(form.elements.payer_name?.value || '').trim();
     const note = String(form.elements.note?.value || '').trim();
+    if (!payerName) {
+      if (status) status.textContent = 'User name or entity is required.';
+      form.elements.payer_name?.focus();
+      return;
+    }
     if (!item) {
-      if (status) status.textContent = 'Item or description is required.';
+      if (status) status.textContent = 'Description of transaction is required.';
+      form.elements.item?.focus();
       return;
     }
     if (!amountDisplay) {
       if (status) status.textContent = 'Amount is required.';
+      form.elements.amount_display?.focus();
       return;
     }
     if (!checkoutCardController) {

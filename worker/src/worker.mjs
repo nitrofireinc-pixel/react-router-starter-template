@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'cms-sponsors-nav-marker-20260813';
+const ASSET_VERSION = 'checkout-required-fields-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -7274,16 +7274,19 @@ async function handleApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: 'Permission required: treasurer, president, or vice-president' }, 403);
     }
     const payload = await request.json().catch(() => ({}));
-    const item = String(payload.item || payload.description || payload.name || '').trim();
-    const payerName = String(payload.payer_name || payload.name || '').trim();
+    const item = String(payload.item || payload.description || '').trim();
+    const payerName = String(payload.payer_name || payload.name || payload.entity || '').trim();
     const note = String(payload.note || '').trim();
     const sourceId = String(payload.source_id || payload.sourceId || '').trim();
     const amountCents = resolveSponsorAmountCents({
       amountCents: payload.amount_cents,
       amountDisplay: payload.amount_display || payload.amount,
     });
+    if (!payerName || payerName.length > 160) {
+      return jsonResponse({ detail: 'User name or entity is required' }, 422);
+    }
     if (!item || item.length > 200) {
-      return jsonResponse({ detail: 'Item or description is required' }, 422);
+      return jsonResponse({ detail: 'Description of transaction is required' }, 422);
     }
     if (!amountCents || amountCents < 100) {
       return jsonResponse({ detail: 'Amount must be at least $1.00' }, 422);
@@ -7334,7 +7337,7 @@ async function handleApi(request, env, url, ctx = null) {
       amount_display: amountDisplay,
       item,
       payer_name: payerName,
-      detail: `Charged ${amountDisplay} for ${item}.`,
+      detail: `Charged ${amountDisplay} for ${item}${payerName ? ` (${payerName})` : ''}.`,
     });
   }
   if (url.pathname === '/api/admin/sponsors' && request.method === 'GET') {
@@ -8810,10 +8813,10 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="checkout-layout">
   <form id="checkout-form" class="admin-card stack checkout-form-card" novalidate>
     <h2>Charge a card</h2>
-    <p class="muted">Enter the item, amount, and card details. Square processes the payment immediately.</p>
-    <label>Item / description<input name="item" required maxlength="200" placeholder="Uniform deposit, trailer rental, donation…"></label>
+    <p class="muted">Enter the payer, transaction description, amount, and card details. Square processes the payment immediately.</p>
+    <label>User name or entity<input name="payer_name" required maxlength="160" placeholder="Student, family, business, or organization" autocomplete="name"></label>
+    <label>Description of transaction<input name="item" required maxlength="200" placeholder="Uniform deposit, trailer rental, donation…"></label>
     <label>Amount<input name="amount_display" required inputmode="decimal" placeholder="$25.00"></label>
-    <label>Payer name <span class="muted">(optional)</span><input name="payer_name" maxlength="160" placeholder="Name on receipt" autocomplete="name"></label>
     <label>Note <span class="muted">(optional)</span><textarea name="note" rows="2" maxlength="500" placeholder="Optional internal note"></textarea></label>
     <div class="checkout-card-box">
       <div id="admin-square-card" class="checkout-card-host" aria-label="Square card entry"></div>
@@ -8826,6 +8829,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges are recorded in the Treasurer ledger as fundraiser income.</p>
     <ul class="checkout-help-list">
       <li>Requires Square card checkout to be connected</li>
+      <li>User name or entity and description of transaction are required</li>
       <li>Minimum charge is $1.00</li>
       <li>Card data stays with Square — it is never stored in the CMS</li>
     </ul>
