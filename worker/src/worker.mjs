@@ -203,7 +203,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'cms-guide-pdf-20260813';
+const ASSET_VERSION = 'remove-ensemble-close-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -8923,7 +8923,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <p class="kicker">Program</p>
         <h2 id="ensembles-editor-title">Edit Ensemble Body</h2>
       </div>
-      <button class="btn outline" type="button" data-ensembles-editor-dismiss>Close</button>
     </div>
     <form id="ensembles-body-form" class="stack minutes-editor-form ensembles-editor-form" novalidate>
       <label class="full form-rich-label"><span>Ensemble body</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich ensembles-body-editor" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter ensemble cards and body content…" aria-label="Ensemble body content"></div><input type="hidden" name="body_html"></label>
