@@ -1454,7 +1454,7 @@ function buildEditablePagePreview(payload = {}) {
     ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
     : '';
   const sponsorsCallout = showCallout
-    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><span class="btn secondary cms-preview-inert" role="link" aria-disabled="true" title="Opens on the public Sponsors page">Become a sponsor</span></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
   const isFundraisingPage = payload.slug === 'fundraising' || payload.original_slug === 'fundraising';
   if (isFundraisingPage) {
@@ -1478,7 +1478,7 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><span class="btn primary cms-preview-inert" role="link" aria-disabled="true" title="Opens on the public Sponsors page">Become a sponsor</span><button type="button" class="btn outline cms-preview-inert" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
@@ -2576,7 +2576,25 @@ function syncPreviewFromForm() {
   }
 }
 
+function isCmsPreviewPublicAction(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest([
+    '.cms-preview-inert',
+    '[data-donate-open]',
+    'a[href*="become-a-sponsor"]',
+    'a[href*="become-sponsor"]',
+  ].join(', ')));
+}
+
 function bindPagePreviewInteractions(preview) {
+  if (!preview.dataset.publicActionGuardBound) {
+    preview.dataset.publicActionGuardBound = '1';
+    preview.addEventListener('click', (event) => {
+      if (!isCmsPreviewPublicAction(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+  }
   preview.querySelectorAll('[data-cms-field], [data-cms-home-field]').forEach(field => {
     field.addEventListener('input', () => {
       syncFieldFromPreview(field);
@@ -2857,7 +2875,9 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    return `<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+    const active = button.classList.contains('active');
+    const activeAttr = active ? ' class="active" aria-current="page"' : '';
+    return `<button type="button"${activeAttr} data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
   };
 
   const pushButton = (button) => {
@@ -2964,7 +2984,11 @@ function renderMobileAdminMenu() {
 }
 
 function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
-  document.querySelectorAll('.admin-menu button').forEach((button) => {
+  const markButton = (button) => {
+    if (!button || button.hasAttribute('data-sponsors-toggle') || button.hasAttribute('data-boosters-toggle') || button.hasAttribute('data-mobile-submenu-toggle')) {
+      button?.classList.remove('active');
+      return;
+    }
     const isTab = Boolean(tab) && button.dataset.tab === tab
       && !button.dataset.editShortcut
       && !button.dataset.sponsorNav
@@ -2972,8 +2996,13 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
     const isPage = Boolean(pageSlug) && button.dataset.editShortcut === pageSlug;
     const isSponsorNav = Boolean(sponsorNav) && button.dataset.sponsorNav === sponsorNav;
     const isPageNav = Boolean(pageSlug) && button.dataset.pageNav === pageSlug;
-    button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav || isPageNav));
-  });
+    const active = Boolean(isTab || isPage || isSponsorNav || isPageNav);
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  };
+  document.querySelectorAll('.admin-menu button').forEach(markButton);
+  document.querySelectorAll('#admin-mobile-menu button[data-mobile-index]').forEach(markButton);
 }
 
 function activateTab(name) {
