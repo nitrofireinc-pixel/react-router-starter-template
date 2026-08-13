@@ -5,6 +5,16 @@ import {
   INVOICE_LOGO_WIDTH,
 } from './invoice-logo-rgb.mjs';
 import {
+  buildAdminAuditExportText,
+  buildAuditSummary,
+  enrichMailAuditMeta,
+  listAdminAuditLogs,
+  maybeAuditAdminApiResponse,
+  requestClientIp,
+  summarizeAdminRequestForAudit,
+  writeAdminAuditLog,
+} from './admin-audit-log.mjs';
+import {
   deserializeVapidKeys,
   generateVapidKeys,
   sendPushNotification,
@@ -203,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'calendar-background-push-20260813';
+const ASSET_VERSION = 'admin-security-audit-log-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -439,6 +449,15 @@ export function canAccessCheckout(user) {
   );
 }
 
+export async function requireSuperAdmin(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  if (!isSuperAdmin(auth.user)) {
+    return { response: jsonResponse({ detail: 'Super admin access required' }, 403), user: auth.user };
+  }
+  return auth;
+}
+
 export function canManageAllEvents(user) {
   return isSuperAdmin(user) || hasPermission(user, 'events:manage');
 }
@@ -619,6 +638,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS push_devices (token TEXT PRIMARY KEY, platform TEXT NOT NULL DEFAULT \'android\', app_id TEXT NOT NULL DEFAULT \'efhs_calendar\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\')'),
   ]);
   try {
     await env.DB.prepare('ALTER TABLE events ADD COLUMN event_year INTEGER NOT NULL DEFAULT 2026').run();
@@ -6043,6 +6063,26 @@ export function serializePagePayload(payload, existing = null) {
 
 async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
+  let requestSummary = null;
+  const actor = url.pathname.startsWith('/api/admin')
+    ? await currentUser(request, env)
+    : null;
+  if (url.pathname.startsWith('/api/admin') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+    requestSummary = await summarizeAdminRequestForAudit(request);
+  }
+  const response = await routeApi(request, env, url, ctx);
+  await maybeAuditAdminApiResponse(env, {
+    request,
+    url,
+    response,
+    actor,
+    requestSummary,
+    ctx,
+  });
+  return response;
+}
+
+async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
   if (url.pathname === '/api/session' && request.method === 'GET') {
@@ -6655,6 +6695,39 @@ async function handleApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     return jsonResponse({ user: publicUser(auth.user), permissions: GLOBAL_PERMISSIONS, pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })) });
+  }
+  if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    const payload = await listAdminAuditLogs(env, {
+      limit: Number(url.searchParams.get('limit') || 200),
+      offset: Number(url.searchParams.get('offset') || 0),
+      action: String(url.searchParams.get('action') || '').trim(),
+      actor: String(url.searchParams.get('actor') || '').trim(),
+    });
+    return jsonResponse({
+      ...payload,
+      storage: 'secured-server-database',
+      access: 'super_admin_only',
+    });
+  }
+  if (url.pathname === '/api/admin/security-log.txt' && request.method === 'GET') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    const payload = await listAdminAuditLogs(env, {
+      limit: Math.min(Number(url.searchParams.get('limit') || 1000), 2000),
+      offset: 0,
+      action: String(url.searchParams.get('action') || '').trim(),
+      actor: String(url.searchParams.get('actor') || '').trim(),
+    });
+    return new Response(buildAdminAuditExportText(payload.entries), {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'content-disposition': 'attachment; filename="efhsband-security-audit-log.txt"',
+        'cache-control': 'no-store',
+      },
+    });
   }
 
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
@@ -8235,6 +8308,35 @@ async function handleApi(request, env, url, ctx = null) {
     }
     const sent = results.filter((item) => item.ok).length;
     const failed = results.length - sent;
+    const status = failed && sent ? 207 : failed ? 502 : 200;
+    await writeAdminAuditLog(env, {
+      action: 'mail.send',
+      category: 'mail',
+      method: 'POST',
+      path: '/api/admin/mail',
+      status,
+      actor_user_id: auth.user.id,
+      actor_username: auth.user.username,
+      ip: requestClientIp(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: 'mail.send',
+        method: 'POST',
+        path: '/api/admin/mail',
+        status,
+        actorUsername: auth.user.username,
+        detail: `subject="${mail.subject}" sent=${sent} failed=${failed}`,
+      }),
+      meta: enrichMailAuditMeta({
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+        recipients,
+        attachments: mail.attachments,
+        replyTo: sender.replyTo,
+        results,
+      }),
+    });
     return jsonResponse({
       ok: failed === 0,
       sent,
@@ -8244,7 +8346,7 @@ async function handleApi(request, env, url, ctx = null) {
       detail: failed
         ? `Sent ${sent} of ${results.length}. ${failed} failed.`
         : `Sent to ${sent} recipient${sent === 1 ? '' : 's'}.`,
-    }, failed && sent ? 207 : failed ? 502 : 200);
+    }, status);
   }
 
   if (url.pathname === '/api/admin/events' && request.method === 'GET') {
@@ -8467,12 +8569,55 @@ async function handleLogin(request, env) {
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     // Always clear any existing session on failed login so a stale cookie cannot
     // keep granting access after an invalid password attempt.
+    await writeAdminAuditLog(env, {
+      action: 'login.failed',
+      category: 'auth',
+      method: 'POST',
+      path: '/admin/login',
+      status: 401,
+      actor_username: username,
+      ip: requestClientIp(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: 'login.failed',
+        method: 'POST',
+        path: '/admin/login',
+        status: 401,
+        actorUsername: username || 'unknown',
+        detail: 'invalid credentials',
+      }),
+      meta: { username, next: nextPath },
+    });
     return htmlResponse(
       renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
       401,
       { 'set-cookie': clearSessionCookie() },
     );
   }
+  await writeAdminAuditLog(env, {
+    action: 'login',
+    category: 'auth',
+    method: 'POST',
+    path: '/admin/login',
+    status: 302,
+    actor_user_id: user.id,
+    actor_username: user.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action: 'login',
+      method: 'POST',
+      path: '/admin/login',
+      status: 302,
+      actorUsername: user.username,
+      detail: 'session started',
+    }),
+    meta: {
+      user_id: user.id,
+      role: user.role,
+      next: nextPath,
+    },
+  });
   const response = redirect(nextPath);
   response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
   return response;
@@ -8484,7 +8629,30 @@ async function handleAdmin(request, env) {
   return htmlResponse(ADMIN_HTML);
 }
 
-function logout() {
+async function logout(request, env) {
+  const user = await currentUser(request, env);
+  if (user) {
+    await writeAdminAuditLog(env, {
+      action: 'logout',
+      category: 'auth',
+      method: String(request?.method || 'POST').toUpperCase(),
+      path: '/admin/logout',
+      status: 302,
+      actor_user_id: user.id,
+      actor_username: user.username,
+      ip: requestClientIp(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: 'logout',
+        method: String(request?.method || 'POST').toUpperCase(),
+        path: '/admin/logout',
+        status: 302,
+        actorUsername: user.username,
+        detail: 'session ended',
+      }),
+      meta: { user_id: user.id, role: user.role },
+    });
+  }
   const response = redirect('/admin/login');
   response.headers.set('set-cookie', clearSessionCookie());
   return response;
@@ -8758,7 +8926,7 @@ export default {
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
-    if (url.pathname === '/admin/logout') return logout();
+    if (url.pathname === '/admin/logout') return logout(request, env);
     if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
     if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
@@ -8780,7 +8948,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff" hidden>Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><button type="button" data-tab="fundraising-body" hidden>Fundraising</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="contact" hidden>Contact Form</button><button type="button" data-tab="users" hidden>Users</button><button type="button" data-tab="social" hidden>Social / Facebook</button><button type="button" data-tab="site" hidden>Site Settings</button><button type="button" data-tab="photos" hidden>Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff" hidden>Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><button type="button" data-tab="fundraising-body" hidden>Fundraising</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsorship</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="contact" hidden>Contact Form</button><button type="button" data-tab="users" hidden>Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social" hidden>Social / Facebook</button><button type="button" data-tab="site" hidden>Site Settings</button><button type="button" data-tab="photos" hidden>Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/index.html">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel" hidden><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich-insert-line title="Insert a new line">Insert line</button></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting. Fundraising content is edited under Manage → Fundraising.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -9077,6 +9245,19 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <button class="btn primary" type="submit">Send email</button>
 <p class="status" id="mail-status"></p>
 </form>
+</div>
+</section>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only. Login, logout, CMS changes, and staff emails are recorded in a secured server-side log that is not public and not available to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.txt">Download log</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<div class="admin-card security-log-filters">
+  <div class="form-grid">
+    <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
+    <label>Filter by action<input id="security-log-action" type="search" placeholder="login, mail.send, change.pages…" autocomplete="off"></label>
+  </div>
+  <p class="muted">Stored in the secured CMS database (<span class="mono">admin_audit_log</span>), not in a public downloads folder.</p>
+  <p class="status" id="security-log-status" aria-live="polite"></p>
+</div>
+<div class="admin-card">
+  <div id="security-log-list" class="security-log-list" aria-live="polite"></div>
 </div>
 </section>
 <section id="tab-users" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Manage CMS editor accounts and page-level permissions.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-tester" hidden>Add Tester</button><button class="btn primary" type="button" id="new-user">New User</button></div></div><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div><p class="status" id="users-list-status" aria-live="polite"></p></div></section>

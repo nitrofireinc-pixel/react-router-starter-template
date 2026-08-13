@@ -4287,3 +4287,36 @@ body.minutes-frame-open{overflow:hidden}
 @media(max-width:900px){
   .checkout-layout{grid-template-columns:1fr}
 }
+
+.security-log-panel .security-log-filters{margin-bottom:16px}
+.security-log-list{display:grid;gap:12px}
+.security-log-entry{
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:14px 16px;
+  background:#fff;
+}
+.security-log-entry header{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 14px;
+  align-items:baseline;
+  margin-bottom:8px;
+}
+.security-log-entry header b{color:var(--navy)}
+.security-log-entry header span{font-weight:800;color:var(--navy)}
+.security-log-entry header small{color:var(--steel)}
+.security-log-entry p{margin:0 0 6px}
+.security-log-meta{
+  margin:8px 0 0;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#f3f6fa;
+  color:var(--navy);
+  font-size:.82rem;
+  overflow:auto;
+  max-height:240px;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.security-log-panel .mono,.security-log-entry .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}

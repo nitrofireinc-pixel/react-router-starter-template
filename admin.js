@@ -3046,6 +3046,9 @@ function activateTab(name) {
     if (name === 'social') {
       loadSocialPanel().catch(() => {});
     }
+    if (name === 'security-log') {
+      loadSecurityLog().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -3194,6 +3197,7 @@ function showAllowedPanels() {
     users: hasPermission('users'),
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
+    'security-log': isSuperAdmin(),
   };
   let manageVisible = false;
   document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
@@ -3602,6 +3606,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
+    isSuperAdmin() && ['Security Log', 'View login, logout, CMS changes, and staff email details. Super Admin only.', 'security-log', 'Security', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
@@ -5438,6 +5443,57 @@ async function loadUsers() {
   }));
 }
 
+async function loadSecurityLog() {
+  if (!isSuperAdmin()) return;
+  const list = document.querySelector('#security-log-list');
+  const status = document.querySelector('#security-log-status');
+  const download = document.querySelector('#download-security-log');
+  if (!list) return;
+  const actor = String(document.querySelector('#security-log-actor')?.value || '').trim();
+  const action = String(document.querySelector('#security-log-action')?.value || '').trim();
+  const params = new URLSearchParams({ limit: '250' });
+  if (actor) params.set('actor', actor);
+  if (action) params.set('action', action);
+  if (download) {
+    download.href = `/api/admin/security-log.txt?${params.toString()}`;
+  }
+  try {
+    if (status) status.textContent = 'Loading security log…';
+    const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) {
+      list.innerHTML = '<p class="draft">No security log entries yet.</p>';
+    } else {
+      list.innerHTML = entries.map((entry) => {
+        const when = escapeHtml(entry.created_at || '');
+        const who = escapeHtml(entry.actor_username || 'unknown');
+        const summary = escapeHtml(entry.summary || entry.action || '');
+        const route = escapeHtml(`${entry.method || ''} ${entry.path || ''}`.trim());
+        const meta = entry.meta && Object.keys(entry.meta).length
+          ? `<pre class="security-log-meta">${escapeHtml(JSON.stringify(entry.meta, null, 2))}</pre>`
+          : '';
+        return `<article class="security-log-entry">
+          <header>
+            <b>${when}</b>
+            <span>${who}</span>
+            <small>${escapeHtml(entry.action || '')}${entry.status != null ? ` · ${escapeHtml(String(entry.status))}` : ''}</small>
+          </header>
+          <p>${summary}</p>
+          ${route ? `<p class="muted mono">${route}</p>` : ''}
+          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}</p>` : ''}
+          ${meta}
+        </article>`;
+      }).join('');
+    }
+    if (status) {
+      status.textContent = `${entries.length} of ${data.total || entries.length} secured log entr${(data.total || entries.length) === 1 ? 'y' : 'ies'} (super admin only).`;
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;
+    if (status) status.textContent = error.message || 'Security log unavailable';
+  }
+}
+
 function defaultEventYear() {
   return new Date().getFullYear();
 }
@@ -6911,6 +6967,24 @@ function bindForms() {
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not refresh ledger.';
     }
+  });
+
+  document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
+    loadSecurityLog().catch(() => {});
+  });
+  let securityLogFilterTimer = null;
+  ['#security-log-actor', '#security-log-action'].forEach((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      loadSecurityLog().catch(() => {});
+    });
+    el.addEventListener('input', () => {
+      clearTimeout(securityLogFilterTimer);
+      securityLogFilterTimer = setTimeout(() => {
+        loadSecurityLog().catch(() => {});
+      }, 300);
+    });
   });
 
   document.querySelector('#download-ledger-excel')?.addEventListener('click', async (event) => {
