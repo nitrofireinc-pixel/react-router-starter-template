@@ -888,6 +888,15 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
       package: 'Fundraiser',
       paid_at: '2026-08-09T10:00:00.000Z',
     }],
+    dues: [{
+      id: 10,
+      kind: 'dues',
+      name: 'Alex Student',
+      amount_cents: 7500,
+      amount_display: '$75.00',
+      package: 'Dues',
+      paid_at: '2026-08-07T10:00:00.000Z',
+    }],
     expenses: [{
       id: 9,
       kind: 'expense',
@@ -902,6 +911,7 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
   assert.match(xml, /<sponsors count="2" total_cents="876400" total_display="\$8,764\.00">/);
   assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25\.00">/);
   assert.match(xml, /<fundraisers count="1" total_cents="12000" total_display="\$120\.00">/);
+  assert.match(xml, /<dues count="1" total_cents="7500" total_display="\$75\.00">/);
   assert.match(xml, /<expenses count="1" total_cents="-4500" total_display="-\$45\.00">/);
   assert.match(xml, /Acme Music &amp; Co/);
   assert.match(xml, /Nitrofire Computing LLC/);
@@ -909,13 +919,14 @@ test('buildPaymentLedgerXml separates sponsors and donors with totals', () => {
   assert.match(xml, /Fair market value for donated services/);
   assert.match(xml, /Jane Donor/);
   assert.match(xml, /Cookie Dough Sale/);
+  assert.match(xml, /Alex Student/);
   assert.match(xml, /Trailer hitch/);
   assert.match(xml, /<package>Gold Sponsor<\/package>/);
-  assert.match(xml, /income cents="890900" display="\$8,909\.00"/);
+  assert.match(xml, /income cents="898400" display="\$8,984\.00"/);
   assert.match(xml, /<expenses cents="4500" display="\$45\.00"\/>/);
   assert.match(xml, /in_kind_total cents="826400" display="\$8,264\.00"/);
-  assert.match(xml, /cash_total cents="60000" display="\$600\.00"/);
-  assert.match(xml, /net_total cents="886400" display="\$8,864\.00"/);
+  assert.match(xml, /cash_total cents="67500" display="\$675\.00"/);
+  assert.match(xml, /net_total cents="893900" display="\$8,939\.00"/);
 
   const excel = buildPaymentLedgerExcelXml([
     { id: 1, kind: 'donor', name: 'Jane Donor', amount_cents: 2500, amount_display: '$25.00', money_exchanged: true, paid_at: '2026-08-10' },

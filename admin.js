@@ -3597,7 +3597,7 @@ function renderDashboard() {
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
-    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, and expenses; view and download Excel.', 'ledger', 'Finance', 'tab'],
+    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses; view and download Excel.', 'ledger', 'Finance', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
@@ -3830,7 +3830,7 @@ async function loadLedger() {
     const totals = data?.totals || {};
     const counts = totals.counts || {};
     summary.innerHTML = [
-      ['Income', totals.income_display || '$0.00', `${Number(counts.sponsor || 0) + Number(counts.donor || 0) + Number(counts.fundraiser || 0)} entries`],
+      ['Income', totals.income_display || '$0.00', `${Number(counts.sponsor || 0) + Number(counts.donor || 0) + Number(counts.fundraiser || 0) + Number(counts.dues || 0)} entries`],
       ['Expenses', totals.expense_display || '$0.00', `${Number(counts.expense || 0)} entries`],
       ['Cash net', totals.cash_display || '$0.00', 'Money exchanged'],
       ['In-kind', totals.in_kind_display || '$0.00', 'No money exchanged'],
@@ -3840,7 +3840,7 @@ async function loadLedger() {
     )).join('');
     const entries = Array.isArray(data?.entries) ? data.entries : [];
     if (!entries.length) {
-      body.innerHTML = '<tr><td colspan="8" class="draft">No ledger entries yet. Add a donor, sponsor, fundraiser, or expense.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="draft">No ledger entries yet. Add a donor, sponsor, fundraiser, dues, or expense.</td></tr>';
     } else {
       body.innerHTML = entries.map((row) => {
         const signed = String(row.kind || '').toLowerCase() === 'expense'
@@ -4399,6 +4399,7 @@ function ledgerKindLabel(kind) {
   if (key === 'sponsor') return 'Sponsor';
   if (key === 'donor') return 'Donor';
   if (key === 'fundraiser') return 'Fundraiser';
+  if (key === 'dues') return 'Dues';
   if (key === 'expense') return 'Expense';
   return key || 'Entry';
 }
@@ -4418,13 +4419,14 @@ function ensureLedgerEntryToast() {
     <div class="admin-sponsor-form-toast-panel">
       <div class="admin-sponsor-form-toast-card">
         <h3 id="admin-ledger-form-toast-title">Add ledger entry</h3>
-        <p class="muted">Record a donor, sponsor, fundraiser, or expense. Choose cash or in-kind (fair-market value with no money exchanged).</p>
+        <p class="muted">Record a donor, sponsor, fundraiser, dues payment, or expense. Choose cash or in-kind (fair-market value with no money exchanged).</p>
         <form id="ledger-entry-form" class="admin-sponsor-manual-form" novalidate>
           <label>Type
             <select name="kind" required>
               <option value="sponsor">Sponsor / organization</option>
               <option value="donor" selected>Donor / individual</option>
               <option value="fundraiser">Fundraiser income</option>
+              <option value="dues">Dues</option>
               <option value="expense">Expense</option>
             </select>
           </label>
@@ -5233,7 +5235,7 @@ function ensureUserFormToast() {
             <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
-            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, expenses) + Checkout</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, dues, expenses) + Checkout</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label>
             <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>

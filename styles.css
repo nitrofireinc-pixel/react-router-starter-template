@@ -4189,6 +4189,7 @@ body.minutes-frame-open{overflow:hidden}
 .ledger-kind-sponsor{background:#e7f0ff;color:#184a8c}
 .ledger-kind-donor{background:#e8f7ee;color:#146c3a}
 .ledger-kind-fundraiser{background:#fff4df;color:#8a5a00}
+.ledger-kind-dues{background:#f0e9ff;color:#5b3aa8}
 .ledger-kind-expense{background:#fdeaea;color:#9b1c1c}
 .ledger-actions{white-space:nowrap}
 .btn-small{padding:8px 12px;font-size:.85rem;border-radius:10px}

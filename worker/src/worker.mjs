@@ -213,9 +213,10 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-security-audit-log-20260813';
+const ASSET_VERSION = 'ledger-dues-entry-20260813';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
-export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'expense'];
+export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
+export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 
 const PUSH_SW_JS = `/* East Forsyth Band — calendar web push service worker */
@@ -3932,12 +3933,13 @@ export function summarizeLedgerEntries(entries = []) {
     byKind[kind].push(row);
   }
   const sumAbs = (list) => list.reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
-  const incomeCents = sumAbs(byKind.sponsor) + sumAbs(byKind.donor) + sumAbs(byKind.fundraiser);
+  const incomeRows = LEDGER_INCOME_KINDS.flatMap((kind) => byKind[kind] || []);
+  const incomeCents = sumAbs(incomeRows);
   const expenseCents = sumAbs(byKind.expense);
   const inKindTotalCents = rows
     .filter((row) => row.money_exchanged === false || Number(row.money_exchanged) === 0)
     .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
-  const cashIncomeCents = [...byKind.sponsor, ...byKind.donor, ...byKind.fundraiser]
+  const cashIncomeCents = incomeRows
     .filter((row) => !(row.money_exchanged === false || Number(row.money_exchanged) === 0))
     .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
   const cashExpenseCents = byKind.expense
@@ -3954,6 +3956,7 @@ export function summarizeLedgerEntries(entries = []) {
     sponsors_cents: sumAbs(byKind.sponsor),
     donors_cents: sumAbs(byKind.donor),
     fundraisers_cents: sumAbs(byKind.fundraiser),
+    dues_cents: sumAbs(byKind.dues),
   };
 }
 
@@ -3962,6 +3965,7 @@ export function buildPaymentLedgerXml({
   sponsors = [],
   donors = [],
   fundraisers = [],
+  dues = [],
   expenses = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
@@ -3971,6 +3975,7 @@ export function buildPaymentLedgerXml({
       ...sponsors.map((row) => ({ ...row, kind: 'sponsor' })),
       ...donors.map((row) => ({ ...row, kind: 'donor' })),
       ...fundraisers.map((row) => ({ ...row, kind: 'fundraiser' })),
+      ...dues.map((row) => ({ ...row, kind: 'dues' })),
       ...expenses.map((row) => ({ ...row, kind: 'expense' })),
     ];
   const summary = summarizeLedgerEntries(allEntries);
@@ -4005,6 +4010,7 @@ ${xml ? `${xml}\n` : ''}  </${label}>`;
 ${section('sponsor', 'sponsors')}
 ${section('donor', 'donors')}
 ${section('fundraiser', 'fundraisers')}
+${section('dues', 'dues')}
 ${section('expense', 'expenses')}
   <totals>
     <income cents="${summary.income_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.income_cents))}"/>
@@ -4212,6 +4218,7 @@ export async function loadPaymentLedgerRows(env) {
     sponsors: all.filter((row) => row.kind === 'sponsor'),
     donors: all.filter((row) => row.kind === 'donor'),
     fundraisers: all.filter((row) => row.kind === 'fundraiser'),
+    dues: all.filter((row) => row.kind === 'dues'),
     expenses: all.filter((row) => row.kind === 'expense'),
   };
 }
@@ -7509,6 +7516,7 @@ async function routeApi(request, env, url, ctx = null) {
       sponsors: loaded.sponsors,
       donors: loaded.donors,
       fundraisers: loaded.fundraisers,
+      dues: loaded.dues,
       expenses: loaded.expenses,
       totals: {
         income_cents: summary.income_cents,
@@ -7527,6 +7535,8 @@ async function routeApi(request, env, url, ctx = null) {
         donors_display: formatLedgerAmountDisplay(summary.donors_cents),
         fundraisers_cents: summary.fundraisers_cents,
         fundraisers_display: formatLedgerAmountDisplay(summary.fundraisers_cents),
+        dues_cents: summary.dues_cents,
+        dues_display: formatLedgerAmountDisplay(summary.dues_cents),
         counts: summary.counts,
       },
       download_url: '/api/admin/ledger.xls',
@@ -7547,7 +7557,7 @@ async function routeApi(request, env, url, ctx = null) {
       String(payload.kind || '').trim().toLowerCase() === 'donor' ? 'donor' : ''
     );
     if (!kind) {
-      return jsonResponse({ detail: 'Type must be sponsor, donor, fundraiser, or expense' }, 422);
+      return jsonResponse({ detail: 'Type must be sponsor, donor, fundraiser, dues, or expense' }, 422);
     }
     const name = String(payload.name || payload.business_name || '').trim();
     const address = String(payload.address || '').trim();
@@ -7573,7 +7583,13 @@ async function routeApi(request, env, url, ctx = null) {
       : 'Fair market value for donated goods or services; no money exchanged.';
     const note = String(payload.note || defaultNote).trim();
     const defaultPackage = moneyExchanged
-      ? (kind === 'fundraiser' ? 'Fundraiser' : kind === 'expense' ? 'Expense' : kind === 'donor' ? 'Donation' : 'Sponsor')
+      ? (
+        kind === 'fundraiser' ? 'Fundraiser'
+          : kind === 'dues' ? 'Dues'
+            : kind === 'expense' ? 'Expense'
+              : kind === 'donor' ? 'Donation'
+                : 'Sponsor'
+      )
       : 'In-kind donated services';
     const packageLabel = String(payload.package || payload.package_label || defaultPackage).trim() || defaultPackage;
     if (!name || name.length > 200) {
