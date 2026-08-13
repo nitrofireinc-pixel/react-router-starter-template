@@ -47,8 +47,9 @@ Use **Settings → Allow background checks** after install so OEM battery polici
 ```bash
 cd mobile
 flutter pub get
-flutter build apk --release
+flutter build apk --release --target-platform android-arm64
 # output: build/app/outputs/flutter-apk/app-release.apk
+# Published copy: /assets/downloads/EFHS-Band-Calendar.apk (arm64-v8a, Cloudflare Pages size limit)
 ```
 
 Install with `adb install -r build/app/outputs/flutter-apk/app-release.apk`.

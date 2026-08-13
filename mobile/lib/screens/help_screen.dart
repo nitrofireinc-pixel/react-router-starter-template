@@ -102,8 +102,9 @@ class HelpScreen extends StatelessWidget {
             body:
                 'cd mobile\n'
                 'flutter pub get\n'
-                'flutter build apk --release\n'
-                '# APK: build/app/outputs/flutter-apk/app-release.apk',
+                'flutter build apk --release --target-platform android-arm64\n'
+                '# APK: build/app/outputs/flutter-apk/app-release.apk\n'
+                '# Site download: /assets/downloads/EFHS-Band-Calendar.apk',
             mono: true,
           ),
         ],
