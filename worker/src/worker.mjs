@@ -383,7 +383,7 @@ export function friendlyHttpErrorMessage(raw, fallback = 'Request failed') {
   if (!text) return fallback;
   const lower = text.toLowerCase();
   const looksLikeHtml = text.startsWith('<!') || lower.includes('<html') || lower.includes('<!doctype')
-    || lower.includes('cdn-cgi') || lower.includes('cloudflare') && lower.includes('error code');
+    || lower.includes('cdn-cgi') || (lower.includes('cloudflare') && lower.includes('error code'));
   if (looksLikeHtml || /error code\s*50[234]/i.test(text) || /bad gateway|gateway timeout/i.test(text)) {
     if (/504|gateway timeout|timed out/i.test(text)) return 'Request timed out. Try again in a moment.';
     if (/503|service unavailable/i.test(text)) return 'Service temporarily unavailable (503). Try again in a moment.';
