@@ -3382,19 +3382,24 @@ function renderZernioFacebookStatus(status) {
   const eventsCard = document.querySelector('#zernio-facebook-events-card');
   if (eventsCard) eventsCard.hidden = !(status?.configured && status?.connected);
   if (apiKeyForm) {
-    const showKeyForm = isSuperAdmin() && (!status?.configured || status?.configured_source === 'database');
+    // Always show for Super Admin so a bad Pages secret can be overridden.
+    const showKeyForm = isSuperAdmin();
     apiKeyForm.hidden = !showKeyForm;
     if (apiKeySource) {
+      const preview = status?.key_preview ? ` (${status.key_preview})` : '';
       if (!status?.configured) {
         apiKeySource.textContent = 'No Zernio API key is available at runtime. Paste your key below to unlock Connect and Post.';
+        apiKeySource.classList.remove('ok');
       } else if (status?.configured_source === 'database') {
-        apiKeySource.textContent = 'Using API key saved in the CMS. Cloudflare Pages secrets take priority when present.';
+        apiKeySource.textContent = `Using API key saved in the CMS${preview}. This overrides the Cloudflare Pages secret.`;
         apiKeySource.classList.add('ok');
+      } else if (status?.configured_source === 'env') {
+        apiKeySource.textContent = `Using Cloudflare Pages secret ZERNIO_API_KEY${preview}. If you see Unauthorized below, paste a fresh key here to override it.`;
+        apiKeySource.classList.toggle('ok', !/unauthorized/i.test(String(status?.error || status?.detail || '')));
       } else {
-        apiKeySource.textContent = 'Using Cloudflare Pages secret ZERNIO_API_KEY.';
-        apiKeySource.classList.add('ok');
+        apiKeySource.textContent = 'Checking API key…';
+        apiKeySource.classList.remove('ok');
       }
-      if (!status?.configured) apiKeySource.classList.remove('ok');
     }
     if (apiKeyClear) apiKeyClear.hidden = status?.configured_source !== 'database';
   }
@@ -3515,6 +3520,10 @@ async function loadZernioPosts() {
     if (statusEl) {
       if (result?.degraded && result?.detail) {
         statusEl.textContent = friendlyHttpErrorMessage(result.detail, 'Could not load recent posts from Zernio.');
+        if (result?.unauthorized && isSuperAdmin()) {
+          const keyStatus = document.querySelector('#zernio-api-key-status');
+          if (keyStatus) keyStatus.textContent = 'Zernio rejected the current API key. Paste a fresh key above and Save.';
+        }
       } else {
         statusEl.textContent = state.zernioPosts.length ? `${state.zernioPosts.length} recent post${state.zernioPosts.length === 1 ? '' : 's'}.` : '';
       }
@@ -6815,7 +6824,7 @@ function bindForms() {
       if (statusEl) statusEl.textContent = 'Paste a Zernio API key first.';
       return;
     }
-    if (statusEl) statusEl.textContent = 'Saving API key…';
+    if (statusEl) statusEl.textContent = 'Saving and testing API key…';
     try {
       const result = await jsonFetch('/api/admin/zernio/api-key', {
         method: 'POST',
@@ -6823,12 +6832,33 @@ function bindForms() {
       });
       form.reset();
       renderZernioFacebookStatus(result);
-      await loadSocialPanel({ sync: Boolean(result?.configured) });
-      if (statusEl) statusEl.textContent = result?.configured
-        ? 'Zernio API key saved. You can connect and post now.'
-        : 'Key saved, but Zernio still looks unconfigured. Check the key and try again.';
+      await loadSocialPanel({ sync: Boolean(result?.auth_ok) });
+      if (statusEl) {
+        statusEl.textContent = result?.detail
+          || (result?.auth_ok
+            ? 'Zernio API key saved and accepted. You can connect and post now.'
+            : 'Key saved, but Zernio rejected it. Create a new key at zernio.com → Settings → API Keys and paste it again.');
+      }
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not save Zernio API key.';
+      if (statusEl) statusEl.textContent = friendlyHttpErrorMessage(error.message, 'Could not save Zernio API key.');
+      // Still refresh status when save returned 401 with body details via throw.
+      loadSocialPanel().catch(() => {});
+    }
+  });
+
+  document.querySelector('#zernio-api-key-test')?.addEventListener('click', async () => {
+    const statusEl = document.querySelector('#zernio-api-key-status');
+    if (statusEl) statusEl.textContent = 'Testing Zernio API key…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/api-key', {
+        method: 'POST',
+        body: JSON.stringify({ test: true }),
+      });
+      renderZernioFacebookStatus(result);
+      if (statusEl) statusEl.textContent = result?.detail || (result?.auth_ok ? 'Zernio accepted the API key.' : 'Zernio rejected the API key.');
+      if (result?.auth_ok) await loadSocialPanel({ sync: true });
+    } catch (error) {
+      if (statusEl) statusEl.textContent = friendlyHttpErrorMessage(error.message, 'Zernio rejected the API key.');
     }
   });
 

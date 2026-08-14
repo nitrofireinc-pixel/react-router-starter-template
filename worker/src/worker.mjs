@@ -213,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'zernio-sync-timeout-fix-20260814';
+const ASSET_VERSION = 'zernio-unauthorized-key-fix-20260814';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
@@ -1948,16 +1948,48 @@ export function parseZernioFacebookConnection(value) {
 
 export const ZERNIO_API_KEY_CONTENT_KEY = 'zernio_api_key';
 
-export async function resolveZernioApiKey(env) {
-  const fromEnv = String(env?.ZERNIO_API_KEY || '').trim();
-  if (fromEnv) return { key: fromEnv, source: 'env' };
-  try {
-    const fromDb = String(await getSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY) || '').trim();
-    if (fromDb) return { key: fromDb, source: 'database' };
-  } catch {
-    // Database may be unavailable during early boot; treat as unset.
+/** Strip quotes / Bearer prefix / whitespace from a pasted or secret key. */
+export function normalizeZernioApiKey(raw) {
+  let key = String(raw ?? '').trim();
+  if (!key) return '';
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
   }
-  return { key: '', source: 'none' };
+  key = key.replace(/^bearer\s+/i, '').trim();
+  return key;
+}
+
+export function zernioApiKeyPreview(key) {
+  const normalized = normalizeZernioApiKey(key);
+  if (!normalized) return '';
+  if (normalized.length <= 8) return '••••';
+  return `${normalized.slice(0, 4)}…${normalized.slice(-4)}`;
+}
+
+export function describeZernioApiError(status, rawDetail = '') {
+  const detail = String(rawDetail || '').trim();
+  const lower = detail.toLowerCase();
+  if (Number(status) === 401 || lower === 'unauthorized' || lower.includes('invalid api key') || lower.includes('invalid token')) {
+    return 'Zernio rejected the API key (Unauthorized). As Super Admin, paste a valid key from zernio.com → Settings → API Keys (Social / Facebook), then try again.';
+  }
+  if (Number(status) === 403 || lower === 'forbidden') {
+    return 'Zernio forbidden this request. Check the API key permissions in the Zernio dashboard.';
+  }
+  return friendlyHttpErrorMessage(detail, `Zernio request failed (${status || 'error'})`);
+}
+
+export async function resolveZernioApiKey(env) {
+  let fromDb = '';
+  try {
+    fromDb = normalizeZernioApiKey(await getSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY));
+  } catch {
+    fromDb = '';
+  }
+  const fromEnv = normalizeZernioApiKey(env?.ZERNIO_API_KEY);
+  // Prefer a CMS-pasted key so Super Admin can override a bad/stale Pages secret.
+  if (fromDb) return { key: fromDb, source: 'database', preview: zernioApiKeyPreview(fromDb) };
+  if (fromEnv) return { key: fromEnv, source: 'env', preview: zernioApiKeyPreview(fromEnv) };
+  return { key: '', source: 'none', preview: '' };
 }
 
 async function zernioConfigured(env) {
@@ -2004,7 +2036,11 @@ async function zernioApi(env, path, options = {}) {
   }
   if (!response.ok) {
     const rawDetail = data?.message || data?.error || data?.detail || data?.raw || `Zernio request failed (${response.status})`;
-    throw new Error(friendlyHttpErrorMessage(rawDetail, `Zernio request failed (${response.status})`));
+    const message = describeZernioApiError(response.status, rawDetail);
+    const err = new Error(message);
+    err.status = response.status;
+    err.code = response.status === 401 ? 'zernio_unauthorized' : 'zernio_error';
+    throw err;
   }
   return data;
 }
@@ -2194,6 +2230,7 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   return {
     configured,
     configured_source: resolvedKey.source,
+    key_preview: resolvedKey.preview || '',
     connected: Boolean(stored?.accountId),
     needsPageSelection,
     profileId,
@@ -6865,15 +6902,49 @@ async function routeApi(request, env, url, ctx = null) {
         ...(await getZernioFacebookStatus(env)),
       });
     }
-    const apiKey = String(payload?.api_key || payload?.apiKey || '').trim();
+    if (payload?.test === true && !payload?.api_key && !payload?.apiKey) {
+      try {
+        await zernioApi(env, '/profiles', { timeoutMs: 8000 });
+        const status = await getZernioFacebookStatus(env);
+        return jsonResponse({
+          ok: true,
+          tested: true,
+          auth_ok: true,
+          detail: `Zernio accepted the API key (${status.configured_source || 'unknown'}${status.key_preview ? `, ${status.key_preview}` : ''}).`,
+          ...status,
+        });
+      } catch (error) {
+        const status = await getZernioFacebookStatus(env);
+        const detail = describeZernioApiError(error.status, error.message);
+        return jsonResponse({
+          ok: false,
+          tested: true,
+          auth_ok: false,
+          detail,
+          ...status,
+        }, error.status === 401 ? 401 : 502);
+      }
+    }
+    const apiKey = normalizeZernioApiKey(payload?.api_key || payload?.apiKey || '');
     if (!apiKey) return jsonResponse({ detail: 'api_key is required' }, 422);
     if (apiKey.length < 8 || apiKey.length > 500) {
       return jsonResponse({ detail: 'api_key length looks invalid' }, 422);
     }
     await setSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY, apiKey);
+    let authOk = false;
+    let testDetail = '';
+    try {
+      await zernioApi(env, '/profiles', { timeoutMs: 8000 });
+      authOk = true;
+      testDetail = `API key saved and accepted by Zernio (${zernioApiKeyPreview(apiKey)}).`;
+    } catch (error) {
+      testDetail = describeZernioApiError(error.status, error.message);
+    }
     return jsonResponse({
-      ok: true,
+      ok: authOk,
       saved: true,
+      auth_ok: authOk,
+      detail: testDetail,
       ...(await getZernioFacebookStatus(env)),
     });
   }
@@ -6963,9 +7034,15 @@ async function routeApi(request, env, url, ctx = null) {
       const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
       return jsonResponse({ posts });
     } catch (error) {
-      const detail = friendlyHttpErrorMessage(error.message, 'Could not load posts');
+      const detail = describeZernioApiError(error.status, error.message || 'Could not load posts');
       // Soft-fail so CMS still renders; Zernio outages should not dump HTML into Social.
-      return jsonResponse({ posts: [], detail, degraded: true });
+      return jsonResponse({
+        posts: [],
+        detail,
+        degraded: true,
+        auth_ok: error.status !== 401,
+        unauthorized: error.status === 401 || /unauthorized/i.test(detail),
+      });
     }
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'POST') {
@@ -6989,9 +7066,9 @@ async function routeApi(request, env, url, ctx = null) {
       });
       return jsonResponse({ ok: true, post: created?.post || created }, 201);
     } catch (error) {
-      return jsonResponse({
-        detail: friendlyHttpErrorMessage(error.message, 'Could not create post'),
-      }, 502);
+      const detail = describeZernioApiError(error.status, error.message || 'Could not create post');
+      const statusCode = error.status === 401 ? 401 : (error.status === 403 ? 403 : 502);
+      return jsonResponse({ detail }, statusCode);
     }
   }
 
@@ -9156,12 +9233,13 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <form id="zernio-api-key-form" class="admin-card stack" hidden>
   <div class="utility-links-head">
     <h2>Zernio API key</h2>
-    <p class="muted">Super Admin only. Paste your Zernio API key here if the Cloudflare Pages secret is missing at runtime. Env secrets still take priority when present.</p>
+    <p class="muted">Super Admin only. If Recent posts shows Unauthorized, the Cloudflare secret is wrong or stale — paste a fresh key from zernio.com → Settings → API Keys. A CMS key overrides the Pages secret.</p>
   </div>
   <p class="notice" id="zernio-api-key-source">Checking API key…</p>
-  <label class="full">API key<input name="api_key" type="password" autocomplete="off" spellcheck="false" maxlength="500" placeholder="Paste Zernio API key"></label>
+  <label class="full">API key<input name="api_key" type="password" autocomplete="off" spellcheck="false" maxlength="500" placeholder="Paste Zernio API key (sk_…)"></label>
   <div class="panel-actions">
     <button class="btn primary" type="submit">Save API key</button>
+    <button class="btn outline" type="button" id="zernio-api-key-test">Test key</button>
     <button class="btn outline" type="button" id="zernio-api-key-clear" hidden>Clear saved key</button>
   </div>
   <p class="status" id="zernio-api-key-status"></p>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { applyHomeFeatureCards, buildCalendarPushPayload, buildPaymentLedgerExcelXml, buildPaymentLedgerXml, buildUserWelcomeInvite, canAccessCheckout, canAccessTreasurerLedger, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isPendingSponsorApplicationStatus, canDeleteSponsorApplication, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, mapSponsorApplicationRow, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, personInitials, renderPersonAvatar, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, extractFundraisingBodyHtml, applyFundraisingBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, friendlyHttpErrorMessage } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, buildCalendarPushPayload, buildPaymentLedgerExcelXml, buildPaymentLedgerXml, buildUserWelcomeInvite, canAccessCheckout, canAccessTreasurerLedger, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureHomeHeroCardMark, ensureHomePhotoGallerySlot, ensureGalleryPageSlot, sortPhotosByRecent, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, fcmConfigured, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, generateTesterPassword, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isPendingSponsorApplicationStatus, canDeleteSponsorApplication, isSessionFresh, isUpcomingEvent, isValidEmail, jsonResponse, mapSponsorApplicationRow, normalizeAdminMailExtraEmails, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizePushRegisterPayload, normalizeWebPushSubscription, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeTesterCreatePayload, normalizeUtilityLinks, parseCalendarPushState, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, personInitials, renderPersonAvatar, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderNav, renderNotifyMeNavControl, renderAddToHomeNavControl, renderPushServiceWorker, renderWebAppManifest, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, renderStaffAuthNavLink, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, extractFundraisingBodyHtml, applyFundraisingBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, resolveSquarePurchaseAuthId, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, sessionCookieHeader, SESSION_TTL_SECONDS, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, buildTextPdfBase64, applicationFromSponsorRecord, renderPublicBrand, BLUE_REGIMENT_MARK_PATH, SPONSOR_INVOICE_FROM_EMAIL, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, friendlyHttpErrorMessage, normalizeZernioApiKey, describeZernioApiError, zernioApiKeyPreview } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -1539,14 +1539,18 @@ test('friendlyHttpErrorMessage strips Cloudflare HTML gateway pages', () => {
   assert.match(friendlyHttpErrorMessage('x'.repeat(400)), /…$/);
 });
 
-test('resolveZernioApiKey prefers env then site_content fallback', async () => {
-  assert.equal(ZERNIO_API_KEY_CONTENT_KEY, 'zernio_api_key');
-  const fromEnv = await resolveZernioApiKey({ ZERNIO_API_KEY: ' env-key-123 ', DB: null });
-  assert.deepEqual(fromEnv, { key: 'env-key-123', source: 'env' });
+test('normalizeZernioApiKey strips Bearer quotes and whitespace', () => {
+  assert.equal(normalizeZernioApiKey('  Bearer sk_abc  '), 'sk_abc');
+  assert.equal(normalizeZernioApiKey('"sk_abc"'), 'sk_abc');
+  assert.equal(zernioApiKeyPreview('sk_abcdefghijklmnop'), 'sk_a…mnop');
+  assert.match(describeZernioApiError(401, 'Unauthorized'), /rejected the API key/i);
+});
 
+test('resolveZernioApiKey prefers CMS key over Pages secret', async () => {
+  assert.equal(ZERNIO_API_KEY_CONTENT_KEY, 'zernio_api_key');
   const values = { zernio_api_key: ' db-key-456 ' };
   const env = {
-    ZERNIO_API_KEY: '',
+    ZERNIO_API_KEY: ' env-key-123 ',
     DB: {
       prepare() {
         return {
@@ -1561,10 +1565,17 @@ test('resolveZernioApiKey prefers env then site_content fallback', async () => {
       },
     },
   };
-  assert.deepEqual(await resolveZernioApiKey(env), { key: 'db-key-456', source: 'database' });
+  const preferred = await resolveZernioApiKey(env);
+  assert.equal(preferred.key, 'db-key-456');
+  assert.equal(preferred.source, 'database');
 
   values.zernio_api_key = '';
-  assert.deepEqual(await resolveZernioApiKey(env), { key: '', source: 'none' });
+  const fromEnv = await resolveZernioApiKey(env);
+  assert.equal(fromEnv.key, 'env-key-123');
+  assert.equal(fromEnv.source, 'env');
+
+  env.ZERNIO_API_KEY = '';
+  assert.equal((await resolveZernioApiKey(env)).source, 'none');
 });
 
 test('normalizeZernioPostPayload builds publish-now and scheduled Facebook posts', () => {
