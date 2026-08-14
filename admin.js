@@ -393,6 +393,23 @@ function hideUploadingOverlay() {
   });
 }
 
+/** Turn gateway HTML / huge bodies into a short UI-safe error string. */
+function friendlyHttpErrorMessage(raw, fallback = 'Request failed') {
+  const text = String(raw ?? '').trim();
+  if (!text) return fallback;
+  const lower = text.toLowerCase();
+  const looksLikeHtml = text.startsWith('<!') || lower.includes('<html') || lower.includes('<!doctype')
+    || lower.includes('cdn-cgi') || (lower.includes('cloudflare') && lower.includes('error code'));
+  if (looksLikeHtml || /error code\s*50[234]/i.test(text) || /bad gateway|gateway timeout/i.test(text)) {
+    if (/504|gateway timeout|timed out/i.test(text)) return 'Request timed out. Try again in a moment.';
+    if (/503|service unavailable/i.test(text)) return 'Service temporarily unavailable (503). Try again in a moment.';
+    if (/502|bad gateway/i.test(text)) return 'Service temporarily unavailable (502). Try again in a moment.';
+    return 'Server returned an unexpected error page. Refresh and try again.';
+  }
+  if (text.length > 280) return `${text.slice(0, 280)}…`;
+  return text;
+}
+
 function jsonFetchViaXhr(url, options = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -429,7 +446,10 @@ function jsonFetchViaXhr(url, options = {}) {
       }
       if (xhr.status < 200 || xhr.status >= 300) {
         if (showUpload) hideUploadingOverlay();
-        reject(new Error(data?.detail || data?.error || text || xhr.statusText || 'Request failed'));
+        reject(new Error(friendlyHttpErrorMessage(
+          data?.detail || data?.error || text || xhr.statusText,
+          'Request failed',
+        )));
         return;
       }
       if (data == null) {
@@ -467,9 +487,11 @@ async function jsonFetch(url, options = {}) {
     const text = await response.text();
     try {
       const data = JSON.parse(text);
-      throw new Error(data.detail || data.error || text);
+      throw new Error(friendlyHttpErrorMessage(data.detail || data.error || text, 'Request failed'));
     } catch (error) {
-      if (error instanceof SyntaxError) throw new Error(text || response.statusText || 'Request failed');
+      if (error instanceof SyntaxError) {
+        throw new Error(friendlyHttpErrorMessage(text || response.statusText, 'Request failed'));
+      }
       throw error;
     }
   }
@@ -3476,11 +3498,17 @@ async function loadZernioPosts() {
     const result = await jsonFetch('/api/admin/zernio/posts');
     state.zernioPosts = Array.isArray(result.posts) ? result.posts : [];
     renderZernioPosts();
-    if (statusEl) statusEl.textContent = state.zernioPosts.length ? `${state.zernioPosts.length} recent post${state.zernioPosts.length === 1 ? '' : 's'}.` : '';
+    if (statusEl) {
+      if (result?.degraded && result?.detail) {
+        statusEl.textContent = friendlyHttpErrorMessage(result.detail, 'Could not load recent posts from Zernio.');
+      } else {
+        statusEl.textContent = state.zernioPosts.length ? `${state.zernioPosts.length} recent post${state.zernioPosts.length === 1 ? '' : 's'}.` : '';
+      }
+    }
   } catch (error) {
     state.zernioPosts = [];
     renderZernioPosts();
-    if (statusEl) statusEl.textContent = error.message || 'Could not load posts.';
+    if (statusEl) statusEl.textContent = friendlyHttpErrorMessage(error.message, 'Could not load posts.');
   }
 }
 
@@ -3534,7 +3562,7 @@ async function loadZernioEventQueue() {
   } catch (error) {
     state.zernioEventQueue = { pending_events: [], pending_count: 0 };
     renderZernioEventQueue();
-    if (statusEl) statusEl.textContent = error.message || 'Could not load calendar queue.';
+    if (statusEl) statusEl.textContent = friendlyHttpErrorMessage(error.message, 'Could not load calendar queue.');
   }
 }
 

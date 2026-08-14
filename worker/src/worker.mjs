@@ -213,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'zernio-api-key-fallback-20260814';
+const ASSET_VERSION = 'zernio-posts-502-sanitize-20260814';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
@@ -375,6 +375,23 @@ export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
   }[char]));
+}
+
+/** Turn gateway HTML / huge bodies into a short UI-safe error string. */
+export function friendlyHttpErrorMessage(raw, fallback = 'Request failed') {
+  const text = String(raw ?? '').trim();
+  if (!text) return fallback;
+  const lower = text.toLowerCase();
+  const looksLikeHtml = text.startsWith('<!') || lower.includes('<html') || lower.includes('<!doctype')
+    || lower.includes('cdn-cgi') || lower.includes('cloudflare') && lower.includes('error code');
+  if (looksLikeHtml || /error code\s*50[234]/i.test(text) || /bad gateway|gateway timeout/i.test(text)) {
+    if (/504|gateway timeout|timed out/i.test(text)) return 'Request timed out. Try again in a moment.';
+    if (/503|service unavailable/i.test(text)) return 'Service temporarily unavailable (503). Try again in a moment.';
+    if (/502|bad gateway/i.test(text)) return 'Service temporarily unavailable (502). Try again in a moment.';
+    return 'Server returned an unexpected error page. Refresh and try again.';
+  }
+  if (text.length > 280) return `${text.slice(0, 280)}…`;
+  return text;
 }
 
 export function decodeBasicHtmlEntities(value) {
@@ -1985,8 +2002,8 @@ async function zernioApi(env, path, options = {}) {
     data = { raw: text };
   }
   if (!response.ok) {
-    const detail = data?.message || data?.error || data?.detail || data?.raw || `Zernio request failed (${response.status})`;
-    throw new Error(String(detail));
+    const rawDetail = data?.message || data?.error || data?.detail || data?.raw || `Zernio request failed (${response.status})`;
+    throw new Error(friendlyHttpErrorMessage(rawDetail, `Zernio request failed (${response.status})`));
   }
   return data;
 }
@@ -6927,10 +6944,14 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     try {
-      await getZernioFacebookStatus(env, { sync: true });
+      // Queue status is local/D1; avoid a second Zernio sync on Social hard-refresh (gateway timeouts).
       return jsonResponse(await getFacebookEventQueueStatus(env));
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Could not load Facebook event queue' }, 502);
+      return jsonResponse({
+        detail: friendlyHttpErrorMessage(error.message, 'Could not load Facebook event queue'),
+        pending_events: [],
+        pending_count: 0,
+      }, 502);
     }
   }
   if (url.pathname === '/api/admin/zernio/facebook/events/publish' && request.method === 'POST') {
@@ -6948,11 +6969,14 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     try {
-      const data = await zernioApi(env, '/posts?limit=20');
+      // Keep the list call short so Social hard-refresh does not hit a gateway timeout.
+      const data = await zernioApi(env, '/posts?limit=20', { timeoutMs: 10000 });
       const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
       return jsonResponse({ posts });
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Could not load posts' }, 502);
+      const detail = friendlyHttpErrorMessage(error.message, 'Could not load posts');
+      // Soft-fail so CMS still renders; Zernio outages should not dump HTML into Social.
+      return jsonResponse({ posts: [], detail, degraded: true });
     }
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'POST') {
