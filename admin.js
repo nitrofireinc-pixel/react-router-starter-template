@@ -169,6 +169,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/connect',
   '/api/admin/zernio/facebook/disconnect',
   '/api/admin/zernio/facebook/pages',
+  '/api/admin/zernio/api-key',
 ];
 
 let savedToastTimer = null;
@@ -3327,6 +3328,9 @@ function renderZernioFacebookStatus(status) {
   const refreshBtn = document.querySelector('#zernio-facebook-refresh');
   const disconnectBtn = document.querySelector('#zernio-facebook-disconnect');
   const postForm = document.querySelector('#zernio-post-form');
+  const apiKeyForm = document.querySelector('#zernio-api-key-form');
+  const apiKeySource = document.querySelector('#zernio-api-key-source');
+  const apiKeyClear = document.querySelector('#zernio-api-key-clear');
   const detail = status?.detail || (status?.connected ? 'Facebook connected.' : 'Facebook not connected.');
   if (statusEl) {
     const debugNote = (!status?.connected && status?.debug?.note)
@@ -3351,9 +3355,27 @@ function renderZernioFacebookStatus(status) {
   }
   if (refreshBtn) refreshBtn.hidden = !status?.configured;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
-  if (postForm) postForm.hidden = !status?.connected;
+  // Posting requires a live API key and a connected Page (stored connection alone is not enough).
+  if (postForm) postForm.hidden = !(status?.configured && status?.connected);
   const eventsCard = document.querySelector('#zernio-facebook-events-card');
-  if (eventsCard) eventsCard.hidden = !status?.connected;
+  if (eventsCard) eventsCard.hidden = !(status?.configured && status?.connected);
+  if (apiKeyForm) {
+    const showKeyForm = isSuperAdmin() && (!status?.configured || status?.configured_source === 'database');
+    apiKeyForm.hidden = !showKeyForm;
+    if (apiKeySource) {
+      if (!status?.configured) {
+        apiKeySource.textContent = 'No Zernio API key is available at runtime. Paste your key below to unlock Connect and Post.';
+      } else if (status?.configured_source === 'database') {
+        apiKeySource.textContent = 'Using API key saved in the CMS. Cloudflare Pages secrets take priority when present.';
+        apiKeySource.classList.add('ok');
+      } else {
+        apiKeySource.textContent = 'Using Cloudflare Pages secret ZERNIO_API_KEY.';
+        apiKeySource.classList.add('ok');
+      }
+      if (!status?.configured) apiKeySource.classList.remove('ok');
+    }
+    if (apiKeyClear) apiKeyClear.hidden = status?.configured_source !== 'database';
+  }
   if (!status?.needsPageSelection) state.zernioPages = [];
   renderZernioFacebookPages();
   syncZernioPublishModeUi();
@@ -3492,7 +3514,7 @@ function renderZernioEventQueue() {
       : '<p class="muted">Queue is empty.</p>';
   }
   if (publishBtn) {
-    publishBtn.hidden = !state.zernioFacebook?.connected || !events.length;
+    publishBtn.hidden = !(state.zernioFacebook?.configured && state.zernioFacebook?.connected) || !events.length;
     publishBtn.disabled = !events.length;
   }
 }
@@ -6739,6 +6761,49 @@ function bindForms() {
 
   document.querySelectorAll('[data-open-social-tab]').forEach((button) => {
     button.addEventListener('click', () => activateTab('social'));
+  });
+
+  document.querySelector('#zernio-api-key-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const statusEl = document.querySelector('#zernio-api-key-status');
+    const apiKey = String(form.elements.api_key?.value || '').trim();
+    if (!apiKey) {
+      if (statusEl) statusEl.textContent = 'Paste a Zernio API key first.';
+      return;
+    }
+    if (statusEl) statusEl.textContent = 'Saving API key…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/api-key', {
+        method: 'POST',
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+      form.reset();
+      renderZernioFacebookStatus(result);
+      await loadSocialPanel({ sync: Boolean(result?.configured) });
+      if (statusEl) statusEl.textContent = result?.configured
+        ? 'Zernio API key saved. You can connect and post now.'
+        : 'Key saved, but Zernio still looks unconfigured. Check the key and try again.';
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not save Zernio API key.';
+    }
+  });
+
+  document.querySelector('#zernio-api-key-clear')?.addEventListener('click', async () => {
+    const statusEl = document.querySelector('#zernio-api-key-status');
+    if (!confirm('Clear the Zernio API key saved in the CMS?')) return;
+    if (statusEl) statusEl.textContent = 'Clearing…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/api-key', {
+        method: 'POST',
+        body: JSON.stringify({ clear: true }),
+      });
+      renderZernioFacebookStatus(result);
+      await loadSocialPanel();
+      if (statusEl) statusEl.textContent = 'Saved CMS API key cleared.';
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not clear Zernio API key.';
+    }
   });
 
   document.querySelector('#zernio-facebook-refresh')?.addEventListener('click', async () => {
