@@ -4,6 +4,163 @@ function escapeHtml(value) {
   }[char]));
 }
 
+
+function playOverlayEnter(root) {
+  if (!root) return;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+}
+
+function playOverlayLeave(root, { ms = 380, hide = false, onDone } = {}) {
+  if (!root) return null;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  return window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    if (hide) root.hidden = true;
+    onDone?.(root);
+  }, ms);
+}
+
+function datasetKeyToAttr(key) {
+  return String(key || '').replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+}
+
+function bindAdminRowDragAndDrop(list, {
+  idAttr,
+  getOrdered,
+  applyLocalOrder,
+  saveOrder,
+  reload,
+  errorStatusSelector,
+  errorMessage,
+  successStatusSelector,
+  successMessage,
+} = {}) {
+  if (!list || !idAttr) return;
+  let dragId = null;
+  let allowRowDrag = false;
+  const attr = datasetKeyToAttr(idAttr);
+  const rowSelector = `[data-${attr}]`;
+
+  list.querySelectorAll(rowSelector).forEach((row) => {
+    const handle = row.querySelector('.drag-handle');
+    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
+    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
+    handle?.addEventListener('click', (event) => event.preventDefault());
+
+    row.addEventListener('dragstart', (event) => {
+      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
+        event.preventDefault();
+        return;
+      }
+      dragId = Number(row.dataset[idAttr]);
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(dragId));
+      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
+    });
+    row.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      row.classList.remove('is-dragging');
+      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+      dragId = null;
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(row.dataset[idAttr]) !== dragId) row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      allowRowDrag = false;
+      row.classList.remove('is-drop-target');
+      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
+      const toId = Number(row.dataset[idAttr]);
+      if (!fromId || !toId || fromId === toId) return;
+      const ordered = typeof getOrdered === 'function' ? getOrdered() : [];
+      const fromIndex = ordered.findIndex((item) => item.id === fromId);
+      const toIndex = ordered.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const next = [...ordered];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      const ids = next.map((item) => item.id);
+      applyLocalOrder?.(next);
+      try {
+        await saveOrder?.(ids);
+        if (successStatusSelector && successMessage) {
+          const status = document.querySelector(successStatusSelector);
+          if (status) status.textContent = successMessage;
+        }
+      } catch (error) {
+        console.error(error);
+        if (typeof reload === 'function') await reload();
+        if (errorStatusSelector) {
+          const status = document.querySelector(errorStatusSelector);
+          if (status) status.textContent = errorMessage || 'Could not save the new order.';
+        }
+      }
+    });
+  });
+}
+
+function wireEditPageButton(selector, slug, canEdit) {
+  const button = document.querySelector(selector);
+  if (!button) return;
+  button.hidden = !canEdit;
+  button.onclick = () => editPage(slug);
+}
+
+function setAdminSubmenuOpen(key, open) {
+  const menuSel = `[data-${key}-menu]`;
+  const toggleSel = `[data-${key}-toggle]`;
+  const subSel = `[data-${key}-sub]`;
+  document.querySelectorAll(menuSel).forEach((menu) => {
+    const toggle = menu.querySelector(toggleSel);
+    const sub = menu.querySelector(subSel);
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindAdminSubmenu(key, { onItemClick, itemSelector } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  const toggle = menu?.querySelector(`[data-${key}-toggle]`);
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setAdminSubmenuOpen(key, open);
+  });
+  if (typeof onItemClick !== 'function') return;
+  const nodes = itemSelector
+    ? menu.querySelectorAll(itemSelector)
+    : menu.querySelectorAll(`button:not([data-${key}-toggle])`);
+  nodes.forEach((button) => {
+    if (button.dataset.boundNav === '1') return;
+    button.dataset.boundNav = '1';
+    button.addEventListener('click', () => onItemClick(button));
+  });
+}
+
+function syncAdminSubmenuAccess(key, { canAccess, children = [] } = {}) {
+  const menu = document.querySelector(`[data-${key}-menu]`);
+  if (!menu) return false;
+  menu.hidden = !canAccess;
+  const toggle = menu.querySelector(`[data-${key}-toggle]`);
+  if (toggle) toggle.hidden = !canAccess;
+  children.forEach(({ selector, visible }) => {
+    const node = menu.querySelector(selector);
+    if (node) node.hidden = !visible;
+  });
+  return Boolean(canAccess);
+}
+
+
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
@@ -12,6 +169,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/connect',
   '/api/admin/zernio/facebook/disconnect',
   '/api/admin/zernio/facebook/pages',
+  '/api/admin/zernio/api-key',
 ];
 
 let savedToastTimer = null;
@@ -62,8 +220,10 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
   const passwordSuccess = Boolean(options.passwordSuccess);
+  const isError = Boolean(options.error);
   root.classList.toggle('has-icon', Boolean(iconKind));
   root.classList.toggle('is-password-success', passwordSuccess);
+  root.classList.toggle('is-error', isError);
   if (icon) {
     if (iconKind === 'envelope') {
       icon.hidden = false;
@@ -78,19 +238,25 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   window.clearTimeout(savedToastTimer);
   window.clearTimeout(savedToastLeaveTimer);
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   savedToastTimer = window.setTimeout(() => {
-    root.classList.add('is-leaving');
-    root.classList.remove('is-visible');
-    savedToastLeaveTimer = window.setTimeout(() => {
-      root.classList.remove('is-leaving');
-      root.classList.remove('is-password-success');
-      root.classList.remove('has-icon');
-    }, 380);
-  }, 3000);
+    savedToastLeaveTimer = playOverlayLeave(root, {
+      ms: 380,
+      onDone: () => {
+        // A newer toast may have started while this one was leaving.
+        if (root.classList.contains('is-visible')) return;
+        root.classList.remove('is-password-success');
+        root.classList.remove('is-error');
+        root.classList.remove('has-icon');
+      },
+    });
+  }, isError ? 4200 : 3000);
+}
+
+function showFailedToast(detail = '') {
+  const reason = String(detail || 'Something went wrong.').trim();
+  const short = reason.length > 120 ? `${reason.slice(0, 117)}…` : reason;
+  showSavedToast(`Failed — ${short}`, { error: true });
 }
 
 let passwordToastLeaveTimer = null;
@@ -129,31 +295,41 @@ function ensurePasswordToast() {
   return root;
 }
 
-function showPasswordToast() {
+function mustChangePassword() {
+  return Boolean(state.me?.user?.must_change_password);
+}
+
+function showPasswordToast({ required = false } = {}) {
   const root = ensurePasswordToast();
   const form = root.querySelector('#password-form');
   const status = root.querySelector('#password-status');
+  const forceRequired = required || mustChangePassword();
   form?.reset();
-  if (status) status.textContent = '';
+  if (status) {
+    status.textContent = forceRequired
+      ? 'Please choose a new password before continuing.'
+      : '';
+  }
+  root.classList.toggle('is-required', forceRequired);
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = forceRequired;
+  });
   window.clearTimeout(passwordToastLeaveTimer);
   root.hidden = false;
-  root.classList.remove('is-leaving');
-  root.classList.remove('is-visible');
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   window.setTimeout(() => root.querySelector('input[name="current_password"]')?.focus(), 40);
 }
 
 function hidePasswordToast() {
+  if (mustChangePassword()) return;
   const root = document.querySelector('#admin-password-toast');
   if (!root || root.hidden) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
+  root.classList.remove('is-required');
+  root.querySelectorAll('[data-password-dismiss]').forEach((el) => {
+    el.hidden = false;
+  });
   window.clearTimeout(passwordToastLeaveTimer);
-  passwordToastLeaveTimer = window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    root.hidden = true;
-  }, 380);
+  passwordToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
 }
 
 function formDataHasFiles(formData) {
@@ -202,10 +378,8 @@ function setUploadProgress(percent) {
 
 function showUploadingOverlay() {
   const root = ensureUploadToast();
-  root.classList.remove('is-leaving');
   setUploadProgress(0);
-  void root.offsetWidth;
-  root.classList.add('is-visible');
+  playOverlayEnter(root);
   document.body.classList.add('admin-upload-open');
 }
 
@@ -213,12 +387,10 @@ function hideUploadingOverlay() {
   const root = document.querySelector('#admin-upload-toast');
   document.body.classList.remove('admin-upload-open');
   if (!root) return;
-  root.classList.add('is-leaving');
-  root.classList.remove('is-visible');
-  window.setTimeout(() => {
-    root.classList.remove('is-leaving');
-    setUploadProgress(0);
-  }, 380);
+  playOverlayLeave(root, {
+    ms: 380,
+    onDone: () => setUploadProgress(0),
+  });
 }
 
 function jsonFetchViaXhr(url, options = {}) {
@@ -260,15 +432,20 @@ function jsonFetchViaXhr(url, options = {}) {
         reject(new Error(data?.detail || data?.error || text || xhr.statusText || 'Request failed'));
         return;
       }
+      if (data == null) {
+        if (showUpload) hideUploadingOverlay();
+        reject(new Error('Server returned a non-JSON response. Refresh and try again.'));
+        return;
+      }
       if (showUpload) {
         setUploadProgress(100);
         window.setTimeout(() => {
           hideUploadingOverlay();
-          resolve(data || {});
+          resolve(data);
         }, 160);
         return;
       }
-      resolve(data || {});
+      resolve(data);
     };
     xhr.send(options.body);
   });
@@ -309,7 +486,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], pendingSponsorApplications: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', fundraisingBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -393,6 +570,10 @@ function canEditPage(pageOrSlug) {
 
 function canEditSponsors() {
   return hasPermission('sponsors') || canEditPage('sponsors');
+}
+
+function canBypassSponsorPayment() {
+  return hasPermission('sponsors:bypass-payment');
 }
 
 function canEditStaff() {
@@ -705,16 +886,82 @@ function normalizeCssEmphasisMarkup(dirty) {
     });
 }
 
+function sanitizeRichHtmlClassList(attrs, allowedNames) {
+  const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  return String(classMatch?.[1] || classMatch?.[2] || '')
+    .split(/\s+/)
+    .filter((name) => allowedNames.includes(name))
+    .join(' ');
+}
+
+function sanitizeRichImageWidthPx(attrs = '') {
+  const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const dataMatch = String(attrs || '').match(/\bdata-photo-width\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const dataWidth = Number.parseFloat(String(dataMatch?.[1] || dataMatch?.[2] || dataMatch?.[3] || ''));
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
+  const width = Number.isFinite(fromStyle) && fromStyle > 0
+    ? fromStyle
+    : (Number.isFinite(dataWidth) && dataWidth > 0
+      ? dataWidth
+      : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0));
+  if (!width) return 0;
+  return Math.max(80, Math.min(1600, Math.round(width)));
+}
+
+function sanitizeRichImageFloatClass(attrs = '') {
+  const className = String(attrs || '');
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  if (/\bcms-body-photo-block\b/i.test(className) || /(?:^|;)\s*float\s*:\s*none\b/i.test(style)) return 'cms-body-photo-block';
+  if (/\bcms-body-photo-right\b/i.test(className) || /(?:^|;)\s*float\s*:\s*right\b/i.test(style)) return 'cms-body-photo-right';
+  if (/\bcms-body-photo-left\b/i.test(className) || /(?:^|;)\s*float\s*:\s*left\b/i.test(style)) return 'cms-body-photo-left';
+  // Sized photos default to left wrap; unsized legacy photos stay full-width block.
+  if (sanitizeRichImageWidthPx(attrs) > 0) return 'cms-body-photo-left';
+  return 'cms-body-photo-block';
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
+  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+  try {
+    if (/^https?:\/\//i.test(src)) {
+      const parsed = new URL(src);
+      if (!parsed.pathname.startsWith('/uploads/')) return '';
+      src = parsed.pathname + (parsed.search || '');
+    }
+  } catch {
+    return '';
+  }
+  if (!src.startsWith('/uploads/')) return '';
+  if (/[<>"\s]/.test(src)) return '';
+  const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
+  const floatClass = sanitizeRichImageFloatClass(attrs);
+  const className = ['cms-body-photo', floatClass].filter(Boolean).join(' ');
+  const widthPx = sanitizeRichImageWidthPx(attrs);
+  const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
+  const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}${widthData}>`;
+}
+
 function sanitizeRichHtml(dirty) {
   let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a', 'img']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
+    if (tag === 'img') {
+      if (match.startsWith('</')) return '';
+      return sanitizeRichImageTag(attrs);
+    }
     if (match.startsWith('</')) return `</${tag}>`;
     if (tag === 'br') return '<br>';
     if (tag === 'a') {
@@ -729,22 +976,25 @@ function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'p') {
+      const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']);
+      return className ? `<p class="${className}">` : '<p>';
+    }
     if (tag === 'div') {
-      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const className = String(classMatch?.[1] || classMatch?.[2] || '')
-        .split(/\s+/)
-        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
-        .join(' ');
+      const className = sanitizeRichHtmlClassList(attrs, ['kicker', 'tag', 'draft', 'cms-body-photo']);
       return className ? `<div class="${className}">` : '<div>';
     }
     return `<${tag}>`;
   });
   html = html
+    .replace(/<span[^>]*\bdata-cms-caret-mark\b[^>]*>[\s\S]*?<\/span>/gi, '')
+    .replace(/<(p|div)\s+class="cms-body-photo">\s*(<img\b[^>]*>)\s*<\/\1>/gi, '$2')
     .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .trim();
   if (!html) return '';
-  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  // Keep a lone floated <img> unwrapped so it can insert mid-paragraph and wrap text.
+  if (!/<(?:p|div|h2|h3|ul|ol|img)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 
@@ -925,6 +1175,7 @@ function structuredPageFields(page) {
   const calloutTitleNode = callout?.querySelector('[data-cms-field="callout_title"], h2, h3');
   const inferredLayout = root.querySelector('[data-cms-layout]')?.dataset.cmsLayout
     || (page.slug === 'calendar' ? 'calendar'
+      : page.slug === 'gallery' ? 'gallery'
       : page.slug === 'contact' ? 'contact'
         : page.slug === 'directors' ? 'directory'
           : page.slug === 'sponsors' ? 'sponsors'
@@ -981,6 +1232,7 @@ function layoutChipLabel(layout) {
     home: 'Home layout',
     standard: 'Standard layout',
     calendar: 'Calendar layout',
+    gallery: 'Photo gallery layout',
     contact: 'Contact layout',
     directory: 'Staff directory layout',
     sponsors: 'Sponsors layout',
@@ -1045,13 +1297,17 @@ function markHomeHtmlEditable(html = '') {
   });
   root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
-    node.setAttribute('data-cms-dynamic-label', 'Managed in Photos');
+    node.setAttribute('data-cms-dynamic-label', 'Managed in Photos · 6 newest on Home');
+  });
+  root.querySelectorAll('.gallery-more').forEach((node) => {
+    node.classList.add('cms-home-dynamic');
+    node.setAttribute('data-cms-dynamic-label', 'Links to Gallery page');
   });
 
   const targets = root.querySelectorAll('.eyebrow, .kicker, .tag, h1, h2, h3, p, li, a.btn, figcaption');
   let index = 0;
   targets.forEach((el) => {
-    if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note')) return;
+    if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
     if (el.closest('.cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
@@ -1075,8 +1331,40 @@ function markHomeHtmlEditable(html = '') {
     }
   });
 
-  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
+  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. The site footer note at the bottom appears on every public page. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
   return note + template.innerHTML;
+}
+
+function buildHomeSiteFooterEditor() {
+  const note = state.site?.footer_note
+    || 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.';
+  const html = formatRichText(note) || '<p></p>';
+  return `
+<footer class="footer cms-home-site-footer" data-cms-home-site-footer>
+  <div class="wrap">
+    <div>
+      <p class="kicker">Site footer</p>
+      <h3>Footer note</h3>
+      <p class="muted cms-home-footer-help">Shown on every public page. Use the formatting toolbar for bold, links, and more.</p>
+      <div class="cms-edit-field cms-edit-rich cms-home-footer-note" data-cms-field="footer_note" data-site-field="footer_note" data-edit-label="Footer note" contenteditable="true" role="textbox" spellcheck="true" aria-multiline="true" aria-label="Footer note" data-placeholder="Footer note shown on every public page…">${html}</div>
+      <small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small>
+    </div>
+  </div>
+</footer>`;
+}
+
+function readHomeFooterNote(preview = document.querySelector('#page-preview')) {
+  const footerNode = preview?.querySelector('[data-cms-field="footer_note"], [data-site-field="footer_note"]');
+  if (!footerNode) return '';
+  return sanitizeRichHtml(footerNode.innerHTML || '') || plainTextFromHtml(footerNode.innerHTML || '');
+}
+
+function captureHomeFooterNoteFromPreview(preview = document.querySelector('#page-preview')) {
+  const note = readHomeFooterNote(preview);
+  if (!note) return note;
+  if (!state.site) state.site = {};
+  state.site.footer_note = note;
+  return note;
 }
 
 function serializeHomePreviewHtml(preview) {
@@ -1092,8 +1380,9 @@ function serializeHomePreviewHtml(preview) {
       link.dataset.cmsHref = href;
     }
   });
+  captureHomeFooterNoteFromPreview(preview);
   const clone = preview.cloneNode(true);
-  clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field').forEach((node) => node.remove());
+  clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field, [data-cms-home-site-footer]').forEach((node) => node.remove());
   clone.querySelectorAll('[contenteditable], [data-cms-home-field], .cms-edit-field').forEach((el) => {
     el.removeAttribute('contenteditable');
     el.removeAttribute('role');
@@ -1110,14 +1399,17 @@ function serializeHomePreviewHtml(preview) {
   return clone.innerHTML.trim();
 }
 
-function extractHomeSiteFields(html = '') {
+function extractHomeSiteFields(html = '', preview = null) {
   const template = document.createElement('template');
   template.innerHTML = html;
   const titleNode = template.content.querySelector('[data-site-field="hero_title"]');
   const subtitleNode = template.content.querySelector('[data-site-field="hero_subtitle"]');
+  const footerNote = readHomeFooterNote(preview)
+    || sanitizeRichHtml(template.content.querySelector('[data-site-field="footer_note"], [data-cms-field="footer_note"]')?.innerHTML || '');
   return {
     hero_title: sanitizeInlineRichHtml(titleNode?.innerHTML || '') || plainTextFromHtml(titleNode?.innerHTML || ''),
     hero_subtitle: sanitizeRichHtml(subtitleNode?.innerHTML || '') || plainTextFromHtml(subtitleNode?.innerHTML || ''),
+    footer_note: footerNote || plainTextFromHtml(template.content.querySelector('[data-site-field="footer_note"]')?.innerHTML || ''),
   };
 }
 
@@ -1126,7 +1418,7 @@ function buildEditableHomePreview() {
   if (!base) {
     return '<div class="cms-home-preview-note"><p class="kicker">Home page</p><p>Home page HTML is missing. Refresh or restore the Home page content.</p></div>';
   }
-  return markHomeHtmlEditable(base);
+  return markHomeHtmlEditable(base) + buildHomeSiteFooterEditor();
 }
 
 function editableField(name, tag, value, placeholder = '', extraClass = '') {
@@ -1160,14 +1452,22 @@ function buildEditablePagePreview(payload = {}) {
   const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="timeline cms-events-placeholder" data-events data-limit="5"><article class="event"><div class="datebox">Aug<span>01</span></div><div><h3>Events appear here</h3><p>Manage real calendar items in the Calendar Events tab.</p></div></article></div>'
+    ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
     : '';
   const sponsorsCallout = showCallout
-    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><span class="btn secondary cms-preview-inert" role="link" aria-disabled="true" title="Opens on the public Sponsors page">Become a sponsor</span></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
+  const isFundraisingPage = payload.slug === 'fundraising' || payload.original_slug === 'fundraising';
+  if (isFundraisingPage) {
+    const previewBody = formatRichText(body || state.fundraisingBodyHtml || '') || '<p class="draft">No fundraising content yet.</p>';
+    return `${hero}<section class="content"><div class="wrap"><div class="card cms-managed-body-card" data-cms-dynamic-label="Managed in Fundraising"><div class="cms-managed-body-note"><p class="kicker">Campaign content</p><p>Edit campaign copy and photos under <strong>Manage → Fundraising</strong>.</p><p><button type="button" class="btn primary" data-open-fundraising-body>Open Fundraising</button></p></div><div class="cms-managed-body-preview cms-content">${previewBody}</div></div>${callout}</div></section>`;
+  }
 
   if (layout === 'calendar') {
     return `${hero}<section class="content soft"><div class="wrap">${editableRichField('body_text', body || 'Add calendar instructions here.', 'Page instructions')}${eventsPlaceholder}${callout}</div></section>`;
+  }
+  if (layout === 'gallery' || payload.slug === 'gallery' || payload.original_slug === 'gallery') {
+    return `${hero}<section class="content soft photo-gallery-section"><div class="wrap"><div class="photo-gallery cms-home-dynamic" data-photo-gallery data-sort="recent" data-cms-dynamic-label="Managed in Photos"><p class="draft">Newest uploaded photos appear here on the public Gallery page. Brand logos are never shown in this gallery.</p></div>${callout}</div></section>`;
   }
   if (layout === 'contact') {
     return `${hero}<section class="content soft"><div class="wrap grid two"><article class="card">${editableRichField('body_text', body || '<span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p>', 'Main contact content')}</article><div class="card cms-contact-placeholder" data-contact-form-slot><span class="tag">Contact form</span><h3>Send a message</h3><p>Topics and delivery emails are managed in the Contact tab.</p></div>${showCallout ? callout : ''}</div></section>`;
@@ -1179,7 +1479,7 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><span class="btn primary cms-preview-inert" role="link" aria-disabled="true" title="Opens on the public Sponsors page">Become a sponsor</span><button type="button" class="btn outline cms-preview-inert" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
@@ -1309,7 +1609,11 @@ function renderUtilityLinksEditor() {
     ? state.utilityLinks
     : [
       { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
-      { label: 'Student Resources', href: '/resources.html', target: '_self' },
+      {
+        label: 'Student Resources',
+        href: 'https://winstonsalemforsythcsnc.sites.thrillshare.com/o/efhs/page/counselor-assignments',
+        target: '_blank',
+      },
       { label: 'Contact', href: '/contact.html', target: '_self' },
     ];
   list.innerHTML = links.map((link, index) => {
@@ -1439,6 +1743,7 @@ function currentPageSnapshot() {
       return JSON.stringify({
         page: JSON.parse(base),
         home_html: serializeHomePreviewHtml(document.querySelector('#page-preview')),
+        footer_note: readHomeFooterNote(document.querySelector('#page-preview')) || state.site?.footer_note || '',
       });
     }
     return base;
@@ -1539,17 +1844,20 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
       method: original ? 'PUT' : 'POST',
       body: JSON.stringify(payload),
     });
-    if (isHomeSave && hasPermission('site')) {
-      const siteFields = extractHomeSiteFields(payload.body_html);
-      if (siteFields.hero_title || siteFields.hero_subtitle) {
-        await jsonFetch('/api/admin/site', {
+    if (isHomeSave && (hasPermission('site') || hasPermission('pages') || canEditPage('home'))) {
+      const siteFields = extractHomeSiteFields(payload.body_html, document.querySelector('#page-preview'));
+      if (siteFields.hero_title || siteFields.hero_subtitle || siteFields.footer_note) {
+        const savedSite = await jsonFetch('/api/admin/site', {
           method: 'POST',
           body: JSON.stringify({
             ...(state.site || {}),
             hero_title: siteFields.hero_title || state.site?.hero_title,
             hero_subtitle: siteFields.hero_subtitle || state.site?.hero_subtitle,
+            footer_note: siteFields.footer_note || state.site?.footer_note,
           }),
         }).catch(() => null);
+        if (savedSite) state.site = savedSite;
+        else if (state.site && siteFields.footer_note) state.site.footer_note = siteFields.footer_note;
       }
     }
     if (status) status.textContent = 'Page saved. Public site updated.';
@@ -1590,12 +1898,641 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
+function currentEditorPageSlug() {
+  const form = document.querySelector('#page-form');
+  return String(form?.elements?.original_slug?.value || form?.elements?.slug?.value || '').trim();
+}
+
+function canEditFundraisingBody() {
+  return canEditPage('fundraising');
+}
+
+function canInsertPageBodyPhotos() {
+  return canEditFundraisingBody();
+}
+
+function getFundraisingBodyEditor() {
+  return document.querySelector('#fundraising-body-form [data-rich-input="body_html"]');
+}
+
+function getActivePageRichField({ multilineOnly = false } = {}) {
+  const fundraisingEditor = getFundraisingBodyEditor();
+  if (fundraisingEditor && isFundraisingBodyEditorOpen()) {
+    if (
+      fundraisingEditor.classList.contains('is-focused')
+      || document.activeElement === fundraisingEditor
+      || fundraisingEditor.contains(document.activeElement)
+      || pageRichSelection.field === fundraisingEditor
+    ) {
+      return fundraisingEditor;
+    }
+  }
+  const preview = document.querySelector('#page-preview');
+  if (!preview) return null;
+  const field = preview.querySelector('.cms-edit-rich.is-focused')
+    || preview.querySelector('.cms-edit-rich:focus')
+    || (document.activeElement?.closest?.('.cms-edit-rich') || null);
+  if (!field || !preview.contains(field)) return null;
+  if (multilineOnly && field.classList.contains('cms-edit-inline')) return null;
+  return field;
+}
+
+const pageRichSelection = { field: null, range: null, offset: null };
+
+function getCaretCharacterOffsetWithin(element) {
+  const selection = window.getSelection();
+  if (!element || !selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) return null;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(element);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function setCaretCharacterOffsetWithin(element, offset) {
+  if (!element) return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const target = Math.max(0, Number(offset) || 0);
+  let current = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode();
+  while (node) {
+    const next = current + node.textContent.length;
+    if (target <= next) {
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, target - current));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+    current = next;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function clearPageRichCaretMarks(root = null) {
+  const roots = root
+    ? [root]
+    : [...document.querySelectorAll('.cms-edit-rich, .fundraising-body-editor')];
+  roots.forEach((node) => {
+    node?.querySelectorAll?.('[data-cms-caret-mark]').forEach((mark) => mark.remove());
+  });
+}
+
+function placePageRichCaretMark(field) {
+  if (!field) return false;
+  clearPageRichCaretMarks(field);
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  if (!selection) return false;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    if (pageRichSelection.range) {
+      try {
+        selection.removeAllRanges();
+        selection.addRange(pageRichSelection.range);
+      } catch {
+        /* fall through */
+      }
+    } else if (pageRichSelection.offset != null) {
+      setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) return false;
+  const range = selection.getRangeAt(0);
+  range.collapse(true);
+  const mark = document.createElement('span');
+  mark.setAttribute('data-cms-caret-mark', '1');
+  mark.setAttribute('aria-hidden', 'true');
+  mark.style.cssText = 'display:inline-block;width:0;height:0;overflow:hidden;font-size:0;line-height:0;';
+  mark.appendChild(document.createTextNode('\u200b'));
+  range.insertNode(mark);
+  const after = document.createRange();
+  after.setStartAfter(mark);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
+  pageRichSelection.field = field;
+  return true;
+}
+
+function savePageRichSelection(field = getActivePageRichField()) {
+  pageRichSelection.field = field || null;
+  pageRichSelection.range = null;
+  pageRichSelection.offset = null;
+  if (!field) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!field.contains(range.commonAncestorContainer)) return;
+  try {
+    pageRichSelection.range = range.cloneRange();
+  } catch {
+    pageRichSelection.range = null;
+  }
+  pageRichSelection.offset = getCaretCharacterOffsetWithin(field);
+}
+
+function restorePageRichSelection() {
+  const field = pageRichSelection.field
+    || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
+    || getActivePageRichField({ multilineOnly: true });
+  if (!field) return null;
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  const mark = field.querySelector('[data-cms-caret-mark]');
+  if (mark && selection) {
+    const range = document.createRange();
+    range.setStartBefore(mark);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    mark.remove();
+    return field;
+  }
+  let restored = false;
+  if (pageRichSelection.range && selection) {
+    try {
+      selection.removeAllRanges();
+      selection.addRange(pageRichSelection.range);
+      restored = field.contains(selection.anchorNode);
+    } catch {
+      restored = false;
+    }
+  }
+  if (!restored && pageRichSelection.offset != null) {
+    restored = setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+  }
+  if (!restored && selection) {
+    // Prefer end over start so inserts never jump to the top of the editor.
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  return field;
+}
+
+function insertHtmlAtCaret(field, html) {
+  if (!field || !html) return null;
+  restorePageRichSelection();
+  field.focus();
+  const selection = window.getSelection();
+  if (!selection) return null;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  let node = null;
+  try {
+    const frag = range.createContextualFragment(html);
+    node = frag.lastChild;
+    range.insertNode(frag);
+  } catch {
+    document.execCommand('insertHTML', false, html);
+    node = [...field.querySelectorAll('img.cms-body-photo')].pop() || null;
+  }
+  if (node) {
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(after);
+  }
+  savePageRichSelection(field);
+  return node;
+}
+
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
   // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
+}
+
+// 2 MB image endpoints: browser prepares files to <= 1.8 MB before upload.
+// Staff Email attachments (4 MB) must never use these helpers.
+const IMAGE_UPLOAD_CLIENT_TARGET_BYTES = window.EfhsImageUpload?.CLIENT_TARGET_BYTES || 1_800_000;
+const IMAGE_UPLOAD_CLIENT_TARGET_LABEL = window.EfhsImageUpload?.CLIENT_TARGET_LABEL || '1.8 MB';
+const IMAGE_UPLOAD_SERVER_MAX_LABEL = window.EfhsImageUpload?.SERVER_MAX_LABEL || '2 MB';
+
+async function prepareImageFileForUpload(file, options = {}) {
+  const helper = window.EfhsImageUpload?.prepareImageFileForUpload;
+  if (typeof helper !== 'function') {
+    throw new Error('Image upload helper failed to load. Refresh the page and try again.');
+  }
+  return helper(file, {
+    maxBytes: IMAGE_UPLOAD_CLIENT_TARGET_BYTES,
+    targetLabel: IMAGE_UPLOAD_CLIENT_TARGET_LABEL,
+    ...options,
+  });
+}
+
+function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
+  const field = pageRichSelection.field
+    || (isFundraisingBodyEditorOpen() ? getFundraisingBodyEditor() : null)
+    || getActivePageRichField({ multilineOnly: true });
+  if (!field) return false;
+  // Default width leaves room for text wrap beside the photo.
+  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : 280;
+  const cleaned = sanitizeRichHtml(
+    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo cms-body-photo-left" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
+  );
+  if (!cleaned || !/<img\b/i.test(cleaned)) return false;
+  // Avoid block <p> wrappers so the image can sit at the caret and wrap text.
+  const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
+  const insertedNode = insertHtmlAtCaret(field, html);
+  const inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+    ? insertedNode
+    : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  if (field.closest('#fundraising-body-form')) {
+    syncFormRichEditors(field.closest('form'));
+    if (inserted) selectFundraisingBodyPhoto(inserted);
+  } else {
+    syncFieldFromPreview(field);
+  }
+  savePageRichSelection(field);
+  return Boolean(inserted || html);
+}
+
+const fundraisingPhotoResize = {
+  img: null,
+  dragging: false,
+  handle: 'se',
+  startX: 0,
+  startWidth: 0,
+};
+
+function ensureFundraisingPhotoResizeHandles() {
+  let root = document.querySelector('#cms-photo-resize-handles');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'cms-photo-resize-handles';
+  root.className = 'cms-photo-resize-handles';
+  root.hidden = true;
+  root.innerHTML = `
+    <div class="cms-photo-resize-toolbar">
+      <button type="button" class="cms-photo-delete-btn" data-photo-delete>Delete photo</button>
+    </div>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="nw" aria-label="Resize from top left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="ne" aria-label="Resize from top right"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="sw" aria-label="Resize from bottom left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="se" aria-label="Resize from bottom right"></button>
+  `;
+  document.body.appendChild(root);
+  root.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.querySelector('[data-photo-delete]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedFundraisingBodyPhoto();
+  });
+  root.querySelectorAll('[data-photo-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (!fundraisingPhotoResize.img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const img = fundraisingPhotoResize.img;
+      fundraisingPhotoResize.dragging = true;
+      fundraisingPhotoResize.handle = handle.dataset.photoHandle || 'se';
+      fundraisingPhotoResize.startX = event.clientX;
+      fundraisingPhotoResize.startWidth = img.getBoundingClientRect().width || Number.parseFloat(img.style.width) || 320;
+      try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    });
+  });
+  window.addEventListener('pointermove', (event) => {
+    if (!fundraisingPhotoResize.dragging || !fundraisingPhotoResize.img) return;
+    event.preventDefault();
+    const img = fundraisingPhotoResize.img;
+    const editor = getFundraisingBodyEditor();
+    const maxWidth = Math.max(120, Math.floor((editor?.clientWidth || 640) - 16));
+    const delta = event.clientX - fundraisingPhotoResize.startX;
+    const outward = /e$/i.test(fundraisingPhotoResize.handle || 'se') ? delta : -delta;
+    const next = Math.max(80, Math.min(maxWidth, Math.round(fundraisingPhotoResize.startWidth + outward)));
+    img.style.width = `${next}px`;
+    img.style.height = 'auto';
+    img.setAttribute('data-photo-width', String(next));
+    positionFundraisingPhotoResizeHandles();
+  }, { passive: false });
+  window.addEventListener('pointerup', () => {
+    if (!fundraisingPhotoResize.dragging) return;
+    fundraisingPhotoResize.dragging = false;
+    const editor = getFundraisingBodyEditor();
+    const form = editor?.closest('form');
+    if (form) syncFormRichEditors(form);
+    positionFundraisingPhotoResizeHandles();
+  });
+  window.addEventListener('scroll', () => positionFundraisingPhotoResizeHandles(), true);
+  window.addEventListener('resize', () => positionFundraisingPhotoResizeHandles());
+  return root;
+}
+
+function deleteSelectedFundraisingBodyPhoto() {
+  const img = fundraisingPhotoResize.img;
+  const editor = getFundraisingBodyEditor();
+  if (!img || !editor || !editor.contains(img)) return false;
+  const form = editor.closest('form');
+  img.remove();
+  clearFundraisingBodyPhotoSelection();
+  if (form) syncFormRichEditors(form);
+  editor.focus();
+  savePageRichSelection(editor);
+  const status = document.querySelector('#fundraising-body-status');
+  if (status) status.textContent = 'Photo removed. Save to keep this change.';
+  return true;
+}
+
+function clearFundraisingBodyPhotoSelection() {
+  const editor = getFundraisingBodyEditor();
+  editor?.querySelectorAll('img.cms-body-photo.is-selected').forEach((img) => {
+    img.classList.remove('is-selected');
+  });
+  fundraisingPhotoResize.img = null;
+  fundraisingPhotoResize.dragging = false;
+  const handles = document.querySelector('#cms-photo-resize-handles');
+  if (handles) {
+    handles.hidden = true;
+    handles.setAttribute('hidden', '');
+  }
+}
+
+function positionFundraisingPhotoResizeHandles() {
+  const root = ensureFundraisingPhotoResizeHandles();
+  const img = fundraisingPhotoResize.img;
+  if (!img || !document.body.contains(img) || !isFundraisingBodyEditorOpen()) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  const rect = img.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  root.hidden = false;
+  root.removeAttribute('hidden');
+  // Fixed to the viewport so handles track images inside the fixed modal.
+  root.style.left = `${Math.round(rect.left)}px`;
+  root.style.top = `${Math.round(rect.top)}px`;
+  root.style.width = `${Math.round(rect.width)}px`;
+  root.style.height = `${Math.round(rect.height)}px`;
+}
+
+function selectFundraisingBodyPhoto(img) {
+  if (!img) return;
+  const editor = getFundraisingBodyEditor();
+  if (!editor || !editor.contains(img)) return;
+  if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
+  if (!img.classList.contains('cms-body-photo-left')
+    && !img.classList.contains('cms-body-photo-right')
+    && !img.classList.contains('cms-body-photo-block')) {
+    img.classList.add('cms-body-photo-left');
+  }
+  ensureFundraisingPhotoResizeHandles();
+  editor.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
+    if (node !== img) node.classList.remove('is-selected');
+  });
+  img.classList.add('is-selected');
+  fundraisingPhotoResize.img = img;
+  const applyWidth = () => {
+    if (fundraisingPhotoResize.img !== img) return;
+    const measured = Math.round(img.getBoundingClientRect().width);
+    const existing = Number.parseFloat(img.style.width || img.getAttribute('data-photo-width') || '');
+    const width = Number.isFinite(existing) && existing > 0 ? existing : measured;
+    if (width > 0) {
+      img.style.width = `${width}px`;
+      img.style.height = 'auto';
+      img.setAttribute('data-photo-width', String(width));
+    }
+    positionFundraisingPhotoResizeHandles();
+  };
+  if (img.complete && img.naturalWidth) applyWidth();
+  else img.addEventListener('load', applyWidth, { once: true });
+  applyWidth();
+  requestAnimationFrame(() => positionFundraisingPhotoResizeHandles());
+}
+
+function bindFundraisingBodyPhotoResize() {
+  if (document.documentElement.dataset.fundraisingPhotoResizeBound === '1') return;
+  document.documentElement.dataset.fundraisingPhotoResizeBound = '1';
+  const isPhotoTarget = (editor, node) => {
+    const img = node?.closest?.('img.cms-body-photo, img');
+    if (!img || !editor?.contains(img)) return null;
+    if (!(img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) return null;
+    return img.tagName === 'IMG' ? img : img.querySelector('img');
+  };
+  const onSelectPointer = (event) => {
+    if (!isFundraisingBodyEditorOpen()) return;
+    if (event.target.closest?.('#cms-photo-resize-handles')) return;
+    const editor = getFundraisingBodyEditor();
+    if (!editor) return;
+    const target = isPhotoTarget(editor, event.target);
+    if (target) {
+      event.preventDefault();
+      event.stopPropagation();
+      selectFundraisingBodyPhoto(target);
+      return;
+    }
+    if (!event.target.closest?.('#fundraising-editor-modal')) return;
+    // Keep selection while using the editor chrome (toolbar / save actions).
+    if (event.target.closest?.('.form-rich-toolbar, .minutes-form-actions, .minutes-editor-head, .panel-actions')) {
+      return;
+    }
+    // Deselect when clicking elsewhere in the body editor or modal.
+    if (fundraisingPhotoResize.img) clearFundraisingBodyPhotoSelection();
+  };
+  document.addEventListener('pointerdown', onSelectPointer, true);
+  document.addEventListener('keydown', (event) => {
+    if (!isFundraisingBodyEditorOpen() || !fundraisingPhotoResize.img) return;
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+    if (event.target.closest?.('input, textarea, select')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedFundraisingBodyPhoto();
+  }, true);
+}
+
+function ensurePagePhotoToast() {
+  let root = document.querySelector('#admin-page-photo-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-page-photo-toast';
+  root.className = 'admin-page-photo-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-page-photo-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-page-photo-toast-backdrop" data-page-photo-dismiss aria-label="Close insert photo"></button>
+    <div class="admin-page-photo-toast-panel">
+      <div class="admin-page-photo-toast-card">
+        <h3 id="admin-page-photo-toast-title">Insert photo</h3>
+        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are auto-compressed in your browser to about ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL} before upload (server max ${IMAGE_UPLOAD_SERVER_MAX_LABEL}). After insert, drag a corner to resize.</p>
+        <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
+        <label class="admin-page-photo-file">Upload image
+          <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
+        </label>
+        <div class="admin-page-photo-toast-actions">
+          <button class="btn primary" type="button" data-page-photo-upload>Upload &amp; insert</button>
+          <button class="btn outline" type="button" data-page-photo-dismiss>Cancel</button>
+        </div>
+        <p class="admin-page-photo-toast-status" data-page-photo-status aria-live="polite"></p>
+        <div class="admin-page-photo-picker" data-page-photo-picker></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-page-photo-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePagePhotoToast());
+  });
+  root.querySelector('[data-page-photo-upload]')?.addEventListener('click', () => uploadAndInsertPagePhoto());
+  return root;
+}
+
+async function loadPagePhotoPickerList() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  const picker = root?.querySelector('[data-page-photo-picker]');
+  if (!picker) return;
+  picker.innerHTML = '<p class="draft">Loading photos…</p>';
+  try {
+    const photos = await jsonFetch('/api/photos');
+    const ordered = [...photos].sort((a, b) => (
+      Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      || Number(b.id || 0) - Number(a.id || 0)
+    ));
+    if (!ordered.length) {
+      picker.innerHTML = '<p class="draft">No gallery photos yet. Upload one above.</p>';
+      return;
+    }
+    picker.innerHTML = `
+      <p class="admin-page-photo-picker-label">Or choose an existing photo</p>
+      <div class="admin-page-photo-grid">
+        ${ordered.map((photo) => `
+          <button type="button" class="admin-page-photo-thumb" data-page-photo-pick="${escapeAttr(photo.url)}" data-page-photo-alt="${escapeAttr(photo.alt_text || plainTextFromHtml(photo.caption) || 'Photo')}" title="${escapeAttr(plainTextFromHtml(photo.caption) || photo.original_name || 'Photo')}">
+            <img src="${escapeAttr(photo.url)}" alt="${escapeAttr(photo.alt_text || 'Photo')}">
+          </button>
+        `).join('')}
+      </div>`;
+    picker.querySelectorAll('[data-page-photo-pick]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const altInput = root.querySelector('[name="page_photo_alt"]');
+        const alt = String(altInput?.value || button.dataset.pagePhotoAlt || 'Photo').trim() || 'Photo';
+        if (insertPhotoIntoPageBody(button.dataset.pagePhotoPick, alt)) hidePagePhotoToast();
+      });
+    });
+  } catch (error) {
+    picker.innerHTML = `<p class="draft">Could not load photos: ${escapeHtml(error.message || 'error')}</p>`;
+  }
+}
+
+async function showPagePhotoToast() {
+  if (!canInsertPageBodyPhotos()) {
+    alert('Photo insert requires the Fundraising page permission.');
+    return;
+  }
+  const preferred = isFundraisingBodyEditorOpen()
+    ? (getActivePageRichField({ multilineOnly: true }) || getFundraisingBodyEditor())
+    : getActivePageRichField({ multilineOnly: true });
+  savePageRichSelection(preferred);
+  if (!pageRichSelection.field) {
+    alert('Open Manage → Fundraising, click into the text, then choose Photo.');
+    return;
+  }
+  placePageRichCaretMark(pageRichSelection.field);
+  const root = ensurePagePhotoToast();
+  const status = root.querySelector('[data-page-photo-status]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  if (status) status.textContent = '';
+  if (altInput) altInput.value = '';
+  if (fileInput) fileInput.value = '';
+  root.hidden = false;
+  playOverlayEnter(root);
+  await loadPagePhotoPickerList();
+  window.setTimeout(() => altInput?.focus(), 40);
+}
+
+function hidePagePhotoToast() {
+  const markedField = pageRichSelection.field;
+  if (markedField?.querySelector?.('[data-cms-caret-mark]')) {
+    restorePageRichSelection();
+  } else {
+    clearPageRichCaretMarks();
+  }
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root || root.hidden) return;
+  playOverlayLeave(root, { ms: 380, hide: true });
+}
+
+async function uploadAndInsertPagePhoto() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root) return;
+  const status = root.querySelector('[data-page-photo-status]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = 'Choose an image file to upload.';
+    return;
+  }
+  const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
+  if (status) {
+    status.textContent = file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+      ? `Compressing image to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+      : 'Uploading…';
+  }
+  try {
+    const uploadFile = await prepareImageFileForUpload(file);
+    if (status && uploadFile !== file) {
+      status.textContent = `Uploading compressed image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
+    } else if (status) {
+      status.textContent = 'Uploading…';
+    }
+    const body = new FormData();
+    body.append('file', uploadFile);
+    body.append('alt_text', alt);
+    body.append('caption', alt);
+    // Negative sort_order keeps page-body uploads out of the public gallery grid.
+    body.append('sort_order', '-600');
+    const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body });
+    if (!insertPhotoIntoPageBody(stored.url, stored.alt_text || alt)) {
+      if (status) status.textContent = 'Uploaded, but could not insert into the body. Click the body and try again.';
+      return;
+    }
+    hidePagePhotoToast();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not upload photo.';
+  }
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1640,7 +2577,25 @@ function syncPreviewFromForm() {
   }
 }
 
+function isCmsPreviewPublicAction(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest([
+    '.cms-preview-inert',
+    '[data-donate-open]',
+    'a[href*="become-a-sponsor"]',
+    'a[href*="become-sponsor"]',
+  ].join(', ')));
+}
+
 function bindPagePreviewInteractions(preview) {
+  if (!preview.dataset.publicActionGuardBound) {
+    preview.dataset.publicActionGuardBound = '1';
+    preview.addEventListener('click', (event) => {
+      if (!isCmsPreviewPublicAction(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+  }
   preview.querySelectorAll('[data-cms-field], [data-cms-home-field]').forEach(field => {
     field.addEventListener('input', () => {
       syncFieldFromPreview(field);
@@ -1740,14 +2695,31 @@ function bindPageVisualEditor() {
 
   preview.addEventListener('focusin', event => {
     const field = event.target.closest?.('.cms-edit-rich');
+    if (field) {
+      preview.querySelectorAll('.cms-edit-rich.is-focused').forEach((node) => {
+        if (node !== field) node.classList.remove('is-focused');
+      });
+      field.classList.add('is-focused');
+      savePageRichSelection(field);
+    }
     setRichToolbarVisible(Boolean(field));
+  });
+  preview.addEventListener('mouseup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
+  });
+  preview.addEventListener('keyup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
   });
   preview.addEventListener('focusout', event => {
     const next = event.relatedTarget;
-    if (next?.closest?.('#rich-text-toolbar')) return;
+    if (next?.closest?.('#rich-text-toolbar') || next?.closest?.('#admin-page-photo-toast')) return;
     setTimeout(() => {
       const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-      setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
+      const toolbarFocus = Boolean(document.activeElement?.closest?.('#rich-text-toolbar')
+        || document.activeElement?.closest?.('#admin-page-photo-toast'));
+      setRichToolbarVisible(Boolean(active) || toolbarFocus);
     }, 0);
   });
 
@@ -1793,6 +2765,19 @@ function bindPageVisualEditor() {
     const field = preview.querySelector('.cms-edit-rich.is-focused') || preview.querySelector('.cms-edit-rich:focus');
     if (field) syncFieldFromPreview(field);
     event.target.value = '';
+  });
+  toolbar?.querySelector('[data-rich-insert-line]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-line]')?.addEventListener('click', () => {
+    const field = restorePageRichSelection() || getActivePageRichField({ multilineOnly: true });
+    if (!field) return;
+    insertRichEditorLineBreak(field);
+    syncFieldFromPreview(field);
+    savePageRichSelection(field);
+    setRichToolbarVisible(true);
+  });
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('click', () => {
+    showPagePhotoToast();
   });
 
   document.querySelector('#add-page-callout')?.addEventListener('click', () => {
@@ -1862,16 +2847,28 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
+  const isMenuParentToggle = (button) => (
+    button?.hasAttribute('data-sponsors-toggle')
+    || button?.hasAttribute('data-boosters-toggle')
+  );
+
+  const isGroupActionButton = (button, group) => (
+    Boolean(button)
+    && !button.hidden
+    && !isMenuParentToggle(button)
+    && Boolean(group)
+    && !group.hidden
+    && group.contains(button)
+  );
+
   const isVisibleButton = (button) => (
     Boolean(button)
     && !button.hidden
     && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
+    && !isMenuParentToggle(button)
   );
 
-  const pushButton = (button) => {
-    if (!isVisibleButton(button)) return;
+  const actionButtonHtml = (button) => {
     const index = sourceButtons.length;
     sourceButtons.push(button);
     const label = button.textContent.trim();
@@ -1879,7 +2876,14 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    const active = button.classList.contains('active');
+    const activeAttr = active ? ' class="active" aria-current="page"' : '';
+    return `<button type="button"${activeAttr} data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`;
+  };
+
+  const pushButton = (button) => {
+    if (!isVisibleButton(button)) return;
+    parts.push(actionButtonHtml(button));
   };
 
   const pushLabel = (text) => {
@@ -1888,8 +2892,26 @@ function renderMobileAdminMenu() {
     parts.push(`<p class="admin-mobile-menu-label">${escapeHtml(label)}</p>`);
   };
 
+  const pushMenuGroup = (group) => {
+    if (!group || group.hidden) return;
+    const parent = group.querySelector('.admin-menu-parent');
+    const children = [...group.querySelectorAll('button')].filter((button) => isGroupActionButton(button, group));
+    if (!parent || parent.hidden || !children.length) return;
+    const expanded = parent.getAttribute('aria-expanded') === 'true';
+    const childHtml = children.map((button) => actionButtonHtml(button)).join('');
+    parts.push(
+      `<div class="admin-mobile-menu-group">`
+      + `<button type="button" class="admin-menu-parent admin-mobile-menu-parent" data-mobile-submenu-toggle aria-expanded="${expanded ? 'true' : 'false'}">${escapeHtml(parent.textContent.trim())}</button>`
+      + `<div class="admin-mobile-menu-sub" data-mobile-submenu ${expanded ? '' : 'hidden'}>${childHtml}</div>`
+      + `</div>`
+    );
+  };
+
   const sectionHasVisibleButtons = (nodes) => nodes.some((node) => {
     if (node.matches?.('button')) return isVisibleButton(node);
+    if (node.matches?.('.admin-menu-group') && !node.hidden) {
+      return [...node.querySelectorAll('button')].some((button) => isGroupActionButton(button, node));
+    }
     return [...(node.querySelectorAll?.('button') || [])].some(isVisibleButton);
   });
 
@@ -1904,7 +2926,6 @@ function renderMobileAdminMenu() {
         const shortcuts = document.querySelector('#admin-page-shortcuts');
         if (!sectionHasVisibleButtons([...(shortcuts?.children || [])])) return;
       } else {
-        // Manage label: only show when at least one following manage control is visible.
         const following = [];
         let sibling = child.nextElementSibling;
         while (sibling) {
@@ -1922,8 +2943,7 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('.admin-menu-group')) {
-      if (child.hidden) return;
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      pushMenuGroup(child);
       return;
     }
     [...child.querySelectorAll?.('button') || []].forEach(pushButton);
@@ -1932,6 +2952,20 @@ function renderMobileAdminMenu() {
   menu.innerHTML = `${parts.join('')}
   <button type="button" class="admin-mobile-logout" data-mobile-logout>Log Out</button>
   <button type="button" class="admin-mobile-change-password" data-mobile-change-password>Change Password</button>`;
+
+  menu.querySelectorAll('[data-mobile-submenu-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const group = toggle.closest('.admin-mobile-menu-group');
+      const sub = group?.querySelector('[data-mobile-submenu]');
+      if (!sub) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      sub.hidden = !open;
+    });
+  });
+
   menu.querySelectorAll('button[data-mobile-index]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.mobileIndex);
@@ -1951,7 +2985,11 @@ function renderMobileAdminMenu() {
 }
 
 function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
-  document.querySelectorAll('.admin-menu button').forEach((button) => {
+  const markButton = (button) => {
+    if (!button || button.hasAttribute('data-sponsors-toggle') || button.hasAttribute('data-boosters-toggle') || button.hasAttribute('data-mobile-submenu-toggle')) {
+      button?.classList.remove('active');
+      return;
+    }
     const isTab = Boolean(tab) && button.dataset.tab === tab
       && !button.dataset.editShortcut
       && !button.dataset.sponsorNav
@@ -1959,8 +2997,13 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
     const isPage = Boolean(pageSlug) && button.dataset.editShortcut === pageSlug;
     const isSponsorNav = Boolean(sponsorNav) && button.dataset.sponsorNav === sponsorNav;
     const isPageNav = Boolean(pageSlug) && button.dataset.pageNav === pageSlug;
-    button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav || isPageNav));
-  });
+    const active = Boolean(isTab || isPage || isSponsorNav || isPageNav);
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  };
+  document.querySelectorAll('.admin-menu button').forEach(markButton);
+  document.querySelectorAll('#admin-mobile-menu button[data-mobile-index]').forEach(markButton);
 }
 
 function activateTab(name) {
@@ -1968,12 +3011,19 @@ function activateTab(name) {
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
     if (name !== 'ensembles') closeEnsemblesBodyEditor();
+    if (name !== 'fundraising-body') closeFundraisingBodyEditor();
     document.querySelectorAll('.cms-panel').forEach(panel => { panel.hidden = true; });
     document.querySelector(`#tab-${name}`)?.removeAttribute('hidden');
     markAdminNavActive({ tab: name });
     if (name === 'sponsors') {
       setSponsorsMenuOpen(true);
       loadSponsors().catch(() => {});
+    }
+    if (name === 'ledger') {
+      loadLedger().catch(() => {});
+    }
+    if (name === 'checkout') {
+      initCheckoutPanel().catch(() => {});
     }
     if (name === 'booster-members' || name === 'minutes') {
       setBoostersMenuOpen(true);
@@ -1986,11 +3036,19 @@ function activateTab(name) {
         .then(() => openEnsemblesBodyEditor())
         .catch(() => {});
     }
+    if (name === 'fundraising-body') {
+      loadFundraisingBody()
+        .then(() => openFundraisingBodyEditor())
+        .catch(() => {});
+    }
     if (name === 'mail') {
       loadMailRecipients().catch(() => {});
     }
     if (name === 'social') {
       loadSocialPanel().catch(() => {});
+    }
+    if (name === 'security-log') {
+      loadSecurityLog().catch(() => {});
     }
     closeAdminNav();
   };
@@ -2066,56 +3124,40 @@ function canAccessSponsorsMenu() {
   return canEditSponsors() || canEditPage('sponsors') || canEditPage('become-a-sponsor');
 }
 
+function canAccessLedger() {
+  return hasPermission('treasurer') || hasPermission('president');
+}
+
+function canAccessCheckout() {
+  return hasPermission('treasurer') || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canAccessBoostersMenu() {
   return canEditBoosterMembers() || canViewMinutes();
 }
 
 function setSponsorsMenuOpen(open) {
-  document.querySelectorAll('[data-sponsors-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-sponsors-toggle]');
-    const sub = menu.querySelector('[data-sponsors-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('sponsors', open);
 }
 
 function setBoostersMenuOpen(open) {
-  document.querySelectorAll('[data-boosters-menu]').forEach((menu) => {
-    const toggle = menu.querySelector('[data-boosters-toggle]');
-    const sub = menu.querySelector('[data-boosters-sub]');
-    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
-    if (sub) sub.hidden = !open;
-  });
+  setAdminSubmenuOpen('boosters', open);
 }
 
 function bindSponsorsMenu() {
-  const menu = document.querySelector('[data-sponsors-menu]');
-  const toggle = menu?.querySelector('[data-sponsors-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setSponsorsMenuOpen(open);
-  });
-  menu.querySelectorAll('[data-sponsor-nav]').forEach((button) => {
-    button.addEventListener('click', () => {
+  bindAdminSubmenu('sponsors', {
+    itemSelector: '[data-sponsor-nav]',
+    onItemClick: (button) => {
       const key = button.dataset.sponsorNav;
       setSponsorsMenuOpen(true);
       if (key === 'sponsors-page') editPage('sponsors');
       else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
-    });
+    },
   });
 }
 
 function bindBoostersMenu() {
-  const menu = document.querySelector('[data-boosters-menu]');
-  const toggle = menu?.querySelector('[data-boosters-toggle]');
-  if (!menu || !toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    setBoostersMenuOpen(open);
-  });
+  bindAdminSubmenu('boosters');
 }
 
 function renderPageShortcuts() {
@@ -2135,6 +3177,7 @@ function renderPageShortcuts() {
 function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
   document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
+  syncTesterUserButton();
 
   const panels = {
     dashboard: true,
@@ -2142,8 +3185,11 @@ function showAllowedPanels() {
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
+    ledger: canAccessLedger(),
+    checkout: canAccessCheckout(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
+    'fundraising-body': canEditFundraisingBody(),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
     contact: canEditContact(),
@@ -2152,6 +3198,7 @@ function showAllowedPanels() {
     users: hasPermission('users'),
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
+    'security-log': isSuperAdmin(),
   };
   let manageVisible = false;
   document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
@@ -2160,33 +3207,25 @@ function showAllowedPanels() {
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
-  const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
-  if (boostersMenu) {
-    boostersMenu.hidden = !boostersAccess;
-    if (boostersAccess) manageVisible = true;
-    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
-    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
-    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
-    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
-    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
-  }
+  const boostersAccess = syncAdminSubmenuAccess('boosters', {
+    canAccess: canAccessBoostersMenu(),
+    children: [
+      { selector: '[data-tab="booster-members"]', visible: canEditBoosterMembers() },
+      { selector: '[data-tab="minutes"]', visible: canViewMinutes() },
+    ],
+  });
+  if (boostersAccess) manageVisible = true;
   bindBoostersMenu();
-  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
-  const sponsorsAccess = canAccessSponsorsMenu();
-  if (sponsorsMenu) {
-    sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
-    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
-    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
-    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
-    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
-    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
-    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
-  }
+  const sponsorsAccess = syncAdminSubmenuAccess('sponsors', {
+    canAccess: canAccessSponsorsMenu(),
+    children: [
+      { selector: '[data-tab="sponsors"]', visible: canEditSponsors() },
+      { selector: '[data-sponsor-nav="sponsors-page"]', visible: canEditPage('sponsors') },
+      { selector: '[data-sponsor-nav="become-a-sponsor"]', visible: canEditPage('become-a-sponsor') },
+    ],
+  });
+  if (sponsorsAccess) manageVisible = true;
+  else setSponsorsMenuOpen(false);
   bindSponsorsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
@@ -2194,26 +3233,10 @@ function showAllowedPanels() {
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
-  const editCalendarPage = document.querySelector('#edit-calendar-page');
-  if (editCalendarPage) {
-    editCalendarPage.hidden = !canEditPage('calendar');
-    editCalendarPage.onclick = () => editPage('calendar');
-  }
-  const editDirectorsPage = document.querySelector('#edit-directors-page');
-  if (editDirectorsPage) {
-    editDirectorsPage.hidden = !canEditPage('directors');
-    editDirectorsPage.onclick = () => editPage('directors');
-  }
-  const editBoostersPage = document.querySelector('#edit-boosters-page');
-  if (editBoostersPage) {
-    editBoostersPage.hidden = !canEditBoostersPage();
-    editBoostersPage.onclick = () => editPage('boosters');
-  }
-  const editContactPage = document.querySelector('#edit-contact-page');
-  if (editContactPage) {
-    editContactPage.hidden = !canEditPage('contact');
-    editContactPage.onclick = () => editPage('contact');
-  }
+  wireEditPageButton('#edit-calendar-page', 'calendar', canEditPage('calendar'));
+  wireEditPageButton('#edit-directors-page', 'directors', canEditPage('directors'));
+  wireEditPageButton('#edit-boosters-page', 'boosters', canEditBoostersPage());
+  wireEditPageButton('#edit-contact-page', 'contact', canEditPage('contact'));
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
@@ -2230,6 +3253,8 @@ function showAllowedPanels() {
   bindAdminNavToggle();
   renderDashboard();
   activateTab('dashboard');
+  document.body.classList.remove('cms-booting');
+  document.body.classList.add('cms-ready');
 }
 
 function bindAdminNavToggle() {
@@ -2303,6 +3328,9 @@ function renderZernioFacebookStatus(status) {
   const refreshBtn = document.querySelector('#zernio-facebook-refresh');
   const disconnectBtn = document.querySelector('#zernio-facebook-disconnect');
   const postForm = document.querySelector('#zernio-post-form');
+  const apiKeyForm = document.querySelector('#zernio-api-key-form');
+  const apiKeySource = document.querySelector('#zernio-api-key-source');
+  const apiKeyClear = document.querySelector('#zernio-api-key-clear');
   const detail = status?.detail || (status?.connected ? 'Facebook connected.' : 'Facebook not connected.');
   if (statusEl) {
     const debugNote = (!status?.connected && status?.debug?.note)
@@ -2327,9 +3355,27 @@ function renderZernioFacebookStatus(status) {
   }
   if (refreshBtn) refreshBtn.hidden = !status?.configured;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
-  if (postForm) postForm.hidden = !status?.connected;
+  // Posting requires a live API key and a connected Page (stored connection alone is not enough).
+  if (postForm) postForm.hidden = !(status?.configured && status?.connected);
   const eventsCard = document.querySelector('#zernio-facebook-events-card');
-  if (eventsCard) eventsCard.hidden = !status?.connected;
+  if (eventsCard) eventsCard.hidden = !(status?.configured && status?.connected);
+  if (apiKeyForm) {
+    const showKeyForm = isSuperAdmin() && (!status?.configured || status?.configured_source === 'database');
+    apiKeyForm.hidden = !showKeyForm;
+    if (apiKeySource) {
+      if (!status?.configured) {
+        apiKeySource.textContent = 'No Zernio API key is available at runtime. Paste your key below to unlock Connect and Post.';
+      } else if (status?.configured_source === 'database') {
+        apiKeySource.textContent = 'Using API key saved in the CMS. Cloudflare Pages secrets take priority when present.';
+        apiKeySource.classList.add('ok');
+      } else {
+        apiKeySource.textContent = 'Using Cloudflare Pages secret ZERNIO_API_KEY.';
+        apiKeySource.classList.add('ok');
+      }
+      if (!status?.configured) apiKeySource.classList.remove('ok');
+    }
+    if (apiKeyClear) apiKeyClear.hidden = status?.configured_source !== 'database';
+  }
   if (!status?.needsPageSelection) state.zernioPages = [];
   renderZernioFacebookPages();
   syncZernioPublishModeUi();
@@ -2468,7 +3514,7 @@ function renderZernioEventQueue() {
       : '<p class="muted">Queue is empty.</p>';
   }
   if (publishBtn) {
-    publishBtn.hidden = !state.zernioFacebook?.connected || !events.length;
+    publishBtn.hidden = !(state.zernioFacebook?.configured && state.zernioFacebook?.connected) || !events.length;
     publishBtn.disabled = !events.length;
   }
 }
@@ -2563,26 +3609,42 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
+  const guideHref = '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=cms-guide-pdf-20260813';
+  const calendarApkHref = '/assets/downloads/EFHS-Band-Calendar.apk?v=calendar-background-push-20260813';
   const cards = [
+    ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs', 'EFHS-Band-Website-CMS-Guide.pdf'],
+    ['Calendar Android app', 'Sideload the EFHS Band Calendar APK. After install, use Settings → Allow background checks so alerts work while the app is closed.', calendarApkHref, 'Mobile', 'link', 'android', 'EFHS-Band-Calendar.apk'],
+    canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
+    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses; view and download Excel.', 'ledger', 'Finance', 'tab'],
     state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
     state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
+    canEditFundraisingBody() && ['Fundraising', 'Edit fundraising campaign copy and insert photos.', 'fundraising-body', 'Support', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
+    isSuperAdmin() && ['Security Log', 'View login, logout, CMS changes, and staff email details. Super Admin only.', 'security-log', 'Security', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
 
   dashboard.innerHTML = cards.length
-    ? cards.map(([title, text, target, kicker, kind]) => {
+    ? cards.map((card) => {
+      const [title, copy, target, kicker, kind, theme = '', downloadName = ''] = card;
+      const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
+      if (kind === 'link') {
+        const downloadAttr = downloadName
+          ? ` download="${escapeAttr(downloadName)}"`
+          : '';
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}"${downloadAttr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+      }
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
-      return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
+      return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
@@ -2620,8 +3682,12 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (becomeSponsorHint) becomeSponsorHint.hidden = page.slug !== 'become-a-sponsor';
     const boostersHint = form.querySelector('[data-boosters-hint]');
     if (boostersHint) boostersHint.hidden = page.slug !== 'boosters';
+    const fundraisingHint = form.querySelector('[data-fundraising-hint]');
+    if (fundraisingHint) fundraisingHint.hidden = page.slug !== 'fundraising';
     const contactHint = form.querySelector('[data-contact-hint]');
     if (contactHint) contactHint.hidden = page.slug !== 'contact';
+    const galleryHint = form.querySelector('[data-gallery-hint]');
+    if (galleryHint) galleryHint.hidden = page.slug !== 'gallery';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
     if (ensemblesHint) ensemblesHint.hidden = page.slug !== 'ensembles';
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
@@ -2650,28 +3716,254 @@ function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
   const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
-  box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+  box.innerHTML = pages.map((page) => {
+    const label = page.slug === 'fundraising'
+      ? `${page.title} (Manage → Fundraising)`
+      : page.slug === 'ensembles'
+        ? `${page.title} (Manage → Ensemble Body)`
+        : page.title;
+    return `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(label)}</label>`;
+  }).join('');
 }
 
 async function loadSponsorAdSettings() {
-  if (!canEditSponsors()) return;
-  const form = document.querySelector('#sponsor-ad-settings-form');
-  if (!form) return;
-  try {
-    const settings = await jsonFetch('/api/admin/sponsors/settings');
-    const input = formControl(form, 'sponsor_ad_seconds');
-    if (input) input.value = String(settings.sponsor_ad_seconds ?? 6);
-  } catch (error) {
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    if (status) status.textContent = `Could not load ad timing: ${error.message}`;
-  }
+  // Homepage fly-in duration is fixed at 6 seconds; settings UI removed.
 }
 
 async function loadSponsors() {
   if (!canEditSponsors()) return;
   state.sponsors = await jsonFetch('/api/admin/sponsors');
   renderSponsors();
+  await loadPendingSponsorApplications();
   await loadSponsorAdSettings();
+}
+
+function pendingSponsorStatusLabel(status) {
+  const key = String(status || '').trim().toLowerCase();
+  if (key === 'checkout_ready') return 'Awaiting payment';
+  if (key === 'payment_setup_needed') return 'Payment setup needed';
+  if (key === 'pending_payment') return 'Pending payment';
+  return key.replace(/_/g, ' ') || 'Pending';
+}
+
+async function loadPendingSponsorApplications() {
+  const list = document.querySelector('#pending-sponsors-list');
+  const status = document.querySelector('#pending-sponsors-status');
+  if (!list || !canEditSponsors()) return;
+  try {
+    const data = await jsonFetch('/api/admin/sponsor-applications?pending=1');
+    state.pendingSponsorApplications = Array.isArray(data?.applications) ? data.applications : [];
+    renderPendingSponsorApplications();
+    if (status) {
+      const count = state.pendingSponsorApplications.length;
+      status.textContent = count
+        ? `${count} pending application${count === 1 ? '' : 's'} need review.`
+        : 'No pending sponsor applications.';
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="draft">Could not load pending applications: ${escapeHtml(error.message || 'error')}</p>`;
+    if (status) status.textContent = error.message || 'Could not load pending applications.';
+  }
+}
+
+function renderPendingSponsorApplications() {
+  const list = document.querySelector('#pending-sponsors-list');
+  if (!list) return;
+  const rows = Array.isArray(state.pendingSponsorApplications) ? state.pendingSponsorApplications : [];
+  if (!rows.length) {
+    list.innerHTML = '<p class="draft">No pending public sponsor sign-ups right now.</p>';
+    return;
+  }
+  list.innerHTML = rows.map((app) => {
+    const tier = app.tier || 'bronze';
+    const tierLabel = app.tier_label || (tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor');
+    const logo = app.logo_url
+      ? `<img src="${escapeHtml(app.logo_url)}" alt="">`
+      : escapeHtml(String(app.business_name || '?').slice(0, 1).toUpperCase());
+    return `
+    <article class="admin-row sponsor-admin-row is-pending" data-application-id="${escapeAttr(String(app.id || ''))}">
+      <div class="mini-logo">${logo}</div>
+      <div>
+        <b>${escapeHtml(app.business_name || 'Unnamed business')} <span class="pending-flag">Pending</span></b>
+        <span>${escapeHtml(app.address || 'No address')}</span>
+        <span>${escapeHtml([
+          app.phone ? `Phone: ${app.phone}` : '',
+          app.email ? `Email: ${app.email}` : '',
+        ].filter(Boolean).join(' · ') || 'No phone/email on file')}</span>
+        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${escapeHtml(app.amount_display || '')} · ${escapeHtml(pendingSponsorStatusLabel(app.status))}</small>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn primary btn-small" data-accept-application="${escapeAttr(String(app.id || ''))}">Accept</button>
+        <button type="button" class="btn outline btn-small" data-delete-application="${escapeAttr(String(app.id || ''))}">Delete</button>
+      </div>
+    </article>`;
+  }).join('');
+  list.querySelectorAll('[data-accept-application]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = String(button.dataset.acceptApplication || '').trim();
+      if (!id) return;
+      if (!window.confirm('Accept this sponsor and add them to the public listing now?')) return;
+      const status = document.querySelector('#pending-sponsors-status');
+      button.disabled = true;
+      if (status) status.textContent = 'Accepting…';
+      try {
+        const result = await jsonFetch(`/api/admin/sponsor-applications/${id}/accept`, { method: 'POST', body: '{}' });
+        showSavedToast(result.detail || 'Sponsor accepted.');
+        await loadSponsors();
+      } catch (error) {
+        const detail = error?.message || 'Could not accept sponsor.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
+        button.disabled = false;
+      }
+    });
+  });
+  list.querySelectorAll('[data-delete-application]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = String(button.dataset.deleteApplication || '').trim();
+      if (!id) return;
+      const app = (state.pendingSponsorApplications || []).find((item) => String(item.id) === id);
+      const name = app?.business_name || 'this pending application';
+      if (!window.confirm(`Delete ${name}? This removes the unfinished sign-up and cannot be undone.`)) return;
+      const status = document.querySelector('#pending-sponsors-status');
+      button.disabled = true;
+      if (status) status.textContent = 'Deleting…';
+      try {
+        const result = await jsonFetch(`/api/admin/sponsor-applications/${id}`, { method: 'DELETE' });
+        showSavedToast(result.detail || 'Pending application deleted.');
+        await loadPendingSponsorApplications();
+      } catch (error) {
+        const detail = error?.message || 'Could not delete pending application.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
+        button.disabled = false;
+      }
+    });
+  });
+}
+
+async function loadLedger() {
+  const summary = document.querySelector('#ledger-summary');
+  const body = document.querySelector('#ledger-table-body');
+  const status = document.querySelector('#ledger-status');
+  if (!summary || !body || !canAccessLedger()) return;
+  try {
+    const data = await jsonFetch('/api/admin/ledger');
+    const totals = data?.totals || {};
+    const counts = totals.counts || {};
+    summary.innerHTML = [
+      ['Income', totals.income_display || '$0.00', `${Number(counts.sponsor || 0) + Number(counts.donor || 0) + Number(counts.fundraiser || 0) + Number(counts.dues || 0)} entries`],
+      ['Expenses', totals.expense_display || '$0.00', `${Number(counts.expense || 0)} entries`],
+      ['Cash net', totals.cash_display || '$0.00', 'Money exchanged'],
+      ['In-kind', totals.in_kind_display || '$0.00', 'No money exchanged'],
+      ['Net total', totals.net_display || '$0.00', 'Income − expenses'],
+    ].map(([label, value, hint]) => (
+      `<div class="ledger-summary-card"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b><small>${escapeHtml(hint)}</small></div>`
+    )).join('');
+    const entries = Array.isArray(data?.entries) ? data.entries : [];
+    if (!entries.length) {
+      body.innerHTML = '<tr><td colspan="8" class="draft">No ledger entries yet. Add a donor, sponsor, fundraiser, dues, or expense.</td></tr>';
+    } else {
+      body.innerHTML = entries.map((row) => {
+        const signed = String(row.kind || '').toLowerCase() === 'expense'
+          ? -Math.abs(Number(row.amount_cents) || 0)
+          : Math.abs(Number(row.amount_cents) || 0);
+        const amountClass = signed < 0 ? 'is-expense' : 'is-income';
+        const amountText = row.amount_display || new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(signed / 100);
+        const moneyLabel = row.money_exchanged === false ? 'In-kind' : 'Cash';
+        return `<tr data-ledger-id="${escapeAttr(String(row.id || ''))}">
+          <td>${escapeHtml(formatLedgerDate(row.paid_at))}</td>
+          <td><span class="ledger-kind ledger-kind-${escapeAttr(String(row.kind || ''))}">${escapeHtml(ledgerKindLabel(row.kind))}</span></td>
+          <td><b>${escapeHtml(row.name || '—')}</b><small class="ledger-address">${escapeHtml(row.address || '')}</small></td>
+          <td class="ledger-amount ${amountClass}">${escapeHtml(amountText)}</td>
+          <td>${escapeHtml(moneyLabel)}</td>
+          <td>${escapeHtml(row.package || '—')}</td>
+          <td>${escapeHtml(row.note || '')}</td>
+          <td class="ledger-actions"><button type="button" class="btn outline btn-small" data-ledger-delete="${escapeAttr(String(row.id || ''))}">Delete</button></td>
+        </tr>`;
+      }).join('');
+    }
+    if (status) status.textContent = `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} in ledger.`;
+    body.querySelectorAll('[data-ledger-delete]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = String(button.dataset.ledgerDelete || '').trim();
+        if (!id) return;
+        if (!window.confirm('Delete this ledger entry? This cannot be undone.')) return;
+        if (status) status.textContent = 'Deleting…';
+        try {
+          await jsonFetch(`/api/admin/ledger/${id}`, { method: 'DELETE' });
+          showSavedToast('Ledger entry deleted.');
+          await loadLedger();
+        } catch (error) {
+          const detail = error?.message || 'Could not delete entry.';
+          if (status) status.textContent = detail;
+          showFailedToast(detail);
+        }
+      });
+    });
+  } catch (error) {
+    summary.innerHTML = '<div class="ledger-summary-card"><span>Ledger</span><b>Unavailable</b><small>Could not load totals</small></div>';
+    body.innerHTML = `<tr><td colspan="8" class="draft">${escapeHtml(error.message || 'Ledger unavailable')}</td></tr>`;
+    if (status) status.textContent = error.message || 'Ledger unavailable';
+  }
+}
+
+
+function loadAdminSquareWebSdk(environment = 'production') {
+  const existing = document.querySelector('script[data-square-web-sdk]');
+  if (existing && window.Square) return Promise.resolve(window.Square);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = environment === 'sandbox'
+      ? 'https://sandbox.web.squareupsandbox.com/v1/square.js'
+      : 'https://web.squarecdn.com/v1/square.js';
+    script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+    script.onerror = () => reject(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+let checkoutCardController = null;
+let checkoutInitPromise = null;
+
+async function initCheckoutPanel() {
+  if (!canAccessCheckout()) return;
+  if (checkoutInitPromise) return checkoutInitPromise;
+  checkoutInitPromise = (async () => {
+    const form = document.querySelector('#checkout-form');
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const host = document.querySelector('#admin-square-card');
+    if (!form || !host) return;
+    if (status) status.textContent = 'Loading Square…';
+    if (submit) submit.disabled = true;
+    try {
+      if (checkoutCardController) {
+        try { await checkoutCardController.destroy(); } catch { /* ignore */ }
+        checkoutCardController = null;
+      }
+      host.innerHTML = '';
+      const config = await jsonFetch('/api/admin/checkout/config');
+      if (!config.web_payments) {
+        if (status) status.textContent = config.detail || 'Square card checkout is not configured.';
+        return;
+      }
+      const Square = await loadAdminSquareWebSdk(config.environment || 'production');
+      const payments = Square.payments(config.application_id, config.location_id);
+      const card = await payments.card();
+      await card.attach('#admin-square-card');
+      checkoutCardController = card;
+      if (status) status.textContent = 'Square secure card form ready.';
+      if (submit) submit.disabled = false;
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not load Square checkout.';
+      if (submit) submit.disabled = true;
+    } finally {
+      checkoutInitPromise = null;
+    }
+  })();
+  return checkoutInitPromise;
 }
 
 async function loadStaff() {
@@ -2686,10 +3978,33 @@ async function loadBoosterMembers() {
   renderBoosterMembers();
 }
 
+function personInitials(name = '', fallback = '?') {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !/^(dr|mr|mrs|ms|miss|prof)\.?$/i.test(word));
+  if (!words.length) return fallback;
+  if (words.length === 1) {
+    const letters = (words[0].match(/[a-z0-9]/gi) || []).slice(0, 2).map((ch) => ch.toUpperCase()).join('');
+    return letters || fallback;
+  }
+  const first = words[0].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  const last = words[words.length - 1].match(/[a-z0-9]/i)?.[0]?.toUpperCase();
+  return [first, last].filter(Boolean).join('') || fallback;
+}
+
+function personAvatarHtml(member = {}) {
+  const name = String(member.name || '').trim();
+  const photoUrl = String(member.photo_url || '').trim();
+  if (photoUrl) {
+    return `<div class="avatar"><img src="${escapeHtml(photoUrl)}" alt="${escapeHtml(name || 'Profile photo')}"></div>`;
+  }
+  return `<div class="avatar avatar-initials" aria-hidden="true"><span>${escapeHtml(personInitials(name))}</span></div>`;
+}
+
 function staffPreviewCard(member) {
-  const photo = member.photo_url
-    ? `<div class="avatar"><img src="${escapeHtml(member.photo_url)}" alt="${escapeHtml(member.name)}"></div>`
-    : '<div class="avatar" aria-hidden="true"></div>';
+  const photo = personAvatarHtml(member);
   const role = member.role ? `<p class="person-role">${formatInlineRichText(member.role)}</p>` : '';
   const bio = member.bio ? `<div class="person-bio">${formatRichText(member.bio)}</div>` : '';
   return `<article class="person">${photo}<div class="person-copy"><h3>${escapeHtml(member.name)}</h3>${role}${bio}</div></article>`;
@@ -2707,7 +4022,7 @@ function renderStaff() {
   list.innerHTML = ordered.map((member) => `
     <article class="admin-row staff-admin-row" data-staff-id="${member.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'staff member')}" title="Drag to reorder">⋮⋮</button>
-      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'S').trim().charAt(0).toUpperCase())}</div>
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml(personInitials(member.name, 'S'))}</div>
       <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Staff')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-staff="${member.id}">Edit</button><button type="button" data-delete-staff="${member.id}">Delete</button></div>
     </article>
@@ -2752,65 +4067,17 @@ async function saveStaffOrder(ids) {
 }
 
 function bindStaffDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-staff-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.staffId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.staffId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.staffId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedStaff();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'staffId',
+    getOrdered: orderedStaff,
+    applyLocalOrder: (next) => {
       state.staff = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderStaff();
-      try {
-        await saveStaffOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadStaff();
-        const status = document.querySelector('#staff-status');
-        if (status) status.textContent = 'Could not save the new staff order.';
-      }
-    });
+    },
+    saveOrder: saveStaffOrder,
+    reload: loadStaff,
+    errorStatusSelector: '#staff-status',
+    errorMessage: 'Could not save the new staff order.',
   });
 }
 
@@ -2826,7 +4093,7 @@ function renderBoosterMembers() {
   list.innerHTML = ordered.map((member) => `
     <article class="admin-row staff-admin-row" data-booster-member-id="${member.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(member.name || 'booster member')}" title="Drag to reorder">⋮⋮</button>
-      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml((member.name || 'B').trim().charAt(0).toUpperCase())}</div>
+      <div class="mini-logo staff-mini-photo">${member.photo_url ? `<img src="${escapeHtml(member.photo_url)}" alt="">` : escapeHtml(personInitials(member.name, 'B'))}</div>
       <div><b>${escapeHtml(member.name)}</b><span>${escapeHtml(plainTextFromHtml(member.role) || 'Booster member')}</span><small>${escapeHtml(plainTextFromHtml(member.bio) || 'No description')} · ${member.active ? 'Active' : 'Hidden'}</small></div>
       <div class="row-actions"><button type="button" data-edit-booster-member="${member.id}">Edit</button><button type="button" data-delete-booster-member="${member.id}">Delete</button></div>
     </article>
@@ -2871,65 +4138,17 @@ async function saveBoosterMemberOrder(ids) {
 }
 
 function bindBoosterMemberDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-booster-member-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.boosterMemberId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.boosterMemberId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.boosterMemberId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedBoosterMembers();
-      const fromIndex = ordered.findIndex((member) => member.id === fromId);
-      const toIndex = ordered.findIndex((member) => member.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((member) => member.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'boosterMemberId',
+    getOrdered: orderedBoosterMembers,
+    applyLocalOrder: (next) => {
       state.boosterMembers = next.map((member, index) => ({ ...member, sort_order: index + 1 }));
       renderBoosterMembers();
-      try {
-        await saveBoosterMemberOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadBoosterMembers();
-        const status = document.querySelector('#booster-member-status');
-        if (status) status.textContent = 'Could not save the new booster member order.';
-      }
-    });
+    },
+    saveOrder: saveBoosterMemberOrder,
+    reload: loadBoosterMembers,
+    errorStatusSelector: '#booster-member-status',
+    errorMessage: 'Could not save the new booster member order.',
   });
 }
 
@@ -2939,6 +4158,18 @@ function formatAdminSponsorAddress(sponsor = {}) {
   const city = String(sponsor.city || '').trim();
   const state = String(sponsor.state || '').trim().toUpperCase();
   return [street, city, state].filter(Boolean).join(', ');
+}
+
+
+function formatAdminSponsorContactLines(sponsor = {}) {
+  const address = formatAdminSponsorAddress(sponsor);
+  const phone = String(sponsor.phone || '').trim();
+  const email = String(sponsor.email || '').trim();
+  return [
+    address || 'No address on file',
+    phone ? `Phone: ${phone}` : 'Phone: —',
+    email ? `Email: ${email}` : 'Email: —',
+  ];
 }
 
 function sponsorPreviewCard(sponsor, index = 0) {
@@ -2968,18 +4199,319 @@ function orderedSponsors() {
   return [...state.sponsors].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 }
 
-function resetSponsorForm(form) {
-  if (!form) return;
-  form.reset();
-  formControl(form, 'id').value = '';
-  formControl(form, 'city').value = 'Kernersville';
-  setSelectValue(formControl(form, 'state'), 'NC');
-  form.elements.active.checked = true;
-  form.elements.level.value = 'Bronze Sponsor';
-  const file = formControl(form, 'logo_file');
-  if (file) file.value = '';
-  syncSponsorLogoPreview(form, '');
-  syncSponsorTierBenefits(form);
+const MANUAL_SPONSOR_TIER_AMOUNTS = {
+  bronze: { cents: 10000, display: '$100' },
+  silver: { cents: 25000, display: '$250' },
+  gold: { cents: 50000, display: '$500' },
+};
+
+let sponsorFormToastLeaveTimer = null;
+
+function ensureSponsorFormToast() {
+  let root = document.querySelector('#admin-sponsor-form-toast');
+  if (root && root.querySelector('[data-sponsor-form-confirm]')) return root;
+  if (root) root.remove();
+  root = document.createElement('div');
+  root.id = 'admin-sponsor-form-toast';
+  root.className = 'admin-sponsor-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-sponsor-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-sponsor-form-dismiss aria-label="Close sponsor form"></button>
+    <div class="admin-sponsor-form-toast-panel">
+      <div class="admin-sponsor-form-toast-card">
+        <p class="admin-sponsor-form-edit-note" data-sponsor-edit-note hidden>Editing existing sponsor</p>
+        <h3 id="admin-sponsor-form-toast-title">Manual Add Sponsor</h3>
+        <form id="sponsor-manual-form" class="admin-sponsor-manual-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <input type="hidden" name="logo_url" value="">
+          <input type="hidden" name="active" value="1">
+          <label>Business / organization name<input name="business_name" required autocomplete="organization" maxlength="160" placeholder="Business or organization name"></label>
+          <label>Address<input name="address" required maxlength="400" placeholder="Street, city, state" autocomplete="street-address"></label>
+          <label data-sponsor-phone-field>Phone<input name="phone" required maxlength="40" placeholder="(336) 555-0100" autocomplete="tel"></label>
+          <label data-sponsor-email-field>Invoice email<input name="email" type="email" required maxlength="160" placeholder="billing@business.com" autocomplete="email"></label>
+          <label>Sponsor package
+            <select name="tier" required>
+              <option value="bronze">Bronze — $100</option>
+              <option value="silver">Silver — $250</option>
+              <option value="gold" selected>Gold — $500</option>
+            </select>
+          </label>
+          <label class="admin-sponsor-manual-logo">Company logo <span data-logo-optional-label>(optional)</span>
+            <input name="logo" type="file" accept="image/*,.svg">
+          </label>
+          <p class="admin-sponsor-current-logo" data-current-logo hidden></p>
+          <label class="checkline admin-sponsor-bypass" data-bypass-payment-row hidden>
+            <input name="bypass_payment" type="checkbox" value="1"> Bypass payment (activate sponsor now)
+          </label>
+          <p class="admin-sponsor-form-toast-status" id="sponsor-manual-status" aria-live="polite"></p>
+          <div class="admin-sponsor-form-toast-actions">
+            <button class="btn outline" type="button" data-sponsor-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" data-sponsor-submit-label>Save Sponsor</button>
+          </div>
+        </form>
+        <div class="admin-sponsor-form-confirm" data-sponsor-form-confirm hidden>
+          <div class="admin-sponsor-form-confirm-card" role="alertdialog" aria-labelledby="admin-sponsor-form-confirm-title" aria-describedby="admin-sponsor-form-confirm-copy">
+            <h4 id="admin-sponsor-form-confirm-title">Are you sure?</h4>
+            <p id="admin-sponsor-form-confirm-copy">Canceling returns you to Manage sponsors and discards this form.</p>
+            <div class="admin-sponsor-form-confirm-actions">
+              <button class="btn outline" type="button" data-sponsor-confirm-no>No</button>
+              <button class="btn primary" type="button" data-sponsor-confirm-yes>Yes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-sponsor-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => showSponsorFormCancelConfirm(root));
+  });
+  root.querySelector('[data-sponsor-confirm-no]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+  });
+  root.querySelector('[data-sponsor-confirm-yes]')?.addEventListener('click', () => {
+    hideSponsorFormCancelConfirm(root);
+    hideSponsorFormToast();
+  });
+  return root;
+}
+
+function showSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-sponsor-confirm-yes]')?.focus();
+}
+
+function hideSponsorFormCancelConfirm(root = document.querySelector('#admin-sponsor-form-toast')) {
+  const confirm = root?.querySelector('[data-sponsor-form-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function syncBypassPaymentVisibility(root = document.querySelector('#admin-sponsor-form-toast'), { editing = false } = {}) {
+  const row = root?.querySelector('[data-bypass-payment-row]');
+  if (!row) return;
+  const allowed = !editing && canBypassSponsorPayment();
+  row.hidden = !allowed;
+  const input = row.querySelector('input[name="bypass_payment"]');
+  if (input && !allowed) input.checked = false;
+}
+
+function openSponsorFormToast() {
+  const root = ensureSponsorFormToast();
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  hideSponsorFormCancelConfirm(root);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  return root;
+}
+
+function showManualAddSponsorToast() {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  if (title) title.textContent = 'Manual Add Sponsor';
+  if (note) note.hidden = true;
+  if (submit) submit.textContent = 'Save Sponsor';
+  if (currentLogo) {
+    currentLogo.hidden = true;
+    currentLogo.textContent = '';
+  }
+  if (form) {
+    form.dataset.mode = 'add';
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.logo_url.value = '';
+    form.elements.active.value = '1';
+    if (form.elements.tier) form.elements.tier.value = 'gold';
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  syncBypassPaymentVisibility(root, { editing: false });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function showEditSponsorToast(sponsor) {
+  const root = openSponsorFormToast();
+  const title = root.querySelector('#admin-sponsor-form-toast-title');
+  const note = root.querySelector('[data-sponsor-edit-note]');
+  const form = root.querySelector('#sponsor-manual-form');
+  const submit = root.querySelector('[data-sponsor-submit-label]');
+  const currentLogo = root.querySelector('[data-current-logo]');
+  const tier = sponsorTierFromLevel(sponsor.level || sponsor.tier) || 'bronze';
+  const address = String(sponsor.formatted_address || [
+    sponsor.address,
+    sponsor.city,
+    sponsor.state,
+  ].filter(Boolean).join(', ')).trim();
+  if (title) title.textContent = 'Edit Sponsor';
+  if (note) {
+    note.hidden = false;
+    note.textContent = 'Editing existing sponsor';
+  }
+  if (submit) submit.textContent = 'Save Changes';
+  if (form) {
+    form.dataset.mode = 'edit';
+    form.reset();
+    form.elements.id.value = String(sponsor.id || '');
+    form.elements.logo_url.value = String(sponsor.logo_url || '');
+    form.elements.active.value = Number(sponsor.active) === 0 ? '0' : '1';
+    form.elements.business_name.value = String(sponsor.name || '');
+    form.elements.address.value = address;
+    form.elements.phone.value = String(sponsor.phone || '').trim();
+    form.elements.email.value = String(sponsor.email || '').trim();
+    form.elements.phone.required = true;
+    form.elements.email.required = true;
+    if (form.elements.tier) form.elements.tier.value = tier;
+    if (form.elements.logo) form.elements.logo.value = '';
+    const status = root.querySelector('#sponsor-manual-status');
+    if (status) status.textContent = '';
+  }
+  if (currentLogo) {
+    if (sponsor.logo_url) {
+      currentLogo.hidden = false;
+      currentLogo.textContent = `Current logo: ${sponsor.logo_url}`;
+    } else {
+      currentLogo.hidden = true;
+      currentLogo.textContent = '';
+    }
+  }
+  syncBypassPaymentVisibility(root, { editing: true });
+  window.setTimeout(() => form?.elements.business_name?.focus(), 40);
+}
+
+function hideSponsorFormToast() {
+  const root = document.querySelector('#admin-sponsor-form-toast');
+  if (!root || root.hidden) return;
+  hideSponsorFormCancelConfirm(root);
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(sponsorFormToastLeaveTimer);
+  sponsorFormToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
+function resetSponsorForm() {
+  // Legacy no-op kept for older call sites; form lives in the toast now.
+}
+
+function formatLedgerDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function ledgerKindLabel(kind) {
+  const key = String(kind || '').trim().toLowerCase();
+  if (key === 'sponsor') return 'Sponsor';
+  if (key === 'donor') return 'Donor';
+  if (key === 'fundraiser') return 'Fundraiser';
+  if (key === 'dues') return 'Dues';
+  if (key === 'expense') return 'Expense';
+  return key || 'Entry';
+}
+
+function ensureLedgerEntryToast() {
+  let root = document.querySelector('#admin-ledger-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-ledger-form-toast';
+  root.className = 'admin-sponsor-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-ledger-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-sponsor-form-toast-backdrop" data-ledger-form-dismiss aria-label="Close ledger entry form"></button>
+    <div class="admin-sponsor-form-toast-panel">
+      <div class="admin-sponsor-form-toast-card">
+        <h3 id="admin-ledger-form-toast-title">Add ledger entry</h3>
+        <p class="muted">Record a donor, sponsor, fundraiser, dues payment, or expense. Choose cash or in-kind (fair-market value with no money exchanged).</p>
+        <form id="ledger-entry-form" class="admin-sponsor-manual-form" novalidate>
+          <label>Type
+            <select name="kind" required>
+              <option value="sponsor">Sponsor / organization</option>
+              <option value="donor" selected>Donor / individual</option>
+              <option value="fundraiser">Fundraiser income</option>
+              <option value="dues">Dues</option>
+              <option value="expense">Expense</option>
+            </select>
+          </label>
+          <label>Payment
+            <select name="entry_mode" required>
+              <option value="cash" selected>Cash / check / card</option>
+              <option value="in_kind">In-kind (no money exchanged)</option>
+            </select>
+          </label>
+          <label>Name or business<input name="name" required autocomplete="organization" maxlength="200" placeholder="Business, donor, or payee"></label>
+          <label>Address <span class="muted">(optional)</span><input name="address" maxlength="400" placeholder="Street, city, state ZIP" autocomplete="street-address"></label>
+          <label>Amount<input name="amount_display" required inputmode="decimal" placeholder="$100.00"></label>
+          <label>Date<input name="paid_at" type="date"></label>
+          <label>Package / description<input name="package" maxlength="80" placeholder="Donation, Gold Sponsor, Trailer rental…"></label>
+          <label>Note<textarea name="note" rows="3" maxlength="500" placeholder="Optional note for the ledger"></textarea></label>
+          <p class="admin-sponsor-form-toast-status" id="ledger-entry-status" aria-live="polite"></p>
+          <div class="admin-sponsor-form-toast-actions">
+            <button class="btn outline" type="button" data-ledger-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit">Save entry</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-ledger-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideLedgerEntryToast());
+  });
+  return root;
+}
+
+function showLedgerEntryToast() {
+  const root = ensureLedgerEntryToast();
+  const form = root.querySelector('#ledger-entry-form');
+  const status = root.querySelector('#ledger-entry-status');
+  if (form) {
+    form.reset();
+    if (form.elements.kind) form.elements.kind.value = 'donor';
+    if (form.elements.entry_mode) form.elements.entry_mode.value = 'cash';
+    if (form.elements.paid_at) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      form.elements.paid_at.value = `${yyyy}-${mm}-${dd}`;
+    }
+  }
+  if (status) status.textContent = '';
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  requestAnimationFrame(() => root.classList.add('is-visible'));
+  window.setTimeout(() => form?.elements.name?.focus(), 40);
+}
+
+function hideLedgerEntryToast() {
+  const root = document.querySelector('#admin-ledger-form-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
 }
 
 function goldPrintSponsors() {
@@ -3002,10 +4534,16 @@ function renderGoldSponsorsPrintPreview() {
     const logo = sponsor.logo_url
       ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
       : `<span class="gold-sponsor-print-mark">${mark}</span>`;
+    const contact = formatAdminSponsorContactLines(sponsor)
+      .map((line) => `<span>${escapeHtml(line)}</span>`)
+      .join('');
     return `
       <article class="gold-sponsor-print-row">
         <div class="gold-sponsor-print-logo">${logo}</div>
-        <b>${escapeHtml(sponsor.name)}</b>
+        <div class="gold-sponsor-print-copy">
+          <b>${escapeHtml(sponsor.name)}</b>
+          ${contact}
+        </div>
       </article>
     `;
   }).join('');
@@ -3134,13 +4672,14 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     const nameLines = doc.splitTextToSize(String(sponsor.name || 'Sponsor'), textWidth);
-    const address = formatAdminSponsorAddress(sponsor) || 'No address on file';
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    const addressLines = doc.splitTextToSize(address, textWidth);
-    const textBlockHeight = nameLines.length * 18 + 4 + addressLines.length * 14;
+    const contactLines = formatAdminSponsorContactLines(sponsor).flatMap((line) => (
+      doc.splitTextToSize(String(line), textWidth)
+    ));
+    const textBlockHeight = nameLines.length * 18 + 4 + contactLines.length * 14;
     const logoBasedHeight = logo ? Math.max(56, Math.round((logo.height / logo.width) * 96) + 16) : 56;
-    const rowHeight = Math.max(64, logoBasedHeight, textBlockHeight + 24);
+    const rowHeight = Math.max(72, logoBasedHeight, textBlockHeight + 24);
     ensureSpace(rowHeight + 12);
 
     doc.setDrawColor(216, 226, 239);
@@ -3179,7 +4718,7 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(91, 111, 136);
-    doc.text(addressLines, nameX, textTop + nameLines.length * 18 + 2);
+    doc.text(contactLines, nameX, textTop + nameLines.length * 18 + 2);
 
     y += rowHeight + 10;
   }
@@ -3247,7 +4786,10 @@ function printGoldSponsorsHtmlFallback(sponsors) {
       const logo = sponsor.logo_url
         ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">`
         : `<span class="mark">${mark}</span>`;
-      return `<li><div class="logo">${logo}</div><strong>${escapeHtml(sponsor.name)}</strong></li>`;
+      const contact = formatAdminSponsorContactLines(sponsor)
+        .map((line) => `<span>${escapeHtml(line)}</span>`)
+        .join('');
+      return `<li><div class="logo">${logo}</div><div class="copy"><strong>${escapeHtml(sponsor.name)}</strong>${contact}</div></li>`;
     }).join('')
     : '<li><strong>No active Gold sponsors yet.</strong></li>';
   const html = `<!doctype html>
@@ -3264,6 +4806,8 @@ function printGoldSponsorsHtmlFallback(sponsors) {
     .logo{width:110px;height:64px;display:grid;place-items:center;background:#fff;border:1px solid #ddd;border-radius:6px;overflow:hidden}
     .logo img{max-width:100%;max-height:100%;object-fit:contain}
     .mark{font:700 .85rem/1.2 Helvetica,Arial,sans-serif;color:#014990;text-align:center}
+    .copy{display:grid;gap:4px}
+    .copy span{display:block;color:#445;font:400 .95rem/1.35 Helvetica,Arial,sans-serif}
     strong{font-size:1.15rem}
     @media print{body{margin:.55in} li{break-inside:avoid}}
   </style>
@@ -3360,6 +4904,10 @@ function renderSponsors() {
       <div>
         <b>${escapeHtml(sponsor.name)}</b>
         <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
+        <span>${escapeHtml([
+          sponsor.phone ? `Phone: ${sponsor.phone}` : '',
+          sponsor.email ? `Email: ${sponsor.email}` : '',
+        ].filter(Boolean).join(' · ') || 'No phone/email on file')}</span>
         <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${sponsor.active ? 'Active' : 'Hidden'} · ${escapeHtml(benefits.join(' · '))}</small>
       </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
@@ -3371,30 +4919,8 @@ function renderSponsors() {
   renderGoldSponsorsPrintPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
-    const form = document.querySelector('#sponsor-form');
-    fillForm(form, {
-      ...sponsor,
-      city: sponsor.city || 'Kernersville',
-      state: sponsor.state || 'NC',
-    });
-    setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
-    const levelSelect = formControl(form, 'level');
-    if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
-      if (![...levelSelect.options].some((option) => option.value === level)) {
-        const option = document.createElement('option');
-        option.value = level;
-        option.textContent = level;
-        levelSelect.appendChild(option);
-      }
-      setSelectValue(levelSelect, level);
-    }
-    form.elements.active.checked = Boolean(Number(sponsor.active));
-    const file = formControl(form, 'logo_file');
-    if (file) file.value = '';
-    syncSponsorLogoPreview(form, sponsor.logo_url || '');
-    syncSponsorTierBenefits(form);
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!sponsor) return;
+    showEditSponsorToast(sponsor);
   }));
   list.querySelectorAll('[data-delete-sponsor]').forEach(button => button.addEventListener('click', async () => {
     if (!confirm('Delete this sponsor?')) return;
@@ -3413,65 +4939,17 @@ async function saveSponsorOrder(ids) {
 }
 
 function bindSponsorDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-sponsor-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.sponsorId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.sponsorId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.sponsorId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedSponsors();
-      const fromIndex = ordered.findIndex((sponsor) => sponsor.id === fromId);
-      const toIndex = ordered.findIndex((sponsor) => sponsor.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((sponsor) => sponsor.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'sponsorId',
+    getOrdered: orderedSponsors,
+    applyLocalOrder: (next) => {
       state.sponsors = next.map((sponsor, index) => ({ ...sponsor, sort_order: index + 1 }));
       renderSponsors();
-      try {
-        await saveSponsorOrder(ids);
-      } catch (error) {
-        console.error(error);
-        await loadSponsors();
-        const status = document.querySelector('#sponsor-status');
-        if (status) status.textContent = 'Could not save the new sponsor order.';
-      }
-    });
+    },
+    saveOrder: saveSponsorOrder,
+    reload: loadSponsors,
+    errorStatusSelector: '#sponsor-status',
+    errorMessage: 'Could not save the new sponsor order.',
   });
 }
 
@@ -3493,30 +4971,106 @@ async function loadMailDeliveryStatus() {
   }
 }
 
+function mailPeopleOptions(select) {
+  return [...(select?.options || [])].filter((option) => option.value && !option.disabled);
+}
+
+function mailEveryoneSelected(select) {
+  const people = mailPeopleOptions(select);
+  return Boolean(people.length) && people.every((option) => option.selected);
+}
+
+function updateMailAllUsersButton(select = document.querySelector('#mail-recipient-select')) {
+  const button = document.querySelector('#mail-toggle-all-users');
+  if (!button) return;
+  const people = mailPeopleOptions(select);
+  const allSelected = mailEveryoneSelected(select);
+  button.disabled = !people.length;
+  button.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+  button.classList.toggle('is-active', allSelected);
+  button.textContent = allSelected ? 'Clear all users' : 'All users';
+}
+
+function toggleMailAllUsers(select = document.querySelector('#mail-recipient-select')) {
+  if (!select) return;
+  const people = mailPeopleOptions(select);
+  if (!people.length) return;
+  const selectAll = !mailEveryoneSelected(select);
+  people.forEach((option) => { option.selected = selectAll; });
+  updateMailAllUsersButton(select);
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
-  }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
+  const select = document.querySelector('#mail-recipient-select');
+  if (!select) return;
+  const previous = new Set(
+    [...select.selectedOptions]
+      .map((option) => String(option.value || ''))
+      .filter((value) => value && value !== '__all__'),
+  );
+  select.replaceChildren();
+
+  state.mailRecipients.forEach((user) => {
+    const name = String(user.display_name || user.email || 'User').trim();
+    const email = String(user.email || '').trim();
+    const value = String(user.id);
+    const option = new Option(name, value, false, previous.has(value));
+    if (email) option.title = email;
+    select.add(option);
+  });
+
+  updateMailAllUsersButton(select);
 }
 
 async function loadMailRecipients() {
   if (!canSendMail()) return;
-  state.mailRecipients = await jsonFetch('/api/admin/mail/recipients');
+  try {
+    const data = await jsonFetch('/api/admin/mail/recipients');
+    state.mailRecipients = Array.isArray(data) ? data : [];
+  } catch (error) {
+    state.mailRecipients = [];
+    const status = document.querySelector('#mail-status');
+    if (status) status.textContent = error?.message || 'Could not load recipients.';
+  }
   renderMailRecipients();
   await loadMailDeliveryStatus();
 }
 
 function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
+  const select = form?.querySelector('#mail-recipient-select') || form?.elements.recipient;
+  if (!select) return [];
+  return [...new Set(
+    [...select.selectedOptions]
+      .map((option) => Number(String(option.value || '').trim()))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  )];
+}
+
+function selectedMailExtraEmails(form) {
+  const raw = String(form?.elements.extra_emails?.value || '').trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw
+      .split(/[,;\n]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )];
+}
+
+function resetMailComposerForm(form, editor) {
+  if (!form) return;
+  if (form.elements.subject) form.elements.subject.value = '';
+  if (editor) editor.innerHTML = '';
+  if (form.elements.attachments) form.elements.attachments.value = '';
+  if (form.elements.extra_emails) form.elements.extra_emails.value = '';
+  const recipientSelectEl = form.querySelector('#mail-recipient-select');
+  if (recipientSelectEl) {
+    [...recipientSelectEl.options].forEach((option) => { option.selected = false; });
+    updateMailAllUsersButton(recipientSelectEl);
+  }
+  const colorInput = document.querySelector('#mail-rich-color');
+  if (colorInput) colorInput.value = '#002142';
 }
 
 function bindMailComposer() {
@@ -3525,6 +5079,43 @@ function bindMailComposer() {
   const toolbar = document.querySelector('#mail-rich-toolbar');
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+  // Prevent a native GET navigation to /admin if the JS handler ever fails to bind.
+  form.setAttribute('method', 'post');
+  form.setAttribute('action', '/api/admin/mail');
+
+  const recipientSelect = form.querySelector('#mail-recipient-select');
+  const allUsersButton = form.querySelector('#mail-toggle-all-users');
+  const submitButton = form.querySelector('button[type="submit"]');
+  let mailSendInFlight = false;
+  let mailSendGeneration = 0;
+  if (allUsersButton && allUsersButton.dataset.boundAllUsers !== '1') {
+    allUsersButton.dataset.boundAllUsers = '1';
+    allUsersButton.addEventListener('click', () => {
+      toggleMailAllUsers(recipientSelect);
+    });
+  }
+  if (recipientSelect && !recipientSelect.dataset.boundRecipientGuard) {
+    recipientSelect.dataset.boundRecipientGuard = '1';
+    // Tap/click toggles options without requiring Ctrl/Cmd when the browser
+    // exposes the option as the event target (Chrome/Edge). Firefox falls back
+    // to native multi-select (Ctrl/Cmd).
+    recipientSelect.addEventListener('mousedown', (event) => {
+      const direct = event.target?.tagName === 'OPTION' ? event.target : null;
+      const fromPoint = !direct && typeof document.elementFromPoint === 'function'
+        ? document.elementFromPoint(event.clientX, event.clientY)
+        : null;
+      const option = direct || (fromPoint?.tagName === 'OPTION' ? fromPoint : null);
+      if (!option || option.disabled || option.parentElement !== recipientSelect) return;
+      event.preventDefault();
+      recipientSelect.focus();
+      option.selected = !option.selected;
+      updateMailAllUsersButton(recipientSelect);
+      recipientSelect.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    recipientSelect.addEventListener('change', () => {
+      updateMailAllUsersButton(recipientSelect);
+    });
+  }
 
   toolbar?.querySelectorAll('[data-mail-rich]').forEach((button) => {
     button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -3540,29 +5131,35 @@ function bindMailComposer() {
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
-  });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    event.stopPropagation();
+    if (mailSendInFlight) return;
+
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
     const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const extraEmails = selectedMailExtraEmails(form);
+    const rawExtra = String(form.elements.extra_emails?.value || '').trim();
+    if (!userIds.length && !extraEmails.length) {
+      const detail = rawExtra
+        ? 'Enter a valid email address, or choose a recipient from the list.'
+        : 'Choose a recipient or enter at least one email address.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
     if (!subject) {
-      if (status) status.textContent = 'Subject is required.';
+      const detail = 'Subject is required.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
     if (!html.replace(/<[^>]+>/g, '').trim()) {
-      if (status) status.textContent = 'Message body is required.';
+      const detail = 'Message body is required.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
       return;
     }
 
@@ -3570,24 +5167,29 @@ function bindMailComposer() {
     payload.set('subject', subject);
     payload.set('html', html);
     userIds.forEach((id) => payload.append('user_ids', String(id)));
-    [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
+    if (extraEmails.length) payload.set('extra_emails', extraEmails.join(', '));
+    [...(form.elements.attachments?.files || [])]
+      .filter((file) => file && Number(file.size || 0) > 0)
+      .forEach((file) => payload.append('attachments', file));
 
+    mailSendInFlight = true;
+    const sendGeneration = ++mailSendGeneration;
+    if (submitButton) submitButton.disabled = true;
     if (status) status.textContent = 'Sending…';
     try {
       const result = await jsonFetch('/api/admin/mail', { method: 'POST', body: payload });
-      if (result.ok) {
-        if (form.elements.subject) form.elements.subject.value = '';
-        editor.innerHTML = '';
-        if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
-        const colorInput = document.querySelector('#mail-rich-color');
-        if (colorInput) colorInput.value = '#002142';
+      if (sendGeneration !== mailSendGeneration) return;
+      if (result?.ok) {
+        resetMailComposerForm(form, editor);
         showSavedToast('Sent.', { icon: 'envelope' });
         await loadMailDeliveryStatus();
-      } else if (status) {
-        status.textContent = result.detail || 'Email sent.';
+      } else {
+        const detail = result?.detail || 'Email could not be sent.';
+        if (status) status.textContent = detail;
+        showFailedToast(detail);
       }
     } catch (error) {
+      if (sendGeneration !== mailSendGeneration) return;
       let message = error.message || 'Could not send email.';
       try {
         const parsed = JSON.parse(message);
@@ -3596,65 +5198,266 @@ function bindMailComposer() {
         // Keep raw error text when the API did not return JSON.
       }
       if (status) status.textContent = message;
+      showFailedToast(message);
+    } finally {
+      if (sendGeneration === mailSendGeneration) {
+        mailSendInFlight = false;
+        if (submitButton) submitButton.disabled = false;
+      }
     }
   });
 }
 
 function canEditManagedUser(user) {
   if (!user || !hasPermission('users')) return false;
+  if (user.is_tester) return isSuperAdmin();
   if (isSuperAdmin()) return true;
   // Editors with the users permission can manage other editors, not Super Admins.
   return !isSuperAdmin(user);
 }
 
-async function loadUsers() {
-  if (!hasPermission('users')) return;
-  state.users = await jsonFetch('/api/admin/users');
-  const list = document.querySelector('#users-list');
-  const roleSelect = document.querySelector('#user-form [name="role"]');
+function syncTesterUserButton() {
+  document.querySelector('#new-tester')?.toggleAttribute('hidden', !isSuperAdmin());
+}
+
+let userFormToastLeaveTimer = null;
+
+function ensureUserFormToast() {
+  let root = document.querySelector('#admin-user-form-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-user-form-toast';
+  root.className = 'admin-user-form-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-user-form-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-user-form-toast-backdrop" data-user-form-dismiss aria-label="Close user form"></button>
+    <div class="admin-user-form-toast-panel">
+      <div class="admin-user-form-toast-card">
+        <h3 id="admin-user-form-toast-title">New User</h3>
+        <form id="user-form" class="admin-user-form" novalidate>
+          <input type="hidden" name="id" value="">
+          <label id="user-username-label">Email / Username<input name="username" type="email" required autocomplete="username" placeholder="editor@example.com"></label>
+          <label id="user-display-name-label">Display name<input name="display_name" required placeholder="Full name"></label>
+          <label id="user-password-label">Password <small id="user-password-hint">required · min 8 characters</small>
+            <input name="password" type="password" autocomplete="new-password" minlength="8">
+          </label>
+          <label id="user-role-label">Role
+            <select name="role">
+              <option value="editor">Editor</option>
+              <option value="admin">Super Admin - all permissions</option>
+            </select>
+          </label>
+          <label class="checkline"><input name="active" type="checkbox" checked> Active</label>
+          <fieldset>
+            <legend>Global permissions</legend>
+            <label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="sponsors:bypass-payment"> Bypass sponsor payment (manual add)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer ledger (donors, sponsors, fundraisers, dues, expenses) + Checkout</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label>
+            <label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Page edit permissions</legend>
+            <div id="page-permission-boxes"></div>
+          </fieldset>
+          <p class="admin-user-form-toast-status" id="user-status" aria-live="polite"></p>
+          <div class="admin-user-form-toast-actions">
+            <button class="btn outline" type="button" data-user-form-dismiss>Cancel</button>
+            <button class="btn primary" type="submit" id="user-submit">Send Invite</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-user-form-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hideUserFormToast());
+  });
+  return root;
+}
+
+function syncUserFormMode(form = document.querySelector('#user-form')) {
+  if (!form) return;
+  const editing = Boolean(String(formControl(form, 'id')?.value || '').trim());
+  const testerMode = form.dataset.mode === 'tester' || form.dataset.isTester === '1';
+  const title = document.querySelector('#admin-user-form-toast-title');
+  const submit = document.querySelector('#user-submit');
+  const passwordHint = document.querySelector('#user-password-hint');
+  const passwordInput = formControl(form, 'password');
+  const usernameInput = formControl(form, 'username');
+  const displayNameInput = formControl(form, 'display_name');
+  const roleSelect = formControl(form, 'role');
+  const roleLabel = document.querySelector('#user-role-label');
+  if (testerMode && !editing) {
+    if (title) title.textContent = 'Add Tester';
+    if (submit) submit.textContent = 'Create Tester';
+  } else if (testerMode && editing) {
+    if (title) title.textContent = 'Edit Tester';
+    if (submit) submit.textContent = 'Update Tester';
+  } else {
+    if (title) title.textContent = editing ? 'Edit User' : 'New User';
+    if (submit) submit.textContent = editing ? 'Update' : 'Send Invite';
+  }
+  if (passwordHint) {
+    if (testerMode && !editing) {
+      passwordHint.textContent = 'optional · auto-generated if blank';
+    } else if (editing) {
+      passwordHint.textContent = 'optional · leave blank to keep current password';
+    } else {
+      passwordHint.textContent = 'required · min 8 characters';
+    }
+  }
+  if (passwordInput) {
+    passwordInput.required = !editing && !testerMode;
+    passwordInput.placeholder = editing
+      ? 'Leave blank to keep current password'
+      : (testerMode ? 'Leave blank to auto-generate' : '');
+    if (!editing && !testerMode) passwordInput.minLength = 8;
+    else passwordInput.removeAttribute('minlength');
+  }
+  if (usernameInput) {
+    usernameInput.required = !testerMode || editing;
+    usernameInput.type = testerMode ? 'text' : 'email';
+    usernameInput.placeholder = testerMode
+      ? 'optional · e.g. tester1 (auto if blank)'
+      : 'editor@example.com';
+  }
+  if (displayNameInput) {
+    displayNameInput.required = !testerMode || editing;
+    displayNameInput.placeholder = testerMode ? 'optional · defaults to Tester' : 'Full name';
+  }
   if (roleSelect) {
     [...roleSelect.options].forEach((option) => {
-      if (option.value === 'admin') option.hidden = !isSuperAdmin();
+      if (option.value === 'admin') option.hidden = !isSuperAdmin() || testerMode;
     });
-    if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
+    if (testerMode || (!isSuperAdmin() && roleSelect.value === 'admin')) roleSelect.value = 'editor';
   }
+  if (roleLabel) roleLabel.hidden = Boolean(testerMode);
+  if (!editing) form.dataset.mode = testerMode ? 'tester' : 'create';
+  else if (testerMode) form.dataset.mode = 'tester';
+  else form.dataset.mode = 'edit';
+}
+
+function openUserFormToast({ editing = false } = {}) {
+  const root = ensureUserFormToast();
+  renderPagePermissionBoxes();
+  window.clearTimeout(userFormToastLeaveTimer);
+  root.hidden = false;
+  playOverlayEnter(root);
+  syncUserFormMode(root.querySelector('#user-form'));
+  const focusName = editing ? 'display_name' : 'username';
+  window.setTimeout(() => root.querySelector(`[name="${focusName}"]`)?.focus(), 40);
+}
+
+function hideUserFormToast() {
+  const root = document.querySelector('#admin-user-form-toast');
+  if (!root || root.hidden) return;
+  window.clearTimeout(userFormToastLeaveTimer);
+  userFormToastLeaveTimer = playOverlayLeave(root, { ms: 380, hide: true });
+}
+
+function resetUserForm(form = document.querySelector('#user-form'), { mode = 'create' } = {}) {
+  if (!form) return;
+  form.reset();
+  formControl(form, 'id').value = '';
+  form.dataset.mode = mode;
+  form.dataset.isTester = mode === 'tester' ? '1' : '0';
+  if (form.elements.active) form.elements.active.checked = true;
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => { input.checked = false; });
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = '';
+  syncUserFormMode(form);
+}
+
+function openNewUserToast() {
+  ensureUserFormToast();
+  resetUserForm(undefined, { mode: 'create' });
+  const status = document.querySelector('#user-status');
+  if (status) status.textContent = 'Saving will email a welcome invite with login details.';
+  openUserFormToast({ editing: false });
+}
+
+function openNewTesterToast() {
+  if (!isSuperAdmin()) return;
+  ensureUserFormToast();
+  resetUserForm(undefined, { mode: 'tester' });
+  const status = document.querySelector('#user-status');
+  if (status) {
+    status.textContent = 'Tester accounts skip required fields, send no email, and are only visible to Super Admins.';
+  }
+  openUserFormToast({ editing: false });
+}
+
+function openEditUserToast(user) {
+  if (!user || !canEditManagedUser(user)) return;
+  const root = ensureUserFormToast();
+  const form = root.querySelector('#user-form');
+  renderPagePermissionBoxes();
+  form.dataset.mode = user.is_tester ? 'tester' : 'edit';
+  form.dataset.isTester = user.is_tester ? '1' : '0';
+  fillForm(form, {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.is_tester ? 'editor' : user.role,
+    password: '',
+  });
+  form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+    input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+  });
+  form.elements.active.checked = Boolean(user.active);
+  const status = document.querySelector('#user-status');
+  if (status) {
+    status.textContent = user.is_tester
+      ? 'Tester changes save only — no email is sent. Still visible only to Super Admins.'
+      : 'Changes save only — no email is sent.';
+  }
+  openUserFormToast({ editing: true });
+}
+
+async function loadUsers() {
+  if (!hasPermission('users')) return;
+  syncTesterUserButton();
+  state.users = await jsonFetch('/api/admin/users');
+  const list = document.querySelector('#users-list');
+  if (!list) return;
   list.innerHTML = state.users.length
     ? state.users.map(user => {
       const editable = canEditManagedUser(user);
       const actions = editable
         ? `<div class="row-actions"><button type="button" data-edit-user="${user.id}">Edit</button>${Number(user.id) !== Number(state.me.user.id) ? `<button type="button" data-delete-user="${user.id}">Delete</button>` : ''}</div>`
         : '<div class="row-actions"><span class="muted">View only</span></div>';
+      const roleLabel = user.is_tester
+        ? 'TESTER'
+        : (isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR');
       return `
-    <article class="admin-row user-admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small></div>
+    <article class="admin-row user-admin-row${user.is_tester ? ' is-tester' : ''}">
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${roleLabel}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (user.is_tester ? 'tester account' : (isSuperAdmin(user) ? 'all permissions' : 'no permissions')))}</small></div>
       ${actions}
     </article>`;
     }).join('')
     : '<p class="draft">No users found.</p>';
   list.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => {
     const user = state.users.find(item => item.id === Number(button.dataset.editUser));
-    if (!user || !canEditManagedUser(user)) return;
-    const form = document.querySelector('#user-form');
-    fillForm(form, {
-      id: user.id,
-      username: user.username,
-      display_name: user.display_name,
-      role: user.role,
-      password: '',
-    });
-    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
-    });
-    form.elements.active.checked = Boolean(user.active);
-    const status = document.querySelector('#user-status');
-    if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
-    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    formControl(form, 'display_name')?.focus();
+    openEditUserToast(user);
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
     if (!user || !canEditManagedUser(user)) return;
-    if (!confirm('Delete this user?')) return;
+    if (!confirm(user.is_tester ? 'Delete this tester account?' : 'Delete this user?')) return;
     try {
       await jsonFetch(`/api/admin/users/${button.dataset.deleteUser}`, { method: 'DELETE' });
       await loadUsers();
@@ -3662,6 +5465,57 @@ async function loadUsers() {
       alert(error.message || 'Could not delete user.');
     }
   }));
+}
+
+async function loadSecurityLog() {
+  if (!isSuperAdmin()) return;
+  const list = document.querySelector('#security-log-list');
+  const status = document.querySelector('#security-log-status');
+  const download = document.querySelector('#download-security-log');
+  if (!list) return;
+  const actor = String(document.querySelector('#security-log-actor')?.value || '').trim();
+  const action = String(document.querySelector('#security-log-action')?.value || '').trim();
+  const params = new URLSearchParams({ limit: '250' });
+  if (actor) params.set('actor', actor);
+  if (action) params.set('action', action);
+  if (download) {
+    download.href = `/api/admin/security-log.txt?${params.toString()}`;
+  }
+  try {
+    if (status) status.textContent = 'Loading security log…';
+    const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) {
+      list.innerHTML = '<p class="draft">No security log entries yet.</p>';
+    } else {
+      list.innerHTML = entries.map((entry) => {
+        const when = escapeHtml(entry.created_at || '');
+        const who = escapeHtml(entry.actor_username || 'unknown');
+        const summary = escapeHtml(entry.summary || entry.action || '');
+        const route = escapeHtml(`${entry.method || ''} ${entry.path || ''}`.trim());
+        const meta = entry.meta && Object.keys(entry.meta).length
+          ? `<pre class="security-log-meta">${escapeHtml(JSON.stringify(entry.meta, null, 2))}</pre>`
+          : '';
+        return `<article class="security-log-entry">
+          <header>
+            <b>${when}</b>
+            <span>${who}</span>
+            <small>${escapeHtml(entry.action || '')}${entry.status != null ? ` · ${escapeHtml(String(entry.status))}` : ''}</small>
+          </header>
+          <p>${summary}</p>
+          ${route ? `<p class="muted mono">${route}</p>` : ''}
+          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}</p>` : ''}
+          ${meta}
+        </article>`;
+      }).join('');
+    }
+    if (status) {
+      status.textContent = `${entries.length} of ${data.total || entries.length} secured log entr${(data.total || entries.length) === 1 ? 'y' : 'ies'} (super admin only).`;
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;
+    if (status) status.textContent = error.message || 'Security log unavailable';
+  }
 }
 
 function defaultEventYear() {
@@ -3936,67 +5790,19 @@ async function savePhotoOrder(ids) {
 }
 
 function bindPhotoDragAndDrop(list) {
-  if (!list) return;
-  let dragId = null;
-  let allowRowDrag = false;
-
-  list.querySelectorAll('[data-photo-id]').forEach((row) => {
-    const handle = row.querySelector('.drag-handle');
-    handle?.addEventListener('mousedown', () => { allowRowDrag = true; });
-    handle?.addEventListener('touchstart', () => { allowRowDrag = true; }, { passive: true });
-    handle?.addEventListener('click', (event) => event.preventDefault());
-
-    row.addEventListener('dragstart', (event) => {
-      if (!allowRowDrag && !event.target.closest?.('.drag-handle')) {
-        event.preventDefault();
-        return;
-      }
-      dragId = Number(row.dataset.photoId);
-      row.classList.add('is-dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(dragId));
-      try { event.dataTransfer.setDragImage(row, 24, 24); } catch { /* older browsers */ }
-    });
-    row.addEventListener('dragend', () => {
-      allowRowDrag = false;
-      row.classList.remove('is-dragging');
-      list.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
-      dragId = null;
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (Number(row.dataset.photoId) !== dragId) row.classList.add('is-drop-target');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-    row.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      allowRowDrag = false;
-      row.classList.remove('is-drop-target');
-      const fromId = Number(event.dataTransfer.getData('text/plain') || dragId);
-      const toId = Number(row.dataset.photoId);
-      if (!fromId || !toId || fromId === toId) return;
-      const ordered = orderedPhotos();
-      const fromIndex = ordered.findIndex((photo) => photo.id === fromId);
-      const toIndex = ordered.findIndex((photo) => photo.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return;
-      const next = [...ordered];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const ids = next.map((photo) => photo.id);
+  bindAdminRowDragAndDrop(list, {
+    idAttr: 'photoId',
+    getOrdered: orderedPhotos,
+    applyLocalOrder: (next) => {
       state.photos = next.map((photo, index) => ({ ...photo, sort_order: index + 1 }));
       renderPhotos();
-      try {
-        await savePhotoOrder(ids);
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Photo order saved.';
-      } catch (error) {
-        console.error(error);
-        await loadPhotos();
-        const status = document.querySelector('#photo-status');
-        if (status) status.textContent = 'Could not save the new photo order.';
-      }
-    });
+    },
+    saveOrder: savePhotoOrder,
+    reload: loadPhotos,
+    errorStatusSelector: '#photo-status',
+    errorMessage: 'Could not save the new photo order.',
+    successStatusSelector: '#photo-status',
+    successMessage: 'Photo order saved.',
   });
 }
 
@@ -4134,7 +5940,10 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
+  const open = isMinutesViewOpen()
+    || isMinutesEditorOpen()
+    || isEnsemblesBodyEditorOpen()
+    || isFundraisingBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
@@ -4154,8 +5963,35 @@ function closeMinutesView() {
   syncMinutesFrameBodyLock();
 }
 
+function hideMinutesEditorCancelConfirm() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function showMinutesEditorCancelConfirm() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-minutes-confirm-yes]')?.focus();
+}
+
+function isMinutesEditorCancelConfirmOpen() {
+  const confirm = document.querySelector('[data-minutes-editor-confirm]');
+  return Boolean(confirm && !confirm.hidden);
+}
+
+function dismissMinutesEditor() {
+  hideMinutesEditorCancelConfirm();
+  closeMinutesEditor();
+  const selected = selectedMinutes();
+  if (selected) openMinutesView(selected.id);
+  else showMinutesIdle();
+}
+
 function closeMinutesEditor() {
   const modal = document.querySelector('#minutes-editor-modal');
+  hideMinutesEditorCancelConfirm();
   if (modal) modal.toggleAttribute('hidden', true);
   syncMinutesFrameBodyLock();
 }
@@ -4167,6 +6003,7 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   const title = document.querySelector('#minutes-editor-title');
   if (!modal || !form) return;
   closeMinutesView();
+  hideMinutesEditorCancelConfirm();
   modal.toggleAttribute('hidden', false);
   syncMinutesFrameBodyLock();
   if (title) title.textContent = editing ? 'Edit Minutes' : 'Add Minutes';
@@ -4227,7 +6064,7 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.'
     : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
@@ -4247,41 +6084,17 @@ function bindMinutesListClicks(root) {
   root?.querySelectorAll('[data-minutes-id]').forEach((button) => {
     button.addEventListener('click', () => {
       openMinutesView(Number(button.dataset.minutesId));
-      setMinutesNavOpen(false);
     });
   });
 }
 
-function syncMinutesNavToggleLabel() {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  if (!toggle) return;
-  const selected = selectedMinutes();
-  toggle.textContent = selected
-    ? (selected.meeting_date_display || selected.meeting_date || 'Minutes')
-    : 'Minutes';
-}
-
-function setMinutesNavOpen(open) {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  const menu = document.querySelector('#minutes-mobile-menu');
-  if (!toggle || !menu) return;
-  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  menu.hidden = !open;
-}
-
 function renderMinutesList() {
   const list = document.querySelector('#minutes-list');
-  const mobileMenu = document.querySelector('#minutes-mobile-menu');
   const markup = minutesListMarkup();
   if (list) {
     list.innerHTML = markup;
     bindMinutesListClicks(list);
   }
-  if (mobileMenu) {
-    mobileMenu.innerHTML = markup;
-    bindMinutesListClicks(mobileMenu);
-  }
-  syncMinutesNavToggleLabel();
 }
 
 function renderMinutesView(item) {
@@ -4377,7 +6190,7 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes below to create a new entry.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
@@ -4405,8 +6218,16 @@ function isEnsemblesBodyEditorOpen() {
   return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
+function isFundraisingBodyEditorOpen() {
+  const modal = document.querySelector('#fundraising-editor-modal');
+  return Boolean(modal && !modal.hasAttribute('hidden'));
+}
+
 function syncEnsemblesFrameBodyLock() {
-  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
+  document.body.classList.toggle(
+    'minutes-frame-open',
+    isEnsemblesBodyEditorOpen() || isFundraisingBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen(),
+  );
 }
 
 function closeEnsemblesBodyEditor() {
@@ -4521,24 +6342,177 @@ function bindEnsemblesBodyPanel() {
   });
 }
 
-function bindMinutesPanel() {
-  const toggle = document.querySelector('.minutes-nav-toggle');
-  if (toggle && toggle.dataset.bound !== '1') {
-    toggle.dataset.bound = '1';
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const open = toggle.getAttribute('aria-expanded') !== 'true';
-      setMinutesNavOpen(open);
-    });
-    document.addEventListener('click', (event) => {
-      const card = document.querySelector('.minutes-nav-card');
-      if (!card || card.contains(event.target)) return;
-      setMinutesNavOpen(false);
-    });
+function closeFundraisingBodyEditor() {
+  const modal = document.querySelector('#fundraising-editor-modal');
+  if (modal) {
+    modal.hidden = true;
+    modal.setAttribute('hidden', '');
   }
+  clearFundraisingBodyPhotoSelection();
+  hidePagePhotoToast();
+  syncEnsemblesFrameBodyLock();
+  syncMinutesFrameBodyLock();
+}
+
+function renderFundraisingBodyPreview() {
+  const preview = document.querySelector('#fundraising-body-preview');
+  if (!preview) return;
+  const html = String(state.fundraisingBodyHtml || '').trim();
+  preview.innerHTML = html || '<p class="draft">No fundraising content yet. Click Edit to create it.</p>';
+}
+
+function populateFundraisingBodyForm() {
+  const form = document.querySelector('#fundraising-body-form');
+  if (!form) return;
+  setFormRichEditorValue(form, 'body_html', state.fundraisingBodyHtml || '');
+}
+
+function openFundraisingBodyEditor({ statusText = '' } = {}) {
+  if (!canEditFundraisingBody()) return;
+  const modal = document.querySelector('#fundraising-editor-modal');
+  const form = document.querySelector('#fundraising-body-form');
+  if (!modal || !form) return;
+  populateFundraisingBodyForm();
+  modal.hidden = false;
+  modal.removeAttribute('hidden');
+  syncEnsemblesFrameBodyLock();
+  const status = document.querySelector('#fundraising-body-status');
+  if (status) {
+    status.textContent = statusText || 'Click where the photo should go, then use Photo. Click a photo to resize or delete it.';
+  }
+  window.setTimeout(() => {
+    const editor = form.querySelector('[data-rich-input="body_html"]');
+    editor?.focus();
+    if (editor) {
+      editor.classList.add('is-focused');
+      savePageRichSelection(editor);
+    }
+  }, 30);
+}
+
+function readFundraisingBodyHtml(form) {
+  syncFormRichEditors(form);
+  const control = formControl(form, 'body_html');
+  let html = String(control?.value || '').trim();
+  if (!html.replace(/<[^>]+>/g, '').trim() && !/<img\b/i.test(html)) {
+    const editor = form?.querySelector('[data-rich-input="body_html"]');
+    const fromEditor = String(editor?.innerHTML || '').trim();
+    if (fromEditor.replace(/<[^>]+>/g, '').trim() || /<img\b/i.test(fromEditor)) {
+      html = fromEditor;
+      if (control) control.value = fromEditor;
+    }
+  }
+  return html;
+}
+
+async function saveFundraisingBodyForm(form) {
+  const status = document.querySelector('#fundraising-body-status');
+  if (!canEditFundraisingBody()) {
+    if (status) status.textContent = 'You do not have permission to edit Fundraising.';
+    return;
+  }
+  const bodyHtml = readFundraisingBodyHtml(form);
+  if (!bodyHtml.replace(/<[^>]+>/g, '').trim() && !/<img\b/i.test(bodyHtml)) {
+    if (status) status.textContent = 'Fundraising content is required.';
+    form.querySelector('[data-rich-input="body_html"]')?.focus();
+    return;
+  }
+  if (status) status.textContent = 'Saving fundraising…';
+  try {
+    const saved = await jsonFetch('/api/admin/fundraising/body', {
+      method: 'PUT',
+      body: JSON.stringify({ body_html: bodyHtml }),
+    });
+    state.fundraisingBodyHtml = String(saved?.body_html || bodyHtml);
+    renderFundraisingBodyPreview();
+    closeFundraisingBodyEditor();
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = 'Fundraising saved.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save fundraising.';
+  }
+}
+
+async function loadFundraisingBody() {
+  if (!canEditFundraisingBody()) return;
+  try {
+    const result = await jsonFetch('/api/admin/fundraising/body');
+    state.fundraisingBodyHtml = String(result?.body_html || '');
+    renderFundraisingBodyPreview();
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = '';
+  } catch (error) {
+    const panelStatus = document.querySelector('#fundraising-body-panel-status');
+    if (panelStatus) panelStatus.textContent = error.message || 'Could not load fundraising.';
+  }
+}
+
+function bindFundraisingBodyPanel() {
+  bindFundraisingBodyPhotoResize();
+  document.querySelector('#edit-fundraising-body')?.addEventListener('click', () => {
+    if (!canEditFundraisingBody()) return;
+    openFundraisingBodyEditor();
+  });
+  document.querySelectorAll('[data-fundraising-editor-dismiss], #cancel-fundraising-edit').forEach((button) => {
+    button.addEventListener('click', () => closeFundraisingBodyEditor());
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isFundraisingBodyEditorOpen()) return;
+    if (fundraisingPhotoResize.img) {
+      clearFundraisingBodyPhotoSelection();
+      return;
+    }
+    closeFundraisingBodyEditor();
+  });
+  document.querySelector('#fundraising-body-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await saveFundraisingBodyForm(event.currentTarget);
+  });
+  const form = document.querySelector('#fundraising-body-form');
+  form?.querySelector('[data-fundraising-insert-line]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  form?.querySelector('[data-fundraising-insert-line]')?.addEventListener('click', () => {
+    const editor = restorePageRichSelection() || getFundraisingBodyEditor();
+    if (!editor) return;
+    insertRichEditorLineBreak(editor);
+    syncFormRichEditors(form);
+    savePageRichSelection(editor);
+  });
+  form?.querySelector('[data-fundraising-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  form?.querySelector('[data-fundraising-insert-photo]')?.addEventListener('click', () => {
+    const editor = getFundraisingBodyEditor();
+    if (editor) savePageRichSelection(editor);
+    showPagePhotoToast();
+  });
+  const editor = form?.querySelector('[data-rich-input="body_html"]');
+  editor?.addEventListener('focusin', (event) => {
+    event.currentTarget.classList.add('is-focused');
+    savePageRichSelection(event.currentTarget);
+  });
+  editor?.addEventListener('keyup', (event) => {
+    savePageRichSelection(event.currentTarget);
+  });
+  editor?.addEventListener('mouseup', (event) => {
+    savePageRichSelection(event.currentTarget);
+  });
+  editor?.addEventListener('scroll', () => positionFundraisingPhotoResizeHandles());
+  document.querySelector('#fundraising-editor-modal')?.addEventListener('scroll', () => {
+    positionFundraisingPhotoResizeHandles();
+  }, true);
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-open-fundraising-body]');
+    if (!button) return;
+    event.preventDefault();
+    if (!canEditFundraisingBody()) {
+      alert('You need the Fundraising page permission to edit Fundraising.');
+      return;
+    }
+    activateTab('fundraising-body');
+  });
+}
+
+function bindMinutesPanel() {
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
-    setMinutesNavOpen(false);
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });
@@ -4553,19 +6527,23 @@ function bindMinutesPanel() {
   });
   document.querySelectorAll('[data-minutes-editor-dismiss], #cancel-minutes-edit').forEach((button) => {
     button.addEventListener('click', () => {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      showMinutesEditorCancelConfirm();
     });
+  });
+  document.querySelector('[data-minutes-confirm-no]')?.addEventListener('click', () => {
+    hideMinutesEditorCancelConfirm();
+  });
+  document.querySelector('[data-minutes-confirm-yes]')?.addEventListener('click', () => {
+    dismissMinutesEditor();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (isMinutesEditorOpen()) {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      if (isMinutesEditorCancelConfirmOpen()) {
+        hideMinutesEditorCancelConfirm();
+        return;
+      }
+      showMinutesEditorCancelConfirm();
       return;
     }
     if (isMinutesViewOpen()) {
@@ -4623,7 +6601,10 @@ function bindMinutesPanel() {
 
 async function refreshAll() {
   await loadMe();
-  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody()]);
+  await Promise.all([loadSite(), loadPages(), loadSponsors(), loadStaff(), loadBoosterMembers(), loadUsers(), loadMailRecipients(), loadEvents(), loadPhotos(), loadContactTopics(), loadMinutes(), loadEnsemblesBody(), loadFundraisingBody()]);
+  if (mustChangePassword()) {
+    showPasswordToast({ required: true });
+  }
 }
 
 function bindPasswordControls() {
@@ -4665,6 +6646,7 @@ function bindPasswordControls() {
           confirm_password: confirmPassword,
         }),
       });
+      if (state.me?.user) state.me.user.must_change_password = false;
       form.reset();
       if (status) status.textContent = '';
       hidePasswordToast();
@@ -4689,7 +6671,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. All public pages now redirect to maintenance.html.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });
@@ -4698,11 +6680,27 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#logo-status');
-    status.textContent = 'Uploading...';
-    const result = await jsonFetch('/api/admin/logo', { method: 'POST', body: new FormData(form) });
-    form.reset();
-    fillForm(document.querySelector('#site-form'), result.site);
-    status.textContent = 'Logo uploaded and saved.';
+    const file = form.elements.file?.files?.[0];
+    if (!file) {
+      status.textContent = 'Choose a logo image first.';
+      return;
+    }
+    try {
+      status.textContent = file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+        ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+        : 'Uploading…';
+      const uploadFile = await prepareImageFileForUpload(file);
+      const body = new FormData();
+      body.set('file', uploadFile);
+      const result = await jsonFetch('/api/admin/logo', { method: 'POST', body });
+      form.reset();
+      fillForm(document.querySelector('#site-form'), result.site);
+      status.textContent = uploadFile !== file
+        ? 'Logo uploaded (auto-compressed) and saved.'
+        : 'Logo uploaded and saved.';
+    } catch (error) {
+      status.textContent = error.message || 'Could not upload logo.';
+    }
   });
 
   document.querySelector('#page-form')?.addEventListener('submit', async event => {
@@ -4763,6 +6761,49 @@ function bindForms() {
 
   document.querySelectorAll('[data-open-social-tab]').forEach((button) => {
     button.addEventListener('click', () => activateTab('social'));
+  });
+
+  document.querySelector('#zernio-api-key-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const statusEl = document.querySelector('#zernio-api-key-status');
+    const apiKey = String(form.elements.api_key?.value || '').trim();
+    if (!apiKey) {
+      if (statusEl) statusEl.textContent = 'Paste a Zernio API key first.';
+      return;
+    }
+    if (statusEl) statusEl.textContent = 'Saving API key…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/api-key', {
+        method: 'POST',
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+      form.reset();
+      renderZernioFacebookStatus(result);
+      await loadSocialPanel({ sync: Boolean(result?.configured) });
+      if (statusEl) statusEl.textContent = result?.configured
+        ? 'Zernio API key saved. You can connect and post now.'
+        : 'Key saved, but Zernio still looks unconfigured. Check the key and try again.';
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not save Zernio API key.';
+    }
+  });
+
+  document.querySelector('#zernio-api-key-clear')?.addEventListener('click', async () => {
+    const statusEl = document.querySelector('#zernio-api-key-status');
+    if (!confirm('Clear the Zernio API key saved in the CMS?')) return;
+    if (statusEl) statusEl.textContent = 'Clearing…';
+    try {
+      const result = await jsonFetch('/api/admin/zernio/api-key', {
+        method: 'POST',
+        body: JSON.stringify({ clear: true }),
+      });
+      renderZernioFacebookStatus(result);
+      await loadSocialPanel();
+      if (statusEl) statusEl.textContent = 'Saved CMS API key cleared.';
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not clear Zernio API key.';
+    }
   });
 
   document.querySelector('#zernio-facebook-refresh')?.addEventListener('click', async () => {
@@ -4886,8 +6927,12 @@ function bindForms() {
       delete payload.sort_order;
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
+        if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+          status.textContent = `Compressing photo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
+        }
+        const uploadFile = await prepareImageFileForUpload(file);
         const upload = new FormData();
-        upload.set('file', file);
+        upload.set('file', uploadFile);
         upload.set('alt_text', payload.name || 'Staff photo');
         upload.set('caption', plainTextFromHtml(payload.role) || 'Directors & Staff');
         // Negative sort keeps staff photos out of the public Photo gallery listing.
@@ -4936,8 +6981,12 @@ function bindForms() {
       delete payload.sort_order;
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
+        if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+          status.textContent = `Compressing photo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
+        }
+        const uploadFile = await prepareImageFileForUpload(file);
         const upload = new FormData();
-        upload.set('file', file);
+        upload.set('file', uploadFile);
         upload.set('alt_text', payload.name || 'Booster member photo');
         upload.set('caption', plainTextFromHtml(payload.role) || 'Booster Members');
         upload.set('sort_order', '-500');
@@ -4971,89 +7020,288 @@ function bindForms() {
     formControl(form, 'name')?.focus();
   });
 
-  document.querySelector('#sponsor-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-status');
-    const payload = formPayload(form);
-    delete payload.homepage_ad;
-    payload.city = String(payload.city || 'Kernersville').trim() || 'Kernersville';
-    payload.state = String(payload.state || 'NC').trim() || 'NC';
-    const id = payload.id;
-    delete payload.id;
-    delete payload.logo_file;
-    delete payload.sort_order;
-    if (status) status.textContent = 'Saving…';
-    try {
-      const file = formControl(form, 'logo_file')?.files?.[0];
-      if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Sponsor logo');
-        upload.set('caption', payload.level || 'Sponsor');
-        // Negative sort keeps sponsor logos out of the public Photo gallery listing.
-        upload.set('sort_order', '-400');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
-        payload.logo_url = stored.url;
-        formControl(form, 'logo_url').value = stored.url;
-        syncSponsorLogoPreview(form, stored.url);
-      }
-      await jsonFetch(id ? `/api/admin/sponsors/${id}` : '/api/admin/sponsors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      if (status) status.textContent = 'Sponsor saved. The public Sponsors page updates automatically.';
-      resetSponsorForm(form);
-      await loadSponsors();
-    } catch (error) {
-      if (status) status.textContent = `Could not save sponsor: ${error.message}`;
-    }
-  });
-
-  document.querySelector('#sponsor-form [name="logo_url"]')?.addEventListener('input', (event) => {
-    syncSponsorLogoPreview(event.currentTarget.form, event.currentTarget.value);
-  });
-  document.querySelector('#sponsor-form [name="logo_file"]')?.addEventListener('change', (event) => {
-    const form = event.currentTarget.form;
-    const file = event.currentTarget.files?.[0];
-    if (!file) {
-      syncSponsorLogoPreview(form);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(file);
-    syncSponsorLogoPreview(form, objectUrl);
-  });
-  document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
-    syncSponsorTierBenefits(event.currentTarget.form);
-  });
   document.querySelector('#print-gold-sponsors')?.addEventListener('click', () => {
     printGoldSponsorsPdf();
   });
-  syncSponsorTierBenefits();
 
-  document.querySelector('#sponsor-ad-settings-form')?.addEventListener('submit', async (event) => {
+  document.querySelector('#refresh-ledger')?.addEventListener('click', async () => {
+    const status = document.querySelector('#ledger-status');
+    if (status) status.textContent = 'Refreshing…';
+    try {
+      await jsonFetch('/api/admin/ledger?rebuild=1');
+      await loadLedger();
+      if (status) status.textContent = 'Ledger refreshed.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not refresh ledger.';
+    }
+  });
+
+  document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
+    loadSecurityLog().catch(() => {});
+  });
+  let securityLogFilterTimer = null;
+  ['#security-log-actor', '#security-log-action'].forEach((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      loadSecurityLog().catch(() => {});
+    });
+    el.addEventListener('input', () => {
+      clearTimeout(securityLogFilterTimer);
+      securityLogFilterTimer = setTimeout(() => {
+        loadSecurityLog().catch(() => {});
+      }, 300);
+    });
+  });
+
+  document.querySelector('#download-ledger-excel')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#ledger-status');
+    if (status) status.textContent = 'Preparing Excel download…';
+    try {
+      const response = await fetch('/api/admin/ledger.xls', {
+        credentials: 'same-origin',
+        headers: { accept: 'application/vnd.ms-excel' },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Download failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'efhs-payment-ledger.xls';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      if (status) status.textContent = 'Excel ledger downloaded.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not download Excel.';
+      showFailedToast(error.message || 'Could not download Excel.');
+    }
+  });
+
+  document.querySelector('#new-ledger-entry')?.addEventListener('click', () => {
+    showLedgerEntryToast();
+  });
+
+  document.querySelector('#checkout-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAccessCheckout()) return;
+    const form = event.currentTarget;
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const item = String(form.elements.item?.value || '').trim();
+    const amountDisplay = String(form.elements.amount_display?.value || '').trim();
+    const payerName = String(form.elements.payer_name?.value || '').trim();
+    const note = String(form.elements.note?.value || '').trim();
+    if (!payerName) {
+      if (status) status.textContent = 'User name or entity is required.';
+      form.elements.payer_name?.focus();
+      return;
+    }
+    if (!item) {
+      if (status) status.textContent = 'Description of transaction is required.';
+      form.elements.item?.focus();
+      return;
+    }
+    if (!amountDisplay) {
+      if (status) status.textContent = 'Amount is required.';
+      form.elements.amount_display?.focus();
+      return;
+    }
+    if (!checkoutCardController) {
+      if (status) status.textContent = 'Square card form is not ready.';
+      await initCheckoutPanel();
+      return;
+    }
+    if (submit) submit.disabled = true;
+    if (status) status.textContent = 'Processing payment…';
+    try {
+      const amountCents = Math.round(Number(String(amountDisplay).replace(/[^0-9.]/g, '')) * 100);
+      if (!Number.isFinite(amountCents) || amountCents < 100) {
+        throw new Error('Amount must be at least $1.00');
+      }
+      const verificationDetails = {
+        amount: (amountCents / 100).toFixed(2),
+        currencyCode: 'USD',
+        intent: 'CHARGE',
+        customerInitiated: false,
+        sellerKeyedIn: true,
+        billingContact: {
+          givenName: (payerName || item).slice(0, 100),
+          countryCode: 'US',
+        },
+      };
+      const tokenResult = await checkoutCardController.tokenize(verificationDetails);
+      if (tokenResult.status !== 'OK' || !tokenResult.token) {
+        throw new Error(tokenResult.errors?.[0]?.message || 'Card could not be processed.');
+      }
+      const paid = await jsonFetch('/api/admin/checkout/pay', {
+        method: 'POST',
+        body: JSON.stringify({
+          item,
+          amount_display: amountDisplay,
+          amount_cents: amountCents,
+          payer_name: payerName,
+          note,
+          source_id: tokenResult.token,
+        }),
+      });
+      form.reset();
+      showSavedToast(paid.detail || 'Payment charged.');
+      if (status) status.textContent = paid.detail || 'Payment charged.';
+      await initCheckoutPanel();
+    } catch (error) {
+      const detail = error?.message || 'Payment failed.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+      if (submit) submit.disabled = false;
+    }
+  });
+
+  const ledgerToast = ensureLedgerEntryToast();
+  ledgerToast.querySelector('#ledger-entry-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const status = document.querySelector('#sponsor-ad-settings-status');
-    const seconds = Number(formControl(form, 'sponsor_ad_seconds')?.value);
-    if (!Number.isFinite(seconds)) {
-      if (status) status.textContent = 'Enter a valid number of seconds.';
+    const status = document.querySelector('#ledger-entry-status');
+    const kind = String(form.elements.kind?.value || 'donor').trim().toLowerCase();
+    const entryMode = String(form.elements.entry_mode?.value || 'cash').trim().toLowerCase();
+    const name = String(form.elements.name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const amountDisplay = String(form.elements.amount_display?.value || '').trim();
+    const packageLabel = String(form.elements.package?.value || '').trim();
+    const note = String(form.elements.note?.value || '').trim();
+    const paidDate = String(form.elements.paid_at?.value || '').trim();
+    if (!name) {
+      if (status) status.textContent = 'Name or business is required.';
+      return;
+    }
+    if (!amountDisplay) {
+      if (status) status.textContent = 'Amount is required.';
       return;
     }
     if (status) status.textContent = 'Saving…';
     try {
-      const saved = await jsonFetch('/api/admin/sponsors/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ sponsor_ad_seconds: seconds }),
+      const paidAt = paidDate ? `${paidDate}T12:00:00.000Z` : new Date().toISOString();
+      await jsonFetch('/api/admin/ledger', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind,
+          name,
+          address,
+          amount_display: amountDisplay,
+          package: packageLabel,
+          note,
+          paid_at: paidAt,
+          entry_mode: entryMode === 'in_kind' ? 'in_kind' : 'cash',
+          money_exchanged: entryMode !== 'in_kind',
+        }),
       });
-      formControl(form, 'sponsor_ad_seconds').value = String(saved.sponsor_ad_seconds);
-      if (status) status.textContent = `Homepage fly-in will close after ${saved.sponsor_ad_seconds} seconds.`;
+      hideLedgerEntryToast();
+      showSavedToast('Ledger entry saved.');
+      await loadLedger();
     } catch (error) {
-      if (status) status.textContent = `Could not save ad timing: ${error.message}`;
+      const detail = error?.message || 'Could not save ledger entry.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
     }
   });
 
   document.querySelector('#new-sponsor')?.addEventListener('click', () => {
-    resetSponsorForm(document.querySelector('#sponsor-form'));
-    document.querySelector('#sponsor-status').textContent = 'Creating a new sponsor.';
-    formControl(document.querySelector('#sponsor-form'), 'name')?.focus();
+    showManualAddSponsorToast();
+  });
+
+  const sponsorToast = ensureSponsorFormToast();
+  sponsorToast.querySelector('#sponsor-manual-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#sponsor-manual-status');
+    const mode = form.dataset.mode === 'edit' ? 'edit' : 'add';
+    const tier = String(form.elements.tier?.value || '').trim().toLowerCase();
+    const businessName = String(form.elements.business_name?.value || '').trim();
+    const address = String(form.elements.address?.value || '').trim();
+    const phone = String(form.elements.phone?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim();
+    const logo = form.elements.logo?.files?.[0];
+    if (status) status.textContent = 'Saving…';
+    try {
+      if (mode === 'edit') {
+        const id = String(form.elements.id?.value || '').trim();
+        if (!id) {
+          showFailedToast('Missing sponsor id.');
+          return;
+        }
+        const level = tier === 'gold' ? 'Gold Sponsor' : tier === 'silver' ? 'Silver Sponsor' : 'Bronze Sponsor';
+        let logoUrl = String(form.elements.logo_url?.value || '').trim();
+        if (logo) {
+          if (status) {
+            status.textContent = logo.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+              ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+              : 'Uploading logo…';
+          }
+          const uploadFile = await prepareImageFileForUpload(logo);
+          const upload = new FormData();
+          upload.set('file', uploadFile);
+          upload.set('alt_text', businessName || 'Sponsor logo');
+          upload.set('caption', level);
+          upload.set('sort_order', '-400');
+          const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+          logoUrl = stored.url || logoUrl;
+        }
+        if (!phone) {
+          if (status) status.textContent = 'Phone is required.';
+          showFailedToast('Phone is required.');
+          return;
+        }
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          if (status) status.textContent = 'A valid invoice email is required.';
+          showFailedToast('A valid invoice email is required.');
+          return;
+        }
+        await jsonFetch(`/api/admin/sponsors/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: businessName,
+            address,
+            phone,
+            email,
+            logo_url: logoUrl,
+            level,
+            active: form.elements.active?.value !== '0',
+          }),
+        });
+      } else {
+        const amounts = MANUAL_SPONSOR_TIER_AMOUNTS[tier] || MANUAL_SPONSOR_TIER_AMOUNTS.gold;
+        const bypass = Boolean(form.elements.bypass_payment?.checked) && canBypassSponsorPayment();
+        const body = new FormData();
+        body.set('business_name', businessName);
+        body.set('address', address);
+        body.set('phone', phone);
+        body.set('email', email);
+        body.set('tier', tier);
+        body.set('amount_cents', String(amounts.cents));
+        body.set('amount_display', amounts.display);
+        if (bypass) body.set('bypass_payment', '1');
+        if (logo) {
+          if (status) {
+            status.textContent = logo.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES
+              ? `Compressing logo to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`
+              : 'Uploading logo…';
+          }
+          body.set('logo', await prepareImageFileForUpload(logo));
+        }
+        await jsonFetch('/api/admin/sponsors/manual', { method: 'POST', body });
+      }
+      hideSponsorFormToast();
+      await loadSponsors();
+    } catch (error) {
+      const detail = error?.message || 'Could not save sponsor.';
+      if (status) status.textContent = detail;
+      showFailedToast(detail);
+    }
   });
 
   document.querySelector('#contact-topic-form')?.addEventListener('submit', async (event) => {
@@ -5097,59 +7345,98 @@ function bindForms() {
     formControl(form, 'label')?.focus();
   });
 
-  document.querySelector('#user-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const status = document.querySelector('#user-status');
-    const payload = formPayload(form);
-    payload.username = String(payload.username || '').trim();
-    payload.display_name = String(payload.display_name || '').trim();
-    payload.password = String(payload.password || '');
-    if (!payload.username) {
-      status.textContent = 'Username is required.';
-      return;
-    }
-    if (!payload.display_name) {
-      status.textContent = 'Display name is required.';
-      return;
-    }
-    const id = payload.id;
-    if (!id && !payload.password) {
-      status.textContent = 'Password is required for new users.';
-      return;
-    }
-    if (payload.password && payload.password.length < 8) {
-      status.textContent = 'Password must be at least 8 characters.';
-      return;
-    }
-    payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
-    delete payload.id;
-    if (!payload.password) delete payload.password;
-    status.textContent = 'Saving…';
-    try {
-      await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      status.textContent = 'User saved.';
-      form.reset();
-      form.elements.active.checked = true;
-      form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
-      await loadUsers();
-    } catch (error) {
-      let message = 'Could not save user.';
-      try {
-        const parsed = JSON.parse(String(error.message || ''));
-        if (parsed?.detail) message = parsed.detail;
-      } catch {
-        if (error?.message) message = error.message;
+  const bindUserForm = () => {
+    const form = ensureUserFormToast().querySelector('#user-form');
+    if (!form || form.dataset.boundUserSubmit === '1') return;
+    form.dataset.boundUserSubmit = '1';
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = document.querySelector('#user-status');
+      const listStatus = document.querySelector('#users-list-status');
+      const payload = formPayload(form);
+      payload.username = String(payload.username || '').trim();
+      payload.display_name = String(payload.display_name || '').trim();
+      payload.password = String(payload.password || '');
+      const id = payload.id;
+      const creatingTester = !id && (form.dataset.mode === 'tester' || form.dataset.isTester === '1');
+      if (!creatingTester && !payload.username) {
+        if (status) status.textContent = 'Username is required.';
+        return;
       }
-      status.textContent = message;
-    }
-  });
+      if (!creatingTester && !payload.display_name) {
+        if (status) status.textContent = 'Display name is required.';
+        return;
+      }
+      if (!id && !creatingTester && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.username)) {
+        if (status) status.textContent = 'Username must be a valid email address so we can send the welcome invite.';
+        return;
+      }
+      if (!id && !creatingTester && !payload.password) {
+        if (status) status.textContent = 'Password is required for new users.';
+        return;
+      }
+      if (payload.password && payload.password.length < 8) {
+        if (status) status.textContent = 'Password must be at least 8 characters.';
+        return;
+      }
+      payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
+      delete payload.id;
+      if (!payload.password) delete payload.password;
+      if (creatingTester) {
+        payload.is_tester = true;
+        payload.role = 'editor';
+      }
+      if (status) {
+        status.textContent = id
+          ? 'Updating…'
+          : (creatingTester ? 'Creating tester…' : 'Sending invite…');
+      }
+      try {
+        const result = await jsonFetch(id ? `/api/admin/users/${id}` : '/api/admin/users', {
+          method: id ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        });
+        let message = id ? 'User updated.' : 'User saved.';
+        if (!id && creatingTester) {
+          message = result?.generated_password
+            ? `Tester created. Username: ${result.username}. Password: ${result.generated_password}`
+            : `Tester created. Username: ${result?.username || 'saved'}. No email sent.`;
+        } else if (!id && result?.invite_detail) {
+          message = result.invite_sent
+            ? result.invite_detail
+            : `User saved, but invite email failed: ${result.invite_detail}`;
+        }
+        if (listStatus) listStatus.textContent = message;
+        if (status) status.textContent = message;
+        hideUserFormToast();
+        resetUserForm(form);
+        await loadUsers();
+        if (!id && creatingTester) {
+          showSavedToast('Tester created.');
+        } else if (!id && result?.invite_sent) {
+          showSavedToast('Invite sent.', { icon: 'envelope' });
+        } else if (id) {
+          showSavedToast(result?.is_tester ? 'Tester updated.' : 'User updated.');
+        }
+      } catch (error) {
+        let message = id ? 'Could not update user.' : 'Could not save user.';
+        try {
+          const parsed = JSON.parse(String(error.message || ''));
+          if (parsed?.detail) message = parsed.detail;
+        } catch {
+          if (error?.message) message = error.message;
+        }
+        if (status) status.textContent = message;
+      }
+    });
+  };
+  bindUserForm();
 
   document.querySelector('#new-user')?.addEventListener('click', () => {
-    const form = document.querySelector('#user-form');
-    form.reset();
-    form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    openNewUserToast();
+  });
+  document.querySelector('#new-tester')?.addEventListener('click', () => {
+    openNewTesterToast();
   });
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
@@ -5265,13 +7552,23 @@ function bindForms() {
       status.textContent = 'Choose a photo file first.';
       return;
     }
-    const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
-    status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
     try {
-      await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      if (file.size > IMAGE_UPLOAD_CLIENT_TARGET_BYTES) {
+        status.textContent = `Compressing ${file.name || 'photo'} to fit ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}…`;
+      }
+      const uploadFile = await prepareImageFileForUpload(file);
+      const sizeKb = Math.max(1, Math.round(Number(uploadFile.size || 0) / 1024));
+      status.textContent = `Uploading ${uploadFile.name || 'photo'} (${sizeKb} KB)…`;
+      const body = new FormData();
+      body.append('file', uploadFile);
+      body.append('alt_text', altText);
+      body.append('caption', caption);
+      await jsonFetch('/api/admin/photos', { method: 'POST', body });
       resetPhotoForm();
       await loadPhotos();
-      status.textContent = 'Photo uploaded.';
+      status.textContent = uploadFile !== file
+        ? `Photo uploaded (auto-compressed under ${IMAGE_UPLOAD_CLIENT_TARGET_LABEL}).`
+        : 'Photo uploaded.';
     } catch (error) {
       const detail = String(error?.message || '').trim() || 'Unknown error';
       status.textContent = `Photo upload failed: ${detail}`;
@@ -5292,12 +7589,15 @@ bindForms();
 bindMailComposer();
 bindMinutesPanel();
 bindEnsemblesBodyPanel();
+bindFundraisingBodyPanel();
 refreshAll()
   .then(() => {
     applyZernioQueryFeedback();
   })
   .catch(error => {
   console.error(error);
+  document.body.classList.remove('cms-booting');
+  document.body.classList.add('cms-ready');
   document.body.insertAdjacentHTML('afterbegin', `<div class="admin-card error">CMS failed to load: ${escapeHtml(error.message)}</div>`);
 });
 
