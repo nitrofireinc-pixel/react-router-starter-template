@@ -213,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'ledger-dues-entry-20260813';
+const ASSET_VERSION = 'zernio-connect-timeout-20260814';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
@@ -1936,15 +1936,30 @@ function zernioConfigured(env) {
 async function zernioApi(env, path, options = {}) {
   const apiKey = String(env.ZERNIO_API_KEY || '').trim();
   if (!apiKey) throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets.');
-  const response = await fetch(`${ZERNIO_API_BASE}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
+  const { timeoutMs: _ignoredTimeout, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${ZERNIO_API_BASE}${path}`, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(fetchOptions.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Zernio request timed out. Try Connect Facebook again in a moment.');
+    }
+    throw new Error(error?.message || 'Could not reach Zernio');
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let data = null;
   try {
@@ -2510,16 +2525,16 @@ async function finalizeZernioFacebookCallback(env, request, url) {
 }
 
 async function handleZernioFacebookConnect(request, env) {
-  await initDb(env);
-  const user = await currentUser(request, env);
-  if (!user) return redirect('/admin/login');
-  if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
-  }
-  if (!zernioConfigured(env)) {
-    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
-  }
   try {
+    await initDb(env);
+    const user = await currentUser(request, env);
+    if (!user) return redirect('/admin/login');
+    if (!hasPermission(user, 'site')) {
+      return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    }
+    if (!zernioConfigured(env)) {
+      return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
+    }
     const profileId = await ensureZernioProfileId(env);
     // Always return to the public custom domain so session cookies match the CMS the admin uses.
     const redirectUrl = zernioFacebookCallbackUrl(request, env);
@@ -2535,7 +2550,7 @@ async function handleZernioFacebookConnect(request, env) {
     return redirect(authUrl);
   } catch (error) {
     const message = escapeHtml(error?.message || 'Could not start Facebook OAuth');
-    return htmlResponse(`<!doctype html><title>Facebook connect failed</title><p>${message}</p><p><a href="/admin">Back to CMS</a></p>`, 502);
+    return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Facebook connect failed</title><link rel="stylesheet" href="/styles.css"></head><body class="admin-body"><main class="admin-shell small"><h1>Facebook connect failed</h1><p>${message}</p><p><a class="btn primary" href="/admin?tab=social">Back to Social / Facebook</a></p></main></body></html>`, 502);
   }
 }
 
