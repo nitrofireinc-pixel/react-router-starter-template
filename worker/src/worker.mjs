@@ -213,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'zernio-posts-502-sanitize-20260814';
+const ASSET_VERSION = 'zernio-sync-timeout-fix-20260814';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
@@ -1970,7 +1970,8 @@ async function zernioApi(env, path, options = {}) {
   if (!apiKey) {
     throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets, or paste it in Social / Facebook (Super Admin).');
   }
-  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
+  // Keep default short — stacked sync calls were exceeding Pages Function wall time (HTML 502).
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 8000;
   const { timeoutMs: _ignoredTimeout, ...fetchOptions } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1988,7 +1989,7 @@ async function zernioApi(env, path, options = {}) {
     });
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new Error('Zernio request timed out. Try Connect Facebook again in a moment.');
+      throw new Error('Zernio request timed out. Try again in a moment.');
     }
     throw new Error(error?.message || 'Could not reach Zernio');
   } finally {
@@ -2125,10 +2126,10 @@ async function selectZernioFacebookPage(env, pending, pageId, requestUrl = '') {
   return connection;
 }
 
-async function ensureZernioProfileId(env) {
+async function ensureZernioProfileId(env, { timeoutMs = 8000 } = {}) {
   const existing = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
   if (existing) return existing;
-  const listed = await zernioApi(env, '/profiles');
+  const listed = await zernioApi(env, '/profiles', { timeoutMs });
   const profiles = Array.isArray(listed?.profiles) ? listed.profiles : [];
   const named = profiles.find((profile) => String(profile?.name || '').trim().toLowerCase() === 'east forsyth band');
   const fallback = named || profiles.find((profile) => profile?.isDefault) || profiles[0];
@@ -2139,6 +2140,7 @@ async function ensureZernioProfileId(env) {
   }
   const created = await zernioApi(env, '/profiles', {
     method: 'POST',
+    timeoutMs,
     body: JSON.stringify({
       name: 'East Forsyth Band',
       description: 'EFHS Band CMS social publishing profile',
@@ -2156,41 +2158,23 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   let stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
   let pending = await getZernioFacebookPending(env);
   let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || pending?.profileId || '').trim();
+  let syncError = '';
   if (configured && sync) {
     try {
-      profileId = await ensureZernioProfileId(env);
-      const live = await syncZernioFacebookConnection(env, profileId);
+      // One short upstream pass — never stack multiple 15s waits (Pages returns HTML 502).
+      profileId = await ensureZernioProfileId(env, { timeoutMs: 8000 });
+      const live = await syncZernioFacebookConnection(env, profileId, { timeoutMs: 8000 });
       if (live) {
         stored = live;
         if (pending) {
           await setZernioFacebookPending(env, null);
           pending = null;
         }
-      } else if (stored?.accountId) {
-        // Stored account no longer present remotely.
-        const data = await zernioApi(env, '/accounts');
-        const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
-        const stillThere = accounts.some((account) => String(account?._id || account?.accountId || '') === stored.accountId);
-        if (!stillThere) {
-          await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, '');
-          stored = null;
-        }
       }
+      // If sync finds no live account, keep the stored connection rather than issuing
+      // a second /accounts call that can push the request over the gateway limit.
     } catch (error) {
-      return {
-        configured,
-        configured_source: resolvedKey.source,
-        connected: Boolean(stored?.accountId),
-        needsPageSelection: Boolean(pending && !stored?.accountId),
-        profileId,
-        account: stored,
-        detail: stored?.accountId
-          ? `Connected: ${stored.name || stored.accountId}`
-          : (pending
-            ? 'Facebook login finished. Choose which Page to connect below.'
-            : `Could not refresh Zernio status: ${error.message}`),
-        error: error.message,
-      };
+      syncError = friendlyHttpErrorMessage(error.message, 'Could not refresh Zernio status');
     }
   }
   const needsPageSelection = Boolean(pending && !stored?.accountId);
@@ -2200,6 +2184,13 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   } catch {
     debug = null;
   }
+  const baseDetail = configured
+    ? (stored?.accountId
+      ? `Connected: ${stored.name || stored.accountId}`
+      : (needsPageSelection
+        ? 'Facebook login finished. Choose which Page to connect below.'
+        : 'Ready to connect a Facebook Page via OAuth. Use Connect Facebook from https://efhsband.org/admin.'))
+    : 'Zernio API key is missing at runtime. Paste your Zernio API key below (Super Admin), or re-save ZERNIO_API_KEY in Cloudflare Pages secrets and redeploy.';
   return {
     configured,
     configured_source: resolvedKey.source,
@@ -2209,13 +2200,10 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
     account: stored,
     connectPath: '/admin/zernio/facebook/connect',
     debug,
-    detail: configured
-      ? (stored?.accountId
-        ? `Connected: ${stored.name || stored.accountId}`
-        : (needsPageSelection
-          ? 'Facebook login finished. Choose which Page to connect below.'
-          : 'Ready to connect a Facebook Page via OAuth. Use Connect Facebook from https://efhsband.org/admin.'))
-      : 'Zernio API key is missing at runtime. Paste your Zernio API key below (Super Admin), or re-save ZERNIO_API_KEY in Cloudflare Pages secrets and redeploy.',
+    detail: syncError
+      ? (stored?.accountId ? `${baseDetail} (refresh failed: ${syncError})` : `Could not refresh Zernio status: ${syncError}`)
+      : baseDetail,
+    ...(syncError ? { error: syncError } : {}),
   };
 }
 
@@ -2249,9 +2237,9 @@ function zernioAccountProfileId(account = null) {
   return String(profile || '').trim();
 }
 
-async function syncZernioFacebookConnection(env, profileId = '') {
+async function syncZernioFacebookConnection(env, profileId = '', { timeoutMs = 8000 } = {}) {
   const preferredProfileId = String(profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
-  const data = await zernioApi(env, '/accounts');
+  const data = await zernioApi(env, '/accounts', { timeoutMs });
   const accounts = Array.isArray(data?.accounts) ? data.accounts : (Array.isArray(data) ? data : []);
   const facebookAccounts = accounts.filter((account) => String(account?.platform || '').toLowerCase() === 'facebook');
   const facebook = facebookAccounts.find((account) => zernioAccountProfileId(account) === preferredProfileId)
@@ -2446,7 +2434,7 @@ async function getFacebookEventQueueStatus(env) {
 }
 
 async function publishFacebookEventQueue(env) {
-  const status = await getZernioFacebookStatus(env, { sync: true });
+  const status = await getZernioFacebookStatus(env, { sync: false });
   if (!status.connected || !status.account?.accountId) {
     throw new Error('Connect a Facebook Page before posting calendar updates.');
   }
@@ -2459,6 +2447,7 @@ async function publishFacebookEventQueue(env) {
   if (content.length > 60000) throw new Error('Calendar update post is too long. Post fewer events at once.');
   const created = await zernioApi(env, '/posts', {
     method: 'POST',
+    timeoutMs: 20000,
     body: JSON.stringify({
       content,
       platforms: [{ platform: 'facebook', accountId: status.account.accountId }],
@@ -2580,13 +2569,13 @@ async function handleZernioFacebookConnect(request, env) {
       profileId,
       redirect_url: redirectUrl,
     });
-    const data = await zernioApi(env, `/connect/facebook?${query.toString()}`);
+    const data = await zernioApi(env, `/connect/facebook?${query.toString()}`, { timeoutMs: 15000 });
     const authUrl = String(data?.authUrl || data?.url || '').trim();
     if (!authUrl) throw new Error('Zernio did not return an OAuth URL.');
     await rememberZernioFacebookDebug(env, { keys: ['connect_started'], note: `redirect=${redirectUrl}` });
     return redirect(authUrl);
   } catch (error) {
-    const message = escapeHtml(error?.message || 'Could not start Facebook OAuth');
+    const message = escapeHtml(friendlyHttpErrorMessage(error?.message, 'Could not start Facebook OAuth'));
     return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Facebook connect failed</title><link rel="stylesheet" href="/styles.css"></head><body class="admin-body"><main class="admin-shell small"><h1>Facebook connect failed</h1><p>${message}</p><p><a class="btn primary" href="/admin?tab=social">Back to Social / Facebook</a></p></main></body></html>`, 502);
   }
 }
@@ -6970,7 +6959,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     try {
       // Keep the list call short so Social hard-refresh does not hit a gateway timeout.
-      const data = await zernioApi(env, '/posts?limit=20', { timeoutMs: 10000 });
+      const data = await zernioApi(env, '/posts?limit=20', { timeoutMs: 8000 });
       const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
       return jsonResponse({ posts });
     } catch (error) {
@@ -6983,7 +6972,8 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
-    const status = await getZernioFacebookStatus(env, { sync: true });
+    // Use stored connection — a live sync here was causing Pages gateway 502s before the post ran.
+    const status = await getZernioFacebookStatus(env, { sync: false });
     if (!status.connected) return jsonResponse({ detail: 'Connect a Facebook Page before posting.' }, 400);
     let body;
     try {
@@ -6992,10 +6982,16 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: error.message || 'Invalid post' }, 422);
     }
     try {
-      const created = await zernioApi(env, '/posts', { method: 'POST', body: JSON.stringify(body) });
+      const created = await zernioApi(env, '/posts', {
+        method: 'POST',
+        timeoutMs: 20000,
+        body: JSON.stringify(body),
+      });
       return jsonResponse({ ok: true, post: created?.post || created }, 201);
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Could not create post' }, 502);
+      return jsonResponse({
+        detail: friendlyHttpErrorMessage(error.message, 'Could not create post'),
+      }, 502);
     }
   }
 

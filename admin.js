@@ -3454,9 +3454,23 @@ async function loadZernioFacebookStatus({ sync = false } = {}) {
     renderZernioFacebookStatus(status);
     return status;
   } catch (error) {
-    if (statusEl) statusEl.textContent = error.message || 'Could not check Facebook connection.';
-    renderZernioFacebookStatus({ configured: false, connected: false, detail: error.message || 'Could not check Facebook connection.' });
-    return null;
+    const message = friendlyHttpErrorMessage(error.message, 'Could not check Facebook connection.');
+    if (statusEl) statusEl.textContent = message;
+    // Keep last-known status when the gateway fails — do not wipe configured/connected.
+    if (state.zernioFacebook) {
+      renderZernioFacebookStatus({
+        ...state.zernioFacebook,
+        detail: message,
+        error: message,
+      });
+    } else {
+      renderZernioFacebookStatus({
+        configured: false,
+        connected: false,
+        detail: message,
+      });
+    }
+    return state.zernioFacebook;
   }
 }
 
@@ -3568,10 +3582,11 @@ async function loadZernioEventQueue() {
 
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
-  // Sync from Zernio when opening Social so dashboard-connected Pages appear in CMS.
-  await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
+  // Default: read stored connection only. Live Zernio sync is opt-in (Refresh) because
+  // hard-refresh auto-sync was stacking upstream calls and returning Cloudflare HTML 502.
+  await loadZernioFacebookStatus({ sync: Boolean(sync) });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
-  if (state.zernioFacebook?.connected) await loadZernioEventQueue();
+  if (state.zernioFacebook?.configured && state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {
     state.zernioEventQueue = null;
     renderZernioEventQueue();
@@ -6839,11 +6854,20 @@ function bindForms() {
     if (messageEl) messageEl.textContent = 'Refreshing…';
     try {
       await loadSocialPanel({ sync: true });
-      if (messageEl) messageEl.textContent = state.zernioFacebook?.connected
-        ? 'Facebook connection refreshed.'
-        : 'No Facebook Page connected yet. Use Connect Facebook to finish OAuth.';
+      if (messageEl) {
+        if (state.zernioFacebook?.error) {
+          messageEl.textContent = friendlyHttpErrorMessage(
+            state.zernioFacebook.error,
+            'Could not refresh Facebook status.',
+          );
+        } else {
+          messageEl.textContent = state.zernioFacebook?.connected
+            ? 'Facebook connection refreshed.'
+            : 'No Facebook Page connected yet. Use Connect Facebook to finish OAuth.';
+        }
+      }
     } catch (error) {
-      if (messageEl) messageEl.textContent = error.message || 'Could not refresh Facebook status.';
+      if (messageEl) messageEl.textContent = friendlyHttpErrorMessage(error.message, 'Could not refresh Facebook status.');
     }
   });
 
