@@ -17,6 +17,7 @@ test('shouldAuditAdminApiRequest logs mutations but skips reads and security-log
   assert.equal(shouldAuditAdminApiRequest('/api/admin/events', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/me', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log', 'GET'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log.pdf', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/mail', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/events', 'POST'), false);
 });

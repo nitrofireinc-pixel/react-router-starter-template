@@ -5527,11 +5527,14 @@ async function loadSecurityLog() {
   if (!list) return;
   const actor = String(document.querySelector('#security-log-actor')?.value || '').trim();
   const action = String(document.querySelector('#security-log-action')?.value || '').trim();
-  const params = new URLSearchParams({ limit: '250' });
+  const params = new URLSearchParams({ limit: '5' });
   if (actor) params.set('actor', actor);
   if (action) params.set('action', action);
   if (download) {
-    download.href = `/api/admin/security-log.txt?${params.toString()}`;
+    const pdfParams = new URLSearchParams();
+    if (actor) pdfParams.set('actor', actor);
+    if (action) pdfParams.set('action', action);
+    download.href = `/api/admin/security-log.pdf${pdfParams.toString() ? `?${pdfParams}` : ''}`;
   }
   try {
     if (status) status.textContent = 'Loading security log…';
@@ -5562,7 +5565,11 @@ async function loadSecurityLog() {
       }).join('');
     }
     if (status) {
-      status.textContent = `${entries.length} of ${data.total || entries.length} secured log entr${(data.total || entries.length) === 1 ? 'y' : 'ies'} (super admin only).`;
+      const total = Number(data.total) || entries.length;
+      const shown = entries.length;
+      status.textContent = total > shown
+        ? `Showing newest ${shown} of ${total} secured log entries. Download PDF for the full log.`
+        : `${shown} secured log entr${shown === 1 ? 'y' : 'ies'} (super admin only).`;
     }
   } catch (error) {
     list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;

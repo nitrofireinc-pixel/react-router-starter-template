@@ -213,7 +213,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'sponsors:bypass-payment', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'security-log-mobile-width-20260814';
+const ASSET_VERSION = 'security-log-five-pdf-20260814';
 export const PENDING_SPONSOR_APPLICATION_STATUSES = ['pending_payment', 'checkout_ready', 'payment_setup_needed'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
@@ -3638,6 +3638,95 @@ export function buildTextPdfBase64(lines = [], { title = 'Document' } = {}) {
   ]);
 }
 
+/** Wrap plain text for a fixed-width Helvetica PDF line. */
+export function wrapPdfLine(text = '', maxChars = 96) {
+  const raw = String(text ?? '');
+  if (!raw) return [''];
+  if (raw.length <= maxChars) return [raw];
+  const out = [];
+  let remaining = raw;
+  while (remaining.length > maxChars) {
+    let breakAt = remaining.lastIndexOf(' ', maxChars);
+    if (breakAt < Math.floor(maxChars * 0.45)) breakAt = maxChars;
+    out.push(remaining.slice(0, breakAt));
+    remaining = remaining.slice(breakAt).replace(/^\s+/, '');
+  }
+  if (remaining) out.push(remaining);
+  return out;
+}
+
+/** Build a multi-page letter PDF from plain-text lines (base64). */
+export function buildMultiPageTextPdfBase64(lines = [], { title = 'Document' } = {}) {
+  const topY = 742;
+  const bottomY = 48;
+  const lineHeight = 11;
+  const titleSize = 16;
+  const bodySize = 9;
+  const maxChars = 96;
+  const wrapped = [];
+  for (const line of Array.isArray(lines) ? lines : []) {
+    for (const part of String(line ?? '').split('\n')) {
+      wrapped.push(...wrapPdfLine(part, maxChars));
+    }
+  }
+
+  const pages = [];
+  let bucket = [];
+  let y = topY - 28;
+  const pushPage = () => {
+    pages.push(bucket);
+    bucket = [];
+    y = topY;
+  };
+
+  for (const line of wrapped) {
+    if (y - lineHeight < bottomY) pushPage();
+    bucket.push(line);
+    y -= lineHeight;
+  }
+  if (bucket.length || !pages.length) pages.push(bucket);
+
+  const objects = [];
+  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
+  const pageObjNumbers = pages.map((_, index) => 3 + index * 2);
+  const fontObjNum = 3 + pages.length * 2;
+  objects.push(`<< /Type /Pages /Kids [${pageObjNumbers.map((n) => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+
+  pages.forEach((pageLines, pageIndex) => {
+    const contentOps = [];
+    if (pageIndex === 0) {
+      contentOps.push(`BT /F1 ${titleSize} Tf 48 ${topY} Td (${pdfSafeText(title)}) Tj ET`);
+    } else {
+      contentOps.push(`BT /F1 10 Tf 48 ${topY} Td (${pdfSafeText(`${title} (continued)`)}) Tj ET`);
+    }
+    let cursorY = topY - 28;
+    for (const line of pageLines) {
+      contentOps.push(`BT /F1 ${bodySize} Tf 48 ${cursorY} Td (${pdfSafeText(line)}) Tj ET`);
+      cursorY -= lineHeight;
+    }
+    const stream = `${contentOps.join('\n')}\n`;
+    const pageObjNum = pageObjNumbers[pageIndex];
+    const contentObjNum = pageObjNum + 1;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources<< /Font<< /F1 ${fontObjNum} 0 R >> >> >>`,
+    );
+    objects.push(`<< /Length ${stream.length} >>stream\n${stream}endstream`);
+  });
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+  const numbered = objects.map((body, index) => `${index + 1} 0 obj${body}endobj\n`);
+  return assemblePdfBase64(numbered);
+}
+
+export function buildAdminAuditExportPdfBase64(entries = []) {
+  const text = buildAdminAuditExportText(entries);
+  // Drop the duplicate title line from the text export; PDF has its own title.
+  const lines = String(text || '')
+    .split('\n')
+    .filter((line, index) => !(index === 0 && /security audit log/i.test(line)));
+  return buildMultiPageTextPdfBase64(lines, { title: 'EFHS Band CMS Security Audit Log' });
+}
+
 export function buildSponsorInvoicePdfBase64({
   invoiceNumber = '',
   paidLabel = '',
@@ -6785,18 +6874,20 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireSuperAdmin(request, env);
     if (auth.response) return auth.response;
     const payload = await listAdminAuditLogs(env, {
-      limit: Number(url.searchParams.get('limit') || 200),
+      // CMS preview shows only the newest handful; full history is in the PDF download.
+      limit: Math.min(Number(url.searchParams.get('limit') || 5), 5),
       offset: Number(url.searchParams.get('offset') || 0),
       action: String(url.searchParams.get('action') || '').trim(),
       actor: String(url.searchParams.get('actor') || '').trim(),
     });
     return jsonResponse({
       ...payload,
+      preview_limit: 5,
       storage: 'secured-server-database',
       access: 'super_admin_only',
     });
   }
-  if (url.pathname === '/api/admin/security-log.txt' && request.method === 'GET') {
+  if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
     const auth = await requireSuperAdmin(request, env);
     if (auth.response) return auth.response;
     const payload = await listAdminAuditLogs(env, {
@@ -6805,11 +6896,13 @@ async function routeApi(request, env, url, ctx = null) {
       action: String(url.searchParams.get('action') || '').trim(),
       actor: String(url.searchParams.get('actor') || '').trim(),
     });
-    return new Response(buildAdminAuditExportText(payload.entries), {
+    const pdfBase64 = buildAdminAuditExportPdfBase64(payload.entries);
+    const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
+    return new Response(bytes, {
       status: 200,
       headers: {
-        'content-type': 'text/plain; charset=utf-8',
-        'content-disposition': 'attachment; filename="efhsband-security-audit-log.txt"',
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename="efhsband-security-audit-log.pdf"',
         'cache-control': 'no-store',
       },
     });
@@ -9438,13 +9531,13 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only. Login, logout, CMS changes, and staff emails are recorded in a secured server-side log that is not public and not available to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.txt">Download log</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only. The CMS shows the newest 5 entries. Download the PDF for the full secured log.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
     <label>Filter by action<input id="security-log-action" type="search" placeholder="login, mail.send, change.pages…" autocomplete="off"></label>
   </div>
-  <p class="muted">Stored in the secured CMS database (<span class="mono">admin_audit_log</span>), not in a public downloads folder.</p>
+  <p class="muted">Stored in the secured CMS database (<span class="mono">admin_audit_log</span>), not in a public downloads folder. Filters apply to the newest 5 preview and to the PDF download.</p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
 </div>
 <div class="admin-card">

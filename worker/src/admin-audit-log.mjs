@@ -31,7 +31,7 @@ export function isMutatingHttpMethod(method = '') {
 export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   const path = String(pathname || '');
   if (!path.startsWith('/api/admin')) return false;
-  if (path === '/api/admin/security-log' || path === '/api/admin/security-log.txt') return false;
+  if (path === '/api/admin/security-log' || path === '/api/admin/security-log.txt' || path === '/api/admin/security-log.pdf') return false;
   if (path === '/api/admin/me') return false;
   // Staff mail is logged with recipient/body details in the mail handler.
   if (path === '/api/admin/mail') return false;
@@ -270,7 +270,7 @@ export async function listAdminAuditLogs(env, {
   action = '',
   actor = '',
 } = {}) {
-  const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 2000);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   const clauses = [];
   const binds = [];
