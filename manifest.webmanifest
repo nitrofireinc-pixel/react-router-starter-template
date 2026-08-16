@@ -1,0 +1,25 @@
+{
+  "name": "East Forsyth Band",
+  "short_name": "EFHS Band",
+  "description": "East Forsyth Band calendar, ensembles, boosters, and program updates.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#002142",
+  "theme_color": "#002142",
+  "icons": [
+    {
+      "src": "/assets/efhs-blue-regiment-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/efhs-blue-regiment-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

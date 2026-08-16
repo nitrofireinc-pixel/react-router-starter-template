@@ -74,3 +74,255 @@ document.querySelectorAll('[data-square-checkout]').forEach((button) => {
     else window.open(url, '_blank', 'noopener,noreferrer');
   });
 });
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+function ensureNotifyMeNavControl() {
+  let button = document.querySelector('[data-notify-me]');
+  if (!button) {
+    const siteNav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+    if (!siteNav) return null;
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nav-notify-me';
+    button.dataset.notifyMe = '';
+    button.setAttribute('aria-label', 'Notify me about calendar updates');
+    button.title = 'Notify me about calendar updates';
+    button.innerHTML = `
+      <span class="nav-notify-bell" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg>
+      </span>
+      <span class="nav-notify-label">Notify Me</span>`;
+    siteNav.appendChild(button);
+  }
+  return document.querySelector('[data-notify-me]');
+}
+
+function setNotifyMeState(button, state) {
+  if (!button) return;
+  const label = button.querySelector('.nav-notify-label');
+  button.classList.toggle('is-enabled', state === 'enabled');
+  button.classList.toggle('is-busy', state === 'busy');
+  button.classList.toggle('is-unsupported', state === 'unsupported');
+  button.disabled = state === 'busy' || state === 'unsupported';
+  if (state === 'enabled') {
+    if (label) label.textContent = 'Notifications On';
+    button.setAttribute('aria-label', 'Calendar notifications are on. Click to turn off.');
+    button.title = 'Calendar notifications are on';
+  } else if (state === 'unsupported') {
+    if (label) label.textContent = 'Notify Me';
+    button.setAttribute('aria-label', 'Notifications are not supported in this browser');
+    button.title = 'Notifications are not supported in this browser';
+  } else if (state === 'busy') {
+    if (label) label.textContent = 'Working…';
+    button.setAttribute('aria-label', 'Updating notification settings');
+  } else {
+    if (label) label.textContent = 'Notify Me';
+    button.setAttribute('aria-label', 'Notify me about calendar updates');
+    button.title = 'Notify me about calendar updates';
+  }
+}
+
+function webPushSupported() {
+  return Boolean(
+    window.isSecureContext
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window
+      && 'Notification' in window,
+  );
+}
+
+async function getNotifyMeSubscription() {
+  const registration = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
+  await navigator.serviceWorker.ready;
+  return {
+    registration,
+    subscription: await registration.pushManager.getSubscription(),
+  };
+}
+
+async function syncNotifyMeButtonState(button) {
+  if (!webPushSupported()) {
+    setNotifyMeState(button, 'unsupported');
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  try {
+    const { subscription } = await getNotifyMeSubscription();
+    if (Notification.permission === 'denied') {
+      setNotifyMeState(button, 'default');
+      return;
+    }
+    setNotifyMeState(button, subscription ? 'enabled' : 'default');
+  } catch {
+    setNotifyMeState(button, 'default');
+  }
+}
+
+function isBraveBrowser() {
+  return Boolean(navigator.brave) || /Brave/i.test(navigator.userAgent || '');
+}
+
+function bravePushSetupHelp() {
+  return [
+    'Brave blocks web push unless Google push messaging is enabled.',
+    '',
+    '1. Open brave://settings/privacy',
+    '2. Turn ON “Use Google services for push messaging”',
+    '3. Also allow notifications for efhsband.org (address-bar lock icon)',
+    '4. On Windows: Settings → System → Notifications → Brave → On',
+    '5. Reload this page and tap Notify Me again.',
+  ].join('\n');
+}
+
+function formatPushSubscribeError(error) {
+  const message = String(error?.message || error || '');
+  const pushServiceFailed = /push service error|Registration failed/i.test(message);
+  if (pushServiceFailed && isBraveBrowser()) {
+    return bravePushSetupHelp();
+  }
+  if (pushServiceFailed) {
+    return [
+      'Your browser could not register for push notifications.',
+      '',
+      'Check that notifications are allowed for efhsband.org, then reload and try again.',
+      'In privacy-focused browsers, enable Google/Firefox push messaging services if required.',
+    ].join('\n');
+  }
+  return message || 'Could not update notifications.';
+}
+
+function showLocalNotifyConfirmation() {
+  try {
+    if (Notification.permission !== 'granted') return;
+    const icon = `${window.location.origin}/assets/efhs-icon.png`;
+    new Notification('Notifications on', {
+      body: 'East Forsyth Band can show calendar alerts in this browser.',
+      icon,
+      tag: 'efhs-notify-local-confirm',
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+async function enableNotifyMe(button) {
+  setNotifyMeState(button, 'busy');
+  if (isBraveBrowser()) {
+    const proceed = window.confirm(
+      `${bravePushSetupHelp()}\n\nHave you already turned on Google push messaging? Click OK to continue, or Cancel to fix Brave first.`,
+    );
+    if (!proceed) {
+      setNotifyMeState(button, 'default');
+      return;
+    }
+  }
+  const keyResponse = await fetch('/api/push/vapid-public-key', { cache: 'no-store' });
+  const keyPayload = await keyResponse.json().catch(() => ({}));
+  if (!keyResponse.ok || !keyPayload.publicKey) {
+    throw new Error(keyPayload.detail || 'Could not load notification settings.');
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error(
+      isBraveBrowser()
+        ? `${bravePushSetupHelp()}\n\nNotifications permission was blocked for this site.`
+        : 'Notifications were blocked. Enable them in your browser settings to get calendar alerts.',
+    );
+  }
+  const { registration } = await getNotifyMeSubscription();
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) {
+    const oldEndpoint = existing.endpoint;
+    await existing.unsubscribe().catch(() => {});
+    if (oldEndpoint) {
+      await fetch('/api/push/subscribe', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ endpoint: oldEndpoint }),
+      }).catch(() => {});
+    }
+  }
+  let subscription;
+  try {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+    });
+  } catch (error) {
+    throw new Error(formatPushSubscribeError(error));
+  }
+  const body = subscription.toJSON();
+  body.user_agent = navigator.userAgent || '';
+  const saveResponse = await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const savePayload = await saveResponse.json().catch(() => ({}));
+  if (!saveResponse.ok) {
+    throw new Error(savePayload.detail || 'Could not save notification subscription.');
+  }
+  setNotifyMeState(button, 'enabled');
+  showLocalNotifyConfirmation();
+  if (savePayload.welcome && savePayload.welcome.ok === false) {
+    throw new Error(
+      isBraveBrowser()
+        ? `${bravePushSetupHelp()}\n\nServer detail: ${savePayload.welcome.detail || 'welcome push failed'}`
+        : (savePayload.welcome.detail
+          || 'Subscription saved, but the welcome notification could not be delivered. Check Windows notification settings for this browser.'),
+    );
+  }
+  window.alert(
+    isBraveBrowser()
+      ? 'Notifications are on. You should see a local confirmation now, plus a push welcome alert shortly. If the push alert never appears, turn ON “Use Google services for push messaging” in brave://settings/privacy and try again.'
+      : 'Notifications are on. You should see a welcome notification now. If not, check Windows notification settings for this browser and that Focus Assist is off.',
+  );
+}
+
+async function disableNotifyMe(button) {
+  setNotifyMeState(button, 'busy');
+  const { subscription } = await getNotifyMeSubscription();
+  if (subscription) {
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe().catch(() => {});
+    await fetch('/api/push/subscribe', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint }),
+    }).catch(() => {});
+  }
+  setNotifyMeState(button, 'default');
+}
+
+(function bindNotifyMeNavControl() {
+  const button = ensureNotifyMeNavControl();
+  if (!button || button.dataset.boundNotifyMe === '1') return;
+  button.dataset.boundNotifyMe = '1';
+  syncNotifyMeButtonState(button);
+
+  button.addEventListener('click', async () => {
+    if (!webPushSupported()) {
+      window.alert('Notifications are not supported in this browser.');
+      return;
+    }
+    try {
+      if (button.classList.contains('is-enabled')) {
+        await disableNotifyMe(button);
+      } else {
+        await enableNotifyMe(button);
+      }
+    } catch (error) {
+      await syncNotifyMeButtonState(button);
+      window.alert(formatPushSubscribeError(error));
+    }
+  });
+})();

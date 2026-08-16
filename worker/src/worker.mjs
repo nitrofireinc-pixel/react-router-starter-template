@@ -1,4 +1,10 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
+import {
+  deserializeVapidKeys,
+  generateVapidKeys,
+  sendPushNotification,
+  serializeVapidKeys,
+} from './web-push-browser/index.js';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -187,7 +193,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'website-guide-rewrite-20260816';
+const ASSET_VERSION = 'notify-me-bell-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -311,6 +317,226 @@ export function hasPermission(user, scope) {
   if (isSuperAdmin(user)) return true;
   const permissions = parsePermissions(user.permissions);
   return permissions.includes(scope) || permissions.includes('all');
+}
+
+
+export const CALENDAR_PUSH_STATE_KEY = 'calendar_push_state';
+export const CALENDAR_PUSH_TOPIC = 'efhs_calendar';
+const WEB_PUSH_VAPID_PUBLIC_KEY = 'web_push_vapid_public';
+const WEB_PUSH_VAPID_PRIVATE_KEY = 'web_push_vapid_private';
+
+export function emptyCalendarPushState() {
+  return { revision: 0, action: '', title: '', event_id: null, at: '' };
+}
+
+export function parseCalendarPushState(raw) {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+    if (!parsed || typeof parsed !== 'object') return emptyCalendarPushState();
+    const revision = Number(parsed.revision);
+    const state = {
+      revision: Number.isFinite(revision) && revision > 0 ? Math.floor(revision) : 0,
+      action: ['created', 'updated', 'deleted'].includes(String(parsed.action || '')) ? String(parsed.action) : '',
+      title: String(parsed.title || '').trim().slice(0, 200),
+      event_id: parsed.event_id == null || parsed.event_id === '' ? null : Number(parsed.event_id) || null,
+      at: String(parsed.at || '').trim(),
+    };
+    if (parsed.web_push && typeof parsed.web_push === 'object') state.web_push = parsed.web_push;
+    return state;
+  } catch {
+    return emptyCalendarPushState();
+  }
+}
+
+export function buildCalendarPushPayload({ action = 'updated', event = null, eventId = null } = {}) {
+  const normalizedAction = ['created', 'updated', 'deleted'].includes(action) ? action : 'updated';
+  const title = htmlToPlainText(event?.title || '').trim() || (normalizedAction === 'deleted' ? 'An event was removed' : 'Calendar update');
+  const headlines = {
+    created: 'New calendar event',
+    updated: 'Calendar event updated',
+    deleted: 'Calendar event removed',
+  };
+  return {
+    action: normalizedAction,
+    event_id: event?.id ?? eventId ?? null,
+    title,
+    notification_title: headlines[normalizedAction],
+    notification_body: title,
+    url: '/calendar.html',
+  };
+}
+
+export async function getWebPushVapidKeys(env = {}) {
+  const envPublic = String(env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
+  const envPrivate = String(env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
+  if (envPublic && envPrivate) return { publicKey: envPublic, privateKey: envPrivate, source: 'env' };
+  let publicKey = await getSiteContentValue(env, WEB_PUSH_VAPID_PUBLIC_KEY);
+  let privateKey = await getSiteContentValue(env, WEB_PUSH_VAPID_PRIVATE_KEY);
+  if (publicKey && privateKey) return { publicKey, privateKey, source: 'db' };
+  const pair = await generateVapidKeys();
+  const serialized = await serializeVapidKeys(pair);
+  await setSiteContentValue(env, WEB_PUSH_VAPID_PUBLIC_KEY, serialized.publicKey);
+  await setSiteContentValue(env, WEB_PUSH_VAPID_PRIVATE_KEY, serialized.privateKey);
+  return { publicKey: serialized.publicKey, privateKey: serialized.privateKey, source: 'generated' };
+}
+
+export function normalizeWebPushSubscription(payload = {}) {
+  const endpoint = String(payload.endpoint || '').trim();
+  const keys = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
+  const p256dh = String(keys.p256dh || payload.p256dh || '').trim();
+  const auth = String(keys.auth || payload.auth || '').trim();
+  const userAgent = String(payload.user_agent || payload.userAgent || '').trim().slice(0, 300);
+  if (!/^https:\/\//i.test(endpoint) || endpoint.length > 2048) {
+    return { ok: false, detail: 'A valid push endpoint is required' };
+  }
+  if (p256dh.length < 20 || p256dh.length > 512 || auth.length < 8 || auth.length > 256) {
+    return { ok: false, detail: 'Subscription keys are missing or invalid' };
+  }
+  return { ok: true, endpoint, p256dh, auth, user_agent: userAgent };
+}
+
+async function upsertWebPushSubscription(env, { endpoint, p256dh, auth, user_agent }) {
+  await env.DB.prepare(
+    `INSERT INTO web_push_subscriptions (endpoint, p256dh, auth, user_agent, created_at, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh=excluded.p256dh,
+       auth=excluded.auth,
+       user_agent=excluded.user_agent,
+       updated_at=CURRENT_TIMESTAMP`,
+  ).bind(endpoint, p256dh, auth, user_agent || '').run();
+  return { ok: true, endpoint };
+}
+
+async function deleteWebPushSubscription(env, endpoint) {
+  await env.DB.prepare('DELETE FROM web_push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
+  return { ok: true };
+}
+
+function webPushSubjectEmail(env = {}) {
+  const subjectEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL || 'no-reply@efhsband.org')
+    .trim()
+    .replace(/^mailto:/i, '');
+  return subjectEmail.includes('@') ? subjectEmail : 'no-reply@efhsband.org';
+}
+
+function buildWebPushMessage(pushPayload = {}) {
+  return JSON.stringify({
+    title: pushPayload.notification_title || pushPayload.title || 'Calendar update',
+    body: pushPayload.notification_body || pushPayload.body || pushPayload.title || 'The band calendar changed.',
+    url: pushPayload.url || '/calendar.html',
+    action: pushPayload.action || '',
+    event_id: pushPayload.event_id,
+    revision: pushPayload.revision,
+  });
+}
+
+export async function sendWebPushToSubscription(env, subscription, pushPayload = {}) {
+  const endpoint = String(subscription?.endpoint || '').trim();
+  const p256dh = String(subscription?.p256dh || subscription?.keys?.p256dh || '').trim();
+  const auth = String(subscription?.auth || subscription?.keys?.auth || '').trim();
+  if (!endpoint || !p256dh || !auth) {
+    return { ok: false, sent: 0, failed: 1, removed: 0, detail: 'Subscription keys are missing' };
+  }
+  const vapid = await getWebPushVapidKeys(env);
+  const keyPair = await deserializeVapidKeys({
+    publicKey: vapid.publicKey,
+    privateKey: vapid.privateKey,
+  });
+  try {
+    const response = await sendPushNotification(
+      keyPair,
+      { endpoint, keys: { p256dh, auth } },
+      webPushSubjectEmail(env),
+      buildWebPushMessage(pushPayload),
+      { algorithm: 'aes128gcm', ttl: 86400, urgency: 'high' },
+    );
+    if (response.status === 404 || response.status === 410) {
+      await deleteWebPushSubscription(env, endpoint);
+      return { ok: false, sent: 0, failed: 1, removed: 1, detail: `Push endpoint gone (${response.status})` };
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      return {
+        ok: false,
+        sent: 0,
+        failed: 1,
+        removed: 0,
+        detail: `Push service returned ${response.status}${body ? `: ${body.slice(0, 180)}` : ''}`,
+      };
+    }
+    return { ok: true, sent: 1, failed: 0, removed: 0, detail: '' };
+  } catch (error) {
+    return { ok: false, sent: 0, failed: 1, removed: 0, detail: error?.message || 'Web push send threw an error' };
+  }
+}
+
+export async function sendWebPushCalendarNotifications(env, pushPayload = {}) {
+  const rows = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM web_push_subscriptions').all();
+  const subscriptions = rows.results || [];
+  if (!subscriptions.length) {
+    return { ok: true, skipped: true, sent: 0, failed: 0, removed: 0, detail: 'No browser subscriptions' };
+  }
+  let sent = 0;
+  let failed = 0;
+  let removed = 0;
+  let detail = '';
+  for (const row of subscriptions) {
+    const result = await sendWebPushToSubscription(env, row, pushPayload);
+    sent += Number(result.sent || 0);
+    failed += Number(result.failed || 0);
+    removed += Number(result.removed || 0);
+    if (!result.ok && !detail && result.detail) detail = result.detail;
+  }
+  return {
+    ok: failed === 0 && sent > 0,
+    sent,
+    failed,
+    removed,
+    total: subscriptions.length,
+    detail: detail || (sent ? '' : 'No notifications were accepted'),
+  };
+}
+
+async function getCalendarPushState(env) {
+  return parseCalendarPushState(await getSiteContentValue(env, CALENDAR_PUSH_STATE_KEY));
+}
+
+export async function recordCalendarPushChange(env, { action = 'updated', event = null, eventId = null } = {}) {
+  const payload = buildCalendarPushPayload({ action, event, eventId });
+  const previous = await getCalendarPushState(env);
+  const next = {
+    revision: (previous.revision || 0) + 1,
+    action: payload.action,
+    title: payload.title,
+    event_id: payload.event_id,
+    at: new Date().toISOString(),
+  };
+  const pushPayload = { ...payload, revision: next.revision };
+  let webPush = { ok: false, skipped: true, detail: 'No browser subscriptions' };
+  try {
+    webPush = await sendWebPushCalendarNotifications(env, pushPayload);
+  } catch (error) {
+    webPush = { ok: false, detail: error.message || 'Web push send failed' };
+  }
+  const state = {
+    ...next,
+    web_push: {
+      ok: Boolean(webPush?.ok),
+      skipped: Boolean(webPush?.skipped),
+      sent: Number(webPush?.sent || 0),
+      failed: Number(webPush?.failed || 0),
+      removed: Number(webPush?.removed || 0),
+      total: Number(webPush?.total || 0),
+      detail: webPush?.detail || '',
+    },
+  };
+  await setSiteContentValue(env, CALENDAR_PUSH_STATE_KEY, JSON.stringify(state));
+  return { state, web_push: webPush, push: pushPayload };
+}
+
+export function renderNotifyMeNavControl() {
+  return `<button type="button" class="nav-notify-me" data-notify-me aria-label="Notify me about calendar updates" title="Notify me about calendar updates"><span class="nav-notify-bell" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg></span><span class="nav-notify-label">Notify Me</span></button>`;
 }
 
 export function canAccessCheckout(user) {
@@ -482,6 +708,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
   try {
@@ -4606,6 +4833,46 @@ async function handleApi(request, env, url) {
   await initDb(env);
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+
+  if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
+    const state = await getCalendarPushState(env);
+    return jsonResponse({
+      ...state,
+      topic: CALENDAR_PUSH_TOPIC,
+    });
+  }
+  if (url.pathname === '/api/push/vapid-public-key' && request.method === 'GET') {
+    const keys = await getWebPushVapidKeys(env);
+    return jsonResponse({
+      publicKey: keys.publicKey,
+      supported: true,
+    });
+  }
+  if (url.pathname === '/api/push/subscribe' && request.method === 'POST') {
+    const normalized = normalizeWebPushSubscription(await request.json().catch(() => ({})));
+    if (!normalized.ok) return jsonResponse({ detail: normalized.detail }, 422);
+    const saved = await upsertWebPushSubscription(env, normalized);
+    let welcome = null;
+    try {
+      welcome = await sendWebPushToSubscription(env, normalized, {
+        notification_title: 'Notifications on',
+        notification_body: 'East Forsyth Band will notify you when the calendar changes.',
+        title: 'Notifications on',
+        body: 'East Forsyth Band will notify you when the calendar changes.',
+        url: '/calendar.html',
+        action: 'welcome',
+      });
+    } catch (error) {
+      welcome = { ok: false, detail: error?.message || 'Welcome push failed' };
+    }
+    return jsonResponse({ ...saved, welcome });
+  }
+  if (url.pathname === '/api/push/subscribe' && request.method === 'DELETE') {
+    const payload = await request.json().catch(() => ({}));
+    const endpoint = String(payload.endpoint || '').trim();
+    if (!endpoint) return jsonResponse({ detail: 'endpoint is required' }, 422);
+    return jsonResponse(await deleteWebPushSubscription(env, endpoint));
+  }
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env);
     return jsonResponse({
@@ -6123,7 +6390,9 @@ async function handleApi(request, env, url) {
     ).run();
     const created = await getEventById(env, result.meta.last_row_id);
     try { await queueEventForFacebook(env, created, 'new'); } catch { /* queue is best-effort */ }
-    return jsonResponse(created);
+    let pushResult = null;
+    try { pushResult = await recordCalendarPushChange(env, { action: 'created', event: created }); } catch { /* push is best-effort */ }
+    return jsonResponse({ ...created, web_push: pushResult?.web_push || null });
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -6138,7 +6407,9 @@ async function handleApi(request, env, url) {
     if (request.method === 'DELETE') {
       await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
       try { await unqueueEventForFacebook(env, id); } catch { /* ignore */ }
-      return jsonResponse({ ok: true });
+      let pushResult = null;
+      try { pushResult = await recordCalendarPushChange(env, { action: 'deleted', event: existing, eventId: id }); } catch { /* push is best-effort */ }
+      return jsonResponse({ ok: true, web_push: pushResult?.web_push || null });
     }
     const p = normalizeEventPayload(await request.json(), existing);
     if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
@@ -6167,7 +6438,9 @@ async function handleApi(request, env, url) {
     ).run();
     const updated = await getEventById(env, id);
     try { await queueEventForFacebook(env, updated, 'updated'); } catch { /* queue is best-effort */ }
-    return jsonResponse(updated);
+    let pushResult = null;
+    try { pushResult = await recordCalendarPushChange(env, { action: 'updated', event: updated }); } catch { /* push is best-effort */ }
+    return jsonResponse({ ...updated, web_push: pushResult?.web_push || null });
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
@@ -6316,10 +6589,11 @@ function logout() {
   return response;
 }
 
-function renderNav(pages) {
-  return pages
+export function renderNav(pages) {
+  const pageLinks = pages
     .filter((page) => page.slug !== 'become-a-sponsor')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
+  return `${pageLinks}${renderNotifyMeNavControl()}`;
 }
 
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false } = {}) {
@@ -6338,6 +6612,12 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta name="description" content="${escapeAttr(site.title)} website.">
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
+  <link rel="apple-touch-icon" href="${escapeAttr(PUBLIC_BRAND_MARK)}">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#002142">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EFHS Band">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
@@ -6495,9 +6775,16 @@ async function serveStaticOrCms(request, env, url) {
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'site-content.js', 'script.js', 'styles.css'].includes(assetName)) {
+  if (['admin.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
+    if (assetName === 'push-sw.js') {
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('service-worker-allowed', '/');
+    }
+    if (assetName === 'manifest.webmanifest') {
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
+    }
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
   }
   if (assetUrl.pathname === '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf' && assetResponse.ok) {
@@ -6513,9 +6800,33 @@ async function serveStaticOrCms(request, env, url) {
   return assetResponse;
 }
 
+export function renderPushServiceWorker() {
+  // Kept for tests; runtime serves /push-sw.js from static assets.
+  return '';
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/push-sw.js') {
+      const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
+      if (asset.ok) {
+        const headers = new Headers(asset.headers);
+        headers.set('content-type', 'application/javascript; charset=utf-8');
+        headers.set('cache-control', 'no-store');
+        headers.set('service-worker-allowed', '/');
+        return new Response(asset.body, { status: 200, headers });
+      }
+    }
+    if (url.pathname === '/manifest.webmanifest') {
+      const asset = await env.ASSETS.fetch(new Request(new URL('/manifest.webmanifest', request.url), request));
+      if (asset.ok) {
+        const headers = new Headers(asset.headers);
+        headers.set('content-type', 'application/manifest+json; charset=utf-8');
+        headers.set('cache-control', 'no-store');
+        return new Response(asset.body, { status: 200, headers });
+      }
+    }
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url);
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage

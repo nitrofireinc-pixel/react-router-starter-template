@@ -68,7 +68,7 @@
 
 <div class="note">
   <p><b>Who this is for:</b> Super Admins, editors, and booster officers who help run the band website. Any logged-in CMS user can open this PDF from the Dashboard <b>Website Guide</b> card.</p>
-  <p><b>Scope:</b> This guide matches the features currently live on production. Planned tools that are not shipped yet (for example Treasurer Ledger, Gallery page, Notify Me push, or a separate Fundraising body editor) are omitted so staff are not pointed at menus that do not exist.</p>
+  <p><b>Scope:</b> This guide matches the features currently live on production. Planned tools that are not shipped yet (for example Treasurer Ledger, Gallery page, or a separate Fundraising body editor) are omitted so staff are not pointed at menus that do not exist.</p>
 </div>
 
 <h2>1. Overview</h2>
@@ -81,7 +81,7 @@
   <tr><td>Home</td><td>/</td><td>Hero branding (site title + Blue Regiment mark), Start Here / feature cards, upcoming calendar highlights, photo gallery section, booster/launch cards, sitewide sponsor marquee, and (when applicable) a Silver/Gold homepage fly-in ad.</td></tr>
   <tr><td>Ensembles</td><td>/ensembles.html</td><td>Program group information (marching band, concert bands, percussion, color guard, jazz, and related groups).</td></tr>
   <tr><td>Directors &amp; Staff</td><td>/directors.html</td><td>Directory of directors/staff with photos, roles, and short bios.</td></tr>
-  <tr><td>Calendar</td><td>/calendar.html</td><td>Upcoming events list (public shows a limited set of future events). Past events stay in the CMS but are hidden from the public list.</td></tr>
+  <tr><td>Calendar</td><td>/calendar.html</td><td>Upcoming events list (public shows a limited set of future events). Past events stay in the CMS but are hidden from the public list. Sitewide <b>Notify Me</b> bell in the main nav lets visitors subscribe to browser push alerts when calendar events are added, updated, or removed.</td></tr>
   <tr><td>Sponsors</td><td>/sponsors.html</td><td>Sponsor directory by tier, Become a Sponsor CTA, Donate button, and optional map/directions for sponsor addresses.</td></tr>
   <tr><td>Become a Sponsor</td><td>/become-a-sponsor.html</td><td>Bronze / Silver / Gold packages with online Square checkout. Linked from Sponsors and the footer (not a main-nav item).</td></tr>
   <tr><td>Fundraising</td><td>/fundraising.html</td><td>Fundraising campaign page content plus the Direct Support Donate flow.</td></tr>
@@ -183,7 +183,7 @@
 
 <h3>6.7 Calendar Events</h3>
 <p><b>Permission:</b> <span class="mono">events</span> to create and manage your own events; <span class="mono">events:manage</span> to edit/delete any event.</p>
-<p>Supports dates, rich descriptions, repeating events, exceptions, and booster-meeting placement. Public Calendar shows upcoming events only.</p>
+<p>Supports dates, rich descriptions, repeating events, exceptions, and booster-meeting placement. Public Calendar shows upcoming events only. Creating, updating, or deleting an event also sends a best-effort <b>Notify Me</b> browser push to visitors who opted in.</p>
 
 <h3>6.8 Sponsors → Manage sponsors</h3>
 <p><b>Permission:</b> <span class="mono">sponsors</span>.</p>
@@ -313,7 +313,8 @@
   <tr><td>Staff Email Reply-To wrong</td><td>Sender username must be a valid email address</td></tr>
   <tr><td>Changes not visible after deploy</td><td>Hard-refresh the CMS/browser. Confirm the login page stylesheet version updated</td></tr>
   <tr><td>Website Guide will not open</td><td>Use the Dashboard Website Guide card. Prefer the <span class="mono">.pdf</span> file; the old <span class="mono">.doc</span> URL redirects to the PDF</td></tr>
-  <tr><td>Looking for Ledger / Gallery page / Notify Me</td><td>Those tools are not live on production yet. Do not expect them in the current CMS menu</td></tr>
+  <tr><td>Looking for Ledger / Gallery page</td><td>Those tools are not live on production yet. Do not expect them in the current CMS menu</td></tr>
+  <tr><td>Notify Me bell missing or not working</td><td>Hard-refresh the public site. Notifications require HTTPS and a supporting browser. In Brave, turn ON “Use Google services for push messaging” under brave://settings/privacy</td></tr>
 </table>
 
 <h2>13. Important URLs</h2>
