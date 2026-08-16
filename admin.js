@@ -2637,7 +2637,7 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=website-guide-superadmin-20260816`;
+  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260816`;
   const cards = [
     isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
@@ -2667,7 +2667,10 @@ function renderDashboard() {
       const [title, copy, target, kicker, kind, theme = ''] = card;
       const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
       if (kind === 'link') {
-        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.pdf"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+        const downloadName = String(target).includes('website-guide')
+          ? 'EFHS-Band-Website-CMS-Guide-Super-Admin.pdf'
+          : 'EFHS-Band-Website-CMS-Guide.pdf';
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="${escapeAttr(downloadName)}"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
       }
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
       return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;

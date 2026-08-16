@@ -9,8 +9,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
-const HTML = join(ROOT, 'assets/downloads/EFHS-Band-Website-CMS-Guide.html');
-const PDF = join(ROOT, 'assets/downloads/EFHS-Band-Website-CMS-Guide.pdf');
+const HTML = join(ROOT, 'assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html');
+const PDF = join(ROOT, 'assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf');
 const PROFILE = join('/tmp', `efhs-cms-guide-chrome-${process.pid}`);
 
 const chromeCandidates = [

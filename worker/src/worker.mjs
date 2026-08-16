@@ -205,7 +205,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'website-guide-superadmin-20260816';
+const ASSET_VERSION = 'website-guide-api-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -338,9 +338,17 @@ export function canAccessWebsiteGuide(user) {
   return isSuperAdmin(user);
 }
 
+export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
+export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
+export const CMS_WEBSITE_GUIDE_API_PATH = '/api/admin/website-guide.pdf';
+
 export function isCmsWebsiteGuidePath(pathname = '') {
   const path = String(pathname || '').replace(/\/+$/, '') || '/';
-  return path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf'
+  return path === CMS_WEBSITE_GUIDE_PDF_PATH
+    || path === CMS_WEBSITE_GUIDE_HTML_PATH
+    || path === CMS_WEBSITE_GUIDE_API_PATH
+    // Legacy public filenames — keep gated so old links cannot leak the guide.
+    || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf'
     || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.html'
     || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc'
     || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide';
@@ -5656,6 +5664,20 @@ async function routeApi(request, env, url, ctx = null) {
       editable: false,
     });
   }
+  if (url.pathname === '/api/admin/website-guide.pdf' && request.method === 'GET') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    const guideUrl = new URL(CMS_WEBSITE_GUIDE_PDF_PATH, request.url);
+    const guideAsset = await env.ASSETS.fetch(new Request(guideUrl, request));
+    if (!guideAsset.ok) {
+      return jsonResponse({ detail: 'Website Guide PDF is missing from deployment assets' }, 404);
+    }
+    const headers = new Headers(guideAsset.headers);
+    headers.set('content-type', 'application/pdf');
+    headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide-Super-Admin.pdf"');
+    headers.set('cache-control', 'private, no-store');
+    return new Response(guideAsset.body, { status: 200, headers });
+  }
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
@@ -7238,19 +7260,15 @@ async function serveStaticOrCms(request, env, url) {
     if (!canAccessWebsiteGuide(guideAuth.user)) {
       return htmlResponse('<!doctype html><title>Forbidden</title><p>The Website Guide is available to Super Admins only.</p><p><a href="/admin">Back to CMS</a></p>', 403);
     }
-    if (rawGuidePath.endsWith('.doc') || assetUrl.pathname.endsWith('.doc')) {
-      return Response.redirect(new URL('/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf', request.url).toString(), 301);
-    }
-    // Prefer the PDF when the extensionless guide URL is requested.
-    if (rawGuidePath === '/assets/downloads/EFHS-Band-Website-CMS-Guide') {
-      assetUrl.pathname = '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf';
-    }
+    // Always serve the current Super Admin PDF (legacy filenames redirect here).
+    const servePdf = !rawGuidePath.endsWith('.html') && !assetUrl.pathname.endsWith('.html');
+    assetUrl.pathname = servePdf ? CMS_WEBSITE_GUIDE_PDF_PATH : CMS_WEBSITE_GUIDE_HTML_PATH;
     const guideAsset = await env.ASSETS.fetch(new Request(assetUrl, request));
     if (!guideAsset.ok) return guideAsset;
     const headers = new Headers(guideAsset.headers);
-    if (assetUrl.pathname.endsWith('.pdf')) {
+    if (servePdf) {
       headers.set('content-type', 'application/pdf');
-      headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide.pdf"');
+      headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide-Super-Admin.pdf"');
     } else {
       headers.set('content-type', 'text/html; charset=utf-8');
     }

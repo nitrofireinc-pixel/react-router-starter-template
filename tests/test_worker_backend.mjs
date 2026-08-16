@@ -438,7 +438,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=website-guide-superadmin-20260816/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=website-guide-api-20260816/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1291,9 +1291,10 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /website-guide-superadmin-20260816/);
+  assert.match(workerSrc, /website-guide-api-20260816/);
   assert.match(workerSrc, /canAccessWebsiteGuide/);
   assert.match(workerSrc, /isCmsWebsiteGuidePath/);
+  assert.match(workerSrc, /\/api\/admin\/website-guide\.pdf/);
   assert.match(workerSrc, /canViewEvents/);
   assert.match(workerSrc, /events-view-only-note/);
   assert.match(workerSrc, /All CMS users can browse events by month/);
