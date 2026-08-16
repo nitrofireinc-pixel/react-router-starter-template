@@ -3031,6 +3031,7 @@ body.sponsor-signup-open{overflow:hidden}
   margin:0 auto;
   padding:18px 18px 20px;
 }
+.minutes-view-back{display:none}
 .minutes-panel-actions{
   flex:0 0 auto;
   display:flex;
@@ -3413,6 +3414,90 @@ body.minutes-frame-open{overflow:hidden}
     color:#fff;
   }
   .minutes-mobile-menu .draft{color:#9fb2c9;margin:4px}
+
+  /* Full-page minutes document viewer on mobile. */
+  #tab-minutes.is-minutes-viewing > .panel-head,
+  #tab-minutes.is-minutes-viewing .minutes-nav-card,
+  #tab-minutes.is-minutes-viewing #minutes-empty{
+    display:none!important;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-layout{
+    display:block;
+    margin:0;
+    gap:0;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-main{
+    gap:0;
+    margin:0;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-card{
+    position:fixed;
+    inset:0;
+    z-index:70;
+    width:100%;
+    max-width:none;
+    height:100dvh;
+    margin:0;
+    border:0;
+    border-radius:0;
+    box-shadow:none;
+    padding:max(10px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    background:#f6f8fb;
+    overflow:hidden;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-back{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    min-height:42px;
+    flex:0 0 auto;
+    font-weight:800;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-close{
+    display:none!important;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-head{
+    flex:0 0 auto;
+    gap:10px;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-head h2{
+    font-size:clamp(1.25rem,5vw,1.7rem);
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-head .panel-actions{
+    width:100%;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-view-head .panel-actions .btn{
+    flex:1 1 auto;
+    min-height:40px;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-document-frame-wrap{
+    flex:1 1 auto;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    border-top:0;
+    padding-top:0;
+  }
+  #tab-minutes.is-minutes-viewing .minutes-document-frame{
+    flex:1 1 auto;
+    width:100%;
+    height:auto;
+    min-height:0;
+    border-radius:14px;
+  }
+  body.minutes-mobile-viewing{
+    overflow:hidden;
+  }
+  body.minutes-mobile-viewing .admin-mobile-bar{
+    display:none!important;
+  }
 }
 
 /* Dashboard Website Guide + Checkout cards */
