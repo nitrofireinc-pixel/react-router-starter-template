@@ -4269,10 +4269,13 @@ function fillMinutesDocxForm(form, bodyHtml = '') {
 
 function syncMinutesPanelMode() {
   const newBtn = document.querySelector('#new-minutes');
+  const uploadBtn = document.querySelector('#upload-minutes-docx');
+  const canManage = canManageMinutes();
   if (newBtn) {
-    newBtn.hidden = !canManageMinutes();
+    newBtn.hidden = !canManage;
     newBtn.textContent = 'Add Minutes';
   }
+  if (uploadBtn) uploadBtn.hidden = !canManage;
 }
 
 function setMinutesEmptyVisible(visible) {
@@ -4379,7 +4382,7 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
     : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
@@ -4534,11 +4537,42 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
+  }
+}
+
+async function uploadMinutesDocxFile(file) {
+  if (!canManageMinutes()) return;
+  if (!file) return;
+  const name = String(file.name || '').toLowerCase();
+  if (!name.endsWith('.docx')) {
+    window.alert('Please choose a .docx Word file.');
+    return;
+  }
+  const payload = new FormData();
+  payload.append('file', file, file.name || 'minutes.docx');
+  try {
+    const saved = await jsonFetch('/api/admin/minutes/upload', {
+      method: 'POST',
+      body: payload,
+    });
+    if (!saved?.id) throw new Error('Upload succeeded but no minutes id was returned.');
+    state.minutes = await jsonFetch('/api/admin/minutes');
+    state.selectedMinutesId = saved.id;
+    renderMinutesList();
+    openMinutesView(saved.id);
+    const empty = document.querySelector('#minutes-empty .muted');
+    if (empty) {
+      empty.textContent = canManageMinutes()
+        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
+        : 'Choose a meeting date from the list to open it in a floating frame.';
+    }
+  } catch (error) {
+    window.alert(error.message || 'Could not upload the DOCX minutes file.');
   }
 }
 
@@ -4698,6 +4732,18 @@ function bindMinutesPanel() {
     setMinutesNavOpen(false);
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
+  });
+  document.querySelector('#upload-minutes-docx')?.addEventListener('click', () => {
+    if (!canManageMinutes()) return;
+    setMinutesNavOpen(false);
+    document.querySelector('#minutes-docx-file')?.click();
+  });
+  document.querySelector('#minutes-docx-file')?.addEventListener('change', async (event) => {
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    if (input) input.value = '';
+    if (!file) return;
+    await uploadMinutesDocxFile(file);
   });
   document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
     button.addEventListener('click', () => {

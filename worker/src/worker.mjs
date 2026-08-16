@@ -187,9 +187,11 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'minutes-docx-fullpage-20260816';
+const ASSET_VERSION = 'minutes-docx-upload-20260816';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
+const MINUTES_DOCX_MAX_BYTES = 8_000_000;
+const MINUTES_DOCX_MAX_LABEL = '8 MB';
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -3659,6 +3661,320 @@ export function normalizeMinutesPayload(payload = {}, existing = null) {
   return { meeting_date, body_html };
 }
 
+function utf8Decode(bytes) {
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+async function inflateRawDeflate(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('DOCX decompression is not supported in this runtime');
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function findZipCentralDirectory(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const minEOCD = 22;
+  const maxComment = 0xffff;
+  const start = Math.max(0, bytes.byteLength - (minEOCD + maxComment));
+  for (let i = bytes.byteLength - minEOCD; i >= start; i -= 1) {
+    if (view.getUint32(i, true) !== 0x06054b50) continue;
+    const entries = view.getUint16(i + 10, true);
+    const size = view.getUint32(i + 12, true);
+    const offset = view.getUint32(i + 16, true);
+    if (offset + size > bytes.byteLength) continue;
+    return { entries, offset };
+  }
+  return null;
+}
+
+export async function readZipEntryBytes(buffer, entryName) {
+  const wanted = String(entryName || '').replace(/^\/+/, '');
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findZipCentralDirectory(bytes);
+  if (!eocd) throw new Error('Invalid DOCX archive');
+  let offset = eocd.offset;
+  for (let i = 0; i < eocd.entries; i += 1) {
+    if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error('Invalid DOCX central directory');
+    }
+    const method = view.getUint16(offset + 10, true);
+    const compSize = view.getUint32(offset + 20, true);
+    const nameLen = view.getUint16(offset + 28, true);
+    const extraLen = view.getUint16(offset + 30, true);
+    const commentLen = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = utf8Decode(bytes.subarray(offset + 46, offset + 46 + nameLen));
+    offset += 46 + nameLen + extraLen + commentLen;
+    if (name !== wanted && !name.endsWith(`/${wanted}`)) continue;
+    if (localOffset + 30 > bytes.byteLength || view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`Corrupt DOCX entry: ${wanted}`);
+    }
+    const localNameLen = view.getUint16(localOffset + 26, true);
+    const localExtraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    const data = bytes.subarray(dataStart, dataStart + compSize);
+    if (method === 0) return data.slice();
+    if (method === 8) return inflateRawDeflate(data);
+    throw new Error(`Unsupported DOCX compression method (${method})`);
+  }
+  return null;
+}
+
+export function docxXmlToPlainText(xml = '') {
+  let text = String(xml || '');
+  text = text
+    .replace(/<w:tab\b[^:]*\/>/gi, '\t')
+    .replace(/<w:br\b[^:]*\/>/gi, '\n')
+    .replace(/<\/w:p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function cleanMinutesDocxBlank(value, { multiline = false } = {}) {
+  const raw = String(value || '').replace(/[_\u2013\u2014\-.]{2,}/g, ' ');
+  if (multiline) {
+    return raw
+      .split(/\n+/)
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+  return raw.replace(/\s+/g, ' ').trim();
+}
+
+export function extractMeetingDateFromFilename(filename = '') {
+  const base = String(filename || '').split(/[/\\]/).pop() || '';
+  const iso = base.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/);
+  if (iso) return parseMeetingDateInput(`${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`);
+  const slashy = base.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2})/);
+  if (slashy) return parseMeetingDateInput(`${slashy[1]}/${slashy[2]}/${slashy[3]}`);
+  const compact = base.match(/(?<!\d)(\d{8})(?!\d)/);
+  if (compact) return parseMeetingDateInput(compact[1]);
+  return null;
+}
+
+export function extractMeetingDateFromMinutesText(text = '', filename = '') {
+  const source = String(text || '');
+  const beforeNext = source.split(/\bNEXT\s+MEETING\b/i)[0] || source;
+  const labeled = beforeNext.match(/\bDate\s*:\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{8})/i);
+  if (labeled) {
+    const parsed = parseMeetingDateInput(labeled[1]);
+    if (parsed) return parsed;
+  }
+  const anySlash = beforeNext.match(/\b([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})\b/);
+  if (anySlash) {
+    const parsed = parseMeetingDateInput(anySlash[1]);
+    if (parsed) return parsed;
+  }
+  return extractMeetingDateFromFilename(filename);
+}
+
+function captureLabeledLine(text, label) {
+  const re = new RegExp(`${label}\\s*:\\s*([^\\n]*)`, 'i');
+  const match = String(text || '').match(re);
+  let value = cleanMinutesDocxBlank(match?.[1] || '');
+  if (/^date$/i.test(label)) {
+    value = value.replace(/\s+Time\s*:.*$/i, '').trim();
+  }
+  return value;
+}
+
+function sectionBodyBetween(text, startRe, endRe) {
+  const source = String(text || '');
+  const start = source.search(startRe);
+  if (start < 0) return '';
+  const afterStart = source.slice(start).replace(startRe, '');
+  const end = afterStart.search(endRe);
+  const body = end >= 0 ? afterStart.slice(0, end) : afterStart;
+  return cleanMinutesDocxBlank(body, { multiline: true });
+}
+
+export function parseBoostersMinutesFieldsFromText(text = '') {
+  const source = String(text || '');
+  const header = source.split(/\bCALL\s+TO\s+ORDER\b/i)[0] || source;
+  const nextMeetingBlock = sectionBodyBetween(source, /\bNEXT\s+MEETING\b/i, /\bADJOURNMENT\b/i);
+  const callBlock = sectionBodyBetween(source, /\bCALL\s+TO\s+ORDER\b/i, /\bATTENDANCE\b/i);
+  const callMatch = callBlock.match(/called to order at\s+(.+?)\s+by\s+(.+?)\.?$/im);
+  const attendance = sectionBodyBetween(source, /\bATTENDANCE\b/i, /\bAPPROVAL\s+OF\s+PREVIOUS\s+MEETING\s+MINUTES\b/i);
+  const presentMatch = attendance.match(/Members\s+Present\s*:?\s*([\s\S]*?)(?=Members\s+Absent\s*:|$)/i);
+  const absentMatch = attendance.match(/Members\s+Absent\s*:?\s*([\s\S]*)$/i);
+  const approval = sectionBodyBetween(source, /\bAPPROVAL\s+OF\s+PREVIOUS\s+MEETING\s+MINUTES\b/i, /\bTREASURER'?S\s+REPORT/i);
+  const motionLine = approval.match(/Motion\s+to\s+approve\s*:\s*(.+?)(?:\s{2,}|\s+Seconded\s+by\s*:|$)/i);
+  const secondLine = approval.match(/Seconded\s+by\s*:\s*(.+)$/im);
+  const voteLine = approval.match(/Vote\s*\/?\s*Action\s*:\s*(.+)$/im);
+  const actionBlock = sectionBodyBetween(source, /\bACTION\s+ITEMS\b/i, /\bNEXT\s+MEETING\b/i);
+  const actionItems = [...actionBlock.matchAll(/^\s*(?:\d+[\).]|[-*])\s*(.+)$/gm)]
+    .map((match) => cleanMinutesDocxBlank(match[1]))
+    .filter(Boolean);
+  const adjourn = sectionBodyBetween(source, /\bADJOURNMENT\b/i, /$/);
+  const adjournMatch = adjourn.match(/adjourned at\s+(.+?)\.?$/im);
+  const submitted = captureLabeledLine(adjourn, 'Submitted by');
+  return {
+    meeting_time: captureLabeledLine(header, 'Time'),
+    location: captureLabeledLine(header, 'Location'),
+    called_by: captureLabeledLine(header, 'Meeting Called By'),
+    call_to_order_time: cleanMinutesDocxBlank(callMatch?.[1] || ''),
+    call_to_order_by: cleanMinutesDocxBlank(callMatch?.[2] || ''),
+    members_present: cleanMinutesDocxBlank(presentMatch?.[1] || '', { multiline: true }),
+    members_absent: cleanMinutesDocxBlank(absentMatch?.[1] || '', { multiline: true }),
+    previous_minutes_motion: cleanMinutesDocxBlank(motionLine?.[1] || ''),
+    previous_minutes_second: cleanMinutesDocxBlank(secondLine?.[1] || ''),
+    previous_minutes_vote: cleanMinutesDocxBlank(voteLine?.[1] || ''),
+    treasurer_report: sectionBodyBetween(source, /\bTREASURER'?S\s+REPORT(?:\s*\/\s*FINANCIAL\s+UPDATE)?\b/i, /\bDIRECTOR\s*\/\s*BAND\s+PROGRAM\s+UPDATE\b/i),
+    director_update: sectionBodyBetween(source, /\bDIRECTOR\s*\/\s*BAND\s+PROGRAM\s+UPDATE\b/i, /\bOLD\s+BUSINESS\b/i),
+    old_business: sectionBodyBetween(source, /\bOLD\s+BUSINESS\b/i, /\bNEW\s+BUSINESS\b/i),
+    new_business: sectionBodyBetween(source, /\bNEW\s+BUSINESS\b/i, /\bFUNDRAISING\b/i),
+    fundraising: sectionBodyBetween(source, /\bFUNDRAISING\b/i, /\bUPCOMING\s+EVENTS/i)
+      .replace(/^Fundraisers discussed, planned, or currently in progress:\s*/i, '')
+      .trim(),
+    upcoming_events: sectionBodyBetween(source, /\bUPCOMING\s+EVENTS(?:\s*&\s*ACTIVITIES)?\b/i, /\bVOLUNTEER\s+NEEDS\b/i),
+    volunteer_needs: sectionBodyBetween(source, /\bVOLUNTEER\s+NEEDS\b/i, /\bADDITIONAL\s+DISCUSSION\b/i),
+    additional_discussion: sectionBodyBetween(source, /\bADDITIONAL\s+DISCUSSION\b/i, /\bACTION\s+ITEMS\b/i),
+    action_item_1: actionItems[0] || '',
+    action_item_2: actionItems[1] || '',
+    action_item_3: actionItems[2] || '',
+    next_meeting_date: captureLabeledLine(nextMeetingBlock, 'Date'),
+    next_meeting_time: captureLabeledLine(nextMeetingBlock, 'Time'),
+    adjourned_at: cleanMinutesDocxBlank(adjournMatch?.[1] || ''),
+    submitted_by: submitted,
+  };
+}
+
+function minutesMultilineHtmlFromText(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trimEnd());
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return '<p><em>Not recorded.</em></p>';
+  return lines.map((line) => `<p>${escapeHtml(line || ' ')}</p>`).join('');
+}
+
+export function buildMinutesDocxBodyHtmlFromFields(fields = {}, meetingDateDisplay = '') {
+  const values = { ...fields };
+  const date = meetingDateDisplay || formatMeetingDateDisplay(values.meeting_date) || '';
+  const time = String(values.meeting_time || '').trim();
+  const location = String(values.location || '').trim();
+  const calledBy = String(values.called_by || '').trim();
+  const callTime = String(values.call_to_order_time || '').trim();
+  const callBy = String(values.call_to_order_by || '').trim();
+  const actions = [values.action_item_1, values.action_item_2, values.action_item_3]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+  const fieldsPayload = {
+    version: 1,
+    template: 'east-forsyth-boosters-v1',
+    meeting_date: date,
+    meeting_time: String(values.meeting_time || ''),
+    location: String(values.location || ''),
+    called_by: String(values.called_by || ''),
+    call_to_order_time: String(values.call_to_order_time || ''),
+    call_to_order_by: String(values.call_to_order_by || ''),
+    members_present: String(values.members_present || ''),
+    members_absent: String(values.members_absent || ''),
+    previous_minutes_motion: String(values.previous_minutes_motion || ''),
+    previous_minutes_second: String(values.previous_minutes_second || ''),
+    previous_minutes_vote: String(values.previous_minutes_vote || ''),
+    treasurer_report: String(values.treasurer_report || ''),
+    director_update: String(values.director_update || ''),
+    old_business: String(values.old_business || ''),
+    new_business: String(values.new_business || ''),
+    fundraising: String(values.fundraising || ''),
+    upcoming_events: String(values.upcoming_events || ''),
+    volunteer_needs: String(values.volunteer_needs || ''),
+    additional_discussion: String(values.additional_discussion || ''),
+    action_item_1: String(values.action_item_1 || ''),
+    action_item_2: String(values.action_item_2 || ''),
+    action_item_3: String(values.action_item_3 || ''),
+    next_meeting_date: String(values.next_meeting_date || ''),
+    next_meeting_time: String(values.next_meeting_time || ''),
+    adjourned_at: String(values.adjourned_at || ''),
+    submitted_by: String(values.submitted_by || ''),
+  };
+  const encodedFields = btoa(unescape(encodeURIComponent(JSON.stringify(fieldsPayload))));
+  return `<div class="minutes-docx">
+<div class="draft">MINUTES_FIELDS_V1:${encodedFields}</div>
+<div class="kicker">East Forsyth Band Boosters</div>
+<h2>Meeting Minutes</h2>
+<p><strong>Date:</strong> ${escapeHtml(date)}${time ? ` · <strong>Time:</strong> ${escapeHtml(time)}` : ''}</p>
+${location ? `<p><strong>Location:</strong> ${escapeHtml(location)}</p>` : ''}
+${calledBy ? `<p><strong>Meeting Called By:</strong> ${escapeHtml(calledBy)}</p>` : ''}
+<h3>Call to Order</h3>
+<p>The regular meeting of the East Forsyth Band Boosters was called to order at ${escapeHtml(callTime || '__________')} by ${escapeHtml(callBy || '________________')}.</p>
+<h3>Attendance</h3>
+<p><strong>Members Present:</strong></p>
+${minutesMultilineHtmlFromText(values.members_present)}
+<p><strong>Members Absent:</strong></p>
+${minutesMultilineHtmlFromText(values.members_absent)}
+<h3>Approval of Previous Meeting Minutes</h3>
+<p>The minutes from the previous meeting were reviewed.</p>
+<p><strong>Motion to approve:</strong> ${escapeHtml(values.previous_minutes_motion || '________________')} · <strong>Seconded by:</strong> ${escapeHtml(values.previous_minutes_second || '________________')}</p>
+<p><strong>Vote/Action:</strong> ${escapeHtml(values.previous_minutes_vote || '________________')}</p>
+<h3>Treasurer's Report / Financial Update</h3>
+${minutesMultilineHtmlFromText(values.treasurer_report)}
+<h3>Director / Band Program Update</h3>
+${minutesMultilineHtmlFromText(values.director_update)}
+<h3>Old Business</h3>
+${minutesMultilineHtmlFromText(values.old_business)}
+<h3>New Business</h3>
+${minutesMultilineHtmlFromText(values.new_business)}
+<h3>Fundraising</h3>
+<p>Fundraisers discussed, planned, or currently in progress:</p>
+${minutesMultilineHtmlFromText(values.fundraising)}
+<h3>Upcoming Events &amp; Activities</h3>
+${minutesMultilineHtmlFromText(values.upcoming_events)}
+<h3>Volunteer Needs</h3>
+${minutesMultilineHtmlFromText(values.volunteer_needs)}
+<h3>Additional Discussion</h3>
+${minutesMultilineHtmlFromText(values.additional_discussion)}
+<h3>Action Items</h3>
+${actions ? `<ol>${actions}</ol>` : '<p><em>No action items recorded.</em></p>'}
+<h3>Next Meeting</h3>
+<p><strong>Date:</strong> ${escapeHtml(values.next_meeting_date || '________________')} · <strong>Time:</strong> ${escapeHtml(values.next_meeting_time || '________________')}</p>
+<h3>Adjournment</h3>
+<p>The meeting was adjourned at ${escapeHtml(values.adjourned_at || '__________')}.</p>
+<p><strong>Submitted by:</strong> ${escapeHtml(values.submitted_by || '________________')}<br><em>Secretary, East Forsyth Band Boosters</em></p>
+</div>`;
+}
+
+export async function parseBoostersMinutesDocx(arrayBuffer, filename = '') {
+  const entry = await readZipEntryBytes(arrayBuffer, 'word/document.xml');
+  if (!entry) throw new Error('DOCX is missing word/document.xml');
+  const plain = docxXmlToPlainText(utf8Decode(entry));
+  if (!plain) throw new Error('DOCX did not contain readable meeting minutes text');
+  const meeting_date = extractMeetingDateFromMinutesText(plain, filename);
+  if (!meeting_date) {
+    throw new Error('Could not find a meeting date in the DOCX. Add Date: MM/DD/YYYY near the top, or include the date in the filename.');
+  }
+  const fields = parseBoostersMinutesFieldsFromText(plain);
+  const meeting_date_display = formatMeetingDateDisplay(meeting_date);
+  const body_html = sanitizeRichHtml(buildMinutesDocxBodyHtmlFromFields(fields, meeting_date_display));
+  if (!body_html.replace(/<[^>]+>/g, '').trim()) {
+    throw new Error('DOCX did not contain usable minutes content');
+  }
+  return {
+    meeting_date,
+    meeting_date_display,
+    fields,
+    body_html,
+    plain_text: plain,
+  };
+}
+
 export function minutesEditableUntil(createdAt) {
   const created = new Date(createdAt || 0);
   if (Number.isNaN(created.getTime())) return null;
@@ -5381,6 +5697,52 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: `Could not save minutes: ${error?.message || error}` }, 500);
     }
   }
+  if (url.pathname === '/api/admin/minutes/upload' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canManageMeetingMinutes(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+    }
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ detail: 'Expected multipart form upload with a .docx file' }, 400);
+    }
+    const file = form.get('file') || form.get('docx') || form.get('minutes');
+    if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
+      return jsonResponse({ detail: 'Choose a .docx meeting minutes file to upload' }, 422);
+    }
+    const filename = String(file.name || 'minutes.docx');
+    const lower = filename.toLowerCase();
+    if (!lower.endsWith('.docx')) {
+      return jsonResponse({ detail: 'Only .docx Word files are supported for minutes upload' }, 422);
+    }
+    const size = Number(file.size || 0);
+    if (size <= 0) return jsonResponse({ detail: 'Uploaded DOCX file is empty' }, 422);
+    if (size > MINUTES_DOCX_MAX_BYTES) {
+      return jsonResponse({ detail: `DOCX must be ${MINUTES_DOCX_MAX_LABEL} or smaller` }, 422);
+    }
+    let parsed;
+    try {
+      parsed = await parseBoostersMinutesDocx(await file.arrayBuffer(), filename);
+    } catch (error) {
+      return jsonResponse({ detail: error?.message || 'Could not read the DOCX minutes file' }, 422);
+    }
+    try {
+      const result = await env.DB.prepare(
+        'INSERT INTO booster_meeting_minutes (meeting_date, body_html, created_by) VALUES (?, ?, ?)',
+      ).bind(parsed.meeting_date, parsed.body_html, auth.user.id).run();
+      const createdId = Number(result?.meta?.last_row_id || 0);
+      const created = createdId ? await getMeetingMinutesById(env, createdId, auth.user) : null;
+      if (!created?.id) {
+        return jsonResponse({ detail: 'Minutes uploaded but could not be reloaded. Refresh and check the list.' }, 500);
+      }
+      return jsonResponse(created, 201);
+    } catch (error) {
+      return jsonResponse({ detail: `Could not save uploaded minutes: ${error?.message || error}` }, 500);
+    }
+  }
   const minutesDocumentMatch = url.pathname.match(/^\/api\/admin\/minutes\/(\d+)\/document$/);
   if (minutesDocumentMatch && request.method === 'GET') {
     const auth = await requireLogin(request, env);
@@ -6189,7 +6551,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.</p></div></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor, or upload a completed .docx. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx">Upload DOCX</button><input id="minutes-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.</p></div></div></div>
 <div id="minutes-view-modal" class="minutes-frame-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-view-dismiss aria-label="Close minutes document"></button>
   <div class="minutes-view-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-view-title">
