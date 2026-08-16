@@ -4428,9 +4428,18 @@ function isMinutesEditorOpen() {
   return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
+function syncMinutesMobileViewing() {
+  const panel = document.querySelector('#tab-minutes');
+  const viewing = isMinutesViewOpen();
+  panel?.classList.toggle('is-minutes-viewing', viewing);
+  const mobile = Boolean(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
+  document.body.classList.toggle('minutes-mobile-viewing', viewing && mobile);
+}
+
 function closeMinutesView() {
   const view = document.querySelector('#minutes-view');
   if (view) view.toggleAttribute('hidden', true);
+  syncMinutesMobileViewing();
 }
 
 function closeMinutesEditor() {
@@ -4482,6 +4491,10 @@ function showMinutesView() {
   const view = document.querySelector('#minutes-view');
   setMinutesEmptyVisible(false);
   if (view) view.toggleAttribute('hidden', false);
+  syncMinutesMobileViewing();
+  if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+    view?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function showMinutesIdle(statusText = '') {
@@ -4858,6 +4871,16 @@ function bindMinutesPanel() {
       if (!card || card.contains(event.target)) return;
       setMinutesNavOpen(false);
     });
+  }
+  if (!window.__minutesMobileViewBound) {
+    window.__minutesMobileViewBound = true;
+    const onViewportChange = () => syncMinutesMobileViewing();
+    if (window.matchMedia) {
+      const media = window.matchMedia('(max-width: 900px)');
+      if (media.addEventListener) media.addEventListener('change', onViewportChange);
+      else if (media.addListener) media.addListener(onViewportChange);
+    }
+    window.addEventListener('resize', onViewportChange);
   }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
