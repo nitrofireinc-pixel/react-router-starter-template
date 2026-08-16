@@ -187,7 +187,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'minutes-no-archive-secretary-20260816';
+const ASSET_VERSION = 'minutes-toast-wider-20260816';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
 const MINUTES_DOCX_MAX_BYTES = 8_000_000;
@@ -6584,7 +6584,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
         <h2 id="minutes-editor-title">Add Minutes</h2>
       </div>
       <div class="panel-actions minutes-docx-toolbar-actions">
-        <button class="btn outline" type="button" id="upload-minutes-docx-editor" data-minutes-manage-actions hidden>Upload .docx</button>
         <button class="btn primary" data-minutes-submit form="minutes-form" type="submit">Save minutes</button>
         <button class="btn outline" type="button" id="cancel-minutes-edit">Cancel</button>
       </div>
