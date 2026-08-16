@@ -7,6 +7,7 @@ function escapeHtml(value) {
 const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
+  '/api/admin/checkout/pay',
   '/api/admin/zernio/facebook/events/publish',
   '/api/admin/zernio/posts',
   '/api/admin/zernio/facebook/connect',
@@ -357,6 +358,10 @@ function hasPermission(scope) {
   if (!state.me?.user) return false;
   if (isSuperAdmin(state.me.user)) return true;
   return state.me.user.permissions.includes(scope) || state.me.user.permissions.includes('all');
+}
+
+function canAccessCheckout() {
+  return hasPermission('treasurer') || hasPermission('president') || hasPermission('vice-president');
 }
 
 function canManageAllEvents() {
@@ -1993,6 +1998,9 @@ function activateTab(name) {
     if (name === 'social') {
       loadSocialPanel().catch(() => {});
     }
+    if (name === 'checkout') {
+      initCheckoutPanel().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -2143,6 +2151,7 @@ function showAllowedPanels() {
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
+    checkout: canAccessCheckout(),
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
@@ -2564,7 +2573,10 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
+  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=checkout-website-guide-20260816`;
   const cards = [
+    ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
+    canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
@@ -2581,9 +2593,14 @@ function renderDashboard() {
   ].filter(Boolean);
 
   dashboard.innerHTML = cards.length
-    ? cards.map(([title, text, target, kicker, kind]) => {
+    ? cards.map((card) => {
+      const [title, copy, target, kicker, kind, theme = ''] = card;
+      const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
+      if (kind === 'link') {
+        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="EFHS-Band-Website-CMS-Guide.pdf"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
+      }
       const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
-      return `<button class="dash-card" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(text)}</small></button>`;
+      return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;
     }).join('')
     : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
   dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
@@ -2679,6 +2696,63 @@ async function loadStaff() {
   if (!canEditStaff()) return;
   state.staff = await jsonFetch('/api/admin/staff');
   renderStaff();
+}
+
+function loadAdminSquareWebSdk(environment = 'production') {
+  const existing = document.querySelector('script[data-square-web-sdk]');
+  if (existing && window.Square) return Promise.resolve(window.Square);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = environment === 'sandbox'
+      ? 'https://sandbox.web.squareupsandbox.com/v1/square.js'
+      : 'https://web.squarecdn.com/v1/square.js';
+    script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+    script.onerror = () => reject(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+let checkoutCardController = null;
+let checkoutInitPromise = null;
+
+async function initCheckoutPanel() {
+  if (!canAccessCheckout()) return;
+  if (checkoutInitPromise) return checkoutInitPromise;
+  checkoutInitPromise = (async () => {
+    const form = document.querySelector('#checkout-form');
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const host = document.querySelector('#admin-square-card');
+    if (!form || !host) return;
+    if (status) status.textContent = 'Loading Square…';
+    if (submit) submit.disabled = true;
+    try {
+      if (checkoutCardController) {
+        try { await checkoutCardController.destroy(); } catch { /* ignore */ }
+        checkoutCardController = null;
+      }
+      host.innerHTML = '';
+      const config = await jsonFetch('/api/admin/checkout/config');
+      if (!config.web_payments) {
+        if (status) status.textContent = config.detail || 'Square card checkout is not configured.';
+        return;
+      }
+      const Square = await loadAdminSquareWebSdk(config.environment || 'production');
+      const payments = Square.payments(config.application_id, config.location_id);
+      const card = await payments.card();
+      await card.attach('#admin-square-card');
+      checkoutCardController = card;
+      if (status) status.textContent = 'Square secure card form ready.';
+      if (submit) submit.disabled = false;
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not load Square checkout.';
+      if (submit) submit.disabled = true;
+    } finally {
+      checkoutInitPromise = null;
+    }
+  })();
+  return checkoutInitPromise;
 }
 
 async function loadBoosterMembers() {
@@ -5496,6 +5570,80 @@ function bindForms() {
   document.querySelector('#new-photo')?.addEventListener('click', () => {
     resetPhotoForm();
     document.querySelector('#photo-form [data-rich-input="caption"]')?.focus();
+  });
+
+  document.querySelector('#checkout-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAccessCheckout()) return;
+    const form = event.currentTarget;
+    const status = document.querySelector('#checkout-status');
+    const submit = document.querySelector('#checkout-submit');
+    const item = String(form.elements.item?.value || '').trim();
+    const amountDisplay = String(form.elements.amount_display?.value || '').trim();
+    const payerName = String(form.elements.payer_name?.value || '').trim();
+    const note = String(form.elements.note?.value || '').trim();
+    if (!payerName) {
+      if (status) status.textContent = 'User name or entity is required.';
+      form.elements.payer_name?.focus();
+      return;
+    }
+    if (!item) {
+      if (status) status.textContent = 'Description of transaction is required.';
+      form.elements.item?.focus();
+      return;
+    }
+    if (!amountDisplay) {
+      if (status) status.textContent = 'Amount is required.';
+      form.elements.amount_display?.focus();
+      return;
+    }
+    if (!checkoutCardController) {
+      if (status) status.textContent = 'Square card form is not ready.';
+      await initCheckoutPanel();
+      return;
+    }
+    if (submit) submit.disabled = true;
+    if (status) status.textContent = 'Processing payment…';
+    try {
+      const amountCents = Math.round(Number(String(amountDisplay).replace(/[^0-9.]/g, '')) * 100);
+      if (!Number.isFinite(amountCents) || amountCents < 100) {
+        throw new Error('Amount must be at least $1.00');
+      }
+      const verificationDetails = {
+        amount: (amountCents / 100).toFixed(2),
+        currencyCode: 'USD',
+        intent: 'CHARGE',
+        customerInitiated: false,
+        sellerKeyedIn: true,
+        billingContact: {
+          givenName: (payerName || item).slice(0, 100),
+          countryCode: 'US',
+        },
+      };
+      const tokenResult = await checkoutCardController.tokenize(verificationDetails);
+      if (tokenResult.status !== 'OK' || !tokenResult.token) {
+        throw new Error(tokenResult.errors?.[0]?.message || 'Card could not be processed.');
+      }
+      const paid = await jsonFetch('/api/admin/checkout/pay', {
+        method: 'POST',
+        body: JSON.stringify({
+          item,
+          amount_display: amountDisplay,
+          amount_cents: amountCents,
+          payer_name: payerName,
+          note,
+          source_id: tokenResult.token,
+        }),
+      });
+      form.reset();
+      showSavedToast(paid.detail || 'Payment charged.');
+      if (status) status.textContent = paid.detail || 'Payment charged.';
+      await initCheckoutPanel();
+    } catch (error) {
+      const detail = error?.message || 'Payment failed.';
+      if (status) status.textContent = detail;
+      if (submit) submit.disabled = false;
+    }
   });
 }
 
