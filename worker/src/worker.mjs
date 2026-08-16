@@ -193,7 +193,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'sponsors-manage-cleanup-20260816';
+const ASSET_VERSION = 'facebook-calendar-ignore-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -1770,9 +1770,11 @@ function emptyFacebookEventSyncState() {
   return {
     posted: {},
     pending: {},
+    ignored: {},
     lastPublishedAt: '',
     lastPostId: '',
     seeded: false,
+    publishDisabledCleared: false,
   };
 }
 
@@ -1783,9 +1785,11 @@ export function parseFacebookEventSyncState(raw) {
     return {
       posted: parsed.posted && typeof parsed.posted === 'object' ? parsed.posted : {},
       pending: parsed.pending && typeof parsed.pending === 'object' ? parsed.pending : {},
+      ignored: parsed.ignored && typeof parsed.ignored === 'object' ? parsed.ignored : {},
       lastPublishedAt: String(parsed.lastPublishedAt || '').trim(),
       lastPostId: String(parsed.lastPostId || '').trim(),
       seeded: Boolean(parsed.seeded),
+      publishDisabledCleared: Boolean(parsed.publishDisabledCleared),
     };
   } catch {
     return emptyFacebookEventSyncState();
@@ -1861,26 +1865,34 @@ async function pruneFacebookEventSyncState(env, state) {
   for (const key of Object.keys(next.posted)) {
     if (!liveIds.has(String(key))) delete next.posted[key];
   }
+  for (const key of Object.keys(next.ignored)) {
+    if (!liveIds.has(String(key))) delete next.ignored[key];
+  }
   return next;
 }
 
+/** Stop auto-seeding every upcoming event into the Facebook suggestions queue. */
 async function seedFacebookEventPendingIfNeeded(env, state) {
   const next = parseFacebookEventSyncState(state);
-  if (next.seeded || Object.keys(next.posted).length) {
-    next.seeded = true;
-    return next;
-  }
-  const upcoming = await getEvents(env, { upcomingOnly: true, expandRepeats: false });
+  if (!next.seeded) next.seeded = true;
+  return next;
+}
+
+/** One-time clear of legacy publish-queue suggestions (staff will not post these). */
+export async function clearLegacyFacebookPublishQueueIfNeeded(env, state) {
+  const next = parseFacebookEventSyncState(state);
+  if (next.publishDisabledCleared) return next;
   const now = new Date().toISOString();
-  for (const event of upcoming) {
-    const id = String(event.id);
-    next.pending[id] = {
-      fingerprint: eventFacebookFingerprint(event),
-      queuedAt: now,
-      reason: 'seed',
+  for (const [id, entry] of Object.entries(next.pending)) {
+    next.ignored[id] = {
+      fingerprint: String(entry?.fingerprint || '').trim(),
+      ignoredAt: now,
+      reason: 'cleared',
     };
   }
+  next.pending = {};
   next.seeded = true;
+  next.publishDisabledCleared = true;
   return next;
 }
 
@@ -1890,7 +1902,12 @@ async function queueEventForFacebook(env, event, reason = 'updated') {
   const id = String(event.id);
   const fingerprint = eventFacebookFingerprint(event);
   const posted = state.posted[id];
+  const ignored = state.ignored[id];
   if (posted && posted.fingerprint === fingerprint) {
+    delete state.pending[id];
+    return saveFacebookEventSyncState(env, state);
+  }
+  if (ignored && ignored.fingerprint === fingerprint) {
     delete state.pending[id];
     return saveFacebookEventSyncState(env, state);
   }
@@ -1898,7 +1915,7 @@ async function queueEventForFacebook(env, event, reason = 'updated') {
   state.pending[id] = {
     fingerprint,
     queuedAt: new Date().toISOString(),
-    reason: posted ? 'updated' : (reason === 'seed' ? 'seed' : 'new'),
+    reason: posted || ignored ? 'updated' : (reason === 'seed' ? 'seed' : 'new'),
   };
   return saveFacebookEventSyncState(env, state);
 }
@@ -1909,11 +1926,50 @@ async function unqueueEventForFacebook(env, eventId) {
   if (!id) return state;
   delete state.pending[id];
   delete state.posted[id];
+  delete state.ignored[id];
   return saveFacebookEventSyncState(env, state);
+}
+
+export async function ignoreFacebookEventSuggestion(env, eventId) {
+  const id = String(eventId || '').trim();
+  if (!id) throw new Error('Event id is required');
+  let state = await pruneFacebookEventSyncState(env, await getFacebookEventSyncState(env));
+  state = await clearLegacyFacebookPublishQueueIfNeeded(env, state);
+  const pending = state.pending[id];
+  const event = await getEventById(env, Number(id));
+  const fingerprint = pending?.fingerprint
+    || (event ? eventFacebookFingerprint(event) : '');
+  state.ignored[id] = {
+    fingerprint,
+    ignoredAt: new Date().toISOString(),
+    reason: 'ignored',
+  };
+  delete state.pending[id];
+  await saveFacebookEventSyncState(env, state);
+  return getFacebookEventQueueStatus(env);
+}
+
+export async function ignoreAllFacebookEventSuggestions(env) {
+  let state = await pruneFacebookEventSyncState(env, await getFacebookEventSyncState(env));
+  state = await clearLegacyFacebookPublishQueueIfNeeded(env, state);
+  const now = new Date().toISOString();
+  for (const [id, entry] of Object.entries(state.pending)) {
+    state.ignored[id] = {
+      fingerprint: String(entry?.fingerprint || '').trim(),
+      ignoredAt: now,
+      reason: 'ignored',
+    };
+  }
+  state.pending = {};
+  state.publishDisabledCleared = true;
+  state.seeded = true;
+  await saveFacebookEventSyncState(env, state);
+  return getFacebookEventQueueStatus(env);
 }
 
 async function getFacebookEventQueueStatus(env) {
   let state = await pruneFacebookEventSyncState(env, await getFacebookEventSyncState(env));
+  state = await clearLegacyFacebookPublishQueueIfNeeded(env, state);
   state = await seedFacebookEventPendingIfNeeded(env, state);
   state = await saveFacebookEventSyncState(env, state);
   const pendingIds = Object.keys(state.pending);
@@ -1935,6 +1991,7 @@ async function getFacebookEventQueueStatus(env) {
     last_post_id: state.lastPostId || '',
     seeded: Boolean(state.seeded),
     posted_count: Object.keys(state.posted).length,
+    ignored_count: Object.keys(state.ignored).length,
   };
 }
 
@@ -5499,15 +5556,31 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: error.message || 'Could not load Facebook event queue' }, 502);
     }
   }
+  if (url.pathname === '/api/admin/zernio/facebook/events/ignore-all' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    try {
+      return jsonResponse(await ignoreAllFacebookEventSuggestions(env));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not clear suggested calendar updates' }, 502);
+    }
+  }
+  const facebookEventIgnoreMatch = url.pathname.match(/^\/api\/admin\/zernio\/facebook\/events\/(\d+)\/ignore$/);
+  if (facebookEventIgnoreMatch && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    try {
+      return jsonResponse(await ignoreFacebookEventSuggestion(env, facebookEventIgnoreMatch[1]));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not ignore calendar update' }, 502);
+    }
+  }
   if (url.pathname === '/api/admin/zernio/facebook/events/publish' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
-    try {
-      return jsonResponse(await publishFacebookEventQueue(env), 201);
-    } catch (error) {
-      return jsonResponse({ detail: error.message || 'Could not publish calendar updates' }, 502);
-    }
+    return jsonResponse({
+      detail: 'Calendar updates are no longer posted to Facebook. Ignore suggestions from the Social tab instead.',
+    }, 410);
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
@@ -6949,13 +7022,13 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <div class="admin-card stack" id="zernio-facebook-events-card" hidden>
   <div class="utility-links-head">
-    <h2>Calendar updates for Facebook</h2>
-    <p class="muted">Current upcoming events start in this queue. After you post them, only newly added or changed events accumulate here until you post again.</p>
+    <h2>Suggested calendar updates</h2>
+    <p class="muted">New or changed calendar events appear here for awareness. They are not posted to Facebook. Ignore any suggestion you do not need.</p>
   </div>
-  <p class="notice" id="zernio-facebook-events-summary">Checking calendar queue…</p>
+  <p class="notice" id="zernio-facebook-events-summary">Checking calendar suggestions…</p>
   <div id="zernio-facebook-events-list" class="admin-list zernio-events-queue-list"></div>
   <div class="panel-actions">
-    <button class="btn primary" type="button" id="zernio-facebook-events-publish" hidden>Post calendar updates to Facebook</button>
+    <button class="btn outline" type="button" id="zernio-facebook-events-ignore-all" hidden>Ignore all suggestions</button>
   </div>
   <p class="status" id="zernio-facebook-events-status"></p>
 </div>

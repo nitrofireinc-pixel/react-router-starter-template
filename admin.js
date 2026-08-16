@@ -9,6 +9,8 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/password',
   '/api/admin/checkout/pay',
   '/api/admin/zernio/facebook/events/publish',
+  '/api/admin/zernio/facebook/events/ignore-all',
+  '/api/admin/zernio/facebook/events/',
   '/api/admin/zernio/posts',
   '/api/admin/zernio/facebook/connect',
   '/api/admin/zernio/facebook/disconnect',
@@ -2451,18 +2453,16 @@ async function loadZernioPosts() {
 function renderZernioEventQueue() {
   const list = document.querySelector('#zernio-facebook-events-list');
   const summary = document.querySelector('#zernio-facebook-events-summary');
-  const publishBtn = document.querySelector('#zernio-facebook-events-publish');
+  const ignoreAllBtn = document.querySelector('#zernio-facebook-events-ignore-all');
   const queue = state.zernioEventQueue;
   const events = Array.isArray(queue?.pending_events) ? queue.pending_events : [];
   if (summary) {
     if (!state.zernioFacebook?.connected) {
-      summary.textContent = 'Connect Facebook to queue and post calendar updates.';
+      summary.textContent = 'Connect Facebook to see suggested calendar updates.';
     } else if (!events.length) {
-      summary.textContent = queue?.last_published_at
-        ? `No new calendar updates waiting. Last posted ${new Date(queue.last_published_at).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET.`
-        : 'No upcoming calendar events are waiting to post.';
+      summary.textContent = 'No suggested calendar updates. New or changed events will appear here.';
     } else {
-      summary.textContent = `${events.length} calendar event${events.length === 1 ? '' : 's'} waiting to post to Facebook.`;
+      summary.textContent = `${events.length} suggested calendar update${events.length === 1 ? '' : 's'}. Ignore any you do not need — they are not posted to Facebook.`;
     }
   }
   if (list) {
@@ -2473,13 +2473,51 @@ function renderZernioEventQueue() {
           ? (event.repeat_summary || 'Repeating event')
           : `${event.date_label || ''} ${event.date_detail || ''} ${event.event_year || ''}`.trim();
         const reason = event.queue_reason === 'updated' ? 'Updated' : (event.queue_reason === 'seed' ? 'Current' : 'New');
-        return `<article class="admin-row"><div><b>${escapeHtml(title)}</b><small>${escapeHtml(when)} · ${escapeHtml(reason)}</small></div></article>`;
+        return `<article class="admin-row"><div><b>${escapeHtml(title)}</b><small>${escapeHtml(when)} · ${escapeHtml(reason)}</small></div><div class="row-actions"><button type="button" class="btn outline" data-ignore-facebook-event="${escapeAttr(event.id)}">Ignore</button></div></article>`;
       }).join('')
-      : '<p class="muted">Queue is empty.</p>';
+      : '<p class="muted">No suggestions right now.</p>';
+    list.querySelectorAll('[data-ignore-facebook-event]').forEach((button) => {
+      button.addEventListener('click', () => ignoreZernioFacebookEvent(button.dataset.ignoreFacebookEvent));
+    });
   }
-  if (publishBtn) {
-    publishBtn.hidden = !state.zernioFacebook?.connected || !events.length;
-    publishBtn.disabled = !events.length;
+  if (ignoreAllBtn) {
+    ignoreAllBtn.hidden = !state.zernioFacebook?.connected || !events.length;
+    ignoreAllBtn.disabled = !events.length;
+  }
+}
+
+async function ignoreZernioFacebookEvent(eventId) {
+  const statusEl = document.querySelector('#zernio-facebook-events-status');
+  const id = String(eventId || '').trim();
+  if (!id) return;
+  if (statusEl) statusEl.textContent = 'Ignoring suggestion…';
+  try {
+    state.zernioEventQueue = await jsonFetch(`/api/admin/zernio/facebook/events/${encodeURIComponent(id)}/ignore`, {
+      method: 'POST',
+      body: '{}',
+    });
+    renderZernioEventQueue();
+    if (statusEl) statusEl.textContent = 'Suggestion ignored.';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not ignore suggestion.';
+  }
+}
+
+async function ignoreAllZernioFacebookEvents() {
+  const statusEl = document.querySelector('#zernio-facebook-events-status');
+  const count = Number(state.zernioEventQueue?.pending_count || 0);
+  if (!count) return;
+  if (!confirm(`Ignore all ${count} suggested calendar update${count === 1 ? '' : 's'}?`)) return;
+  if (statusEl) statusEl.textContent = 'Clearing suggestions…';
+  try {
+    state.zernioEventQueue = await jsonFetch('/api/admin/zernio/facebook/events/ignore-all', {
+      method: 'POST',
+      body: '{}',
+    });
+    renderZernioEventQueue();
+    if (statusEl) statusEl.textContent = 'All suggestions cleared.';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not clear suggestions.';
   }
 }
 
@@ -2490,7 +2528,7 @@ async function loadZernioEventQueue() {
     renderZernioEventQueue();
     return;
   }
-  if (statusEl) statusEl.textContent = 'Loading calendar queue…';
+  if (statusEl) statusEl.textContent = 'Loading calendar suggestions…';
   try {
     state.zernioEventQueue = await jsonFetch('/api/admin/zernio/facebook/events');
     renderZernioEventQueue();
@@ -2498,7 +2536,7 @@ async function loadZernioEventQueue() {
   } catch (error) {
     state.zernioEventQueue = { pending_events: [], pending_count: 0 };
     renderZernioEventQueue();
-    if (statusEl) statusEl.textContent = error.message || 'Could not load calendar queue.';
+    if (statusEl) statusEl.textContent = error.message || 'Could not load calendar suggestions.';
   }
 }
 
@@ -5055,21 +5093,8 @@ function bindForms() {
     }
   });
 
-  document.querySelector('#zernio-facebook-events-publish')?.addEventListener('click', async () => {
-    const statusEl = document.querySelector('#zernio-facebook-events-status');
-    const count = Number(state.zernioEventQueue?.pending_count || 0);
-    if (!count) return;
-    if (!confirm(`Post ${count} calendar event${count === 1 ? '' : 's'} to the Facebook Page now?`)) return;
-    if (statusEl) statusEl.textContent = 'Posting calendar updates…';
-    try {
-      const result = await jsonFetch('/api/admin/zernio/facebook/events/publish', { method: 'POST', body: '{}' });
-      state.zernioEventQueue = result;
-      renderZernioEventQueue();
-      if (statusEl) statusEl.textContent = `Posted ${result.published_count || count} event${(result.published_count || count) === 1 ? '' : 's'} to Facebook.`;
-      await loadZernioPosts();
-    } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not post calendar updates.';
-    }
+  document.querySelector('#zernio-facebook-events-ignore-all')?.addEventListener('click', () => {
+    ignoreAllZernioFacebookEvents();
   });
 
   document.querySelector('#zernio-facebook-disconnect')?.addEventListener('click', async () => {
