@@ -417,6 +417,7 @@ function canSendMail() {
 }
 
 function canManageMinutes() {
+  // Secretary permission only (`minutes`). Super Admins inherit via hasPermission().
   return hasPermission('minutes');
 }
 
@@ -4271,19 +4272,22 @@ function fillMinutesDocxForm(form, bodyHtml = '') {
 
 function syncMinutesPanelMode() {
   const canManage = canManageMinutes();
+  document.querySelectorAll('[data-minutes-manage-actions]').forEach((el) => {
+    el.hidden = !canManage;
+  });
   const newBtn = document.querySelector('#new-minutes');
   if (newBtn) {
     newBtn.hidden = !canManage;
     newBtn.textContent = 'Add Minutes';
   }
-  document.querySelectorAll('#upload-minutes-docx, #upload-minutes-docx-editor, [data-minutes-manage-actions]').forEach((el) => {
-    el.hidden = !canManage;
-  });
+  const uploadBtn = document.querySelector('#upload-minutes-docx');
+  if (uploadBtn) uploadBtn.hidden = !canManage;
+  const editorUpload = document.querySelector('#upload-minutes-docx-editor');
+  if (editorUpload) editorUpload.hidden = !canManage;
 }
 
 function triggerMinutesDocxPicker() {
-  const input = document.querySelector('#minutes-docx-file') || document.querySelector('#minutes-docx-file-drop');
-  input?.click();
+  document.querySelector('#minutes-docx-file')?.click();
 }
 
 function setMinutesEmptyVisible(visible) {
@@ -4356,9 +4360,8 @@ function showMinutesIdle(statusText = '') {
   clearMinutesDocumentFrame();
   setMinutesEmptyVisible(true);
   const empty = document.querySelector('#minutes-empty');
-  if (empty && statusText) {
-    const muted = empty.querySelector('.muted');
-    if (muted) muted.textContent = statusText;
+  if (empty) {
+    empty.textContent = statusText || 'Choose a meeting date from the list to open it.';
   }
 }
 
@@ -4389,9 +4392,7 @@ function resetMinutesForm(statusText = '') {
   syncMinutesPanelMode();
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
-  showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
-    : 'Choose a meeting date from the list to open it in a floating frame.'));
+  showMinutesIdle(statusText || 'Choose a meeting date from the list to open it.');
   renderMinutesList();
 }
 
@@ -4542,12 +4543,8 @@ async function saveMinutesForm(form) {
     state.selectedMinutesId = saved.id;
     renderMinutesList();
     openMinutesView(saved.id);
-    const empty = document.querySelector('#minutes-empty .muted');
-    if (empty) {
-      empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
-        : 'Choose a meeting date from the list to open it in a floating frame.';
-    }
+    const empty = document.querySelector('#minutes-empty');
+    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
   }
@@ -4574,12 +4571,8 @@ async function uploadMinutesDocxFile(file) {
     state.selectedMinutesId = saved.id;
     renderMinutesList();
     openMinutesView(saved.id);
-    const empty = document.querySelector('#minutes-empty .muted');
-    if (empty) {
-      empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
-        : 'Choose a meeting date from the list to open it in a floating frame.';
-    }
+    const empty = document.querySelector('#minutes-empty');
+    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
   } catch (error) {
     window.alert(error.message || 'Could not upload the DOCX minutes file.');
   }
@@ -4742,12 +4735,6 @@ function bindMinutesPanel() {
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });
-  document.querySelector('[data-minutes-empty-add]')?.addEventListener('click', () => {
-    if (!canManageMinutes()) return;
-    setMinutesNavOpen(false);
-    prepareNewMinutesForm();
-    openMinutesEditor({ editing: false });
-  });
   const openDocxPicker = () => {
     if (!canManageMinutes()) return;
     setMinutesNavOpen(false);
@@ -4755,39 +4742,13 @@ function bindMinutesPanel() {
   };
   document.querySelector('#upload-minutes-docx')?.addEventListener('click', openDocxPicker);
   document.querySelector('#upload-minutes-docx-editor')?.addEventListener('click', openDocxPicker);
-  document.querySelector('[data-minutes-empty-upload]')?.addEventListener('click', openDocxPicker);
-  const bindDocxInput = (input) => {
-    input?.addEventListener('change', async (event) => {
-      const el = event.currentTarget;
-      const file = el?.files?.[0];
-      if (el) el.value = '';
-      if (!file) return;
-      await uploadMinutesDocxFile(file);
-    });
-  };
-  bindDocxInput(document.querySelector('#minutes-docx-file'));
-  bindDocxInput(document.querySelector('#minutes-docx-file-drop'));
-  const dropzone = document.querySelector('[data-minutes-dropzone]');
-  if (dropzone) {
-    ['dragenter', 'dragover'].forEach((type) => {
-      dropzone.addEventListener(type, (event) => {
-        event.preventDefault();
-        dropzone.classList.add('is-dragover');
-      });
-    });
-    ['dragleave', 'drop'].forEach((type) => {
-      dropzone.addEventListener(type, (event) => {
-        event.preventDefault();
-        dropzone.classList.remove('is-dragover');
-      });
-    });
-    dropzone.addEventListener('drop', async (event) => {
-      if (!canManageMinutes()) return;
-      const file = event.dataTransfer?.files?.[0];
-      if (!file) return;
-      await uploadMinutesDocxFile(file);
-    });
-  }
+  document.querySelector('#minutes-docx-file')?.addEventListener('change', async (event) => {
+    const el = event.currentTarget;
+    const file = el?.files?.[0];
+    if (el) el.value = '';
+    if (!file) return;
+    await uploadMinutesDocxFile(file);
+  });
   document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
     button.addEventListener('click', () => {
       closeMinutesView();
