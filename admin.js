@@ -4320,6 +4320,20 @@ function closeMinutesEditor() {
   syncMinutesFrameBodyLock();
 }
 
+function confirmCancelMinutesEditor() {
+  if (!isMinutesEditorOpen()) return true;
+  return window.confirm('Discard unsaved minutes changes?');
+}
+
+function cancelMinutesEditor() {
+  if (!confirmCancelMinutesEditor()) return false;
+  closeMinutesEditor();
+  const selected = selectedMinutes();
+  if (selected) openMinutesView(selected.id);
+  else showMinutesIdle();
+  return true;
+}
+
 function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   if (!canManageMinutes()) return;
   const modal = document.querySelector('#minutes-editor-modal');
@@ -4748,6 +4762,7 @@ function bindMinutesPanel() {
   });
   document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
     button.addEventListener('click', () => {
+      // View-only close: no confirmation prompt.
       closeMinutesView();
       clearMinutesDocumentFrame();
       state.selectedMinutesId = null;
@@ -4757,22 +4772,17 @@ function bindMinutesPanel() {
   });
   document.querySelectorAll('[data-minutes-editor-dismiss], #cancel-minutes-edit').forEach((button) => {
     button.addEventListener('click', () => {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      cancelMinutesEditor();
     });
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (isMinutesEditorOpen()) {
-      closeMinutesEditor();
-      const selected = selectedMinutes();
-      if (selected) openMinutesView(selected.id);
-      else showMinutesIdle();
+      cancelMinutesEditor();
       return;
     }
     if (isMinutesViewOpen()) {
+      // View-only close: no confirmation prompt.
       closeMinutesView();
       clearMinutesDocumentFrame();
       state.selectedMinutesId = null;
