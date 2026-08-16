@@ -1203,6 +1203,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /notify-bell-ring-20260816/);
-
+  assert.match(workerSrc, /sponsors-manage-cleanup-20260816/);
+  assert.doesNotMatch(workerSrc, /gold-tier-benefits-card/);
+  assert.doesNotMatch(workerSrc, /id="sponsor-preview"/);
 });

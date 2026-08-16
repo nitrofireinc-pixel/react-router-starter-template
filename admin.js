@@ -3016,15 +3016,6 @@ function formatAdminSponsorAddress(sponsor = {}) {
   return [street, city, state].filter(Boolean).join(', ');
 }
 
-function sponsorPreviewCard(sponsor, index = 0) {
-  const featured = index === 0 ? ' sponsor-featured' : '';
-  const mark = sponsor.logo_url ? `<span class="sponsor-logo"><img src="${escapeHtml(sponsor.logo_url)}" alt="${escapeHtml(sponsor.name)} logo"></span>` : `<span class="sponsor-mark">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-  const formatted = formatAdminSponsorAddress(sponsor);
-  const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
-  const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
-  return `<article class="sponsor-card${featured}">${mark}<div><span class="sponsor-level sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)} Sponsor</span><h3>${escapeHtml(sponsor.name)}</h3>${formatted ? `<p class="sponsor-address">${escapeHtml(formatted)}</p>` : ''}</div></article>`;
-}
-
 function syncSponsorLogoPreview(form, url = '') {
   const preview = form?.querySelector?.('[data-sponsor-logo-preview]') || document.querySelector('[data-sponsor-logo-preview]');
   const img = preview?.querySelector('img');
@@ -3441,8 +3432,6 @@ function renderSponsors() {
     </article>
   `;
   }).join('') || '<p class="draft">No sponsors yet. Drag handles appear after you add one.</p>';
-  const preview = document.querySelector('#sponsor-preview');
-  if (preview) preview.innerHTML = ordered.filter(s => s.active).map(sponsorPreviewCard).join('') || '<p class="draft">No active sponsors yet.</p>';
   renderGoldSponsorsPrintPreview();
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
