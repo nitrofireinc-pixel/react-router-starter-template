@@ -427,7 +427,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=home-hero-logo-20260816/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=minutes-mobile-compact-20260816/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1275,16 +1275,24 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /home-hero-logo-20260816/);
-  assert.match(workerSrc, /minutes-view-modal/);
+  assert.match(workerSrc, /minutes-mobile-compact-20260816/);
+  assert.match(workerSrc, /minutes-view-card/);
+  assert.match(workerSrc, /minutes-view-back/);
+  assert.match(workerSrc, /embed = false/);
+  assert.match(workerSrc, /body\.is-embed/);
+  assert.doesNotMatch(workerSrc, /minutes-view-modal/);
   assert.match(workerSrc, /last_login_at/);
   assert.match(workerSrc, /UPDATE users SET last_login_at/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /formatUserLastLoginLabel/);
   assert.match(adminJs, /user-last-login/);
   assert.match(adminJs, /#minutes-view/);
-  assert.match(adminJs, /minutes-view-modal/);
+  assert.match(adminJs, /syncMinutesMobileViewing/);
+  assert.match(adminJs, /embed=1/);
+  assert.doesNotMatch(adminJs, /minutes-view-modal/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
+  assert.match(styles, /is-minutes-viewing/);
+  assert.match(styles, /minutes-mobile-viewing/);
   const markBytes = readFileSync(join(root, 'assets/efhs-blue-regiment-mark.png'));
   // Updated circular mark from the restored upload (not the Aug 5 letterhead crop).
   assert.notEqual(createHash('md5').update(markBytes).digest('hex'), '0de3ab10f088d89df03c43e88dc2bb58');

@@ -4414,13 +4414,21 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
+  const open = isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
+function syncMinutesMobileViewing() {
+  const panel = document.querySelector('#tab-minutes');
+  const viewing = isMinutesViewOpen();
+  panel?.classList.toggle('is-minutes-viewing', viewing);
+  const mobile = Boolean(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
+  document.body.classList.toggle('minutes-mobile-viewing', viewing && mobile);
+}
+
 function isMinutesViewOpen() {
-  const modal = document.querySelector('#minutes-view-modal');
-  return Boolean(modal && !modal.hasAttribute('hidden'));
+  const view = document.querySelector('#minutes-view');
+  return Boolean(view && !view.hasAttribute('hidden'));
 }
 
 function isMinutesEditorOpen() {
@@ -4429,9 +4437,9 @@ function isMinutesEditorOpen() {
 }
 
 function closeMinutesView() {
-  const modal = document.querySelector('#minutes-view-modal');
-  if (modal) modal.toggleAttribute('hidden', true);
-  syncMinutesFrameBodyLock();
+  const view = document.querySelector('#minutes-view');
+  if (view) view.toggleAttribute('hidden', true);
+  syncMinutesMobileViewing();
 }
 
 function closeMinutesEditor() {
@@ -4480,10 +4488,13 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
 
 function showMinutesView() {
   closeMinutesEditor();
-  const modal = document.querySelector('#minutes-view-modal');
-  setMinutesEmptyVisible(true);
-  if (modal) modal.toggleAttribute('hidden', false);
-  syncMinutesFrameBodyLock();
+  const view = document.querySelector('#minutes-view');
+  setMinutesEmptyVisible(false);
+  if (view) view.toggleAttribute('hidden', false);
+  syncMinutesMobileViewing();
+  if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+    window.scrollTo(0, 0);
+  }
 }
 
 function showMinutesIdle(statusText = '') {
@@ -4596,9 +4607,10 @@ function renderMinutesView(item) {
   const frame = document.querySelector('#minutes-document-frame');
   const body = document.querySelector('[data-minutes-view-body]');
   const documentUrl = item.document_url || `/api/admin/minutes/${item.id}/document`;
+  const embedUrl = documentUrl.includes('?') ? `${documentUrl}&embed=1` : `${documentUrl}?embed=1`;
   if (frame) {
     frame.toggleAttribute('hidden', false);
-    if (frame.getAttribute('src') !== documentUrl) frame.setAttribute('src', documentUrl);
+    if (frame.getAttribute('src') !== embedUrl) frame.setAttribute('src', embedUrl);
   }
   if (body) {
     body.toggleAttribute('hidden', true);
@@ -4731,7 +4743,7 @@ function isEnsemblesBodyEditorOpen() {
 }
 
 function syncEnsemblesFrameBodyLock() {
-  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
+  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesEditorOpen());
 }
 
 function closeEnsemblesBodyEditor() {
@@ -4860,6 +4872,16 @@ function bindMinutesPanel() {
       if (!card || card.contains(event.target)) return;
       setMinutesNavOpen(false);
     });
+  }
+  if (!window.__minutesMobileViewBound) {
+    window.__minutesMobileViewBound = true;
+    const onViewportChange = () => syncMinutesMobileViewing();
+    if (window.matchMedia) {
+      const media = window.matchMedia('(max-width: 900px)');
+      if (media.addEventListener) media.addEventListener('change', onViewportChange);
+      else if (media.addListener) media.addListener(onViewportChange);
+    }
+    window.addEventListener('resize', onViewportChange);
   }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
