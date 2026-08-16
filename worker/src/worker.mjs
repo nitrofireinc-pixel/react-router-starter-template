@@ -194,10 +194,9 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'blue-regiment-mark-20260816';
+const ASSET_VERSION = 'restore-minutes-no-logo-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
-const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
-const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
+const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
 const MINUTES_DOCX_MAX_BYTES = 8_000_000;
 const MINUTES_DOCX_MAX_LABEL = '8 MB';
@@ -4379,17 +4378,13 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   const recorder = String(minutes.created_by_name || '').trim();
   const body = sanitizeRichHtml(minutes.body_html || '');
   const isDocxMinutes = /\bminutes-docx\b/.test(body);
-  // Letterhead assets are fixed in code (not CMS-editable).
-  const letterheadMark = MINUTES_LETTERHEAD_MARK;
+  // Letterhead banner only for DOCX minutes. Blue Regiment logo is not used in minutes.
   const letterheadBanner = MINUTES_LETTERHEAD_BANNER;
   const chrome = isDocxMinutes
     ? `<header class="letterhead letterhead-banner-wrap" aria-hidden="true">
       <img class="letterhead-banner" src="${escapeHtml(letterheadBanner)}" alt="" draggable="false">
     </header>`
-    : `<header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
-    </header>
-    <p class="doc-kicker">${escapeHtml(title)}</p>
+    : `<p class="doc-kicker">${escapeHtml(title)}</p>
     <h1>Booster Meeting Minutes</h1>
     <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>`;
   return `<!doctype html>
@@ -4432,13 +4427,6 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       max-height: 1.35in;
       object-fit: contain;
       object-position: center top;
-      -webkit-user-drag: none;
-    }
-    .letterhead-mark {
-      display: block;
-      width: 1.45in;
-      height: 1.45in;
-      opacity: 0.28;
       -webkit-user-drag: none;
     }
     .doc-kicker {
@@ -4496,7 +4484,6 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
-      .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .letterhead-banner { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
@@ -7167,7 +7154,28 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Select a meeting to view the document below the list. Secretaries can add, edit, or upload .docx minutes. Only Super Admins can delete.</p></div><div class="panel-actions minutes-panel-actions" data-minutes-manage-actions hidden><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx">Upload .docx</button><input id="minutes-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to view the document below.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><p id="minutes-empty" class="minutes-empty-hint muted">Choose a meeting date from the list to view it below.</p><article id="minutes-view" class="admin-card stack minutes-view minutes-view-card" hidden aria-labelledby="minutes-view-title"><button type="button" class="btn outline minutes-view-back" data-minutes-view-dismiss>← Minutes list</button><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 id="minutes-view-title" data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button><button class="btn outline minutes-view-close" type="button" data-minutes-view-dismiss>Close</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document. Secretaries can add, edit, or upload .docx minutes. Only Super Admins can delete.</p></div><div class="panel-actions minutes-panel-actions" data-minutes-manage-actions hidden><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx">Upload .docx</button><input id="minutes-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><p id="minutes-empty" class="minutes-empty-hint muted">Choose a meeting date from the list to open it.</p></div></div>
+<div id="minutes-view-modal" class="minutes-frame-modal" hidden>
+  <button type="button" class="minutes-frame-backdrop" data-minutes-view-dismiss aria-label="Close minutes document"></button>
+  <div class="minutes-view-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-view-title">
+    <article id="minutes-view" class="stack minutes-view">
+      <div class="minutes-view-head">
+        <div>
+          <p class="kicker">Meeting minutes</p>
+          <h2 id="minutes-view-title" data-minutes-view-date></h2>
+          <p class="muted" data-minutes-view-meta></p>
+        </div>
+        <div class="panel-actions">
+          <button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button>
+          <button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button>
+          <button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button>
+          <button class="btn outline" type="button" data-minutes-view-dismiss>Close</button>
+        </div>
+      </div>
+      <div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div>
+    </article>
+  </div>
+</div>
 <div id="minutes-editor-modal" class="minutes-frame-modal minutes-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-editor-dismiss aria-label="Close minutes editor"></button>
   <div class="minutes-editor-dialog minutes-docx-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">

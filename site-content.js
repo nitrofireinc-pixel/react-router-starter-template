@@ -298,7 +298,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=blue-regiment-mark-20260816';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=restore-minutes-no-logo-20260816';
     mark.alt = 'East Forsyth Blue Regiment';
     brand.appendChild(mark);
   });
