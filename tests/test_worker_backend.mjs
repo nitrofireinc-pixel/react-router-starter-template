@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, renderNav, renderNotifyMeNavControl, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -1137,3 +1137,72 @@ test('normalizeZernioPostPayload builds publish-now and scheduled Facebook posts
   assert.equal(scheduled.timezone, 'America/New_York');
 });
 
+test('notify me nav control is rendered in public navigation', () => {
+  assert.match(renderNotifyMeNavControl(), /nav-notify-bell/);
+  assert.match(renderNotifyMeNavControl(), /data-notify-me/);
+  const nav = renderNav([
+    { slug: 'home', path: '/', title: 'Home' },
+    { slug: 'become-a-sponsor', path: '/become-a-sponsor.html', title: 'Become a Sponsor' },
+    { slug: 'contact', path: '/contact.html', title: 'Contact' },
+  ]);
+  assert.match(nav, />Home</);
+  assert.match(nav, />Contact</);
+  assert.doesNotMatch(nav, /Become a Sponsor/);
+  assert.match(nav, /data-notify-me/);
+  assert.match(nav, /Notify Me/);
+});
+
+test('normalizeWebPushSubscription validates browser push endpoints and keys', () => {
+  assert.equal(normalizeWebPushSubscription({}).ok, false);
+  assert.equal(normalizeWebPushSubscription({
+    endpoint: 'http://example.com/push',
+    keys: { p256dh: 'a'.repeat(40), auth: 'b'.repeat(16) },
+  }).ok, false);
+  const ok = normalizeWebPushSubscription({
+    endpoint: 'https://fcm.googleapis.com/fcm/send/abc123',
+    keys: { p256dh: 'a'.repeat(40), auth: 'b'.repeat(16) },
+    user_agent: 'Mozilla/5.0',
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.endpoint, 'https://fcm.googleapis.com/fcm/send/abc123');
+  assert.equal(ok.p256dh.length, 40);
+  assert.equal(ok.auth.length, 16);
+  assert.equal(ok.user_agent, 'Mozilla/5.0');
+});
+
+test('calendar web push helpers build notification payloads and parse state', () => {
+  const created = buildCalendarPushPayload({
+    action: 'created',
+    event: { id: 40, title: '<span>Band Practice</span>' },
+  });
+  assert.equal(created.action, 'created');
+  assert.equal(created.title, 'Band Practice');
+  assert.equal(created.notification_title, 'New calendar event');
+  assert.equal(created.url, '/calendar.html');
+  assert.equal(parseCalendarPushState('{"revision":2,"action":"updated","title":"Spirit Week"}').revision, 2);
+  assert.equal(emptyCalendarPushState().revision, 0);
+});
+
+test('push service worker and web app manifest assets exist', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const sw = readFileSync(join(root, 'push-sw.js'), 'utf8');
+  const manifest = readFileSync(join(root, 'manifest.webmanifest'), 'utf8');
+  assert.match(sw, /showNotification/);
+  assert.match(sw, /notificationclick/);
+  assert.match(manifest, /"display": "standalone"/);
+  assert.match(manifest, /efhs-blue-regiment-mark\.png/);
+  const script = readFileSync(join(root, 'script.js'), 'utf8');
+  assert.match(script, /bindNotifyMeNavControl|data-notify-me|enableNotifyMe/);
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(styles, /nav-notify-me/);
+  assert.match(styles, /nav-bell-ring/);
+  assert.match(styles, /menu-button-icon/);
+  assert.match(styles, /mobile-nav-tray/);
+  assert.match(styles, /header-quick-actions/);
+  assert.match(script, /placeHeaderQuickActions|enhanceMenuButton/);
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /mobile-nav-tray/);
+  assert.match(workerSrc, /menu-button-icon/);
+  assert.match(workerSrc, /hamburger-notify-20260816/);
+
+});
