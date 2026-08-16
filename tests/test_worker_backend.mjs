@@ -1196,4 +1196,13 @@ test('push service worker and web app manifest assets exist', () => {
   const styles = readFileSync(join(root, 'styles.css'), 'utf8');
   assert.match(styles, /nav-notify-me/);
   assert.match(styles, /nav-bell-ring/);
+  assert.match(styles, /menu-button-icon/);
+  assert.match(styles, /mobile-nav-tray/);
+  assert.match(styles, /header-quick-actions/);
+  assert.match(script, /placeHeaderQuickActions|enhanceMenuButton/);
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /mobile-nav-tray/);
+  assert.match(workerSrc, /menu-button-icon/);
+  assert.match(workerSrc, /hamburger-notify-20260816/);
+
 });
