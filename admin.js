@@ -2637,9 +2637,9 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=website-guide-notify-me-20260816`;
+  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=website-guide-superadmin-20260816`;
   const cards = [
-    ['Website Guide', 'Download the current site and CMS operations guide (PDF) for staff and officers.', guideHref, 'Documentation', 'link', 'docs'],
+    isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],

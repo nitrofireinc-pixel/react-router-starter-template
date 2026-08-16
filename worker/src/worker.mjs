@@ -205,7 +205,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'events-view-all-20260816';
+const ASSET_VERSION = 'website-guide-superadmin-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -331,6 +331,19 @@ export function isSuperAdmin(user) {
 /** Security log is Super Admin only — never grantable via permissions. */
 export function canAccessSecurityLog(user) {
   return isSuperAdmin(user);
+}
+
+/** Website Guide PDF/HTML is Super Admin only — not public, not for editors. */
+export function canAccessWebsiteGuide(user) {
+  return isSuperAdmin(user);
+}
+
+export function isCmsWebsiteGuidePath(pathname = '') {
+  const path = String(pathname || '').replace(/\/+$/, '') || '/';
+  return path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf'
+    || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.html'
+    || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc'
+    || path === '/assets/downloads/EFHS-Band-Website-CMS-Guide';
 }
 
 export function hasPermission(user, scope) {
@@ -7216,6 +7229,34 @@ async function serveStaticOrCms(request, env, url) {
   if (url.pathname === '/') return env.ASSETS.fetch(request);
   const assetUrl = new URL(request.url);
   assetUrl.pathname = normalizeStaticPath(url.pathname);
+  const rawGuidePath = String(url.pathname || '').replace(/\/+$/, '') || '/';
+  if (isCmsWebsiteGuidePath(rawGuidePath) || isCmsWebsiteGuidePath(assetUrl.pathname)) {
+    const guideAuth = await requireLogin(request, env);
+    if (guideAuth.response) {
+      return redirect(`/admin/login?next=${encodeURIComponent('/admin')}`);
+    }
+    if (!canAccessWebsiteGuide(guideAuth.user)) {
+      return htmlResponse('<!doctype html><title>Forbidden</title><p>The Website Guide is available to Super Admins only.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    }
+    if (rawGuidePath.endsWith('.doc') || assetUrl.pathname.endsWith('.doc')) {
+      return Response.redirect(new URL('/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf', request.url).toString(), 301);
+    }
+    // Prefer the PDF when the extensionless guide URL is requested.
+    if (rawGuidePath === '/assets/downloads/EFHS-Band-Website-CMS-Guide') {
+      assetUrl.pathname = '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf';
+    }
+    const guideAsset = await env.ASSETS.fetch(new Request(assetUrl, request));
+    if (!guideAsset.ok) return guideAsset;
+    const headers = new Headers(guideAsset.headers);
+    if (assetUrl.pathname.endsWith('.pdf')) {
+      headers.set('content-type', 'application/pdf');
+      headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide.pdf"');
+    } else {
+      headers.set('content-type', 'text/html; charset=utf-8');
+    }
+    headers.set('cache-control', 'private, no-store');
+    return new Response(guideAsset.body, { status: guideAsset.status, statusText: guideAsset.statusText, headers });
+  }
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
@@ -7230,16 +7271,6 @@ async function serveStaticOrCms(request, env, url) {
       headers.set('content-type', 'application/manifest+json; charset=utf-8');
     }
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
-  }
-  if (assetUrl.pathname === '/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf' && assetResponse.ok) {
-    const headers = new Headers(assetResponse.headers);
-    headers.set('content-type', 'application/pdf');
-    headers.set('content-disposition', 'inline; filename="EFHS-Band-Website-CMS-Guide.pdf"');
-    headers.set('cache-control', 'public, max-age=3600');
-    return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
-  }
-  if (assetUrl.pathname === '/assets/downloads/EFHS-Band-Website-CMS-Guide.doc') {
-    return Response.redirect(new URL('/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf', request.url).toString(), 301);
   }
   return assetResponse;
 }
