@@ -996,9 +996,8 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /Called to order/);
   assert.doesNotMatch(documentHtml, /<script/i);
   assert.match(documentHtml, /window\.print\(\)/);
-  assert.match(documentHtml, /efhs-blue-regiment-mark/);
-  assert.match(documentHtml, /letterhead-mark/);
-  assert.match(documentHtml, /opacity:\s*0\.28/);
+  assert.doesNotMatch(documentHtml, /efhs-blue-regiment-mark/);
+  assert.doesNotMatch(documentHtml, /letterhead-mark/);
 
   const docxBody = sanitizeRichHtml(`<div class="minutes-docx"><div class="draft">MINUTES_FIELDS_V1:eyJ2IjoxfQ==</div><div class="kicker">East Forsyth Band Boosters</div><h2>Meeting Minutes</h2><h3>Call to Order</h3><p>Called to order.</p></div>`);
   assert.match(docxBody, /minutes-docx/);
@@ -1267,26 +1266,22 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /blue-regiment-mark-20260816/);
-  assert.match(workerSrc, /minutes-view-card/);
-  assert.match(workerSrc, /minutes-view-back/);
-  assert.doesNotMatch(workerSrc, /minutes-view-modal/);
+  assert.match(workerSrc, /restore-minutes-no-logo-20260816/);
+  assert.match(workerSrc, /minutes-view-modal/);
   assert.match(workerSrc, /last_login_at/);
   assert.match(workerSrc, /UPDATE users SET last_login_at/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /formatUserLastLoginLabel/);
   assert.match(adminJs, /user-last-login/);
   assert.match(adminJs, /#minutes-view/);
-  assert.match(adminJs, /setMinutesEmptyVisible\(false\)/);
-  assert.match(adminJs, /syncMinutesMobileViewing|is-minutes-viewing/);
+  assert.match(adminJs, /minutes-view-modal/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
-  assert.match(styles, /\.minutes-view-card/);
-  assert.match(styles, /is-minutes-viewing/);
-  assert.match(styles, /minutes-mobile-viewing/);
   const markBytes = readFileSync(join(root, 'assets/efhs-blue-regiment-mark.png'));
   // Updated circular mark from the restored upload (not the Aug 5 letterhead crop).
   assert.notEqual(createHash('md5').update(markBytes).digest('hex'), '0de3ab10f088d89df03c43e88dc2bb58');
   assert.equal(createHash('md5').update(markBytes).digest('hex'), '12532aaa580c9fe8c8506c7d4ff0bcd6');
+  assert.doesNotMatch(workerSrc, /MINUTES_LETTERHEAD_MARK/);
+  assert.doesNotMatch(workerSrc, /letterhead-mark/);
 
   assert.match(workerSrc, /Suggested calendar updates/);
   assert.match(workerSrc, /zernio-facebook-events-ignore-all/);

@@ -4414,13 +4414,13 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
+  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
 function isMinutesViewOpen() {
-  const view = document.querySelector('#minutes-view');
-  return Boolean(view && !view.hasAttribute('hidden'));
+  const modal = document.querySelector('#minutes-view-modal');
+  return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
 function isMinutesEditorOpen() {
@@ -4428,18 +4428,10 @@ function isMinutesEditorOpen() {
   return Boolean(modal && !modal.hasAttribute('hidden'));
 }
 
-function syncMinutesMobileViewing() {
-  const panel = document.querySelector('#tab-minutes');
-  const viewing = isMinutesViewOpen();
-  panel?.classList.toggle('is-minutes-viewing', viewing);
-  const mobile = Boolean(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
-  document.body.classList.toggle('minutes-mobile-viewing', viewing && mobile);
-}
-
 function closeMinutesView() {
-  const view = document.querySelector('#minutes-view');
-  if (view) view.toggleAttribute('hidden', true);
-  syncMinutesMobileViewing();
+  const modal = document.querySelector('#minutes-view-modal');
+  if (modal) modal.toggleAttribute('hidden', true);
+  syncMinutesFrameBodyLock();
 }
 
 function closeMinutesEditor() {
@@ -4488,13 +4480,10 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
 
 function showMinutesView() {
   closeMinutesEditor();
-  const view = document.querySelector('#minutes-view');
-  setMinutesEmptyVisible(false);
-  if (view) view.toggleAttribute('hidden', false);
-  syncMinutesMobileViewing();
-  if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
-    view?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  const modal = document.querySelector('#minutes-view-modal');
+  setMinutesEmptyVisible(true);
+  if (modal) modal.toggleAttribute('hidden', false);
+  syncMinutesFrameBodyLock();
 }
 
 function showMinutesIdle(statusText = '') {
@@ -4504,7 +4493,7 @@ function showMinutesIdle(statusText = '') {
   setMinutesEmptyVisible(true);
   const empty = document.querySelector('#minutes-empty');
   if (empty) {
-    empty.textContent = statusText || 'Choose a meeting date from the list to view it below.';
+    empty.textContent = statusText || 'Choose a meeting date from the list to open it.';
   }
 }
 
@@ -4535,7 +4524,7 @@ function resetMinutesForm(statusText = '') {
   syncMinutesPanelMode();
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
-  showMinutesIdle(statusText || 'Choose a meeting date from the list to view it below.');
+  showMinutesIdle(statusText || 'Choose a meeting date from the list to open it.');
   renderMinutesList();
 }
 
@@ -4687,7 +4676,7 @@ async function saveMinutesForm(form) {
     renderMinutesList();
     openMinutesView(saved.id);
     const empty = document.querySelector('#minutes-empty');
-    if (empty) empty.textContent = 'Choose a meeting date from the list to view it below.';
+    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
   }
@@ -4715,7 +4704,7 @@ async function uploadMinutesDocxFile(file) {
     renderMinutesList();
     openMinutesView(saved.id);
     const empty = document.querySelector('#minutes-empty');
-    if (empty) empty.textContent = 'Choose a meeting date from the list to view it below.';
+    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
   } catch (error) {
     window.alert(error.message || 'Could not upload the DOCX minutes file.');
   }
@@ -4742,7 +4731,7 @@ function isEnsemblesBodyEditorOpen() {
 }
 
 function syncEnsemblesFrameBodyLock() {
-  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesEditorOpen());
+  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
 }
 
 function closeEnsemblesBodyEditor() {
@@ -4871,16 +4860,6 @@ function bindMinutesPanel() {
       if (!card || card.contains(event.target)) return;
       setMinutesNavOpen(false);
     });
-  }
-  if (!window.__minutesMobileViewBound) {
-    window.__minutesMobileViewBound = true;
-    const onViewportChange = () => syncMinutesMobileViewing();
-    if (window.matchMedia) {
-      const media = window.matchMedia('(max-width: 900px)');
-      if (media.addEventListener) media.addEventListener('change', onViewportChange);
-      else if (media.addListener) media.addListener(onViewportChange);
-    }
-    window.addEventListener('resize', onViewportChange);
   }
   document.querySelector('#new-minutes')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
