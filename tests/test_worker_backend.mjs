@@ -1267,7 +1267,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /minutes-mobile-viewer-20260816/);
+  assert.match(workerSrc, /blue-regiment-mark-20260816/);
   assert.match(workerSrc, /minutes-view-card/);
   assert.match(workerSrc, /minutes-view-back/);
   assert.doesNotMatch(workerSrc, /minutes-view-modal/);
@@ -1283,6 +1283,10 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(styles, /\.minutes-view-card/);
   assert.match(styles, /is-minutes-viewing/);
   assert.match(styles, /minutes-mobile-viewing/);
+  const markBytes = readFileSync(join(root, 'assets/efhs-blue-regiment-mark.png'));
+  // Updated circular mark from the restored upload (not the Aug 5 letterhead crop).
+  assert.notEqual(createHash('md5').update(markBytes).digest('hex'), '0de3ab10f088d89df03c43e88dc2bb58');
+  assert.equal(createHash('md5').update(markBytes).digest('hex'), '12532aaa580c9fe8c8506c7d4ff0bcd6');
 
   assert.match(workerSrc, /Suggested calendar updates/);
   assert.match(workerSrc, /zernio-facebook-events-ignore-all/);
