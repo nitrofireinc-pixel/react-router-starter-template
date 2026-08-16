@@ -193,7 +193,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'facebook-calendar-ignore-20260816';
+const ASSET_VERSION = 'add-to-home-mobile-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -537,6 +537,10 @@ export async function recordCalendarPushChange(env, { action = 'updated', event 
 
 export function renderNotifyMeNavControl() {
   return `<button type="button" class="nav-notify-me" data-notify-me aria-label="Notify me about calendar updates" title="Notify me about calendar updates"><span class="nav-notify-bell" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Zm7-6.2V11a7 7 0 1 0-14 0v4.8L3 17.8V19h18v-1.2l-2-1.8Z"/></svg></span><span class="nav-notify-label">Notify Me</span></button>`;
+}
+
+export function renderAddToHomeNavControl() {
+  return `<button type="button" class="nav-add-home" data-add-home aria-label="Add East Forsyth Band to your home screen" title="Add to Home Screen"><span class="nav-add-home-icon" aria-hidden="true"><svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><img class="nav-add-home-mark" src="${escapeAttr(BLUE_REGIMENT_MARK_PATH)}" alt="" width="16" height="16" decoding="async"></span></button>`;
 }
 
 export function canAccessCheckout(user) {
@@ -6666,7 +6670,7 @@ export function renderNav(pages) {
   const pageLinks = pages
     .filter((page) => page.slug !== 'become-a-sponsor')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
-  return `${pageLinks}${renderNotifyMeNavControl()}`;
+  return `${pageLinks}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false } = {}) {

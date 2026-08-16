@@ -91,11 +91,14 @@ function placeHeaderQuickActions() {
   const menuButton = placeMenuButtonInTray();
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
+  const addHome = document.querySelector('[data-add-home]');
   if (isMobileNavViewport()) {
     if (notify) actions.appendChild(notify);
+    if (addHome) actions.appendChild(addHome);
   } else {
     setMobileNavOpen(false);
     if (notify) nav.appendChild(notify);
+    if (addHome) nav.appendChild(addHome);
   }
   if (menuButton) enhanceMenuButton(menuButton);
 }
@@ -457,5 +460,217 @@ async function disableNotifyMe(button) {
       await syncNotifyMeButtonState(button);
       window.alert(formatPushSubscribeError(error));
     }
+  });
+})();
+
+function isStandaloneDisplay() {
+  return Boolean(
+    window.matchMedia?.('(display-mode: standalone)').matches
+      || window.navigator.standalone === true,
+  );
+}
+
+function detectMobileInstallOs() {
+  const ua = String(navigator.userAgent || '');
+  const platform = String(navigator.platform || '');
+  const touchMac = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  if (/iPhone|iPad|iPod/i.test(ua) || touchMac) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  if (!isMobileNavViewport()) return 'desktop';
+  return 'other';
+}
+
+function ensureWebAppManifestLink() {
+  if (document.querySelector('link[rel="manifest"]')) return;
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = '/manifest.webmanifest';
+  document.head.appendChild(link);
+  if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+    const apple = document.createElement('link');
+    apple.rel = 'apple-touch-icon';
+    apple.href = '/assets/efhs-blue-regiment-mark.png';
+    document.head.appendChild(apple);
+  }
+}
+
+function ensureAddToHomeNavControl() {
+  let button = document.querySelector('[data-add-home]');
+  if (!button) {
+    const siteNav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+    if (!siteNav) return null;
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nav-add-home';
+    button.dataset.addHome = '';
+    button.setAttribute('aria-label', 'Add East Forsyth Band to your home screen');
+    button.title = 'Add to Home Screen';
+    button.innerHTML = `
+      <span class="nav-add-home-icon" aria-hidden="true">
+        <svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png" alt="" width="16" height="16" decoding="async">
+      </span>`;
+    const notify = siteNav.querySelector('[data-notify-me]');
+    if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
+    else if (notify) siteNav.appendChild(button);
+    else siteNav.appendChild(button);
+  }
+  placeHeaderQuickActions();
+  return document.querySelector('[data-add-home]');
+}
+
+function addToHomeInstructions(os) {
+  if (os === 'ios') {
+    return {
+      eyebrow: 'iPhone / iPad',
+      steps: [
+        'Tap the Share button in Safari (square with an up arrow).',
+        'Scroll and tap Add to Home Screen.',
+        'Tap Add to save the Blue Regiment shortcut.',
+      ],
+    };
+  }
+  if (os === 'android') {
+    return {
+      eyebrow: 'Android',
+      steps: [
+        'Tap the browser menu (⋮).',
+        'Choose Add to Home screen or Install app.',
+        'Confirm to place the Blue Regiment icon on your home screen.',
+      ],
+    };
+  }
+  if (os === 'desktop') {
+    return {
+      eyebrow: 'Desktop browser',
+      steps: [
+        'Look for the install icon in your browser address bar.',
+        'Or open the browser menu and choose Install East Forsyth Band / Install app.',
+        'Confirm to add a Blue Regiment shortcut you can open like an app.',
+      ],
+    };
+  }
+  return {
+    eyebrow: 'Mobile browser',
+    steps: [
+      'Open this site in your phone’s browser menu.',
+      'Choose Add to Home screen / Install app.',
+      'Confirm to save the Blue Regiment shortcut.',
+    ],
+  };
+}
+
+function ensureAddToHomeSheet() {
+  let sheet = document.querySelector('[data-add-home-sheet]');
+  if (sheet) return sheet;
+  sheet = document.createElement('div');
+  sheet.className = 'add-home-sheet';
+  sheet.dataset.addHomeSheet = '';
+  sheet.hidden = true;
+  sheet.innerHTML = `
+    <div class="add-home-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="add-home-title">
+      <div class="add-home-sheet-head">
+        <img src="/assets/efhs-blue-regiment-mark.png" alt="">
+        <div>
+          <h2 id="add-home-title">Add to Home Screen</h2>
+          <p data-add-home-os></p>
+        </div>
+      </div>
+      <ol data-add-home-steps></ol>
+      <div class="add-home-sheet-actions">
+        <button type="button" class="btn primary" data-add-home-install hidden>Install</button>
+        <button type="button" class="btn secondary" data-add-home-close>Got it</button>
+      </div>
+    </div>`;
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click', (event) => {
+    if (event.target === sheet || event.target.closest('[data-add-home-close]')) {
+      sheet.hidden = true;
+    }
+  });
+  return sheet;
+}
+
+function showAddToHomeSheet({ os, canInstall }) {
+  const sheet = ensureAddToHomeSheet();
+  const info = addToHomeInstructions(os);
+  const osLabel = sheet.querySelector('[data-add-home-os]');
+  const steps = sheet.querySelector('[data-add-home-steps]');
+  const installBtn = sheet.querySelector('[data-add-home-install]');
+  if (osLabel) osLabel.textContent = info.eyebrow;
+  if (steps) {
+    steps.innerHTML = info.steps.map((step) => `<li>${step}</li>`).join('');
+  }
+  if (installBtn) {
+    installBtn.hidden = !canInstall;
+    installBtn.onclick = async () => {
+      if (!window.__efhsDeferredInstallPrompt) return;
+      const promptEvent = window.__efhsDeferredInstallPrompt;
+      window.__efhsDeferredInstallPrompt = null;
+      installBtn.hidden = true;
+      await promptEvent.prompt();
+      sheet.hidden = true;
+      syncAddToHomeButtonState(ensureAddToHomeNavControl());
+    };
+  }
+  sheet.hidden = false;
+}
+
+function syncAddToHomeButtonState(button) {
+  if (!button) return;
+  // Mobile-only control; desktop uses browser install UI / address-bar install.
+  button.hidden = !isMobileNavViewport() || isStandaloneDisplay();
+}
+
+(function bindAddToHomeNavControl() {
+  ensureWebAppManifestLink();
+  const button = ensureAddToHomeNavControl();
+  if (!button || button.dataset.boundAddHome === '1') return;
+  button.dataset.boundAddHome = '1';
+  syncAddToHomeButtonState(button);
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    window.__efhsDeferredInstallPrompt = event;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    window.__efhsDeferredInstallPrompt = null;
+    syncAddToHomeButtonState(button);
+  });
+
+  if (window.matchMedia) {
+    const media = window.matchMedia('(max-width: 760px)');
+    const onChange = () => {
+      syncAddToHomeButtonState(button);
+      placeHeaderQuickActions();
+    };
+    if (media.addEventListener) media.addEventListener('change', onChange);
+    else if (media.addListener) media.addListener(onChange);
+  }
+
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/push-sw.js', { scope: '/' }).catch(() => {});
+  }
+
+  button.addEventListener('click', async () => {
+    if (!isMobileNavViewport()) return;
+    if (isStandaloneDisplay()) {
+      window.alert('East Forsyth Band is already on your home screen.');
+      return;
+    }
+    const os = detectMobileInstallOs();
+    const deferred = window.__efhsDeferredInstallPrompt;
+    if (deferred && os === 'android') {
+      try {
+        await deferred.prompt();
+        window.__efhsDeferredInstallPrompt = null;
+        syncAddToHomeButtonState(button);
+        return;
+      } catch {
+        // Fall through to instructions if the native prompt fails.
+      }
+    }
+    showAddToHomeSheet({ os, canInstall: Boolean(window.__efhsDeferredInstallPrompt) });
   });
 })();
