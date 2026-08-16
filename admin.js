@@ -4414,13 +4414,13 @@ function setMinutesEmptyVisible(visible) {
 }
 
 function syncMinutesFrameBodyLock() {
-  const open = isMinutesViewOpen() || isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
+  const open = isMinutesEditorOpen() || isEnsemblesBodyEditorOpen();
   document.body.classList.toggle('minutes-frame-open', open);
 }
 
 function isMinutesViewOpen() {
-  const modal = document.querySelector('#minutes-view-modal');
-  return Boolean(modal && !modal.hasAttribute('hidden'));
+  const view = document.querySelector('#minutes-view');
+  return Boolean(view && !view.hasAttribute('hidden'));
 }
 
 function isMinutesEditorOpen() {
@@ -4429,9 +4429,8 @@ function isMinutesEditorOpen() {
 }
 
 function closeMinutesView() {
-  const modal = document.querySelector('#minutes-view-modal');
-  if (modal) modal.toggleAttribute('hidden', true);
-  syncMinutesFrameBodyLock();
+  const view = document.querySelector('#minutes-view');
+  if (view) view.toggleAttribute('hidden', true);
 }
 
 function closeMinutesEditor() {
@@ -4480,10 +4479,9 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
 
 function showMinutesView() {
   closeMinutesEditor();
-  const modal = document.querySelector('#minutes-view-modal');
-  setMinutesEmptyVisible(true);
-  if (modal) modal.toggleAttribute('hidden', false);
-  syncMinutesFrameBodyLock();
+  const view = document.querySelector('#minutes-view');
+  setMinutesEmptyVisible(false);
+  if (view) view.toggleAttribute('hidden', false);
 }
 
 function showMinutesIdle(statusText = '') {
@@ -4493,7 +4491,7 @@ function showMinutesIdle(statusText = '') {
   setMinutesEmptyVisible(true);
   const empty = document.querySelector('#minutes-empty');
   if (empty) {
-    empty.textContent = statusText || 'Choose a meeting date from the list to open it.';
+    empty.textContent = statusText || 'Choose a meeting date from the list to view it below.';
   }
 }
 
@@ -4524,7 +4522,7 @@ function resetMinutesForm(statusText = '') {
   syncMinutesPanelMode();
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
-  showMinutesIdle(statusText || 'Choose a meeting date from the list to open it.');
+  showMinutesIdle(statusText || 'Choose a meeting date from the list to view it below.');
   renderMinutesList();
 }
 
@@ -4676,7 +4674,7 @@ async function saveMinutesForm(form) {
     renderMinutesList();
     openMinutesView(saved.id);
     const empty = document.querySelector('#minutes-empty');
-    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
+    if (empty) empty.textContent = 'Choose a meeting date from the list to view it below.';
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
   }
@@ -4704,7 +4702,7 @@ async function uploadMinutesDocxFile(file) {
     renderMinutesList();
     openMinutesView(saved.id);
     const empty = document.querySelector('#minutes-empty');
-    if (empty) empty.textContent = 'Choose a meeting date from the list to open it.';
+    if (empty) empty.textContent = 'Choose a meeting date from the list to view it below.';
   } catch (error) {
     window.alert(error.message || 'Could not upload the DOCX minutes file.');
   }
@@ -4731,7 +4729,7 @@ function isEnsemblesBodyEditorOpen() {
 }
 
 function syncEnsemblesFrameBodyLock() {
-  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesViewOpen() || isMinutesEditorOpen());
+  document.body.classList.toggle('minutes-frame-open', isEnsemblesBodyEditorOpen() || isMinutesEditorOpen());
 }
 
 function closeEnsemblesBodyEditor() {
