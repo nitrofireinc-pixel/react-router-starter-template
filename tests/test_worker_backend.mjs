@@ -427,7 +427,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=minutes-mobile-compact-20260816/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=security-log-restore-20260816/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1275,12 +1275,19 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /minutes-mobile-compact-20260816/);
+  assert.match(workerSrc, /security-log-restore-20260816/);
   assert.match(workerSrc, /minutes-view-card/);
   assert.match(workerSrc, /minutes-view-back/);
   assert.match(workerSrc, /embed = false/);
   assert.match(workerSrc, /body\.is-embed/);
+  assert.match(workerSrc, /tab-security-log/);
+  assert.match(workerSrc, /admin_audit_log/);
+  assert.match(workerSrc, /requireSuperAdmin/);
   assert.doesNotMatch(workerSrc, /minutes-view-modal/);
+  // Security log must never appear as a grantable GLOBAL_PERMISSIONS scope.
+  const permissionsDecl = workerSrc.match(/const GLOBAL_PERMISSIONS = \[([^\]]+)\]/);
+  assert.ok(permissionsDecl);
+  assert.doesNotMatch(permissionsDecl[1], /security-log/);
   assert.match(workerSrc, /last_login_at/);
   assert.match(workerSrc, /UPDATE users SET last_login_at/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
@@ -1289,10 +1296,13 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(adminJs, /#minutes-view/);
   assert.match(adminJs, /syncMinutesMobileViewing/);
   assert.match(adminJs, /embed=1/);
+  assert.match(adminJs, /loadSecurityLog/);
+  assert.match(adminJs, /security-log/);
   assert.doesNotMatch(adminJs, /minutes-view-modal/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
   assert.match(styles, /is-minutes-viewing/);
   assert.match(styles, /minutes-mobile-viewing/);
+  assert.match(styles, /\.security-log-entry/);
   const markBytes = readFileSync(join(root, 'assets/efhs-blue-regiment-mark.png'));
   // Updated circular mark from the restored upload (not the Aug 5 letterhead crop).
   assert.notEqual(createHash('md5').update(markBytes).digest('hex'), '0de3ab10f088d89df03c43e88dc2bb58');

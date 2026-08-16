@@ -2003,6 +2003,9 @@ function activateTab(name) {
     if (name === 'checkout') {
       initCheckoutPanel().catch(() => {});
     }
+    if (name === 'security-log') {
+      loadSecurityLog().catch(() => {});
+    }
     closeAdminNav();
   };
   if (!leavingPages) {
@@ -2162,6 +2165,7 @@ function showAllowedPanels() {
     site: hasPermission('site'),
     social: hasPermission('site'),
     users: hasPermission('users'),
+    'security-log': isSuperAdmin(),
     events: canCreateEvents() || canEditPage('calendar'),
     photos: hasPermission('photos'),
   };
@@ -2626,6 +2630,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
+    isSuperAdmin() && ['Security Log', 'View and print encrypted login and CMS change history. Super Admin only — not editable.', 'security-log', 'Security', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
@@ -3725,6 +3730,66 @@ function formatUserLastLoginLabel(value) {
     })} ET`;
   } catch {
     return `Last login ${date.toISOString()}`;
+  }
+}
+
+async function loadSecurityLog() {
+  if (!isSuperAdmin()) return;
+  const list = document.querySelector('#security-log-list');
+  const status = document.querySelector('#security-log-status');
+  const download = document.querySelector('#download-security-log');
+  if (!list) return;
+  const actor = String(document.querySelector('#security-log-actor')?.value || '').trim();
+  const action = String(document.querySelector('#security-log-action')?.value || '').trim();
+  const params = new URLSearchParams({ limit: '5' });
+  if (actor) params.set('actor', actor);
+  if (action) params.set('action', action);
+  if (download) {
+    download.href = `/api/admin/security-log.pdf?${params.toString()}`;
+  }
+  try {
+    if (status) status.textContent = 'Loading security log…';
+    const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) {
+      list.innerHTML = '<p class="draft">No security log entries yet. Log in/out or save a CMS change to create the first entry.</p>';
+    } else {
+      list.innerHTML = entries.map((entry) => {
+        const when = escapeHtml(entry.created_at || '');
+        const who = escapeHtml(entry.actor_username || 'unknown');
+        const summary = escapeHtml(entry.summary || entry.action || '');
+        const route = escapeHtml(`${entry.method || ''} ${entry.path || ''}`.trim());
+        const integrity = entry.integrity_ok === false
+          ? '<p class="error">Integrity check failed for this sealed entry.</p>'
+          : '';
+        const sha = entry.payload_sha256
+          ? `<p class="muted mono">SHA-256: ${escapeHtml(entry.payload_sha256)}</p>`
+          : '';
+        const meta = entry.meta && Object.keys(entry.meta).length
+          ? `<pre class="security-log-meta">${escapeHtml(JSON.stringify(entry.meta, null, 2))}</pre>`
+          : '';
+        return `<article class="security-log-entry">
+          <header>
+            <b>${when}</b>
+            <span>${who}</span>
+            <small>${escapeHtml(entry.action || '')}${entry.status != null ? ` · ${escapeHtml(String(entry.status))}` : ''}</small>
+          </header>
+          <p>${summary}</p>
+          ${route ? `<p class="muted mono">${route}</p>` : ''}
+          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}</p>` : ''}
+          ${integrity}
+          ${sha}
+          ${meta}
+        </article>`;
+      }).join('');
+    }
+    if (status) {
+      const total = data.total || entries.length;
+      status.textContent = `Showing ${entries.length} of ${total} encrypted log entr${total === 1 ? 'y' : 'ies'} (super admin view/print only).`;
+    }
+  } catch (error) {
+    list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;
+    if (status) status.textContent = error.message || 'Security log unavailable';
   }
 }
 
@@ -5493,6 +5558,24 @@ function bindForms() {
     form.reset();
     form.elements.active.checked = true;
     form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+  });
+
+  document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
+    loadSecurityLog().catch(() => {});
+  });
+  let securityLogFilterTimer = null;
+  ['#security-log-actor', '#security-log-action'].forEach((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      loadSecurityLog().catch(() => {});
+    });
+    el.addEventListener('input', () => {
+      clearTimeout(securityLogFilterTimer);
+      securityLogFilterTimer = setTimeout(() => {
+        loadSecurityLog().catch(() => {});
+      }, 300);
+    });
   });
 
   document.querySelector('#event-form')?.addEventListener('submit', async event => {
