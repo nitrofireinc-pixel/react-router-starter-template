@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>East Forsyth Band Website &amp; CMS Guide</title>
+<style>
+  @page { size: letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.4;
+    color: #10233c;
+    margin: 0;
+  }
+  h1 { font-size: 20pt; color: #002142; margin: 0 0 8pt; }
+  h2 {
+    font-size: 14pt;
+    color: #002142;
+    margin: 18pt 0 8pt;
+    border-bottom: 1px solid #c9d4e2;
+    padding-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12pt; color: #0f2f4d; margin: 14pt 0 6pt; page-break-after: avoid; }
+  h4 { font-size: 11pt; color: #184a8c; margin: 10pt 0 4pt; page-break-after: avoid; }
+  p, li { margin: 0 0 7pt; }
+  .meta { color: #5b6f86; margin-bottom: 14pt; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 6pt 0 12pt;
+    page-break-inside: auto;
+  }
+  tr { page-break-inside: avoid; }
+  th, td {
+    border: 1px solid #c9d4e2;
+    padding: 5pt 7pt;
+    vertical-align: top;
+    text-align: left;
+  }
+  th { background: #0f2f4d; color: #fff; }
+  tr:nth-child(even) td { background: #f7fafc; }
+  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
+  ul, ol { margin: 0 0 10pt 18pt; padding: 0; }
+  .note {
+    background: #fff8dc;
+    border: 1px solid #f1d45b;
+    padding: 8pt 10pt;
+    margin: 8pt 0 12pt;
+  }
+</style>
+</head>
+<body>
+
+<h1>East Forsyth Band Website &amp; CMS Guide</h1>
+<p class="meta">
+  Organization: East Forsyth Band Boosters / East Forsyth High School Band (Blue Regiment)<br>
+  Public site: https://efhsband.org<br>
+  Staff CMS: https://efhsband.org/admin<br>
+  Document type: Full-site operations guide (PDF)<br>
+  Last updated: August 13, 2026
+</p>
+
+<div class="note">
+  <p><b>Who this is for:</b> Super Admins, editors, officers (President, Vice President, Treasurer), and anyone helping run the band website. This PDF is linked from the CMS Dashboard and can be opened or downloaded by any logged-in staff user.</p>
+</div>
+
+<h2>1. Overview</h2>
+<p>The East Forsyth Band website is a public community site plus a private Content Management System (CMS). The public site shows program information, calendar events, sponsors, fundraising, staff, boosters, gallery photos, and contact forms. The CMS at <span class="mono">/admin</span> lets authorized staff edit that content, manage users, take payments, and keep financial records.</p>
+<p>Production runs on Cloudflare Pages with a Worker backend and a D1 database. Sessions last 24 hours. Changes made in the CMS publish to the live public site.</p>
+
+<h2>2. Public Website Pages</h2>
+<table>
+  <tr><th>Page</th><th>URL</th><th>What visitors see / can do</th></tr>
+  <tr><td>Home</td><td>/</td><td>Hero branding, Start Here feature cards, upcoming calendar highlights, newest photos, booster/launch cards, sitewide sponsor marquee, and (when applicable) a Silver/Gold homepage fly-in ad.</td></tr>
+  <tr><td>Ensembles</td><td>/ensembles.html</td><td>Program group information (marching band, concert bands, percussion, color guard, jazz, etc.).</td></tr>
+  <tr><td>Directors &amp; Staff</td><td>/directors.html</td><td>Directory of directors/staff with photos, roles, and short bios.</td></tr>
+  <tr><td>Calendar</td><td>/calendar.html</td><td>Month calendar of upcoming events; day details open in a toast. Past events are hidden from the public list.</td></tr>
+  <tr><td>Gallery</td><td>/gallery.html</td><td>Photo gallery with lightbox viewing. Newest photos appear first.</td></tr>
+  <tr><td>Sponsors</td><td>/sponsors.html</td><td>Sponsor directory by tier, Become a Sponsor CTA, Donate button, optional map/directions for sponsor addresses.</td></tr>
+  <tr><td>Become a Sponsor</td><td>/become-a-sponsor.html</td><td>Bronze / Silver / Gold packages with online Square checkout. Not listed in main nav; linked from Sponsors and footer.</td></tr>
+  <tr><td>Fundraising</td><td>/fundraising.html</td><td>Campaign copy and photos (edited in CMS under Manage → Fundraising), plus the Direct Support Donate flow.</td></tr>
+  <tr><td>Student Resources</td><td>/resources.html</td><td>Family/student resource content (handbooks, forms, schedules, etc.).</td></tr>
+  <tr><td>Boosters</td><td>/boosters.html</td><td>Booster intro, meetings pulled from calendar, and booster member directory. Meeting minutes are <b>not</b> public.</td></tr>
+  <tr><td>Contact</td><td>/contact.html</td><td>School contact details and a topic-based contact form that emails the assigned recipient.</td></tr>
+</table>
+
+<h3>2.1 Shared public features</h3>
+<ul>
+  <li><b>Sponsor marquee:</b> Logos/names of active Bronze, Silver, and Gold sponsors scroll sitewide.</li>
+  <li><b>Homepage fly-in ad:</b> Random Silver/Gold (or homepage-ad) sponsor briefly appears on Home (default about 6 seconds; editable in CMS).</li>
+  <li><b>Notify Me:</b> Browser web push for calendar updates (service worker + VAPID).</li>
+  <li><b>Add to Home Screen:</b> Mobile PWA-style shortcut support.</li>
+  <li><b>Login / Staff Menu:</b> Public nav shows Login when logged out, or Staff Menu when a CMS session is active.</li>
+  <li><b>Maintenance mode:</b> When enabled, public visitors (and non–Super Admin staff) are redirected to a maintenance page. Super Admins can still preview the live site with a banner.</li>
+</ul>
+
+<h2>3. Public Payment Flows</h2>
+<h3>3.1 Become a Sponsor (Square)</h3>
+<ol>
+  <li>Visitor chooses Bronze ($100), Silver ($250), or Gold ($500) — amounts/copy are editable in CMS.</li>
+  <li>They enter business name, address, phone, invoice email, and optional logo.</li>
+  <li>Square processes the card (in-popup Web Payments when configured).</li>
+  <li>On success the sponsor is activated on the public site in the correct tier, an invoice email is sent when possible, and the payment is written to the Ledger.</li>
+</ol>
+<p><b>Package benefits (defaults):</b></p>
+<ul>
+  <li><b>Bronze:</b> Website marquee logo feature</li>
+  <li><b>Silver:</b> Marquee + homepage fly-in</li>
+  <li><b>Gold:</b> Marquee + fly-in + game-day announcement recognition</li>
+</ul>
+<p>If payment does not finish, the application stays <b>Pending</b> for staff to review under Manage sponsors.</p>
+
+<h3>3.2 Donate</h3>
+<p>Available from Sponsors and Fundraising. Visitor enters donor name and amount, pays by Square card, and the donation is recorded in the Ledger as a donor entry.</p>
+
+<h3>3.3 What is automatic vs manual</h3>
+<table>
+  <tr><th>Transaction</th><th>Auto to Ledger?</th></tr>
+  <tr><td>Public sponsor package paid through the site</td><td>Yes, after successful payment</td></tr>
+  <tr><td>Public donation paid through the site</td><td>Yes, after successful payment</td></tr>
+  <tr><td>Admin Checkout (Square charge by officers)</td><td>Yes, as fundraiser income</td></tr>
+  <tr><td>Pending sponsor Accept / bypass-payment activate</td><td>Yes</td></tr>
+  <tr><td>Cash, check, or Square charges taken outside the website</td><td>No — enter manually in Ledger</td></tr>
+</table>
+
+<h2>4. CMS Login &amp; Sessions</h2>
+<ul>
+  <li><b>Login URL:</b> https://efhsband.org/admin/login (also /admin)</li>
+  <li><b>Session length:</b> 24 hours</li>
+  <li><b>Password:</b> Minimum 8 characters. New users are usually forced to change password on first login.</li>
+  <li><b>Change Password:</b> Available from the CMS sidebar for every logged-in user.</li>
+  <li><b>Log Out:</b> Sidebar (desktop) or mobile bar.</li>
+</ul>
+
+<h2>5. CMS Dashboard</h2>
+<p>After login, the Dashboard shows permission-filtered shortcut cards. Typical cards include:</p>
+<ul>
+  <li>Checkout (green money card)</li>
+  <li>Staff Email</li>
+  <li>Meeting Minutes</li>
+  <li>Manage sponsors / Sponsors page / Become a Sponsor</li>
+  <li>Ledger</li>
+  <li>Directors &amp; Staff, Ensemble Body, Fundraising, Booster Members</li>
+  <li>Contact Form, User Management, Social / Facebook, Calendar Events</li>
+  <li><b>Website Guide</b> — downloads this PDF</li>
+</ul>
+<p>Use <b>View Site</b> to open the public homepage in the same window.</p>
+
+<h2>6. CMS Menu &amp; Tools (Detailed)</h2>
+
+<h3>6.1 Staff Email</h3>
+<p><b>Who can open it:</b> Any logged-in CMS user.</p>
+<p>Compose rich-text email to one or many CMS users (plus optional extra addresses). Attachments supported within size limits. Reply-To uses the sender’s account email username. Delivery uses Resend / configured mail provider.</p>
+
+<h3>6.2 Pages (visual editor)</h3>
+<p><b>Permission:</b> <span class="mono">pages</span> for full page management, or <span class="mono">page:&lt;slug&gt;</span> for a specific page.</p>
+<p>Edit live preview text with formatting (bold, italic, underline, color, size). Site admins can also change page settings (title, slug, path, layout, active flag). Unsaved changes warn before leaving.</p>
+<p><b>Fundraising page note:</b> The Pages editor for Fundraising is for the <b>hero/header only</b>. Campaign copy and photos are edited under <b>Manage → Fundraising</b> (see 6.5).</p>
+
+<h3>6.3 Directors &amp; Staff</h3>
+<p><b>Permission:</b> <span class="mono">staff</span> or <span class="mono">page:directors</span>.</p>
+<p>Add/edit/delete staff members with name, role, bio, photo. Drag rows to reorder the public directory.</p>
+
+<h3>6.4 Ensemble Body</h3>
+<p><b>Permission:</b> <span class="mono">page:ensembles</span> (or pages).</p>
+<p>Edit ensemble cards/body content shown under the Ensembles page hero.</p>
+
+<h3>6.5 Fundraising</h3>
+<p><b>Permission:</b> <span class="mono">page:fundraising</span> (or <span class="mono">pages</span> / Super Admin).</p>
+<p>In the CMS sidebar under <b>Manage</b>, open <b>Fundraising</b> (not the Pages hero editor). Click <b>Edit</b> to open the campaign content editor.</p>
+<ul>
+  <li>Write and format campaign copy (bold, italic, underline, color, size).</li>
+  <li>Use <b>Insert line</b> to start a new paragraph/line.</li>
+  <li>Use <b>Photo</b> to insert an image <b>at the cursor</b> (not always at the top). Surrounding text wraps beside the photo.</li>
+  <li>Choose an existing gallery photo or upload a new one. Large uploads are auto-compressed in the browser to about <b>1.8 MB</b> before upload (server max about <b>2 MB</b>).</li>
+  <li>Add clear <b>alt text</b> that describes the photo.</li>
+  <li>Click a photo to select it: drag a <b>corner handle</b> to resize; use <b>Delete photo</b> (or Delete/Backspace) to remove it; press Escape or click elsewhere to deselect.</li>
+  <li>Click <b>Save</b> to publish. Cancel closes without saving. The public Direct Support Donate card stays on the Fundraising page automatically.</li>
+</ul>
+<p>In User Management, the Fundraising page checkbox is labeled like <b>Fundraising (Manage → Fundraising)</b> so editors know which tool it unlocks.</p>
+
+<h3>6.6 Band Boosters → Booster Members</h3>
+<p><b>Permission:</b> <span class="mono">boosters</span> or <span class="mono">page:boosters</span>.</p>
+<p>Manage booster officer/member directory (photo, role, bio, drag reorder).</p>
+
+<h3>6.7 Band Boosters → Meeting Minutes</h3>
+<p><b>Who can view/print:</b> Any logged-in CMS user.</p>
+<p><b>Who can add/edit:</b> <span class="mono">minutes</span> permission (Meeting Minutes Secretary).</p>
+<p><b>Who can delete:</b> Super Admin only.</p>
+<p>Non–Super Admin editors can edit minutes only within a limited window (about 10 days from the meeting date). Minutes are staff-only; they are not published on the public Boosters page.</p>
+
+<h3>6.8 Calendar Events</h3>
+<p><b>Permission:</b> <span class="mono">events</span> to create and manage your own events; <span class="mono">events:manage</span> to edit/delete any event.</p>
+<p>Supports dates, rich descriptions, repeating events, exceptions, and booster-meeting placement. Creating/updating events can trigger Notify Me web push and (when configured) Facebook calendar queue posts.</p>
+
+<h3>6.9 Sponsorship → Manage sponsors</h3>
+<p><b>Permission:</b> <span class="mono">sponsors</span> (or related page access for some operations).</p>
+<ul>
+  <li>Manual Add Sponsor (optional Bypass Payment if granted <span class="mono">sponsors:bypass-payment</span>)</li>
+  <li>Edit / delete / drag-reorder sponsors and logos</li>
+  <li>Gold sponsors print/PDF sheet for advertising</li>
+  <li><b>Pending sponsor applications</b> from the public site, each flagged Pending, with <b>Accept</b> to activate after real-world resolution, or <b>Delete</b> to remove test/invalid applications</li>
+</ul>
+
+<h3>6.10 Ledger (Treasurer)</h3>
+<p><b>Permission:</b> <span class="mono">treasurer</span> (Super Admins also have access).</p>
+<p>Accountant-style view of sponsors, donors, fundraisers, and expenses. Supports cash and in-kind entries, summary totals, delete, and Excel download (<span class="mono">.xls</span>).</p>
+
+<h3>6.11 Checkout</h3>
+<p><b>Permission:</b> <span class="mono">treasurer</span>, <span class="mono">president</span>, or <span class="mono">vice-president</span>.</p>
+<p>Manual Square card charge for an item and amount (in-person/phone keyed entry). Successful charges post to the Ledger as fundraiser income. Minimum $1.00. Requires Square access token + application id + location.</p>
+
+<h3>6.12 Contact Form</h3>
+<p><b>Permission:</b> <span class="mono">contact</span> or <span class="mono">page:contact</span>.</p>
+<p>Manage contact topics (A–Z) and the email address each topic delivers to. Review recent contact messages.</p>
+
+<h3>6.13 Users (User Management)</h3>
+<p><b>Permission:</b> <span class="mono">users</span>.</p>
+<p>Create editor accounts, assign permissions, activate/disable users, send welcome invites. Super Admins can also create tester accounts.</p>
+
+<h3>6.14 Social / Facebook</h3>
+<p><b>Permission:</b> <span class="mono">site</span>.</p>
+<p>Connect the band Facebook Page through Zernio, publish or schedule posts, and manage calendar-to-Facebook queue items when configured.</p>
+
+<h3>6.15 Site Settings</h3>
+<p><b>Permission:</b> <span class="mono">site</span> (utility/home link editing also available with pages or page:home).</p>
+<p>Edit site title, hero text, footer note, logo, maintenance mode, top utility links, and footer social links.</p>
+
+<h3>6.16 Photos</h3>
+<p><b>Permission:</b> <span class="mono">photos</span>.</p>
+<p>Upload/delete/reorder gallery photos with alt text and captions. Home shows the newest photos; Gallery shows the full set. Brand/logo utility uploads are kept out of the public gallery.</p>
+<p>Gallery photos can also be reused when inserting images into <b>Manage → Fundraising</b> campaign content (see 6.5).</p>
+
+<h2>7. Permissions Reference</h2>
+<p>CMS accounts are either <b>Super Admin</b> (<span class="mono">role = admin</span>) or <b>Editor</b> with an assigned permission list.</p>
+
+<h3>7.1 Super Admin</h3>
+<ul>
+  <li>Has every permission automatically</li>
+  <li>Can create tester accounts and manage other Super Admins</li>
+  <li>Can delete meeting minutes</li>
+  <li>Can preview the live site during maintenance mode</li>
+</ul>
+
+<h3>7.2 Permission scopes</h3>
+<table>
+  <tr><th>Permission</th><th>What it unlocks</th></tr>
+  <tr><td><span class="mono">site</span></td><td>Site Settings, Social/Facebook, logo, maintenance, social links</td></tr>
+  <tr><td><span class="mono">pages</span></td><td>Add/remove/manage all CMS pages and page settings</td></tr>
+  <tr><td><span class="mono">page:&lt;slug&gt;</span></td><td>Edit that one page’s content (example: <span class="mono">page:home</span>, <span class="mono">page:calendar</span>). <span class="mono">page:ensembles</span> unlocks Manage → Ensemble Body. <span class="mono">page:fundraising</span> unlocks Manage → Fundraising (campaign copy and photos).</td></tr>
+  <tr><td><span class="mono">sponsors</span></td><td>Manage sponsors, pending applications, Accept, Delete pending</td></tr>
+  <tr><td><span class="mono">sponsors:bypass-payment</span></td><td>Manual Add Sponsor without collecting payment</td></tr>
+  <tr><td><span class="mono">treasurer</span></td><td>Ledger + Checkout</td></tr>
+  <tr><td><span class="mono">president</span></td><td>Checkout only</td></tr>
+  <tr><td><span class="mono">vice-president</span></td><td>Checkout only</td></tr>
+  <tr><td><span class="mono">staff</span></td><td>Directors &amp; Staff directory</td></tr>
+  <tr><td><span class="mono">boosters</span></td><td>Booster Members (+ Boosters page edit access)</td></tr>
+  <tr><td><span class="mono">users</span></td><td>User Management</td></tr>
+  <tr><td><span class="mono">mail</span></td><td>Mail delivery helper endpoints (Staff Email UI is open to all logged-in users)</td></tr>
+  <tr><td><span class="mono">events</span></td><td>Create calendar events; edit/delete your own</td></tr>
+  <tr><td><span class="mono">events:manage</span></td><td>Edit/delete any calendar event</td></tr>
+  <tr><td><span class="mono">photos</span></td><td>Photo gallery uploads/deletes</td></tr>
+  <tr><td><span class="mono">contact</span></td><td>Contact form topics and message review</td></tr>
+  <tr><td><span class="mono">minutes</span></td><td>Meeting Minutes Secretary (add/edit)</td></tr>
+  <tr><td><span class="mono">minutes:view</span></td><td>Listed in system permissions; in practice any logged-in user can view/print minutes</td></tr>
+</table>
+
+<h3>7.3 Suggested officer permission sets</h3>
+<table>
+  <tr><th>Role</th><th>Recommended permissions</th></tr>
+  <tr><td>Treasurer</td><td><span class="mono">treasurer</span> (Ledger + Checkout). Often also <span class="mono">sponsors</span> if they review pending sponsors.</td></tr>
+  <tr><td>President</td><td><span class="mono">president</span> (Checkout). Add other scopes as needed (for example <span class="mono">users</span>, <span class="mono">site</span>).</td></tr>
+  <tr><td>Vice President</td><td><span class="mono">vice-president</span> (Checkout). Add other scopes as needed.</td></tr>
+  <tr><td>Minutes Secretary</td><td><span class="mono">minutes</span></td></tr>
+  <tr><td>Calendar editor</td><td><span class="mono">events</span> (or <span class="mono">events:manage</span> for full control)</td></tr>
+  <tr><td>Fundraising editor</td><td><span class="mono">page:fundraising</span> (Manage → Fundraising campaign content and photos)</td></tr>
+  <tr><td>Sponsors coordinator</td><td><span class="mono">sponsors</span> (+ optional <span class="mono">sponsors:bypass-payment</span>)</td></tr>
+</table>
+
+<h2>8. User Management &amp; User Status</h2>
+<p>Under <b>Users</b>, staff with the <span class="mono">users</span> permission can see account status for each CMS user:</p>
+<table>
+  <tr><th>Field / status</th><th>Meaning</th></tr>
+  <tr><td>Display name</td><td>Name shown in CMS</td></tr>
+  <tr><td>Username</td><td>Login id; should be a real email for Staff Email Reply-To and invites</td></tr>
+  <tr><td>Role</td><td>Editor or Super Admin</td></tr>
+  <tr><td>Active / Disabled</td><td>Disabled accounts cannot use the CMS</td></tr>
+  <tr><td>Permissions list</td><td>Granted scopes (or “all permissions” for Super Admin)</td></tr>
+  <tr><td>Must change password</td><td>Forced on first login / invite until they set their own password</td></tr>
+  <tr><td>Tester account</td><td>Super Admin–only temporary accounts; hidden from normal editors and mail recipient lists</td></tr>
+</table>
+<p><b>Invite flow:</b> New User → set email username, temporary password, permissions → Send Invite → welcome email points to https://efhsband.org/admin.</p>
+<p><b>User “stats” available in CMS today:</b> the Users list shows each account’s role, active state, and permission summary. There is no separate analytics dashboard for login counts or page views; operational status is managed from the Users list and each tool’s own screens (for example pending sponsor count on Manage sponsors, ledger entry counts on Ledger).</p>
+
+<h2>9. Pending Sponsors &amp; Accept / Delete</h2>
+<ol>
+  <li>A public Become a Sponsor signup is saved even if Square payment is incomplete.</li>
+  <li>It appears under Manage sponsors as <b>Pending</b> with status such as Pending payment, Awaiting payment, or Payment setup needed.</li>
+  <li>When the real-world issue is resolved, click <b>Accept</b>.</li>
+  <li>Accept activates the sponsor in the correct tier, attempts invoice email, and records the Ledger entry.</li>
+  <li>Use <b>Delete</b> on a pending card to remove test or invalid applications without accepting them.</li>
+</ol>
+
+<h2>10. Square Requirements</h2>
+<p>Online card payments need these environment settings on Cloudflare:</p>
+<ul>
+  <li><span class="mono">SQUARE_ACCESS_TOKEN</span> — required for charges and payment links</li>
+  <li><span class="mono">SQUARE_APPLICATION_ID</span> (or <span class="mono">SQUARE_APP_ID</span>) — Web Payments card form</li>
+  <li><span class="mono">SQUARE_LOCATION_ID</span> — optional; otherwise auto-resolved</li>
+  <li><span class="mono">SQUARE_ENVIRONMENT</span> — <span class="mono">sandbox</span> or production</li>
+</ul>
+<p>Without Square connected, public applications may still save as pending for staff Accept/manual handling.</p>
+
+<h2>11. Email Features</h2>
+<ul>
+  <li><b>Staff Email:</b> internal CMS messaging with attachments</li>
+  <li><b>User welcome invites:</b> sent when creating users</li>
+  <li><b>Contact form:</b> topic-routed public messages</li>
+  <li><b>Sponsor invoices:</b> sent from no-reply@efhsband.org as East Forsyth Band Boosters after paid/accepted sponsorships when email is available</li>
+</ul>
+
+<h2>12. Photos &amp; Media</h2>
+<ul>
+  <li>Supported image uploads (Photos, Fundraising, staff/booster photos, logos, sponsor logos): server max about <b>2 MB</b>. The browser auto-compresses larger files to about <b>1.8 MB</b> before upload when possible</li>
+  <li>Staff Email attachments are separate and remain up to <b>4 MB</b> each (not the image 1.8 MB workflow)</li>
+  <li>Always include alt text</li>
+  <li>Home shows newest photos; Gallery shows the full public set</li>
+  <li>Protect brand marks/logos from appearing as gallery photos</li>
+  <li>Fundraising campaign photos: insert at the cursor under Manage → Fundraising, wrap text beside them, resize with corner handles, and delete from the selection toolbar</li>
+</ul>
+
+<h2>13. Facebook / Zernio (optional)</h2>
+<p>With <span class="mono">site</span> permission and a configured Zernio API key, staff can connect the band Facebook Page, publish or schedule posts, and push calendar digests when that workflow is enabled.</p>
+
+<h2>14. Mobile Calendar App</h2>
+<p>A Flutter companion app (“EFHS Band Calendar”) can read public calendar events from the website API and receive update alerts. Sideload install:</p>
+<ul>
+  <li>Android APK (arm64 phones/tablets): <span class="mono">https://efhsband.org/assets/downloads/EFHS-Band-Calendar.apk</span></li>
+  <li>After install, open <strong>Settings → Allow background checks</strong> so Android will let the app poll for calendar updates while closed (notification permission + battery exemption).</li>
+  <li>Without Firebase/FCM secrets, alerts come from background revision checks (~15 minutes) and whenever the app is opened. Instant push still needs Firebase + <span class="mono">FCM_SERVICE_ACCOUNT_JSON</span>.</li>
+</ul>
+
+<h2>15. Quick Troubleshooting</h2>
+<table>
+  <tr><th>Issue</th><th>What to check</th></tr>
+  <tr><td>User cannot see a menu item</td><td>Their permissions in Users; Super Admin bypasses all checks</td></tr>
+  <tr><td>Sponsor paid but not listed</td><td>Manage sponsors Pending list; Accept if payment completed outside the site</td></tr>
+  <tr><td>Checkout / donate card form missing</td><td>Square access token + application id + location</td></tr>
+  <tr><td>Ledger missing an outside payment</td><td>Add Ledger entry manually (cash/in-kind as needed)</td></tr>
+  <tr><td>Site shows maintenance page</td><td>Site Settings → maintenance mode; only Super Admins preview live content</td></tr>
+  <tr><td>Staff Email Reply-To wrong</td><td>Sender username must be a valid email address</td></tr>
+  <tr><td>Mobile menu jumps on Ledger</td><td>Hard-refresh; menu should overlay without scrolling the page</td></tr>
+  <tr><td>Cannot find Fundraising content editor</td><td>Use Manage → Fundraising (not only the Pages hero editor). Requires <span class="mono">page:fundraising</span></td></tr>
+  <tr><td>Photo always inserts at the top</td><td>Click into the text where the photo should go, then choose Photo. Hard-refresh if the CMS still shows older behavior</td></tr>
+  <tr><td>Cannot resize or delete a Fundraising photo</td><td>Click the photo once so the blue selection box stays open; drag a corner to resize, or use Delete photo / Delete key</td></tr>
+  <tr><td>Website Guide will not open</td><td>Download the PDF from the Dashboard Website Guide card. Prefer the <span class="mono">.pdf</span> file; the old <span class="mono">.doc</span> link redirects to the PDF</td></tr>
+</table>
+
+<h2>16. Important URLs</h2>
+<ul>
+  <li>Public site: https://efhsband.org</li>
+  <li>CMS login / dashboard: https://efhsband.org/admin</li>
+  <li>This guide (PDF): https://efhsband.org/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf</li>
+  <li>Become a Sponsor: https://efhsband.org/become-a-sponsor.html</li>
+  <li>Sponsors: https://efhsband.org/sponsors.html</li>
+  <li>Calendar: https://efhsband.org/calendar.html</li>
+</ul>
+
+<p class="meta" style="margin-top:20pt;">End of guide — East Forsyth Band Website &amp; CMS</p>
+
+</body>
+</html>
