@@ -4128,6 +4128,7 @@ function readMinutesBodyHtml(form) {
 }
 
 const MINUTES_DOCX_FIELDS = [
+  'meeting_subtitle',
   'meeting_time',
   'location',
   'called_by',
@@ -4176,6 +4177,7 @@ function buildMinutesDocxBodyHtml(form) {
   const time = minutesFieldValue(form, 'meeting_time');
   const location = minutesFieldValue(form, 'location');
   const calledBy = minutesFieldValue(form, 'called_by');
+  const subtitle = minutesFieldValue(form, 'meeting_subtitle');
   const callTime = minutesFieldValue(form, 'call_to_order_time');
   const callBy = minutesFieldValue(form, 'call_to_order_by');
   const values = Object.fromEntries(MINUTES_DOCX_FIELDS.map((key) => [key, minutesFieldValue(form, key)]));
@@ -4194,8 +4196,8 @@ function buildMinutesDocxBodyHtml(form) {
 <div class="draft">MINUTES_FIELDS_V1:${encodedFields}</div>
 <div class="kicker">East Forsyth Band Boosters</div>
 <h2>Meeting Minutes</h2>
-<p><strong>Date:</strong> ${escapeHtml(date)}${time ? ` · <strong>Time:</strong> ${escapeHtml(time)}` : ''}</p>
-${location ? `<p><strong>Location:</strong> ${escapeHtml(location)}</p>` : ''}
+${subtitle ? `<p><em>${escapeHtml(subtitle)}</em></p>` : ''}
+<p><strong>Date:</strong> ${escapeHtml(date)}${time ? ` · <strong>Time:</strong> ${escapeHtml(time)}` : ''}${location ? ` · <strong>Location:</strong> ${escapeHtml(location)}` : ''}</p>
 ${calledBy ? `<p><strong>Meeting Called By:</strong> ${escapeHtml(calledBy)}</p>` : ''}
 <h3>Call to Order</h3>
 <p>The regular meeting of the East Forsyth Band Boosters was called to order at ${escapeHtml(callTime || '__________')} by ${escapeHtml(callBy || '________________')}.</p>
@@ -4230,8 +4232,8 @@ ${actions ? `<ol>${actions}</ol>` : '<p><em>No action items recorded.</em></p>'}
 <h3>Next Meeting</h3>
 <p><strong>Date:</strong> ${escapeHtml(values.next_meeting_date || '________________')} · <strong>Time:</strong> ${escapeHtml(values.next_meeting_time || '________________')}</p>
 <h3>Adjournment</h3>
-<p>The meeting was adjourned at ${escapeHtml(values.adjourned_at || '__________')}.</p>
-<p><strong>Submitted by:</strong> ${escapeHtml(values.submitted_by || '________________')}<br><em>Secretary, East Forsyth Band Boosters</em></p>
+<p><strong>Meeting Adjourned:</strong> ${escapeHtml(values.adjourned_at || '__________')} · <strong>Submitted by:</strong> ${escapeHtml(values.submitted_by || '________________')}</p>
+<p><em>Secretary, East Forsyth Band Boosters</em></p>
 </div>`;
 }
 
