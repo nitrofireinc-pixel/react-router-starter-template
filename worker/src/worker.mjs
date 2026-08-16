@@ -204,8 +204,11 @@ const SESSION_COOKIE = 'efband_session';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'contact-topic-recipients-20260816';
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
+export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
+export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
+export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
+const ASSET_VERSION = 'restore-ledger-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -597,6 +600,11 @@ export function canAccessCheckout(user) {
   );
 }
 
+/** Treasurer ledger is limited to treasurer/president (not vice-president). */
+export function canAccessTreasurerLedger(user) {
+  return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
+}
+
 export function canManageAllEvents(user) {
   return isSuperAdmin(user) || hasPermission(user, 'events:manage');
 }
@@ -781,6 +789,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
   ]);
   try {
     await env.DB.prepare("ALTER TABLE admin_audit_log ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''").run();
@@ -884,6 +893,16 @@ async function initDb(env) {
     // Column already exists on upgraded databases.
   }
   await migrateContactTopicRecipients(env);
+  try {
+    await env.DB.prepare("ALTER TABLE payment_ledger ADD COLUMN note TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE payment_ledger ADD COLUMN money_exchanged INTEGER NOT NULL DEFAULT 1').run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
     const rawAddress = String(row.address || '');
@@ -3221,6 +3240,424 @@ async function maybeSendSponsorInvoice(env, application, { force = false } = {})
   return sendSponsorDonationInvoice(env, application);
 }
 
+export function escapeXml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&apos;',
+    '"': '&quot;',
+  }[char]));
+}
+
+export function formatLedgerAmountDisplay(cents) {
+  const amount = Number(cents);
+  if (!Number.isFinite(amount)) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount / 100);
+}
+
+export function normalizeLedgerKind(value) {
+  const kind = String(value || '').trim().toLowerCase();
+  return LEDGER_KINDS.includes(kind) ? kind : '';
+}
+
+export function ledgerSignedCents(row = {}) {
+  const cents = Math.abs(Math.round(Number(row.amount_cents) || 0));
+  return normalizeLedgerKind(row.kind) === 'expense' ? -cents : cents;
+}
+
+export function summarizeLedgerEntries(entries = []) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const byKind = Object.fromEntries(LEDGER_KINDS.map((kind) => [kind, []]));
+  for (const row of rows) {
+    const kind = normalizeLedgerKind(row.kind) || 'donor';
+    byKind[kind].push(row);
+  }
+  const sumAbs = (list) => list.reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+  const incomeRows = LEDGER_INCOME_KINDS.flatMap((kind) => byKind[kind] || []);
+  const incomeCents = sumAbs(incomeRows);
+  const expenseCents = sumAbs(byKind.expense);
+  const inKindTotalCents = rows
+    .filter((row) => row.money_exchanged === false || Number(row.money_exchanged) === 0)
+    .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+  const cashIncomeCents = incomeRows
+    .filter((row) => !(row.money_exchanged === false || Number(row.money_exchanged) === 0))
+    .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+  const cashExpenseCents = byKind.expense
+    .filter((row) => !(row.money_exchanged === false || Number(row.money_exchanged) === 0))
+    .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+  return {
+    byKind,
+    counts: Object.fromEntries(LEDGER_KINDS.map((kind) => [kind, byKind[kind].length])),
+    income_cents: incomeCents,
+    expense_cents: expenseCents,
+    net_cents: incomeCents - expenseCents,
+    cash_cents: cashIncomeCents - cashExpenseCents,
+    in_kind_cents: inKindTotalCents,
+    sponsors_cents: sumAbs(byKind.sponsor),
+    donors_cents: sumAbs(byKind.donor),
+    fundraisers_cents: sumAbs(byKind.fundraiser),
+    dues_cents: sumAbs(byKind.dues),
+  };
+}
+
+export function buildPaymentLedgerXml({
+  entries = null,
+  sponsors = [],
+  donors = [],
+  fundraisers = [],
+  dues = [],
+  expenses = [],
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const allEntries = Array.isArray(entries) && entries.length
+    ? entries
+    : [
+      ...sponsors.map((row) => ({ ...row, kind: 'sponsor' })),
+      ...donors.map((row) => ({ ...row, kind: 'donor' })),
+      ...fundraisers.map((row) => ({ ...row, kind: 'fundraiser' })),
+      ...dues.map((row) => ({ ...row, kind: 'dues' })),
+      ...expenses.map((row) => ({ ...row, kind: 'expense' })),
+    ];
+  const summary = summarizeLedgerEntries(allEntries);
+  const renderEntry = (row) => {
+    const kind = normalizeLedgerKind(row.kind) || 'donor';
+    const name = escapeXml(row.name || '');
+    const address = escapeXml(row.address || '');
+    const signed = ledgerSignedCents(row);
+    const amountDisplay = escapeXml(row.amount_display || formatLedgerAmountDisplay(Math.abs(signed)));
+    const paidAt = escapeXml(row.paid_at || '');
+    const pkg = escapeXml(row.package || '');
+    const note = escapeXml(row.note || '');
+    const moneyExchanged = !(row.money_exchanged === false || Number(row.money_exchanged) === 0);
+    const id = escapeXml(row.id == null ? '' : String(row.id));
+    const packageXml = pkg ? `\n      <package>${pkg}</package>` : '';
+    const noteXml = note ? `\n      <note>${note}</note>` : '';
+    return `    <entry id="${id}" kind="${kind}" paid_at="${paidAt}" money_exchanged="${moneyExchanged ? 'true' : 'false'}">
+      <name>${name}</name>
+      <address>${address}</address>
+      <amount cents="${signed}" display="${amountDisplay}"/>${packageXml}${noteXml}
+    </entry>`;
+  };
+  const section = (kind, label) => {
+    const rows = summary.byKind[kind] || [];
+    const total = rows.reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+    const xml = rows.map(renderEntry).join('\n');
+    return `  <${label} count="${rows.length}" total_cents="${kind === 'expense' ? -total : total}" total_display="${escapeXml(formatLedgerAmountDisplay(kind === 'expense' ? -total : total))}">
+${xml ? `${xml}\n` : ''}  </${label}>`;
+  };
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<payment_ledger generated_at="${escapeXml(generatedAt)}" organization="East Forsyth Band Boosters">
+${section('sponsor', 'sponsors')}
+${section('donor', 'donors')}
+${section('fundraiser', 'fundraisers')}
+${section('dues', 'dues')}
+${section('expense', 'expenses')}
+  <totals>
+    <income cents="${summary.income_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.income_cents))}"/>
+    <expenses cents="${summary.expense_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.expense_cents))}"/>
+    <cash_total cents="${summary.cash_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.cash_cents))}"/>
+    <in_kind_total cents="${summary.in_kind_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.in_kind_cents))}"/>
+    <net_total cents="${summary.net_cents}" display="${escapeXml(formatLedgerAmountDisplay(summary.net_cents))}"/>
+  </totals>
+</payment_ledger>
+`;
+}
+
+export function buildPaymentLedgerExcelXml(entries = [], {
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const summary = summarizeLedgerEntries(rows);
+  const cell = (value, type = 'String') => {
+    const text = String(value ?? '');
+    return `<Cell><Data ss:Type="${type}">${escapeXml(text)}</Data></Cell>`;
+  };
+  const header = ['Date', 'Type', 'Name', 'Address', 'Amount', 'Amount (cents)', 'Money exchanged', 'Package / description', 'Note', 'Ledger ID'];
+  const body = rows.map((row) => {
+    const signed = ledgerSignedCents(row);
+    const money = !(row.money_exchanged === false || Number(row.money_exchanged) === 0);
+    return [
+      row.paid_at || '',
+      normalizeLedgerKind(row.kind) || '',
+      row.name || '',
+      row.address || '',
+      row.amount_display || formatLedgerAmountDisplay(Math.abs(signed)),
+      String(signed),
+      money ? 'Yes' : 'No (in-kind)',
+      row.package || '',
+      row.note || '',
+      String(row.id ?? ''),
+    ];
+  });
+  const summaryRows = [
+    ['', '', '', '', '', '', '', '', '', ''],
+    ['Totals', '', '', '', '', '', '', '', '', ''],
+    ['Income', '', '', '', formatLedgerAmountDisplay(summary.income_cents), String(summary.income_cents), '', '', '', ''],
+    ['Expenses', '', '', '', formatLedgerAmountDisplay(summary.expense_cents), String(summary.expense_cents), '', '', '', ''],
+    ['Cash net', '', '', '', formatLedgerAmountDisplay(summary.cash_cents), String(summary.cash_cents), '', '', '', ''],
+    ['In-kind total', '', '', '', formatLedgerAmountDisplay(summary.in_kind_cents), String(summary.in_kind_cents), '', '', '', ''],
+    ['Net total', '', '', '', formatLedgerAmountDisplay(summary.net_cents), String(summary.net_cents), '', '', '', ''],
+    ['Generated at', generatedAt, '', '', '', '', '', '', '', ''],
+  ];
+  const excelRows = [header, ...body, ...summaryRows]
+    .map((cols) => `<Row>${cols.map((value, index) => cell(value, index === 5 && /^-?\d+$/.test(String(value)) ? 'Number' : 'String')).join('')}</Row>`)
+    .join('\n');
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal"><Font ss:FontName="Calibri" ss:Size="11"/></Style>
+ </Styles>
+ <Worksheet ss:Name="EFHS Ledger">
+  <Table>
+${excelRows}
+  </Table>
+ </Worksheet>
+</Workbook>
+`;
+}
+
+export async function upsertPaymentLedgerEntry(env, {
+  kind = 'sponsor',
+  refType = '',
+  refId = null,
+  name = '',
+  address = '',
+  amountCents = 0,
+  amountDisplay = '',
+  packageLabel = '',
+  note = '',
+  moneyExchanged = true,
+  paidAt = '',
+} = {}) {
+  const normalizedKind = normalizeLedgerKind(kind) || 'sponsor';
+  const cents = Math.max(0, Math.round(Math.abs(Number(amountCents) || 0)));
+  const display = String(amountDisplay || formatLedgerAmountDisplay(cents)).trim();
+  const paid = String(paidAt || new Date().toISOString()).trim();
+  const exchanged = moneyExchanged === false || moneyExchanged === 0 || moneyExchanged === '0' ? 0 : 1;
+  await env.DB.prepare(
+    `INSERT INTO payment_ledger
+      (kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, note, money_exchanged, paid_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(kind, ref_type, ref_id) DO UPDATE SET
+       name=excluded.name,
+       address=excluded.address,
+       amount_cents=excluded.amount_cents,
+       amount_display=excluded.amount_display,
+       package=excluded.package,
+       note=excluded.note,
+       money_exchanged=excluded.money_exchanged,
+       paid_at=excluded.paid_at`,
+  ).bind(
+    normalizedKind,
+    String(refType || '').trim().slice(0, 40),
+    refId == null ? null : Number(refId),
+    String(name || '').trim().slice(0, 200),
+    String(address || '').trim().slice(0, 400),
+    cents,
+    display.slice(0, 40),
+    String(packageLabel || '').trim().slice(0, 80),
+    String(note || '').trim().slice(0, 500),
+    exchanged,
+    paid.slice(0, 64),
+    new Date().toISOString(),
+  ).run();
+}
+
+export async function recordSponsorPaymentLedger(env, application = {}) {
+  const id = Number(application.id || 0);
+  if (!id) return null;
+  const tier = normalizeSponsorTierKey(application.tier) || String(application.tier || '').trim();
+  const packageLabel = sponsorLevelFromTierKey(tier) || (tier ? `${tier} Sponsor` : 'Sponsor');
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'sponsor',
+    refType: 'application',
+    refId: id,
+    name: application.business_name || application.name || '',
+    address: application.address || '',
+    amountCents: application.amount_cents,
+    amountDisplay: application.amount_display,
+    packageLabel,
+    paidAt: application.paid_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function recordDonorPaymentLedger(env, donation = {}) {
+  const id = Number(donation.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'donor',
+    refType: 'donation',
+    refId: id,
+    name: donation.donor_name || donation.name || '',
+    address: donation.address || '',
+    amountCents: donation.amount_cents,
+    amountDisplay: donation.amount_display,
+    packageLabel: 'Donation',
+    paidAt: donation.paid_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function recordManualSponsorPaymentLedger(env, sponsor = {}, {
+  amountCents = 0,
+  amountDisplay = '',
+  paidAt = '',
+} = {}) {
+  const id = Number(sponsor.id || 0);
+  if (!id) return null;
+  const address = formatSponsorAddress(sponsor) || [sponsor.address, sponsor.city, sponsor.state].filter(Boolean).join(', ');
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'sponsor',
+    refType: 'manual_sponsor',
+    refId: id,
+    name: sponsor.name || '',
+    address,
+    amountCents: amountCents || resolveSponsorAmountCents({ amountCents, amountDisplay }),
+    amountDisplay,
+    packageLabel: sponsor.level || sponsor.tier_label || 'Sponsor',
+    paidAt: paidAt || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function loadPaymentLedgerRows(env) {
+  const rows = await env.DB.prepare(
+    `SELECT id, kind, ref_type, ref_id, name, address, amount_cents, amount_display, package, note, money_exchanged, paid_at, created_at
+     FROM payment_ledger
+     ORDER BY datetime(paid_at) DESC, id DESC`,
+  ).all();
+  const mapRow = (row) => {
+    const kind = normalizeLedgerKind(row.kind) || String(row.kind || '');
+    const cents = Math.abs(Math.round(Number(row.amount_cents) || 0));
+    const signed = kind === 'expense' ? -cents : cents;
+    return {
+      id: Number(row.id || 0),
+      kind,
+      ref_type: String(row.ref_type || ''),
+      ref_id: row.ref_id == null ? null : Number(row.ref_id),
+      name: String(row.name || ''),
+      address: String(row.address || ''),
+      amount_cents: cents,
+      amount_display: String(row.amount_display || formatLedgerAmountDisplay(signed)),
+      package: String(row.package || ''),
+      note: String(row.note || ''),
+      money_exchanged: Number(row.money_exchanged) !== 0,
+      paid_at: String(row.paid_at || ''),
+      created_at: String(row.created_at || ''),
+    };
+  };
+  const all = (rows.results || []).map(mapRow);
+  return {
+    entries: all,
+    sponsors: all.filter((row) => row.kind === 'sponsor'),
+    donors: all.filter((row) => row.kind === 'donor'),
+    fundraisers: all.filter((row) => row.kind === 'fundraiser'),
+    dues: all.filter((row) => row.kind === 'dues'),
+    expenses: all.filter((row) => row.kind === 'expense'),
+  };
+}
+
+export async function ensureDefaultInKindLedgerEntries(env) {
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'sponsor',
+    refType: 'in_kind',
+    refId: 1,
+    name: 'Nitrofire Computing LLC',
+    address: '4526 Westhill Pl., Kernersville, NC 27284',
+    amountCents: 826400,
+    amountDisplay: '$8,264.00',
+    packageLabel: 'In-kind donated services',
+    note: 'Fair market value for donated services; no money exchanged.',
+    moneyExchanged: false,
+    paidAt: '2026-08-10T12:00:00.000Z',
+  });
+}
+
+export async function refreshPaymentLedgerXml(env) {
+  await ensureDefaultInKindLedgerEntries(env);
+  const { entries } = await loadPaymentLedgerRows(env);
+  const xml = buildPaymentLedgerXml({
+    entries,
+    generatedAt: new Date().toISOString(),
+  });
+  await setSiteContentValue(env, PAYMENT_LEDGER_XML_KEY, xml);
+  return xml;
+}
+
+export async function buildPaymentLedgerExcelDownload(env) {
+  await ensureDefaultInKindLedgerEntries(env);
+  const { entries } = await loadPaymentLedgerRows(env);
+  return buildPaymentLedgerExcelXml(entries, { generatedAt: new Date().toISOString() });
+}
+
+export async function backfillPaymentLedgerFromPaidRecords(env) {
+  const existing = await env.DB.prepare('SELECT COUNT(*) AS n FROM payment_ledger').first();
+  if (Number(existing?.n || 0) > 0) return { imported: 0, skipped: true };
+  let imported = 0;
+  const apps = await env.DB.prepare(
+    `SELECT id, tier, amount_cents, amount_display, business_name, address, paid_at, status
+     FROM sponsor_applications
+     WHERE status IN ('paid', 'paid_mock') OR paid_at IS NOT NULL`,
+  ).all();
+  for (const row of apps.results || []) {
+    const tier = normalizeSponsorTierKey(row.tier) || String(row.tier || '').trim();
+    await upsertPaymentLedgerEntry(env, {
+      kind: 'sponsor',
+      refType: 'application',
+      refId: row.id,
+      name: row.business_name || '',
+      address: row.address || '',
+      amountCents: row.amount_cents,
+      amountDisplay: row.amount_display,
+      packageLabel: sponsorLevelFromTierKey(tier) || (tier ? `${tier} Sponsor` : 'Sponsor'),
+      paidAt: row.paid_at || new Date().toISOString(),
+    });
+    imported += 1;
+  }
+  const donations = await env.DB.prepare(
+    `SELECT id, donor_name, amount_cents, amount_display, paid_at, status
+     FROM donations
+     WHERE status IN ('paid', 'paid_mock') OR paid_at IS NOT NULL`,
+  ).all();
+  for (const row of donations.results || []) {
+    await upsertPaymentLedgerEntry(env, {
+      kind: 'donor',
+      refType: 'donation',
+      refId: row.id,
+      name: row.donor_name || '',
+      address: '',
+      amountCents: row.amount_cents,
+      amountDisplay: row.amount_display,
+      packageLabel: 'Donation',
+      paidAt: row.paid_at || new Date().toISOString(),
+    });
+    imported += 1;
+  }
+  await refreshPaymentLedgerXml(env);
+  return { imported, skipped: false };
+}
+
+export async function getPaymentLedgerXml(env, { rebuild = false } = {}) {
+  await backfillPaymentLedgerFromPaidRecords(env);
+  if (!rebuild) {
+    const existing = await getSiteContentValue(env, PAYMENT_LEDGER_XML_KEY);
+    if (existing && existing.includes('<payment_ledger')) return existing;
+  }
+  return refreshPaymentLedgerXml(env);
+}
+
 export async function activatePaidSponsorApplication(env, application, { mock = false } = {}) {
   const row = application || {};
   const id = Number(row.id || 0);
@@ -5533,6 +5970,12 @@ async function routeApi(request, env, url, ctx = null) {
         ...application,
         ...result.application,
       });
+      try {
+        await recordSponsorPaymentLedger(env, {
+          ...application,
+          ...result.application,
+        });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         mock: result.mock,
@@ -5601,6 +6044,13 @@ async function routeApi(request, env, url, ctx = null) {
         ...application,
         ...result.application,
       });
+      try {
+        await recordSponsorPaymentLedger(env, {
+          ...application,
+          ...result.application,
+          square_payment_id: payment.payment_id || '',
+        });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         created: result.created,
@@ -5701,6 +6151,9 @@ async function routeApi(request, env, url, ctx = null) {
          SET status = 'paid_mock', paid_at = ?, updated_at = ?
          WHERE id = ?`,
       ).bind(paidAt, paidAt, donationId).run();
+      try {
+        await recordDonorPaymentLedger(env, { ...donation, paid_at: paidAt, status: 'paid_mock' });
+      } catch { /* ledger is best-effort */ }
       return jsonResponse({
         ok: true,
         mock: true,
@@ -5731,6 +6184,14 @@ async function routeApi(request, env, url, ctx = null) {
        SET square_payment_id = ?, status = 'paid', paid_at = ?, updated_at = ?
        WHERE id = ?`,
     ).bind(payment.payment_id || '', paidAt, paidAt, donationId).run();
+    try {
+      await recordDonorPaymentLedger(env, {
+        ...donation,
+        paid_at: paidAt,
+        status: 'paid',
+        square_payment_id: payment.payment_id || '',
+      });
+    } catch { /* ledger is best-effort */ }
     return jsonResponse({
       ok: true,
       created: true,
@@ -6361,12 +6822,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (!sourceId) {
       return jsonResponse({ detail: 'Payment card token is required' }, 422);
     }
-    const amountDisplay = new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amountCents / 100);
+    const amountDisplay = formatLedgerAmountDisplay(amountCents);
     const payment = await createSquareCardPayment(env, {
       sourceId,
       amountCents,
@@ -6376,6 +6832,26 @@ async function routeApi(request, env, url, ctx = null) {
     if (!payment.ok) {
       return jsonResponse({ detail: payment.detail || 'Square payment failed' }, 422);
     }
+    const paidAt = new Date().toISOString();
+    try {
+      const nextRef = await env.DB.prepare(
+        "SELECT COALESCE(MAX(ref_id), 0) + 1 AS next_id FROM payment_ledger WHERE kind = 'fundraiser' AND ref_type = 'square_checkout'",
+      ).first();
+      await upsertPaymentLedgerEntry(env, {
+        kind: 'fundraiser',
+        refType: 'square_checkout',
+        refId: Number(nextRef?.next_id || 1),
+        name: payerName || item,
+        address: '',
+        amountCents,
+        amountDisplay,
+        packageLabel: item,
+        note: note || `Square payment ${payment.payment_id || ''}`.trim(),
+        moneyExchanged: true,
+        paidAt,
+      });
+      await refreshPaymentLedgerXml(env);
+    } catch { /* ledger is best-effort */ }
     return jsonResponse({
       ok: true,
       payment_id: payment.payment_id,
@@ -6387,6 +6863,215 @@ async function routeApi(request, env, url, ctx = null) {
       payer_name: payerName,
       detail: `Charged ${amountDisplay} for ${item}${payerName ? ` (${payerName})` : ''}.`,
     });
+  }
+  if (
+    (url.pathname === '/api/admin/ledger.xls' || url.pathname === '/api/admin/ledger.xlsx' || url.pathname === '/api/admin/sponsors/payment-ledger.xls')
+    && request.method === 'GET'
+  ) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessTreasurerLedger(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer' }, 403);
+    }
+    await backfillPaymentLedgerFromPaidRecords(env);
+    const excel = await buildPaymentLedgerExcelDownload(env);
+    return new Response(excel, {
+      status: 200,
+      headers: {
+        'content-type': 'application/vnd.ms-excel; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-disposition': 'attachment; filename="efhs-payment-ledger.xls"',
+      },
+    });
+  }
+  if (
+    (url.pathname === '/api/admin/ledger.xml' || url.pathname === '/api/admin/sponsors/payment-ledger.xml')
+    && request.method === 'GET'
+  ) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessTreasurerLedger(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer' }, 403);
+    }
+    const rebuild = String(url.searchParams.get('rebuild') || '') === '1';
+    const xml = await getPaymentLedgerXml(env, { rebuild });
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'content-type': 'application/xml; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-disposition': 'attachment; filename="efhs-payment-ledger.xml"',
+      },
+    });
+  }
+  if (
+    (url.pathname === '/api/admin/ledger' || url.pathname === '/api/admin/sponsors/payment-ledger')
+    && request.method === 'GET'
+  ) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessTreasurerLedger(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer' }, 403);
+    }
+    await backfillPaymentLedgerFromPaidRecords(env);
+    const rebuild = String(url.searchParams.get('rebuild') || '') === '1';
+    if (rebuild) await refreshPaymentLedgerXml(env);
+    else await ensureDefaultInKindLedgerEntries(env);
+    const loaded = await loadPaymentLedgerRows(env);
+    const summary = summarizeLedgerEntries(loaded.entries);
+    return jsonResponse({
+      entries: loaded.entries,
+      sponsors: loaded.sponsors,
+      donors: loaded.donors,
+      fundraisers: loaded.fundraisers,
+      dues: loaded.dues,
+      expenses: loaded.expenses,
+      totals: {
+        income_cents: summary.income_cents,
+        income_display: formatLedgerAmountDisplay(summary.income_cents),
+        expense_cents: summary.expense_cents,
+        expense_display: formatLedgerAmountDisplay(summary.expense_cents),
+        cash_cents: summary.cash_cents,
+        cash_display: formatLedgerAmountDisplay(summary.cash_cents),
+        in_kind_cents: summary.in_kind_cents,
+        in_kind_display: formatLedgerAmountDisplay(summary.in_kind_cents),
+        net_cents: summary.net_cents,
+        net_display: formatLedgerAmountDisplay(summary.net_cents),
+        sponsors_cents: summary.sponsors_cents,
+        sponsors_display: formatLedgerAmountDisplay(summary.sponsors_cents),
+        donors_cents: summary.donors_cents,
+        donors_display: formatLedgerAmountDisplay(summary.donors_cents),
+        fundraisers_cents: summary.fundraisers_cents,
+        fundraisers_display: formatLedgerAmountDisplay(summary.fundraisers_cents),
+        dues_cents: summary.dues_cents,
+        dues_display: formatLedgerAmountDisplay(summary.dues_cents),
+        counts: summary.counts,
+      },
+      download_url: '/api/admin/ledger.xls',
+      xml_download_url: '/api/admin/ledger.xml',
+    });
+  }
+  if (
+    (url.pathname === '/api/admin/ledger' || url.pathname === '/api/admin/sponsors/payment-ledger/in-kind')
+    && request.method === 'POST'
+  ) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessTreasurerLedger(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: treasurer' }, 403);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const kind = normalizeLedgerKind(payload.kind) || (
+      String(payload.kind || '').trim().toLowerCase() === 'donor' ? 'donor' : ''
+    );
+    if (!kind) {
+      return jsonResponse({ detail: 'Type must be sponsor, donor, fundraiser, dues, or expense' }, 422);
+    }
+    const name = String(payload.name || payload.business_name || '').trim();
+    const address = String(payload.address || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || payload.amount,
+    });
+    const signedDisplay = formatLedgerAmountDisplay(kind === 'expense' ? -Math.abs(amountCents) : Math.abs(amountCents));
+    const amountDisplay = String(payload.amount_display || signedDisplay).trim() || signedDisplay;
+    const moneyExchangedRaw = payload.money_exchanged;
+    const forcedInKind = url.pathname.endsWith('/in-kind');
+    const moneyExchanged = forcedInKind
+      ? false
+      : !(
+        moneyExchangedRaw === false
+        || moneyExchangedRaw === 0
+        || moneyExchangedRaw === '0'
+        || String(payload.entry_mode || '').trim().toLowerCase() === 'in_kind'
+        || String(payload.payment_type || '').trim().toLowerCase() === 'in_kind'
+      );
+    const defaultNote = moneyExchanged
+      ? (kind === 'expense' ? 'Booster expense' : '')
+      : 'Fair market value for donated goods or services; no money exchanged.';
+    const note = String(payload.note || defaultNote).trim();
+    const defaultPackage = moneyExchanged
+      ? (
+        kind === 'fundraiser' ? 'Fundraiser'
+          : kind === 'dues' ? 'Dues'
+            : kind === 'expense' ? 'Expense'
+              : kind === 'donor' ? 'Donation'
+                : 'Sponsor'
+      )
+      : 'In-kind donated services';
+    const packageLabel = String(payload.package || payload.package_label || defaultPackage).trim() || defaultPackage;
+    if (!name || name.length > 200) {
+      return jsonResponse({ detail: 'Name or business is required' }, 422);
+    }
+    if (address.length > 400) {
+      return jsonResponse({ detail: 'Address is too long' }, 422);
+    }
+    if (!amountCents || amountCents < 1) {
+      return jsonResponse({ detail: 'Enter an amount greater than $0' }, 422);
+    }
+    if (amountCents > 25_000_000) {
+      return jsonResponse({ detail: 'Amount cannot exceed $250,000' }, 422);
+    }
+    if (note.length > 500) {
+      return jsonResponse({ detail: 'Note is too long' }, 422);
+    }
+    const refType = moneyExchanged ? 'manual' : 'in_kind';
+    const nextRef = await env.DB.prepare(
+      'SELECT COALESCE(MAX(ref_id), 0) + 1 AS next_id FROM payment_ledger WHERE kind = ? AND ref_type = ?',
+    ).bind(kind, refType).first();
+    const refId = Number(nextRef?.next_id || 1);
+    const paidAt = String(payload.paid_at || payload.date || new Date().toISOString()).trim();
+    await upsertPaymentLedgerEntry(env, {
+      kind,
+      refType,
+      refId,
+      name,
+      address,
+      amountCents,
+      amountDisplay,
+      packageLabel,
+      note,
+      moneyExchanged,
+      paidAt,
+    });
+    await refreshPaymentLedgerXml(env);
+    const loaded = await loadPaymentLedgerRows(env);
+    const entry = loaded.entries.find((row) => row.kind === kind && row.ref_type === refType && Number(row.ref_id) === refId)
+      || {
+        kind,
+        ref_type: refType,
+        ref_id: refId,
+        name,
+        address,
+        amount_cents: amountCents,
+        amount_display: amountDisplay,
+        package: packageLabel,
+        note,
+        money_exchanged: moneyExchanged,
+        paid_at: paidAt,
+      };
+    return jsonResponse({
+      ok: true,
+      entry,
+      detail: `${moneyExchanged ? 'Cash' : 'In-kind'} ${kind} recorded for ${name}.`,
+    });
+  }
+  {
+    const deleteMatch = url.pathname.match(/^\/api\/admin\/ledger\/(\d+)$/);
+    if (deleteMatch && request.method === 'DELETE') {
+      const auth = await requireLogin(request, env);
+      if (auth.response) return auth.response;
+      if (!canAccessTreasurerLedger(auth.user)) {
+        return jsonResponse({ detail: 'Permission required: treasurer' }, 403);
+      }
+      const id = Number(deleteMatch[1] || 0);
+      if (!id) return jsonResponse({ detail: 'Invalid ledger entry' }, 422);
+      const existing = await env.DB.prepare('SELECT id, name FROM payment_ledger WHERE id = ?').bind(id).first();
+      if (!existing) return jsonResponse({ detail: 'Ledger entry not found' }, 404);
+      await env.DB.prepare('DELETE FROM payment_ledger WHERE id = ?').bind(id).run();
+      await refreshPaymentLedgerXml(env);
+      return jsonResponse({ ok: true, detail: `Removed ledger entry for ${existing.name || id}.` });
+    }
   }
   if (url.pathname === '/api/admin/sponsors' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
@@ -7585,7 +8270,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -7601,6 +8286,21 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
 <form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div></div></div></section>
+<section id="tab-ledger" class="cms-panel ledger-panel" hidden><div class="panel-head"><div><p class="kicker">Treasurer</p><h1>Ledger</h1><p>Accountant view for donors, sponsors, fundraisers, dues, and expenses. Cash and in-kind entries update the downloadable Excel ledger.</p></div><div class="panel-actions"><a class="btn outline" id="download-ledger-excel" href="/api/admin/ledger.xls">Download Excel</a><button class="btn outline" type="button" id="refresh-ledger">Refresh</button><button class="btn primary" type="button" id="new-ledger-entry">Add entry</button></div></div>
+<div class="ledger-summary-grid" id="ledger-summary" aria-live="polite"></div>
+<div class="admin-card stack ledger-table-card">
+  <div class="ledger-table-head"><h2>Transaction ledger</h2><p class="muted">Newest entries first. Amounts for expenses appear as credits against income.</p></div>
+  <div class="ledger-table-wrap">
+    <table class="ledger-table" id="ledger-table">
+      <thead>
+        <tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Amount</th><th scope="col">Cash / In-kind</th><th scope="col">Description</th><th scope="col">Note</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+      </thead>
+      <tbody id="ledger-table-body"><tr><td colspan="8" class="draft">Loading ledger…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="status" id="ledger-status"></p>
+</div>
+</section>
 <section id="tab-checkout" class="cms-panel checkout-panel" hidden><div class="panel-head"><div><p class="kicker">Payments</p><h1>Checkout</h1><p>Manually charge a card through Square for an item or amount. Available to Treasurer, President, and Vice President.</p></div></div>
 <div class="checkout-layout">
   <form id="checkout-form" class="admin-card stack checkout-form-card" novalidate>
@@ -7618,7 +8318,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </form>
   <div class="admin-card stack checkout-help-card">
     <h2>How this works</h2>
-    <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges process immediately through Square.</p>
+    <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges are recorded in the Treasurer ledger as fundraiser income.</p>
     <ul class="checkout-help-list">
       <li>Requires Square card checkout to be connected</li>
       <li>User name or entity and description of transaction are required</li>
@@ -7941,7 +8641,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

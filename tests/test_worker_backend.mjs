@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -438,7 +438,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=contact-topic-recipients-20260816/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=restore-ledger-20260816/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1022,6 +1022,13 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessCheckout({ role: 'editor', permissions: ['sponsors'] }), false);
   assert.equal(canAccessCheckout({ role: 'admin', permissions: [] }), true);
 
+  assert.equal(canAccessTreasurerLedger({ role: 'admin' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['treasurer'] }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['president'] }), true);
+  // Vice President can access Checkout but not the Ledger.
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['vice-president'] }), false);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['sponsors'] }), false);
+
   const documentHtml = renderMinutesDocumentHtml(
     { title: 'East Forsyth Band' },
     {
@@ -1311,7 +1318,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /contact-topic-recipients-20260816/);
+  assert.match(workerSrc, /restore-ledger-20260816/);
   assert.match(workerSrc, /canAccessWebsiteGuide/);
   assert.match(workerSrc, /isCmsWebsiteGuidePath/);
   assert.match(workerSrc, /\/api\/admin\/website-guide\.pdf/);
@@ -1381,4 +1388,128 @@ test('push service worker and web app manifest assets exist', () => {
   assert.doesNotMatch(workerSrc, /zernio-facebook-events-publish/);
   assert.doesNotMatch(workerSrc, /gold-tier-benefits-card/);
   assert.doesNotMatch(workerSrc, /id="sponsor-preview"/);
+});
+
+test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel export, and dues', () => {
+  assert.deepEqual(LEDGER_KINDS, ['sponsor', 'donor', 'fundraiser', 'dues', 'expense']);
+  assert.deepEqual(LEDGER_INCOME_KINDS, ['sponsor', 'donor', 'fundraiser', 'dues']);
+
+  assert.equal(canAccessTreasurerLedger({ role: 'admin' }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['treasurer'] }), true);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['president'] }), true);
+  // Vice President can access Checkout but not the Ledger (checked exactly per the ledger branch).
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['vice-president'] }), false);
+  assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['sponsors'] }), false);
+  assert.equal(canAccessTreasurerLedger(null), false);
+
+  assert.equal(escapeXml('A & B <C>'), 'A &amp; B &lt;C&gt;');
+  assert.equal(formatLedgerAmountDisplay(12345), '$123.45');
+  assert.equal(normalizeLedgerKind('DUES'), 'dues');
+  assert.equal(normalizeLedgerKind('unknown'), '');
+  assert.equal(ledgerSignedCents({ kind: 'expense', amount_cents: 500 }), -500);
+  assert.equal(ledgerSignedCents({ kind: 'dues', amount_cents: 500 }), 500);
+
+  const summary = summarizeLedgerEntries([
+    { kind: 'sponsor', amount_cents: 50000 },
+    { kind: 'donor', amount_cents: 2500 },
+    { kind: 'dues', amount_cents: 7500 },
+    { kind: 'expense', amount_cents: 4500 },
+  ]);
+  assert.equal(summary.income_cents, 60000);
+  assert.equal(summary.expense_cents, 4500);
+  assert.equal(summary.net_cents, 55500);
+  assert.equal(summary.dues_cents, 7500);
+  assert.equal(summary.counts.dues, 1);
+
+  const xml = buildPaymentLedgerXml({
+    generatedAt: '2026-08-16T12:00:00.000Z',
+    sponsors: [{
+      id: 12,
+      name: 'Acme Music & Co',
+      address: '100 Band Way, Kernersville, NC',
+      amount_cents: 50000,
+      amount_display: '$500',
+      package: 'Gold Sponsor',
+      paid_at: '2026-08-10T11:00:00.000Z',
+    }],
+    donors: [{
+      id: 3,
+      name: 'Jane Donor',
+      amount_cents: 2500,
+      amount_display: '$25',
+      paid_at: '2026-08-10T11:30:00.000Z',
+    }],
+    dues: [{
+      id: 10,
+      kind: 'dues',
+      name: 'Alex Student',
+      amount_cents: 7500,
+      amount_display: '$75.00',
+      package: 'Dues',
+      paid_at: '2026-08-07T10:00:00.000Z',
+    }],
+    expenses: [{
+      id: 9,
+      kind: 'expense',
+      name: 'Trailer hitch',
+      amount_cents: 4500,
+      amount_display: '-$45.00',
+      package: 'Expense',
+      paid_at: '2026-08-08T10:00:00.000Z',
+    }],
+  });
+  assert.match(xml, /<\?xml version="1.0"/);
+  assert.match(xml, /<sponsors count="1" total_cents="50000" total_display="\$500\.00">/);
+  assert.match(xml, /<donors count="1" total_cents="2500" total_display="\$25\.00">/);
+  assert.match(xml, /<dues count="1" total_cents="7500" total_display="\$75\.00">/);
+  assert.match(xml, /<expenses count="1" total_cents="-4500" total_display="-\$45\.00">/);
+  assert.match(xml, /Acme Music &amp; Co/);
+  assert.match(xml, /Jane Donor/);
+  assert.match(xml, /Alex Student/);
+  assert.match(xml, /Trailer hitch/);
+  assert.match(xml, /<package>Gold Sponsor<\/package>/);
+  assert.match(xml, /income cents="60000" display="\$600\.00"/);
+  assert.match(xml, /net_total cents="55500" display="\$555\.00"/);
+
+  const excel = buildPaymentLedgerExcelXml([
+    { id: 1, kind: 'dues', name: 'Alex Student', amount_cents: 7500, amount_display: '$75.00', money_exchanged: true, paid_at: '2026-08-07' },
+    { id: 2, kind: 'expense', name: 'Trailer hitch', amount_cents: 4500, amount_display: '-$45.00', money_exchanged: true, paid_at: '2026-08-08' },
+  ], { generatedAt: '2026-08-16T12:00:00.000Z' });
+  assert.match(excel, /Excel\.Sheet/);
+  assert.match(excel, /EFHS Ledger/);
+  assert.match(excel, /Alex Student/);
+  assert.match(excel, /Trailer hitch/);
+  assert.match(excel, /Cash net/);
+
+  // ADMIN_HTML, worker routes, and admin.js wiring for the Ledger CMS tab.
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /id="tab-ledger"/);
+  assert.match(workerSrc, /data-tab="ledger"/);
+  assert.match(workerSrc, /id="ledger-summary"/);
+  assert.match(workerSrc, /id="ledger-table-body"/);
+  assert.match(workerSrc, /id="download-ledger-excel"/);
+  assert.match(workerSrc, /id="refresh-ledger"/);
+  assert.match(workerSrc, /id="new-ledger-entry"/);
+  assert.match(workerSrc, /CREATE TABLE IF NOT EXISTS payment_ledger/);
+  assert.match(workerSrc, /\/api\/admin\/ledger\.xls/);
+  assert.match(workerSrc, /\/api\/admin\/ledger\.xml/);
+  assert.match(workerSrc, /canAccessTreasurerLedger\(auth\.user\)/);
+  assert.match(workerSrc, /Treasurer \(Ledger \+ Square Checkout\)/);
+  assert.match(workerSrc, /President \(Ledger \+ Square Checkout\)/);
+  const permissionsDeclLedger = workerSrc.match(/const GLOBAL_PERMISSIONS = \[([^\]]+)\]/);
+  assert.ok(permissionsDeclLedger);
+  assert.match(permissionsDeclLedger[1], /'treasurer'/);
+  assert.match(permissionsDeclLedger[1], /'president'/);
+
+  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
+  assert.match(adminJs, /function canAccessLedger/);
+  assert.match(adminJs, /async function loadLedger/);
+  assert.match(adminJs, /ledger: canAccessLedger\(\)/);
+  assert.match(adminJs, /'Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses/);
+
+  const stylesSrc = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(stylesSrc, /Treasurer ledger/);
+  assert.match(stylesSrc, /\.ledger-summary-grid/);
+  assert.match(stylesSrc, /\.ledger-table/);
 });

@@ -3649,6 +3649,217 @@ body.minutes-frame-open{overflow:hidden}
 }
 
 
+/* Ledger entry form toast (shares the admin-password-toast modal look) */
+.admin-sponsor-form-toast{
+  position:fixed;
+  inset:0;
+  z-index:125;
+  display:grid;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  pointer-events:none;
+}
+.admin-sponsor-form-toast.is-visible{pointer-events:auto}
+.admin-sponsor-form-toast-backdrop{
+  position:absolute;
+  inset:0;
+  border:0;
+  padding:0;
+  margin:0;
+  background:rgba(2,16,32,.42);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity .3s ease;
+  cursor:pointer;
+}
+.admin-sponsor-form-toast.is-visible .admin-sponsor-form-toast-backdrop{opacity:1}
+.admin-sponsor-form-toast.is-leaving .admin-sponsor-form-toast-backdrop{opacity:0}
+.admin-sponsor-form-toast-panel{
+  position:relative;
+  z-index:1;
+  width:min(420px,100%);
+  max-height:min(88vh,720px);
+  overflow:auto;
+  transform:translate3d(0,36px,0) scale(.94);
+  opacity:0;
+  transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
+}
+.admin-sponsor-form-toast.is-visible .admin-sponsor-form-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.admin-sponsor-form-toast.is-leaving .admin-sponsor-form-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
+.admin-sponsor-form-toast-card{
+  position:relative;
+  padding:22px 22px 20px;
+  border-radius:22px;
+  background:linear-gradient(145deg,#001c38 0%,#063362 58%,#0a4478 100%);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 24px 60px rgba(0,16,32,.45);
+}
+.admin-sponsor-form-toast-card h3{
+  margin:0 0 14px;
+  color:#ff6b6b;
+  font-size:1.15rem;
+  font-weight:900;
+  letter-spacing:-.02em;
+}
+.admin-sponsor-form-toast-card p.muted{
+  margin:0 0 14px;
+  color:rgba(255,255,255,.78);
+  font-size:.85rem;
+  line-height:1.4;
+}
+.admin-sponsor-form-toast-card label{
+  display:grid;
+  gap:5px;
+  margin:0 0 10px;
+  font-size:.78rem;
+  font-weight:800;
+  color:rgba(255,255,255,.9);
+}
+.admin-sponsor-form-toast-card label.checkline{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  grid-template-columns:none;
+}
+.admin-sponsor-form-toast-card input,
+.admin-sponsor-form-toast-card select,
+.admin-sponsor-form-toast-card textarea{
+  padding:9px 11px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.22);
+  background:#fff;
+  color:#10233c;
+  font:inherit;
+  font-size:.92rem;
+}
+.admin-sponsor-form-toast-card input[type="checkbox"]{
+  width:auto;
+  padding:0;
+}
+.admin-sponsor-form-toast-card label span{font-weight:600;opacity:.8}
+.admin-sponsor-form-toast-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:12px;
+}
+.admin-sponsor-form-toast-actions .btn{
+  width:100%;
+  min-height:40px;
+  padding:8px 12px;
+  font-size:.88rem;
+}
+.admin-sponsor-form-toast-actions .btn.outline{
+  background:transparent;
+  border:1px solid rgba(255,255,255,.35);
+  color:#fff;
+}
+.admin-sponsor-form-toast-status{
+  margin:8px 0 0;
+  min-height:1.2em;
+  font-size:.8rem;
+  line-height:1.35;
+  color:#ffb4b4;
+}
+@media (prefers-reduced-motion:reduce){
+  .admin-sponsor-form-toast-backdrop,
+  .admin-sponsor-form-toast-panel{transition:none}
+}
+
+
+/* Treasurer ledger (accountant view) */
+.ledger-panel .panel-head{margin-bottom:18px}
+.ledger-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:12px;
+  margin:0 0 18px;
+}
+.ledger-summary-card{
+  display:grid;
+  gap:4px;
+  padding:14px 16px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:linear-gradient(180deg,#fff 0%,#f3f7fb 100%);
+}
+.ledger-summary-card span{
+  font-size:.72rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  font-weight:800;
+  color:#5b6f86;
+}
+.ledger-summary-card b{
+  color:var(--navy);
+  font-size:1.35rem;
+  line-height:1.1;
+}
+.ledger-summary-card small{color:#6b7f96;font-weight:600}
+.ledger-table-card{overflow:hidden}
+.ledger-table-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+.ledger-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:16px}
+.ledger-table{width:100%;border-collapse:collapse;min-width:920px;background:#fff}
+.ledger-table th,
+.ledger-table td{
+  padding:12px 14px;
+  border-bottom:1px solid var(--line);
+  text-align:left;
+  vertical-align:top;
+  font-size:.95rem;
+}
+.ledger-table th{
+  position:sticky;
+  top:0;
+  background:#0f2f4d;
+  color:#fff;
+  font-size:.72rem;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  z-index:1;
+}
+.ledger-table tbody tr:nth-child(even){background:#f7fafc}
+.ledger-table tbody tr:hover{background:#eef5fb}
+.ledger-table .ledger-address{display:block;margin-top:4px;color:#66788d;font-weight:600;font-size:.85rem}
+.ledger-amount{font-variant-numeric:tabular-nums;font-weight:800;white-space:nowrap}
+.ledger-amount.is-income{color:#0f6b3a}
+.ledger-amount.is-expense{color:#a11919}
+.ledger-kind{
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:.75rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  background:#e8eef5;
+  color:var(--navy);
+}
+.ledger-kind-sponsor{background:#e7f0ff;color:#184a8c}
+.ledger-kind-donor{background:#e8f7ee;color:#146c3a}
+.ledger-kind-fundraiser{background:#fff4df;color:#8a5a00}
+.ledger-kind-dues{background:#f0e9ff;color:#5b3aa8}
+.ledger-kind-expense{background:#fdeaea;color:#9b1c1c}
+.ledger-actions{white-space:nowrap}
+.btn-small{padding:8px 12px;font-size:.85rem;border-radius:10px}
+@media(max-width:1100px){
+  .ledger-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:980px){
+  /* Keep ledger headers from sticking to the viewport under the mobile menu. */
+  .ledger-table th{
+    position:static;
+    top:auto;
+  }
+}
+@media(max-width:700px){
+  .ledger-summary-grid{grid-template-columns:1fr}
+  .ledger-table th,
+  .ledger-table td{padding:10px}
+}
+
+
 /* Super Admin maintenance site preview banner */
 :root{--maintenance-banner-h:48px}
 .maintenance-preview-banner{
