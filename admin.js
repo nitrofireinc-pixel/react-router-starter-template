@@ -4270,14 +4270,20 @@ function fillMinutesDocxForm(form, bodyHtml = '') {
 }
 
 function syncMinutesPanelMode() {
-  const newBtn = document.querySelector('#new-minutes');
-  const uploadBtn = document.querySelector('#upload-minutes-docx');
   const canManage = canManageMinutes();
+  const newBtn = document.querySelector('#new-minutes');
   if (newBtn) {
     newBtn.hidden = !canManage;
     newBtn.textContent = 'Add Minutes';
   }
-  if (uploadBtn) uploadBtn.hidden = !canManage;
+  document.querySelectorAll('#upload-minutes-docx, #upload-minutes-docx-editor, [data-minutes-manage-actions]').forEach((el) => {
+    el.hidden = !canManage;
+  });
+}
+
+function triggerMinutesDocxPicker() {
+  const input = document.querySelector('#minutes-docx-file') || document.querySelector('#minutes-docx-file-drop');
+  input?.click();
 }
 
 function setMinutesEmptyVisible(visible) {
@@ -4384,7 +4390,7 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
+    ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
     : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
@@ -4539,7 +4545,7 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
+        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
@@ -4563,6 +4569,7 @@ async function uploadMinutesDocxFile(file) {
       body: payload,
     });
     if (!saved?.id) throw new Error('Upload succeeded but no minutes id was returned.');
+    closeMinutesEditor();
     state.minutes = await jsonFetch('/api/admin/minutes');
     state.selectedMinutesId = saved.id;
     renderMinutesList();
@@ -4570,7 +4577,7 @@ async function uploadMinutesDocxFile(file) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes / Upload DOCX to create a new entry.'
+        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
@@ -4735,18 +4742,52 @@ function bindMinutesPanel() {
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });
-  document.querySelector('#upload-minutes-docx')?.addEventListener('click', () => {
+  document.querySelector('[data-minutes-empty-add]')?.addEventListener('click', () => {
     if (!canManageMinutes()) return;
     setMinutesNavOpen(false);
-    document.querySelector('#minutes-docx-file')?.click();
+    prepareNewMinutesForm();
+    openMinutesEditor({ editing: false });
   });
-  document.querySelector('#minutes-docx-file')?.addEventListener('change', async (event) => {
-    const input = event.currentTarget;
-    const file = input?.files?.[0];
-    if (input) input.value = '';
-    if (!file) return;
-    await uploadMinutesDocxFile(file);
-  });
+  const openDocxPicker = () => {
+    if (!canManageMinutes()) return;
+    setMinutesNavOpen(false);
+    triggerMinutesDocxPicker();
+  };
+  document.querySelector('#upload-minutes-docx')?.addEventListener('click', openDocxPicker);
+  document.querySelector('#upload-minutes-docx-editor')?.addEventListener('click', openDocxPicker);
+  document.querySelector('[data-minutes-empty-upload]')?.addEventListener('click', openDocxPicker);
+  const bindDocxInput = (input) => {
+    input?.addEventListener('change', async (event) => {
+      const el = event.currentTarget;
+      const file = el?.files?.[0];
+      if (el) el.value = '';
+      if (!file) return;
+      await uploadMinutesDocxFile(file);
+    });
+  };
+  bindDocxInput(document.querySelector('#minutes-docx-file'));
+  bindDocxInput(document.querySelector('#minutes-docx-file-drop'));
+  const dropzone = document.querySelector('[data-minutes-dropzone]');
+  if (dropzone) {
+    ['dragenter', 'dragover'].forEach((type) => {
+      dropzone.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropzone.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach((type) => {
+      dropzone.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropzone.classList.remove('is-dragover');
+      });
+    });
+    dropzone.addEventListener('drop', async (event) => {
+      if (!canManageMinutes()) return;
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      await uploadMinutesDocxFile(file);
+    });
+  }
   document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
     button.addEventListener('click', () => {
       closeMinutesView();
