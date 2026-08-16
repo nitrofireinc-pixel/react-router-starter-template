@@ -2634,10 +2634,13 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    isSuperAdmin() && ['Security Log', 'View and print the sealed audit vault. Super Admin only — cannot be edited or granted to others.', 'security-log', 'Security', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
+  // Always pin Security Log after every other dashboard card (now and for future additions).
+  if (isSuperAdmin()) {
+    cards.push(['Security Log', 'View and print the sealed audit vault. Super Admin only — cannot be edited or granted to others.', 'security-log', 'Security', 'tab', 'security']);
+  }
 
   dashboard.innerHTML = cards.length
     ? cards.map((card) => {

@@ -3549,6 +3549,21 @@ body.minutes-frame-open{overflow:hidden}
   filter:brightness(1.04);
   transform:translateY(-1px);
 }
+.dash-card-security{
+  order:9999;
+  background:linear-gradient(160deg,#1a0505 0%,#5a0a0a 42%,#b01020 78%,#0a0a0a 100%);
+  border-color:#1a0505;
+  color:#fff;
+  box-shadow:0 18px 44px rgba(26,5,5,.35);
+}
+.dash-card-security span{color:rgba(255,210,214,.92)}
+.dash-card-security b,
+.dash-card-security small{color:#fff}
+.dash-card-security small{color:rgba(255,255,255,.86)}
+.dash-card-security:hover{
+  filter:brightness(1.05);
+  transform:translateY(-1px);
+}
 .checkout-layout{
   display:grid;
   grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);
