@@ -194,7 +194,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'restore-minutes-no-logo-20260816';
+const ASSET_VERSION = 'home-hero-logo-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -893,7 +893,7 @@ async function initDb(env) {
   }
   const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
   if (homePageRow?.body_html) {
-    const nextHomeHtml = refreshHomeStartHereSection(homePageRow.body_html);
+    const nextHomeHtml = refreshHomeHeroBrandMark(refreshHomeStartHereSection(homePageRow.body_html));
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
@@ -2590,6 +2590,16 @@ export function refreshHomeStartHereSection(html) {
     );
 }
 
+export function refreshHomeHeroBrandMark(html, markUrl = PUBLIC_BRAND_MARK) {
+  const source = String(html || '');
+  if (!source.trim() || !/<aside\b[^>]*\bhero-card\b/i.test(source)) return source;
+  const mark = String(markUrl || PUBLIC_BRAND_MARK || BLUE_REGIMENT_MARK_PATH).trim() || BLUE_REGIMENT_MARK_PATH;
+  return source.replace(
+    /(<aside\b[^>]*\bhero-card\b[^>]*>[\s\S]*?<img\b[^>]*?\bsrc=["'])([^"']+)(["'])/i,
+    `$1${mark}$3`,
+  );
+}
+
 export function ensureFundraisingDonateSlot(html) {
   let source = rewriteFundraisingDonateToPopup(html);
   if (/data-donate-open/i.test(source) && /data-square-donate|Direct Support/i.test(source)) {
@@ -3843,6 +3853,7 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') return renderBoostersPageBody(page, boosterMembers);
   if (page.slug === 'fundraising') return ensureFundraisingDonateSlot(page.body_html);
+  if (page.slug === 'home' || page.is_home) return refreshHomeHeroBrandMark(page.body_html);
   return page.body_html;
 }
 

@@ -529,7 +529,7 @@ function ensureWebAppManifestLink() {
   if (!document.querySelector('link[rel="apple-touch-icon"]')) {
     const apple = document.createElement('link');
     apple.rel = 'apple-touch-icon';
-    apple.href = '/assets/efhs-blue-regiment-mark.png?v=restore-minutes-no-logo-20260816';
+    apple.href = '/assets/efhs-blue-regiment-mark.png?v=home-hero-logo-20260816';
     document.head.appendChild(apple);
   }
 }
@@ -548,7 +548,7 @@ function ensureAddToHomeNavControl() {
     button.innerHTML = `
       <span class="nav-add-home-icon" aria-hidden="true">
         <svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png?v=restore-minutes-no-logo-20260816" alt="" width="16" height="16" decoding="async">
+        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png?v=home-hero-logo-20260816" alt="" width="16" height="16" decoding="async">
       </span>`;
     const notify = siteNav.querySelector('[data-notify-me]');
     if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
@@ -610,7 +610,7 @@ function ensureAddToHomeSheet() {
   sheet.innerHTML = `
     <div class="add-home-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="add-home-title">
       <div class="add-home-sheet-head">
-        <img src="/assets/efhs-blue-regiment-mark.png?v=restore-minutes-no-logo-20260816" alt="">
+        <img src="/assets/efhs-blue-regiment-mark.png?v=home-hero-logo-20260816" alt="">
         <div>
           <h2 id="add-home-title">Add to Home Screen</h2>
           <p data-add-home-os></p>
