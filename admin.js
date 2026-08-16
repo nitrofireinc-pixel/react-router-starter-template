@@ -3709,6 +3709,25 @@ function canEditManagedUser(user) {
   return !isSuperAdmin(user);
 }
 
+function formatUserLastLoginLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Never logged in';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return 'Never logged in';
+  try {
+    return `Last login ${date.toLocaleString('en-US', {
+      timeZone: 'America/New_York',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })} ET`;
+  } catch {
+    return `Last login ${date.toISOString()}`;
+  }
+}
+
 async function loadUsers() {
   if (!hasPermission('users')) return;
   state.users = await jsonFetch('/api/admin/users');
@@ -3728,7 +3747,7 @@ async function loadUsers() {
         : '<div class="row-actions"><span class="muted">View only</span></div>';
       return `
     <article class="admin-row user-admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small></div>
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small><small class="user-last-login">${escapeHtml(formatUserLastLoginLabel(user.last_login_at))}</small></div>
       ${actions}
     </article>`;
     }).join('')
