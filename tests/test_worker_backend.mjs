@@ -936,8 +936,12 @@ test('meeting minutes dates and secretary edit window', () => {
   const viewer = { role: 'editor', permissions: ['minutes:view'] };
   const outsider = { role: 'editor', permissions: ['mail'] };
   const admin = { role: 'admin', permissions: [] };
-  const fresh = { created_at: new Date().toISOString() };
-  const stale = { created_at: new Date(Date.now() - (11 * 24 * 60 * 60 * 1000)).toISOString() };
+  const today = new Date();
+  const freshMeetingDate = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+  const staleDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 11));
+  const staleMeetingDate = `${staleDay.getUTCFullYear()}-${String(staleDay.getUTCMonth() + 1).padStart(2, '0')}-${String(staleDay.getUTCDate()).padStart(2, '0')}`;
+  const fresh = { meeting_date: freshMeetingDate, created_at: new Date().toISOString() };
+  const stale = { meeting_date: staleMeetingDate, created_at: new Date().toISOString() };
   assert.equal(canViewMeetingMinutes(secretary), true);
   assert.equal(canViewMeetingMinutes(viewer), true);
   assert.equal(canViewMeetingMinutes(outsider), true);
@@ -955,7 +959,13 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['all'] }), false);
   assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['minutes', 'minutes:view', 'users'] }), false);
   assert.equal(canDeleteMeetingMinutes(null), false);
-  assert.ok(minutesEditableUntil(fresh.created_at) instanceof Date);
+  assert.ok(minutesEditableUntil(fresh.meeting_date) instanceof Date);
+  assert.equal(minutesEditableUntil('2026-08-04')?.toISOString(), '2026-08-14T00:00:00.000Z');
+  // Recently uploaded minutes for an older meeting date are still locked for secretaries.
+  assert.equal(canEditMeetingMinutes(secretary, {
+    meeting_date: '2026-07-01',
+    created_at: new Date().toISOString(),
+  }), false);
 
   const documentHtml = renderMinutesDocumentHtml(
     { title: 'East Forsyth Band' },

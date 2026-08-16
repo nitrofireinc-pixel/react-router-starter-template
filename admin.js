@@ -4454,9 +4454,9 @@ function renderMinutesView(item) {
   if (item.created_by_name) meta.push(`Recorded by ${item.created_by_name}`);
   if (item.created_at) meta.push(`Submitted ${new Date(item.created_at).toLocaleString()}`);
   if (item.can_edit && item.editable_until) {
-    meta.push(`Editable until ${new Date(item.editable_until).toLocaleDateString()}`);
+    meta.push(`Editable until ${new Date(item.editable_until).toLocaleDateString()} (10 days from meeting date)`);
   } else if (!item.can_edit) {
-    meta.push('View only');
+    meta.push(isSuperAdmin() ? 'Locked for secretaries · Super Admin can still edit' : 'View only');
   }
   view.querySelector('[data-minutes-view-meta]').textContent = meta.join(' · ');
   const frame = document.querySelector('#minutes-document-frame');
