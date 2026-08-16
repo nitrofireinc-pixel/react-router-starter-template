@@ -3,6 +3,7 @@ import {
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
   enrichMailAuditMeta,
+  isSecurityLogPath,
   listAdminAuditLogs,
   maybeAuditAdminApiResponse,
   requestClientIp,
@@ -204,7 +205,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'security-log-restore-20260816';
+const ASSET_VERSION = 'security-log-harden-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -309,10 +310,15 @@ export function normalizePageSlug(value) {
 }
 
 export function parsePermissions(value) {
-  if (Array.isArray(value)) return value.filter((item) => typeof item === 'string');
+  const forbidden = new Set(['security-log', 'security', 'audit', 'audit-log', 'admin-audit']);
+  const filterSafe = (items) => items
+    .filter((item) => typeof item === 'string')
+    .map((item) => String(item).trim())
+    .filter((item) => item && !forbidden.has(item.toLowerCase()));
+  if (Array.isArray(value)) return filterSafe(value);
   try {
     const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+    return Array.isArray(parsed) ? filterSafe(parsed) : [];
   } catch {
     return [];
   }
@@ -322,8 +328,17 @@ export function isSuperAdmin(user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
 }
 
+/** Security log is Super Admin only — never grantable via permissions. */
+export function canAccessSecurityLog(user) {
+  return isSuperAdmin(user);
+}
+
 export function hasPermission(user, scope) {
   if (!user) return false;
+  const normalized = String(scope || '').trim().toLowerCase();
+  if (['security-log', 'security', 'audit', 'audit-log', 'admin-audit'].includes(normalized)) {
+    return canAccessSecurityLog(user);
+  }
   if (isSuperAdmin(user)) return true;
   const permissions = parsePermissions(user.permissions);
   return permissions.includes(scope) || permissions.includes('all');
@@ -4595,6 +4610,15 @@ export async function requireSuperAdmin(request, env) {
   return auth;
 }
 
+export async function requireSecurityLogAccess(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  if (!canAccessSecurityLog(auth.user)) {
+    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: auth.user };
+  }
+  return auth;
+}
+
 async function requireLogin(request, env) {
   const user = await currentUser(request, env);
   if (!user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
@@ -5006,6 +5030,15 @@ async function handleApi(request, env, url, ctx = null) {
 
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
+  // Security log is immutable: no create/update/delete endpoints.
+  if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
+    return jsonResponse({
+      detail: 'Security log is view and print only. Editing is not allowed.',
+      access: 'super_admin_only',
+      mode: 'view_print_only',
+      editable: false,
+    }, 405);
+  }
   if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
 
   if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
@@ -5548,7 +5581,7 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ user: publicUser(auth.user), permissions: GLOBAL_PERMISSIONS, pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })) });
   }
   if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
     const payload = await listAdminAuditLogs(env, {
       // CMS preview shows only the newest handful; full history is in the PDF download.
@@ -5557,22 +5590,73 @@ async function routeApi(request, env, url, ctx = null) {
       action: String(url.searchParams.get('action') || '').trim(),
       actor: String(url.searchParams.get('actor') || '').trim(),
     });
+    await writeAdminAuditLog(env, {
+      action: 'security.log.view',
+      category: 'security',
+      method: 'GET',
+      path: '/api/admin/security-log',
+      status: 200,
+      actor_user_id: auth.user.id,
+      actor_username: auth.user.username,
+      ip: requestClientIp(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: 'security.log.view',
+        method: 'GET',
+        path: '/api/admin/security-log',
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: 'preview opened',
+      }),
+      meta: {
+        preview_limit: 5,
+        filters: {
+          action: String(url.searchParams.get('action') || '').trim(),
+          actor: String(url.searchParams.get('actor') || '').trim(),
+        },
+      },
+    });
     return jsonResponse({
       ...payload,
       preview_limit: 5,
       storage: 'encrypted-server-database',
       access: 'super_admin_only',
       mode: 'view_print_only',
+      editable: false,
     });
   }
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
     const payload = await listAdminAuditLogs(env, {
       limit: Math.min(Number(url.searchParams.get('limit') || 1000), 2000),
       offset: 0,
       action: String(url.searchParams.get('action') || '').trim(),
       actor: String(url.searchParams.get('actor') || '').trim(),
+    });
+    await writeAdminAuditLog(env, {
+      action: 'security.log.export',
+      category: 'security',
+      method: 'GET',
+      path: url.pathname,
+      status: 200,
+      actor_user_id: auth.user.id,
+      actor_username: auth.user.username,
+      ip: requestClientIp(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: 'security.log.export',
+        method: 'GET',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `exported ${payload.entries.length} entries`,
+      }),
+      meta: {
+        entry_count: payload.entries.length,
+        total: payload.total,
+        format: 'pdf',
+      },
     });
     const pdfBase64 = buildAdminAuditExportPdfBase64(payload.entries);
     const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
@@ -5582,6 +5666,8 @@ async function routeApi(request, env, url, ctx = null) {
         'content-type': 'application/pdf',
         'content-disposition': 'attachment; filename="efhsband-security-audit-log.pdf"',
         'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'x-robots-tag': 'noindex, nofollow',
       },
     });
   }
@@ -7531,13 +7617,13 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only. Newest 5 entries shown here. Download PDF for the full encrypted log. View / print only — not editable.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Newest 5 entries shown here. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
     <label>Filter by action<input id="security-log-action" type="search" placeholder="login, mail.send, change.pages…" autocomplete="off"></label>
   </div>
-  <p class="muted">Stored encrypted in the secured CMS database (<span class="mono">admin_audit_log</span>) with SHA-256 integrity. Not a public file and not grantable to other users.</p>
+  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity. Isolated from website pages and logos.</p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
 </div>
 <div class="admin-card">
