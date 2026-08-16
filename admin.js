@@ -4282,8 +4282,6 @@ function syncMinutesPanelMode() {
   }
   const uploadBtn = document.querySelector('#upload-minutes-docx');
   if (uploadBtn) uploadBtn.hidden = !canManage;
-  const editorUpload = document.querySelector('#upload-minutes-docx-editor');
-  if (editorUpload) editorUpload.hidden = !canManage;
 }
 
 function triggerMinutesDocxPicker() {
@@ -4741,7 +4739,6 @@ function bindMinutesPanel() {
     triggerMinutesDocxPicker();
   };
   document.querySelector('#upload-minutes-docx')?.addEventListener('click', openDocxPicker);
-  document.querySelector('#upload-minutes-docx-editor')?.addEventListener('click', openDocxPicker);
   document.querySelector('#minutes-docx-file')?.addEventListener('change', async (event) => {
     const el = event.currentTarget;
     const file = el?.files?.[0];

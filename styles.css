@@ -2716,8 +2716,8 @@ body.sponsor-signup-open{overflow:hidden}
 }
 .minutes-editor-modal{z-index:85}
 .minutes-editor-dialog.minutes-docx-dialog{
-  width:min(920px,calc(100vw - 24px));
-  max-width:920px;
+  width:min(1012px,calc(100vw - 24px));
+  max-width:1012px;
   height:min(94dvh,1100px);
   max-height:94dvh;
   border-radius:16px;
