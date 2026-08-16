@@ -205,7 +205,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'security-log-card-20260816';
+const ASSET_VERSION = 'security-log-pager-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -5583,42 +5583,55 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
+    const pageSize = Math.min(Math.max(Number(url.searchParams.get('limit') || 5), 1), 5);
+    const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0);
+    const actionFilter = String(url.searchParams.get('action') || '').trim();
+    const actorFilter = String(url.searchParams.get('actor') || '').trim();
     const payload = await listAdminAuditLogs(env, {
-      // CMS preview shows only the newest handful; full history is in the PDF download.
-      limit: Math.min(Number(url.searchParams.get('limit') || 5), 5),
-      offset: Number(url.searchParams.get('offset') || 0),
-      action: String(url.searchParams.get('action') || '').trim(),
-      actor: String(url.searchParams.get('actor') || '').trim(),
+      // CMS preview shows 5 entries per page; full history is in the PDF download.
+      limit: pageSize,
+      offset,
+      action: actionFilter,
+      actor: actorFilter,
     });
-    await writeAdminAuditLog(env, {
-      action: 'security.log.view',
-      category: 'security',
-      method: 'GET',
-      path: '/api/admin/security-log',
-      status: 200,
-      actor_user_id: auth.user.id,
-      actor_username: auth.user.username,
-      ip: requestClientIp(request),
-      user_agent: request.headers.get('user-agent') || '',
-      summary: buildAuditSummary({
+    const totalPages = Math.max(1, Math.ceil((Number(payload.total) || 0) / pageSize) || 1);
+    const page = Math.floor(offset / pageSize) + 1;
+    // Log vault access on first-page opens/refreshes only — not every pager click.
+    if (offset === 0) {
+      await writeAdminAuditLog(env, {
         action: 'security.log.view',
+        category: 'security',
         method: 'GET',
         path: '/api/admin/security-log',
         status: 200,
-        actorUsername: auth.user.username,
-        detail: 'preview opened',
-      }),
-      meta: {
-        preview_limit: 5,
-        filters: {
-          action: String(url.searchParams.get('action') || '').trim(),
-          actor: String(url.searchParams.get('actor') || '').trim(),
+        actor_user_id: auth.user.id,
+        actor_username: auth.user.username,
+        ip: requestClientIp(request),
+        user_agent: request.headers.get('user-agent') || '',
+        summary: buildAuditSummary({
+          action: 'security.log.view',
+          method: 'GET',
+          path: '/api/admin/security-log',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: 'preview opened',
+        }),
+        meta: {
+          preview_limit: pageSize,
+          page: 1,
+          filters: {
+            action: actionFilter,
+            actor: actorFilter,
+          },
         },
-      },
-    });
+      });
+    }
     return jsonResponse({
       ...payload,
-      preview_limit: 5,
+      preview_limit: pageSize,
+      page,
+      page_size: pageSize,
+      total_pages: totalPages,
       storage: 'encrypted-server-database',
       access: 'super_admin_only',
       mode: 'view_print_only',
@@ -7617,7 +7630,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Newest 5 entries shown here. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
@@ -7628,6 +7641,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <div class="admin-card">
   <div id="security-log-list" class="security-log-list" aria-live="polite"></div>
+  <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
 <section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>

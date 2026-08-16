@@ -433,7 +433,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=security-log-card-20260816/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=security-log-pager-20260816/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1281,7 +1281,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /security-log-card-20260816/);
+  assert.match(workerSrc, /security-log-pager-20260816/);
   assert.match(workerSrc, /minutes-view-card/);
   assert.match(workerSrc, /minutes-view-back/);
   assert.match(workerSrc, /embed = false/);
@@ -1291,6 +1291,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(workerSrc, /requireSecurityLogAccess/);
   assert.match(workerSrc, /canAccessSecurityLog/);
   assert.match(workerSrc, /security\.log\.view/);
+  assert.match(workerSrc, /security-log-pager/);
+  assert.match(workerSrc, /total_pages/);
   assert.match(workerSrc, /view and print only/i);
   assert.doesNotMatch(workerSrc, /minutes-view-modal/);
   // Security log must never appear as a grantable GLOBAL_PERMISSIONS scope.
@@ -1306,6 +1308,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(adminJs, /syncMinutesMobileViewing/);
   assert.match(adminJs, /embed=1/);
   assert.match(adminJs, /loadSecurityLog/);
+  assert.match(adminJs, /renderSecurityLogPager/);
+  assert.match(adminJs, /securityLogPage/);
   assert.match(adminJs, /security-log/);
   assert.match(adminJs, /tab', 'security'/);
   assert.match(adminJs, /Always pin Security Log/);
@@ -1317,6 +1321,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(styles, /\.security-log-entry/);
   assert.match(styles, /\.dash-card-security/);
   assert.match(styles, /order:9999/);
+  assert.match(styles, /\.security-log-pager/);
+  assert.match(styles, /\.security-log-page-btn/);
   const markBytes = readFileSync(join(root, 'assets/efhs-blue-regiment-mark.png'));
   // Updated circular mark from the restored upload (not the Aug 5 letterhead crop).
   assert.notEqual(createHash('md5').update(markBytes).digest('hex'), '0de3ab10f088d89df03c43e88dc2bb58');

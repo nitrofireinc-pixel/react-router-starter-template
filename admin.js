@@ -312,7 +312,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '' };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2008,7 +2008,7 @@ function activateTab(name) {
     }
     if (name === 'security-log') {
       if (!isSuperAdmin()) return;
-      loadSecurityLog().catch(() => {});
+      loadSecurityLog({ resetPage: true }).catch(() => {});
     }
     closeAdminNav();
   };
@@ -3740,7 +3740,7 @@ function formatUserLastLoginLabel(value) {
   }
 }
 
-async function loadSecurityLog() {
+async function loadSecurityLog({ resetPage = false } = {}) {
   if (!isSuperAdmin()) {
     const list = document.querySelector('#security-log-list');
     if (list) list.innerHTML = '<p class="error">Security log is Super Admin only.</p>';
@@ -3749,20 +3749,41 @@ async function loadSecurityLog() {
   const list = document.querySelector('#security-log-list');
   const status = document.querySelector('#security-log-status');
   const download = document.querySelector('#download-security-log');
+  const pager = document.querySelector('#security-log-pager');
   if (!list) return;
+  if (resetPage) state.securityLogPage = 1;
+  const pageSize = Math.max(1, Number(state.securityLogPageSize) || 5);
+  const page = Math.max(1, Number(state.securityLogPage) || 1);
+  const offset = (page - 1) * pageSize;
   const actor = String(document.querySelector('#security-log-actor')?.value || '').trim();
   const action = String(document.querySelector('#security-log-action')?.value || '').trim();
-  const params = new URLSearchParams({ limit: '5' });
+  const params = new URLSearchParams({
+    limit: String(pageSize),
+    offset: String(offset),
+  });
   if (actor) params.set('actor', actor);
   if (action) params.set('action', action);
   if (download) {
-    download.href = `/api/admin/security-log.pdf?${params.toString()}`;
+    const pdfParams = new URLSearchParams();
+    if (actor) pdfParams.set('actor', actor);
+    if (action) pdfParams.set('action', action);
+    download.href = `/api/admin/security-log.pdf?${pdfParams.toString()}`;
     download.setAttribute('rel', 'noopener');
   }
   try {
     if (status) status.textContent = 'Loading sealed security log…';
     const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
     const entries = Array.isArray(data.entries) ? data.entries : [];
+    const total = Number(data.total) || entries.length;
+    state.securityLogTotal = total;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+    if (page > totalPages) {
+      state.securityLogPage = totalPages;
+      if (totalPages !== page) {
+        await loadSecurityLog();
+        return;
+      }
+    }
     if (!entries.length) {
       list.innerHTML = '<p class="draft">No security log entries yet. Log in/out or save a CMS change to create the first entry.</p>';
     } else {
@@ -3795,14 +3816,56 @@ async function loadSecurityLog() {
         </article>`;
       }).join('');
     }
+    renderSecurityLogPager({ page, pageSize, total, totalPages });
     if (status) {
-      const total = data.total || entries.length;
-      status.textContent = `Showing ${entries.length} of ${total} sealed entr${total === 1 ? 'y' : 'ies'} · view/print only · not editable.`;
+      if (!total) {
+        status.textContent = 'No sealed entries match these filters · view/print only · not editable.';
+      } else {
+        const start = offset + 1;
+        const end = Math.min(offset + entries.length, total);
+        status.textContent = `Showing ${start}–${end} of ${total} sealed entr${total === 1 ? 'y' : 'ies'} · page ${page} of ${totalPages} · view/print only · not editable.`;
+      }
     }
   } catch (error) {
     list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;
+    if (pager) pager.hidden = true;
     if (status) status.textContent = error.message || 'Security log unavailable';
   }
+}
+
+function renderSecurityLogPager({ page = 1, total = 0, totalPages = 1 } = {}) {
+  const pager = document.querySelector('#security-log-pager');
+  if (!pager) return;
+  if (!total) {
+    pager.hidden = true;
+    pager.innerHTML = '';
+    return;
+  }
+  pager.hidden = false;
+  const atFirst = page <= 1;
+  const atLast = page >= totalPages;
+  pager.innerHTML = `
+    <button type="button" class="btn outline security-log-page-btn" data-security-log-page="first" ${atFirst ? 'disabled' : ''} aria-label="First page">«</button>
+    <button type="button" class="btn outline security-log-page-btn" data-security-log-page="prev" ${atFirst ? 'disabled' : ''} aria-label="Previous page">‹</button>
+    <span class="security-log-page-label" aria-live="polite">Page ${page} of ${totalPages}</span>
+    <button type="button" class="btn outline security-log-page-btn" data-security-log-page="next" ${atLast ? 'disabled' : ''} aria-label="Next page">›</button>
+    <button type="button" class="btn outline security-log-page-btn" data-security-log-page="last" ${atLast ? 'disabled' : ''} aria-label="Last page">»</button>
+  `;
+  pager.querySelectorAll('[data-security-log-page]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.securityLogPage;
+      const size = Math.max(1, Number(state.securityLogPageSize) || 5);
+      const maxPage = Math.max(1, Math.ceil((Number(state.securityLogTotal) || 0) / size) || 1);
+      let next = Number(state.securityLogPage) || 1;
+      if (action === 'first') next = 1;
+      else if (action === 'prev') next = Math.max(1, next - 1);
+      else if (action === 'next') next = Math.min(maxPage, next + 1);
+      else if (action === 'last') next = maxPage;
+      if (next === state.securityLogPage) return;
+      state.securityLogPage = next;
+      loadSecurityLog().catch(() => {});
+    });
+  });
 }
 
 async function loadUsers() {
@@ -5573,19 +5636,19 @@ function bindForms() {
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
-    loadSecurityLog().catch(() => {});
+    loadSecurityLog({ resetPage: true }).catch(() => {});
   });
   let securityLogFilterTimer = null;
   ['#security-log-actor', '#security-log-action'].forEach((selector) => {
     const el = document.querySelector(selector);
     if (!el) return;
     el.addEventListener('change', () => {
-      loadSecurityLog().catch(() => {});
+      loadSecurityLog({ resetPage: true }).catch(() => {});
     });
     el.addEventListener('input', () => {
       clearTimeout(securityLogFilterTimer);
       securityLogFilterTimer = setTimeout(() => {
-        loadSecurityLog().catch(() => {});
+        loadSecurityLog({ resetPage: true }).catch(() => {});
       }, 300);
     });
   });
