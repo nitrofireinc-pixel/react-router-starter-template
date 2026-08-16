@@ -3816,7 +3816,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
         </article>`;
       }).join('');
     }
-    renderSecurityLogPager({ page, pageSize, total, totalPages });
+    renderSecurityLogPager({ page, total, totalPages });
     if (status) {
       if (!total) {
         status.textContent = 'No sealed entries match these filters · view/print only · not editable.';
