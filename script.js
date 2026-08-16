@@ -142,6 +142,46 @@ function placeHeaderQuickActions() {
   }
 })();
 
+function ensureStaffAuthNavLink() {
+  const siteNav = document.querySelector('#site-nav');
+  if (!siteNav) return null;
+  let link = siteNav.querySelector('[data-staff-auth-link]');
+  if (!link) {
+    link = document.createElement('a');
+    link.setAttribute('data-staff-auth-link', '');
+    link.href = '/admin/login';
+    link.textContent = 'Login';
+    const before = siteNav.querySelector('[data-notify-me], [data-add-home]');
+    if (before) siteNav.insertBefore(link, before);
+    else siteNav.appendChild(link);
+  }
+  return link;
+}
+
+function applyStaffAuthNavState(loggedIn) {
+  const link = ensureStaffAuthNavLink();
+  if (!link) return;
+  if (loggedIn) {
+    link.href = '/admin';
+    link.textContent = 'Staff Menu';
+  } else {
+    link.href = '/admin/login';
+    link.textContent = 'Login';
+  }
+}
+
+(function syncStaffAuthNavLink() {
+  applyStaffAuthNavState(false);
+  fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      applyStaffAuthNavState(Boolean(data && data.logged_in));
+    })
+    .catch(() => {
+      applyStaffAuthNavState(false);
+    });
+})();
+
 (function enforceMaintenanceMode() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   if (path === '/maintenance' || path.endsWith('/maintenance.html')) return;
