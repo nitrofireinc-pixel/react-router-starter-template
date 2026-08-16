@@ -1,5 +1,6 @@
 
 :root{
+  --maintenance-banner-h:48px;
   --navy:#002142;
   --navy-2:#014990;
   --red:#E71321;
@@ -3131,4 +3132,50 @@ body.minutes-frame-open{overflow:hidden}
 }
 @media(max-width:900px){
   .checkout-layout{grid-template-columns:1fr}
+}
+
+
+/* Super Admin maintenance site preview banner */
+:root{--maintenance-banner-h:48px}
+.maintenance-preview-banner{
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+  z-index:90;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:center;
+  gap:8px 14px;
+  min-height:var(--maintenance-banner-h);
+  padding:10px 16px;
+  background:linear-gradient(90deg,#5a4500 0%,#8a6a12 55%,#c9a227 100%);
+  color:#fff;
+  text-align:center;
+  font-size:.9rem;
+  font-weight:750;
+  box-shadow:0 8px 20px rgba(0,16,32,.22);
+}
+.maintenance-preview-banner strong{
+  font-weight:900;
+  letter-spacing:.02em;
+}
+.maintenance-preview-banner a{
+  color:#fff;
+  font-weight:900;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.maintenance-preview-banner a:hover,
+.maintenance-preview-banner a:focus-visible{
+  color:#fff8d6;
+  outline:none;
+}
+body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
+body.maintenance-preview header.site-header,
+body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
+@media(max-width:640px){
+  :root{--maintenance-banner-h:64px}
+  .maintenance-preview-banner{font-size:.82rem;padding:10px 12px}
 }

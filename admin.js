@@ -2573,7 +2573,7 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=checkout-website-guide-20260816`;
+  const guideHref = `/assets/downloads/EFHS-Band-Website-CMS-Guide.pdf?v=admin-maintenance-preview-20260816`;
   const cards = [
     ['Website Guide', 'Download the full site and CMS documentation (PDF), including Fundraising photos and image upload limits.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
@@ -4977,7 +4977,7 @@ function bindForms() {
     fillForm(form, saved);
     if (status) {
       status.textContent = saved.maintenance_mode
-        ? 'Saved. All public pages now redirect to maintenance.html.'
+        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
         : 'Saved. The public site is live again.';
     }
   });
