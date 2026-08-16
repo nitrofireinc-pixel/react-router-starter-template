@@ -312,7 +312,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0 };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2009,6 +2009,9 @@ function activateTab(name) {
     if (name === 'security-log') {
       if (!isSuperAdmin()) return;
       loadSecurityLog({ resetPage: true }).catch(() => {});
+    }
+    if (name === 'events') {
+      renderEventsList();
     }
     closeAdminNav();
   };
@@ -4028,16 +4031,82 @@ function isPastEventLocal(event) {
   return end < today;
 }
 
-async function loadEvents() {
-  if (!canCreateEvents() && !canEditPage('calendar')) return;
-  state.events = await jsonFetch('/api/admin/events');
+const EVENT_MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const EVENT_MONTH_SHORT = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12, Spring: 3, Summer: 6, Fall: 9, Autumn: 9, Winter: 12 };
+
+function eventMonthNumber(event) {
+  const label = String(event?.date_label || '').trim();
+  if (EVENT_MONTH_SHORT[label] != null) return EVENT_MONTH_SHORT[label];
+  const key = label.toLowerCase();
+  const map = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9,
+    oct: 10, nov: 11, dec: 12, spring: 3, summer: 6, fall: 9, autumn: 9, winter: 12,
+  };
+  return map[key] || 0;
+}
+
+function eventBelongsToMonthView(event, year, month) {
+  const eventYear = Number(event?.event_year) || 0;
+  if (eventYear !== Number(year)) return false;
+  if (Number(event?.repeat_enabled) === 1) {
+    const months = Array.isArray(event.repeat_months)
+      ? event.repeat_months.map(Number)
+      : [];
+    return months.includes(Number(month));
+  }
+  const eventMonth = eventMonthNumber(event);
+  return eventMonth === Number(month);
+}
+
+function shiftEventsMonthView(deltaMonths) {
+  let year = Number(state.eventsViewYear) || new Date().getFullYear();
+  let month = Number(state.eventsViewMonth) || (new Date().getMonth() + 1);
+  month += Number(deltaMonths) || 0;
+  while (month < 1) {
+    month += 12;
+    year -= 1;
+  }
+  while (month > 12) {
+    month -= 12;
+    year += 1;
+  }
+  state.eventsViewYear = year;
+  state.eventsViewMonth = month;
+  renderEventsList();
+}
+
+function renderEventsMonthNav() {
+  const label = document.querySelector('#events-month-label');
+  if (!label) return;
+  const year = Number(state.eventsViewYear) || new Date().getFullYear();
+  const month = Math.min(12, Math.max(1, Number(state.eventsViewMonth) || 1));
+  label.textContent = `${EVENT_MONTH_LABELS[month - 1]} ${year}`;
+}
+
+function renderEventsList() {
   const list = document.querySelector('#events-list');
   const count = document.querySelector('#events-count');
   if (!list) return;
-  // API already returns events ordered by year → month → day.
-  const ordered = [...state.events];
+  renderEventsMonthNav();
+  const year = Number(state.eventsViewYear) || new Date().getFullYear();
+  const month = Math.min(12, Math.max(1, Number(state.eventsViewMonth) || 1));
+  const ordered = [...state.events].filter((event) => eventBelongsToMonthView(event, year, month));
   const pastCount = ordered.filter(isPastEventLocal).length;
-  if (count) count.textContent = pastCount ? `${ordered.length} total · ${pastCount} past (hidden publicly)` : `${ordered.length} total`;
+  const undatedCount = state.events.filter((event) => {
+    if (Number(event.event_year) !== year) return false;
+    if (Number(event.repeat_enabled) === 1) return false;
+    return !eventMonthNumber(event);
+  }).length;
+  const monthName = EVENT_MONTH_LABELS[month - 1];
+  if (count) {
+    const parts = [`${ordered.length} in ${monthName}`];
+    if (pastCount) parts.push(`${pastCount} past`);
+    parts.push(`${state.events.length} total`);
+    if (undatedCount) parts.push(`${undatedCount} undated/TBD hidden`);
+    count.textContent = parts.join(' · ');
+  }
   list.innerHTML = ordered.length
     ? ordered.map(event => {
       const mutable = canMutateEvent(event);
@@ -4058,7 +4127,7 @@ async function loadEvents() {
       ${actions}
     </article>`;
     }).join('')
-    : '<p class="draft">No calendar events yet. Use the form to add one.</p>';
+    : `<p class="draft">No events for ${escapeHtml(monthName)} ${year}. Use ‹ › to change months, or add one with the form.</p>`;
   list.querySelectorAll('[data-edit-event]').forEach(button => button.addEventListener('click', () => {
     const event = state.events.find(item => item.id === Number(button.dataset.editEvent));
     if (!event || !canMutateEvent(event)) return;
@@ -4094,6 +4163,25 @@ async function loadEvents() {
       alert(error.message || 'Could not delete event.');
     }
   }));
+}
+
+async function loadEvents() {
+  if (!canCreateEvents() && !canEditPage('calendar')) return;
+  state.events = await jsonFetch('/api/admin/events');
+  renderEventsList();
+}
+
+function bindEventsMonthNav() {
+  if (window.__eventsMonthNavBound) return;
+  window.__eventsMonthNavBound = true;
+  document.querySelector('#events-month-prev')?.addEventListener('click', () => shiftEventsMonthView(-1));
+  document.querySelector('#events-month-next')?.addEventListener('click', () => shiftEventsMonthView(1));
+  document.querySelector('#events-month-today')?.addEventListener('click', () => {
+    const now = new Date();
+    state.eventsViewYear = now.getFullYear();
+    state.eventsViewMonth = now.getMonth() + 1;
+    renderEventsList();
+  });
 }
 
 async function loadPhotos() {
@@ -5864,6 +5952,7 @@ bindFormRichEditors();
 bindPageVisualEditor();
 bindPageEditorResizer();
 bindForms();
+bindEventsMonthNav();
 bindMailComposer();
 bindMinutesPanel();
 bindEnsemblesBodyPanel();
