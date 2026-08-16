@@ -374,6 +374,10 @@ function canCreateEvents() {
   return hasPermission('events') || canManageAllEvents();
 }
 
+function canViewEvents() {
+  return Boolean(state.me?.user);
+}
+
 function canMutateEvent(event) {
   if (canManageAllEvents()) return true;
   if (!hasPermission('events')) return false;
@@ -2173,7 +2177,7 @@ function showAllowedPanels() {
     social: hasPermission('site'),
     users: hasPermission('users'),
     'security-log': isSuperAdmin(),
-    events: canCreateEvents() || canEditPage('calendar'),
+    events: canViewEvents(),
     photos: hasPermission('photos'),
   };
   let manageVisible = false;
@@ -2240,10 +2244,21 @@ function showAllowedPanels() {
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
   const eventsList = document.querySelector('#events-list');
+  const eventsListCard = document.querySelector('.events-list-card');
+  const eventsViewNote = document.querySelector('#events-view-only-note');
   const canUseEvents = canCreateEvents();
+  const canBrowseEvents = canViewEvents();
   if (newEventButton) newEventButton.hidden = !canUseEvents;
   if (eventForm) eventForm.hidden = !canUseEvents;
-  if (eventsList) eventsList.hidden = !canUseEvents && !canEditPage('calendar');
+  if (eventsList) eventsList.hidden = !canBrowseEvents;
+  if (eventsListCard) eventsListCard.hidden = !canBrowseEvents;
+  if (eventsViewNote) {
+    eventsViewNote.hidden = !canBrowseEvents || canUseEvents;
+  }
+  const eventsLayout = document.querySelector('#events-editor-layout') || document.querySelector('#tab-events .editor-layout');
+  if (eventsLayout) {
+    eventsLayout.classList.toggle('events-view-only', canBrowseEvents && !canUseEvents);
+  }
   Object.entries(panels).forEach(([name, allowed]) => {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
@@ -2638,7 +2653,9 @@ function renderDashboard() {
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
-    canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
+    canCreateEvents()
+      ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
+      : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -4127,7 +4144,7 @@ function renderEventsList() {
       ${actions}
     </article>`;
     }).join('')
-    : `<p class="draft">No events for ${escapeHtml(monthName)} ${year}. Use ‹ › to change months, or add one with the form.</p>`;
+    : `<p class="draft">No events for ${escapeHtml(monthName)} ${year}. Use ‹ › to change months${canCreateEvents() ? ', or add one with the form' : ''}.</p>`;
   list.querySelectorAll('[data-edit-event]').forEach(button => button.addEventListener('click', () => {
     const event = state.events.find(item => item.id === Number(button.dataset.editEvent));
     if (!event || !canMutateEvent(event)) return;
@@ -4166,7 +4183,7 @@ function renderEventsList() {
 }
 
 async function loadEvents() {
-  if (!canCreateEvents() && !canEditPage('calendar')) return;
+  if (!canViewEvents()) return;
   state.events = await jsonFetch('/api/admin/events');
   renderEventsList();
 }
