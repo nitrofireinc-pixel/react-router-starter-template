@@ -193,7 +193,7 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'add-to-home-mobile-20260816';
+const ASSET_VERSION = 'user-last-login-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
@@ -711,7 +711,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   ]);
@@ -788,6 +788,11 @@ async function initDb(env) {
   }
   try {
     await env.DB.prepare("ALTER TABLE sponsors ADD COLUMN state TEXT NOT NULL DEFAULT 'NC'").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN last_login_at TEXT').run();
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -3905,7 +3910,37 @@ async function getUserById(env, id) {
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, username: user.username, display_name: user.display_name, role: user.role, permissions: parsePermissions(user.permissions), active: Boolean(user.active) };
+  return {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    permissions: parsePermissions(user.permissions),
+    active: Boolean(user.active),
+    last_login_at: String(user.last_login_at || '').trim() || null,
+  };
+}
+
+export function formatUserLastLoginDisplay(value, {
+  timeZone = 'America/New_York',
+  now = new Date(),
+} = {}) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Never logged in';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return 'Never logged in';
+  try {
+    return `Last login ${date.toLocaleString('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })} ET`;
+  } catch {
+    return `Last login ${date.toISOString()}`;
+  }
 }
 
 function canEditPage(user, slug) {
@@ -5647,7 +5682,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === '/api/admin/users' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
-    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users ORDER BY username').all();
+    const rows = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users ORDER BY username').all();
     return jsonResponse((rows.results || []).map(publicUser));
   }
   if (url.pathname === '/api/admin/users' && request.method === 'POST') {
@@ -5666,7 +5701,7 @@ async function handleApi(request, env, url) {
     }
     try {
       const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
-      const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
+      const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       return jsonResponse(publicUser(created));
     } catch (error) {
       const message = String(error?.message || error || '');
@@ -5697,7 +5732,7 @@ async function handleApi(request, env, url) {
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
     if (payload.password) await updatePassword(env, id, payload.password);
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?').bind(id).first()));
+    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
@@ -6648,6 +6683,13 @@ async function handleLogin(request, env) {
       401,
       { 'set-cookie': clearSessionCookie() },
     );
+  }
+  try {
+    await env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
+      .bind(new Date().toISOString(), user.id)
+      .run();
+  } catch {
+    // Best-effort; login should still succeed if the column is missing mid-deploy.
   }
   const response = redirect(nextPath);
   response.headers.set('set-cookie', `${SESSION_COOKIE}=${await makeSession(user, env)}; HttpOnly; Secure; SameSite=Lax; Path=/`);

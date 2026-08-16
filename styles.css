@@ -2943,6 +2943,12 @@ body.sponsor-signup-open{overflow:hidden}
 .user-admin-row{
   align-items:flex-start;
 }
+.user-admin-row .user-last-login{
+  display:block;
+  margin-top:4px;
+  color:var(--muted,#5b6b7c);
+  font-weight:600;
+}
 .user-admin-row .row-actions{
   flex:0 0 auto;
 }
