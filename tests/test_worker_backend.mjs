@@ -971,6 +971,25 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /efhs-blue-regiment-mark/);
   assert.match(documentHtml, /letterhead-mark/);
   assert.match(documentHtml, /opacity:\s*0\.28/);
+
+  const docxBody = sanitizeRichHtml(`<div class="minutes-docx"><div class="draft">MINUTES_FIELDS_V1:eyJ2IjoxfQ==</div><div class="kicker">East Forsyth Band Boosters</div><h2>Meeting Minutes</h2><h3>Call to Order</h3><p>Called to order.</p></div>`);
+  assert.match(docxBody, /minutes-docx/);
+  assert.match(docxBody, /MINUTES_FIELDS_V1:eyJ2IjoxfQ==/);
+  assert.match(docxBody, /class="draft"/);
+  assert.match(docxBody, /class="kicker"/);
+  const docxDocument = renderMinutesDocumentHtml(
+    { title: 'East Forsyth Band' },
+    {
+      meeting_date: '2026-08-04',
+      created_by_name: 'Secretary Sue',
+      body_html: docxBody,
+    },
+  );
+  assert.match(docxDocument, /minutes-template\/letterhead-banner/);
+  assert.match(docxDocument, /Meeting Minutes/);
+  assert.match(docxDocument, /Call to Order/);
+  assert.doesNotMatch(docxDocument, /Booster Meeting Minutes/);
+  assert.match(docxDocument, /\.draft\s*\{\s*display:\s*none/);
 });
 
 

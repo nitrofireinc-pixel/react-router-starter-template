@@ -187,8 +187,9 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
+const ASSET_VERSION = 'minutes-docx-fullpage-20260816';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -3695,8 +3696,20 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   const dateLabel = formatMeetingDateDisplay(minutes.meeting_date_display || minutes.meeting_date);
   const recorder = String(minutes.created_by_name || '').trim();
   const body = sanitizeRichHtml(minutes.body_html || '');
-  // Letterhead mark is fixed in code (not CMS-editable).
+  const isDocxMinutes = /\bminutes-docx\b/.test(body);
+  // Letterhead assets are fixed in code (not CMS-editable).
   const letterheadMark = MINUTES_LETTERHEAD_MARK;
+  const letterheadBanner = MINUTES_LETTERHEAD_BANNER;
+  const chrome = isDocxMinutes
+    ? `<header class="letterhead letterhead-banner-wrap" aria-hidden="true">
+      <img class="letterhead-banner" src="${escapeHtml(letterheadBanner)}" alt="" draggable="false">
+    </header>`
+    : `<header class="letterhead" aria-hidden="true">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+    </header>
+    <p class="doc-kicker">${escapeHtml(title)}</p>
+    <h1>Booster Meeting Minutes</h1>
+    <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3721,6 +3734,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       background: #fff;
       box-shadow: 0 10px 30px rgba(15, 34, 58, 0.18);
     }
+    .sheet.docx { padding-top: 0.45in; }
     .letterhead {
       display: flex;
       justify-content: center;
@@ -3728,6 +3742,15 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       pointer-events: none;
       user-select: none;
       -webkit-user-select: none;
+    }
+    .letterhead-banner-wrap { display: block; margin: 0 0 10px; }
+    .letterhead-banner {
+      display: block;
+      width: 100%;
+      max-height: 1.35in;
+      object-fit: contain;
+      object-position: center top;
+      -webkit-user-drag: none;
     }
     .letterhead-mark {
       display: block;
@@ -3762,6 +3785,11 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
     .body p { margin: 0 0 0.85em; }
     .body p:last-child { margin-bottom: 0; }
     .body ul, .body ol { margin: 0 0 0.85em; padding-left: 1.3em; }
+    .body h2 { margin: 0 0 10px; font: 700 16pt/1.2 "Work Sans", system-ui, sans-serif; color: #10233c; text-align: center; }
+    .body h3 { margin: 1.1em 0 0.45em; font: 800 10pt/1.25 "Work Sans", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #10233c; }
+    .body .kicker { margin: 0 0 6px; font: 700 9pt/1.2 "Work Sans", system-ui, sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: #c8121d; text-align: center; }
+    .body .draft { display: none !important; }
+    .body .minutes-docx { margin: 0; }
     .toolbar {
       position: sticky;
       top: 0;
@@ -3787,18 +3815,14 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
       .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letterhead-banner { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
-  <main class="sheet">
-    <header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
-    </header>
-    <p class="doc-kicker">${escapeHtml(title)}</p>
-    <h1>Booster Meeting Minutes</h1>
-    <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>
+  <main class="sheet${isDocxMinutes ? ' docx' : ''}">
+    ${chrome}
     <div class="body">${body || '<p>No minutes content.</p>'}</div>
   </main>
 </body>
@@ -4078,7 +4102,7 @@ export function sanitizeRichHtml(dirty) {
       const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
       const className = String(classMatch?.[1] || classMatch?.[2] || '')
         .split(/\s+/)
-        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
+        .filter((name) => ['kicker', 'tag', 'draft', 'minutes-docx'].includes(name))
         .join(' ');
       return className ? `<div class="${className}">` : '<div>';
     }
@@ -6189,21 +6213,132 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <div id="minutes-editor-modal" class="minutes-frame-modal minutes-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-editor-dismiss aria-label="Close minutes editor"></button>
-  <div class="minutes-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
-    <div class="minutes-editor-head">
+  <div class="minutes-editor-dialog minutes-docx-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
+    <div class="minutes-editor-head minutes-docx-toolbar">
       <div>
         <p class="kicker">Boosters</p>
         <h2 id="minutes-editor-title">Add Minutes</h2>
       </div>
-      <button class="btn outline" type="button" data-minutes-editor-dismiss>Close</button>
-    </div>
-    <form id="minutes-form" class="stack minutes-editor-form" novalidate>
-      <input type="hidden" name="minutes_id" value="">
-      <label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"><small id="minutes-date-hint" class="field-hint">Defaults to today. Type digits and slashes are inserted for you.</small></label>
-      <label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label>
-      <div class="panel-actions minutes-form-actions">
-        <button class="btn primary" data-minutes-submit type="submit">Save minutes</button>
+      <div class="panel-actions minutes-docx-toolbar-actions">
+        <button class="btn primary" data-minutes-submit form="minutes-form" type="submit">Save minutes</button>
         <button class="btn outline" type="button" id="cancel-minutes-edit">Cancel</button>
+      </div>
+    </div>
+    <form id="minutes-form" class="stack minutes-editor-form minutes-docx-form" novalidate>
+      <input type="hidden" name="minutes_id" value="">
+      <input type="hidden" name="body_html" value="">
+      <div class="minutes-docx-scroll">
+        <article class="minutes-docx-sheet" data-minutes-template="east-forsyth-boosters-v1">
+          <header class="minutes-docx-letterhead">
+            <img class="minutes-docx-banner" src="${MINUTES_LETTERHEAD_BANNER}" alt="East Forsyth Band Boosters letterhead" draggable="false">
+            <div class="minutes-docx-brand-row">
+              <img class="minutes-docx-mark" src="${MINUTES_LETTERHEAD_MARK}" alt="" draggable="false">
+              <div>
+                <p class="minutes-docx-org">East Forsyth Band Boosters</p>
+                <h1 class="minutes-docx-title">Meeting Minutes</h1>
+              </div>
+            </div>
+          </header>
+
+          <div class="minutes-docx-meta-grid">
+            <label>Date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"></label>
+            <label>Time<input name="meeting_time" type="text" maxlength="80" placeholder="7:00 PM" autocomplete="off"></label>
+            <label class="full">Location<input name="location" type="text" maxlength="200" placeholder="Meeting location" autocomplete="off"></label>
+            <label class="full">Meeting Called By<input name="called_by" type="text" maxlength="160" placeholder="Name / role" autocomplete="name"></label>
+          </div>
+          <p id="minutes-date-hint" class="field-hint">Defaults to today. Type digits and slashes are inserted for you.</p>
+
+          <section class="minutes-docx-section">
+            <h2>Call to Order</h2>
+            <p class="minutes-docx-prompt">The regular meeting of the East Forsyth Band Boosters was called to order at
+              <input name="call_to_order_time" type="text" maxlength="40" placeholder="time" class="minutes-docx-inline"> by
+              <input name="call_to_order_by" type="text" maxlength="120" placeholder="name" class="minutes-docx-inline minutes-docx-inline-wide">.
+            </p>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Attendance</h2>
+            <label>Members Present<textarea name="members_present" rows="3" maxlength="4000" placeholder="Names of members present…"></textarea></label>
+            <label>Members Absent<textarea name="members_absent" rows="2" maxlength="4000" placeholder="Names of members absent…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Approval of Previous Meeting Minutes</h2>
+            <p class="minutes-docx-prompt">The minutes from the previous meeting were reviewed.</p>
+            <div class="minutes-docx-meta-grid">
+              <label>Motion to approve<input name="previous_minutes_motion" type="text" maxlength="160" placeholder="Name"></label>
+              <label>Seconded by<input name="previous_minutes_second" type="text" maxlength="160" placeholder="Name"></label>
+              <label class="full">Vote / Action<input name="previous_minutes_vote" type="text" maxlength="300" placeholder="Approved / outcome"></label>
+            </div>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Treasurer's Report / Financial Update</h2>
+            <label class="full"><span class="sr-only">Treasurer report</span><textarea name="treasurer_report" rows="4" maxlength="8000" placeholder="Financial update…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Director / Band Program Update</h2>
+            <label class="full"><span class="sr-only">Director update</span><textarea name="director_update" rows="4" maxlength="8000" placeholder="Program update…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Old Business</h2>
+            <label class="full"><span class="sr-only">Old business</span><textarea name="old_business" rows="4" maxlength="8000" placeholder="Old business…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>New Business</h2>
+            <label class="full"><span class="sr-only">New business</span><textarea name="new_business" rows="4" maxlength="8000" placeholder="New business…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Fundraising</h2>
+            <p class="minutes-docx-prompt">Fundraisers discussed, planned, or currently in progress:</p>
+            <label class="full"><span class="sr-only">Fundraising</span><textarea name="fundraising" rows="4" maxlength="8000" placeholder="Fundraising notes…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Upcoming Events &amp; Activities</h2>
+            <label class="full"><span class="sr-only">Upcoming events</span><textarea name="upcoming_events" rows="3" maxlength="8000" placeholder="Upcoming events…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Volunteer Needs</h2>
+            <label class="full"><span class="sr-only">Volunteer needs</span><textarea name="volunteer_needs" rows="3" maxlength="8000" placeholder="Volunteer needs…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Additional Discussion</h2>
+            <label class="full"><span class="sr-only">Additional discussion</span><textarea name="additional_discussion" rows="3" maxlength="8000" placeholder="Additional discussion…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Action Items</h2>
+            <ol class="minutes-docx-actions">
+              <li><input name="action_item_1" type="text" maxlength="500" placeholder="Action item 1"></li>
+              <li><input name="action_item_2" type="text" maxlength="500" placeholder="Action item 2"></li>
+              <li><input name="action_item_3" type="text" maxlength="500" placeholder="Action item 3"></li>
+            </ol>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Next Meeting</h2>
+            <div class="minutes-docx-meta-grid">
+              <label>Date<input name="next_meeting_date" type="text" maxlength="80" placeholder="MM/DD/YYYY"></label>
+              <label>Time<input name="next_meeting_time" type="text" maxlength="80" placeholder="7:00 PM"></label>
+            </div>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Adjournment</h2>
+            <p class="minutes-docx-prompt">The meeting was adjourned at
+              <input name="adjourned_at" type="text" maxlength="40" placeholder="time" class="minutes-docx-inline">.
+            </p>
+            <label>Submitted by<input name="submitted_by" type="text" maxlength="160" placeholder="Secretary name"></label>
+            <p class="minutes-docx-footer-note">Secretary, East Forsyth Band Boosters</p>
+          </section>
+        </article>
       </div>
       <p class="status" id="minutes-status"></p>
     </form>
