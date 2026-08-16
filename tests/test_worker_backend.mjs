@@ -1243,13 +1243,18 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /user-last-login-20260816/);
+  assert.match(workerSrc, /minutes-inline-viewer-20260816/);
+  assert.match(workerSrc, /minutes-view-card/);
+  assert.doesNotMatch(workerSrc, /minutes-view-modal/);
   assert.match(workerSrc, /last_login_at/);
   assert.match(workerSrc, /UPDATE users SET last_login_at/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /formatUserLastLoginLabel/);
   assert.match(adminJs, /user-last-login/);
+  assert.match(adminJs, /#minutes-view/);
+  assert.match(adminJs, /setMinutesEmptyVisible\(false\)/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
+  assert.match(styles, /\.minutes-view-card/);
 
   assert.match(workerSrc, /Suggested calendar updates/);
   assert.match(workerSrc, /zernio-facebook-events-ignore-all/);
