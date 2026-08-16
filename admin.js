@@ -4106,6 +4106,13 @@ function minutesDateFieldValue(item) {
 }
 
 function readMinutesBodyHtml(form) {
+  if (!form) return '';
+  if (form.querySelector('[data-minutes-template]')) {
+    const html = buildMinutesDocxBodyHtml(form);
+    const control = formControl(form, 'body_html');
+    if (control) control.value = html;
+    return html;
+  }
   syncFormRichEditors(form);
   const control = formControl(form, 'body_html');
   let html = String(control?.value || '').trim();
@@ -4120,12 +4127,163 @@ function readMinutesBodyHtml(form) {
   return html;
 }
 
+const MINUTES_DOCX_FIELDS = [
+  'meeting_subtitle',
+  'meeting_time',
+  'location',
+  'called_by',
+  'call_to_order_time',
+  'call_to_order_by',
+  'members_present',
+  'members_absent',
+  'previous_minutes_motion',
+  'previous_minutes_second',
+  'previous_minutes_vote',
+  'treasurer_report',
+  'director_update',
+  'old_business',
+  'new_business',
+  'fundraising',
+  'upcoming_events',
+  'volunteer_needs',
+  'additional_discussion',
+  'action_item_1',
+  'action_item_2',
+  'action_item_3',
+  'next_meeting_date',
+  'next_meeting_time',
+  'adjourned_at',
+  'submitted_by',
+];
+
+function minutesFieldValue(form, name) {
+  return String(formControl(form, name)?.value || '').trim();
+}
+
+function setMinutesFieldValue(form, name, value) {
+  const control = formControl(form, name);
+  if (control) control.value = value == null ? '' : String(value);
+}
+
+function minutesMultilineHtml(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trimEnd());
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return '<p><em>Not recorded.</em></p>';
+  return lines.map((line) => `<p>${escapeHtml(line || ' ')}</p>`).join('');
+}
+
+function buildMinutesDocxBodyHtml(form) {
+  const date = minutesFieldValue(form, 'meeting_date') || todayMeetingDateDisplay();
+  const time = minutesFieldValue(form, 'meeting_time');
+  const location = minutesFieldValue(form, 'location');
+  const calledBy = minutesFieldValue(form, 'called_by');
+  const subtitle = minutesFieldValue(form, 'meeting_subtitle');
+  const callTime = minutesFieldValue(form, 'call_to_order_time');
+  const callBy = minutesFieldValue(form, 'call_to_order_by');
+  const values = Object.fromEntries(MINUTES_DOCX_FIELDS.map((key) => [key, minutesFieldValue(form, key)]));
+  const actions = [values.action_item_1, values.action_item_2, values.action_item_3]
+    .filter(Boolean)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+  const fieldsPayload = {
+    version: 1,
+    template: 'east-forsyth-boosters-v1',
+    meeting_date: date,
+    ...values,
+  };
+  const encodedFields = btoa(unescape(encodeURIComponent(JSON.stringify(fieldsPayload))));
+  return `<div class="minutes-docx">
+<div class="draft">MINUTES_FIELDS_V1:${encodedFields}</div>
+<div class="kicker">East Forsyth Band Boosters</div>
+<h2>Meeting Minutes</h2>
+${subtitle ? `<p><em>${escapeHtml(subtitle)}</em></p>` : ''}
+<p><strong>Date:</strong> ${escapeHtml(date)}${time ? ` · <strong>Time:</strong> ${escapeHtml(time)}` : ''}${location ? ` · <strong>Location:</strong> ${escapeHtml(location)}` : ''}</p>
+${calledBy ? `<p><strong>Meeting Called By:</strong> ${escapeHtml(calledBy)}</p>` : ''}
+<h3>Call to Order</h3>
+<p>The regular meeting of the East Forsyth Band Boosters was called to order at ${escapeHtml(callTime || '__________')} by ${escapeHtml(callBy || '________________')}.</p>
+<h3>Attendance</h3>
+<p><strong>Members Present:</strong></p>
+${minutesMultilineHtml(values.members_present)}
+<p><strong>Members Absent:</strong></p>
+${minutesMultilineHtml(values.members_absent)}
+<h3>Approval of Previous Meeting Minutes</h3>
+<p>The minutes from the previous meeting were reviewed.</p>
+<p><strong>Motion to approve:</strong> ${escapeHtml(values.previous_minutes_motion || '________________')} · <strong>Seconded by:</strong> ${escapeHtml(values.previous_minutes_second || '________________')}</p>
+<p><strong>Vote/Action:</strong> ${escapeHtml(values.previous_minutes_vote || '________________')}</p>
+<h3>Treasurer's Report / Financial Update</h3>
+${minutesMultilineHtml(values.treasurer_report)}
+<h3>Director / Band Program Update</h3>
+${minutesMultilineHtml(values.director_update)}
+<h3>Old Business</h3>
+${minutesMultilineHtml(values.old_business)}
+<h3>New Business</h3>
+${minutesMultilineHtml(values.new_business)}
+<h3>Fundraising</h3>
+<p>Fundraisers discussed, planned, or currently in progress:</p>
+${minutesMultilineHtml(values.fundraising)}
+<h3>Upcoming Events &amp; Activities</h3>
+${minutesMultilineHtml(values.upcoming_events)}
+<h3>Volunteer Needs</h3>
+${minutesMultilineHtml(values.volunteer_needs)}
+<h3>Additional Discussion</h3>
+${minutesMultilineHtml(values.additional_discussion)}
+<h3>Action Items</h3>
+${actions ? `<ol>${actions}</ol>` : '<p><em>No action items recorded.</em></p>'}
+<h3>Next Meeting</h3>
+<p><strong>Date:</strong> ${escapeHtml(values.next_meeting_date || '________________')} · <strong>Time:</strong> ${escapeHtml(values.next_meeting_time || '________________')}</p>
+<h3>Adjournment</h3>
+<p><strong>Meeting Adjourned:</strong> ${escapeHtml(values.adjourned_at || '__________')} · <strong>Submitted by:</strong> ${escapeHtml(values.submitted_by || '________________')}</p>
+<p><em>Secretary, East Forsyth Band Boosters</em></p>
+</div>`;
+}
+
+function parseMinutesDocxFields(bodyHtml = '') {
+  const html = String(bodyHtml || '');
+  const encodedMatch = html.match(/MINUTES_FIELDS_V1:([A-Za-z0-9+/=]+)/);
+  if (encodedMatch) {
+    try {
+      const json = decodeURIComponent(escape(atob(encodedMatch[1])));
+      const parsed = JSON.parse(json);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      // Fall through.
+    }
+  }
+  if (!/Meeting Minutes/i.test(html) || !/Call to Order/i.test(html)) {
+    return { legacy_body: html };
+  }
+  return { legacy_body: html };
+}
+
+function fillMinutesDocxForm(form, bodyHtml = '') {
+  if (!form?.querySelector('[data-minutes-template]')) return false;
+  MINUTES_DOCX_FIELDS.forEach((name) => setMinutesFieldValue(form, name, ''));
+  const fields = parseMinutesDocxFields(bodyHtml);
+  if (fields.legacy_body) {
+    setMinutesFieldValue(form, 'additional_discussion', String(fields.legacy_body).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    return true;
+  }
+  MINUTES_DOCX_FIELDS.forEach((name) => {
+    if (fields[name] != null) setMinutesFieldValue(form, name, fields[name]);
+  });
+  return true;
+}
+
 function syncMinutesPanelMode() {
+  const canManage = canManageMinutes();
   const newBtn = document.querySelector('#new-minutes');
   if (newBtn) {
-    newBtn.hidden = !canManageMinutes();
+    newBtn.hidden = !canManage;
     newBtn.textContent = 'Add Minutes';
   }
+  document.querySelectorAll('#upload-minutes-docx, #upload-minutes-docx-editor, [data-minutes-manage-actions]').forEach((el) => {
+    el.hidden = !canManage;
+  });
+}
+
+function triggerMinutesDocxPicker() {
+  const input = document.querySelector('#minutes-docx-file') || document.querySelector('#minutes-docx-file-drop');
+  input?.click();
 }
 
 function setMinutesEmptyVisible(visible) {
@@ -4175,7 +4333,9 @@ function openMinutesEditor({ editing = false, statusText = '' } = {}) {
   const status = document.querySelector('#minutes-status');
   if (status) {
     status.textContent = statusText
-      || (editing ? 'Update the minutes, then save to close the editor.' : 'Today is filled in. Enter the minutes, then save to close the editor.');
+      || (editing
+        ? 'Update the minutes form, then save to close the editor.'
+        : 'Fill in the meeting minutes form (same layout as the Boosters DOCX template), then save to close.');
   }
   window.setTimeout(() => {
     form.querySelector('[name="meeting_date"]')?.focus();
@@ -4208,6 +4368,9 @@ function prepareNewMinutesForm() {
   form.reset();
   clearFormRichEditors(form);
   formControl(form, 'minutes_id').value = '';
+  const bodyControl = formControl(form, 'body_html');
+  if (bodyControl) bodyControl.value = '';
+  MINUTES_DOCX_FIELDS.forEach((name) => setMinutesFieldValue(form, name, ''));
   const dateControl = formControl(form, 'meeting_date');
   if (dateControl) dateControl.value = todayMeetingDateDisplay();
 }
@@ -4227,7 +4390,7 @@ function resetMinutesForm(statusText = '') {
   state.selectedMinutesId = null;
   prepareNewMinutesForm();
   showMinutesIdle(statusText || (canManageMinutes()
-    ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+    ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
     : 'Choose a meeting date from the list to open it in a floating frame.'));
   renderMinutesList();
 }
@@ -4332,7 +4495,9 @@ function editSelectedMinutes() {
   if (!item || !form || !item.can_edit) return;
   formControl(form, 'minutes_id').value = String(item.id);
   formControl(form, 'meeting_date').value = minutesDateFieldValue(item);
-  setFormRichEditorValue(form, 'body_html', item.body_html || '');
+  if (!fillMinutesDocxForm(form, item.body_html || '')) {
+    setFormRichEditorValue(form, 'body_html', item.body_html || '');
+  }
   openMinutesEditor({
     editing: true,
     statusText: `Editing minutes for ${item.meeting_date_display || item.meeting_date}. Save to close the editor.`,
@@ -4356,9 +4521,12 @@ async function saveMinutesForm(form) {
     dateControl?.focus();
     return;
   }
-  if (!bodyHtml.replace(/<[^>]+>/g, '').trim()) {
-    if (status) status.textContent = 'Minutes content is required.';
-    form.querySelector('[data-rich-input="body_html"]')?.focus();
+  const hasStructuredContent = form.querySelector('[data-minutes-template]')
+    ? MINUTES_DOCX_FIELDS.some((name) => minutesFieldValue(form, name))
+    : Boolean(bodyHtml.replace(/<[^>]+>/g, '').trim());
+  if (!hasStructuredContent) {
+    if (status) status.textContent = 'Enter minutes content before saving.';
+    form.querySelector('[name="members_present"], [name="treasurer_report"], [data-rich-input="body_html"]')?.focus();
     return;
   }
   if (status) status.textContent = 'Saving minutes…';
@@ -4377,11 +4545,43 @@ async function saveMinutesForm(form) {
     const empty = document.querySelector('#minutes-empty .muted');
     if (empty) {
       empty.textContent = canManageMinutes()
-        ? 'Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.'
+        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
         : 'Choose a meeting date from the list to open it in a floating frame.';
     }
   } catch (error) {
     if (status) status.textContent = error.message || 'Could not save minutes.';
+  }
+}
+
+async function uploadMinutesDocxFile(file) {
+  if (!canManageMinutes()) return;
+  if (!file) return;
+  const name = String(file.name || '').toLowerCase();
+  if (!name.endsWith('.docx')) {
+    window.alert('Please choose a .docx Word file.');
+    return;
+  }
+  const payload = new FormData();
+  payload.append('file', file, file.name || 'minutes.docx');
+  try {
+    const saved = await jsonFetch('/api/admin/minutes/upload', {
+      method: 'POST',
+      body: payload,
+    });
+    if (!saved?.id) throw new Error('Upload succeeded but no minutes id was returned.');
+    closeMinutesEditor();
+    state.minutes = await jsonFetch('/api/admin/minutes');
+    state.selectedMinutesId = saved.id;
+    renderMinutesList();
+    openMinutesView(saved.id);
+    const empty = document.querySelector('#minutes-empty .muted');
+    if (empty) {
+      empty.textContent = canManageMinutes()
+        ? 'Choose a meeting date from the list to open it, or add / upload minutes below.'
+        : 'Choose a meeting date from the list to open it in a floating frame.';
+    }
+  } catch (error) {
+    window.alert(error.message || 'Could not upload the DOCX minutes file.');
   }
 }
 
@@ -4542,6 +4742,52 @@ function bindMinutesPanel() {
     prepareNewMinutesForm();
     openMinutesEditor({ editing: false });
   });
+  document.querySelector('[data-minutes-empty-add]')?.addEventListener('click', () => {
+    if (!canManageMinutes()) return;
+    setMinutesNavOpen(false);
+    prepareNewMinutesForm();
+    openMinutesEditor({ editing: false });
+  });
+  const openDocxPicker = () => {
+    if (!canManageMinutes()) return;
+    setMinutesNavOpen(false);
+    triggerMinutesDocxPicker();
+  };
+  document.querySelector('#upload-minutes-docx')?.addEventListener('click', openDocxPicker);
+  document.querySelector('#upload-minutes-docx-editor')?.addEventListener('click', openDocxPicker);
+  document.querySelector('[data-minutes-empty-upload]')?.addEventListener('click', openDocxPicker);
+  const bindDocxInput = (input) => {
+    input?.addEventListener('change', async (event) => {
+      const el = event.currentTarget;
+      const file = el?.files?.[0];
+      if (el) el.value = '';
+      if (!file) return;
+      await uploadMinutesDocxFile(file);
+    });
+  };
+  bindDocxInput(document.querySelector('#minutes-docx-file'));
+  bindDocxInput(document.querySelector('#minutes-docx-file-drop'));
+  const dropzone = document.querySelector('[data-minutes-dropzone]');
+  if (dropzone) {
+    ['dragenter', 'dragover'].forEach((type) => {
+      dropzone.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropzone.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach((type) => {
+      dropzone.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropzone.classList.remove('is-dragover');
+      });
+    });
+    dropzone.addEventListener('drop', async (event) => {
+      if (!canManageMinutes()) return;
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      await uploadMinutesDocxFile(file);
+    });
+  }
   document.querySelectorAll('[data-minutes-view-dismiss]').forEach((button) => {
     button.addEventListener('click', () => {
       closeMinutesView();

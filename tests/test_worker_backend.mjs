@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canCreateEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureFundraisingDonateSlot, ensureSponsorDonateButton, refreshHomeStartHereSection, ensureSponsorTiersSection, escapeHtml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -971,8 +974,54 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(documentHtml, /efhs-blue-regiment-mark/);
   assert.match(documentHtml, /letterhead-mark/);
   assert.match(documentHtml, /opacity:\s*0\.28/);
+
+  const docxBody = sanitizeRichHtml(`<div class="minutes-docx"><div class="draft">MINUTES_FIELDS_V1:eyJ2IjoxfQ==</div><div class="kicker">East Forsyth Band Boosters</div><h2>Meeting Minutes</h2><h3>Call to Order</h3><p>Called to order.</p></div>`);
+  assert.match(docxBody, /minutes-docx/);
+  assert.match(docxBody, /MINUTES_FIELDS_V1:eyJ2IjoxfQ==/);
+  assert.match(docxBody, /class="draft"/);
+  assert.match(docxBody, /class="kicker"/);
+  const docxDocument = renderMinutesDocumentHtml(
+    { title: 'East Forsyth Band' },
+    {
+      meeting_date: '2026-08-04',
+      created_by_name: 'Secretary Sue',
+      body_html: docxBody,
+    },
+  );
+  assert.match(docxDocument, /minutes-template\/letterhead-banner/);
+  assert.match(docxDocument, /Meeting Minutes/);
+  assert.match(docxDocument, /Call to Order/);
+  assert.doesNotMatch(docxDocument, /Booster Meeting Minutes/);
+  assert.match(docxDocument, /\.draft\s*\{\s*display:\s*none/);
 });
 
+
+
+test('DOCX minutes upload extracts meeting date and structured fields', async () => {
+  assert.equal(extractMeetingDateFromFilename('Boosters_Minutes_09-15-2026.docx'), '2026-09-15');
+  assert.equal(extractMeetingDateFromFilename('minutes-2026_08_04.docx'), '2026-08-04');
+  assert.equal(extractMeetingDateFromMinutesText('MEETING MINUTES\nDate: 08/04/2026\nTime: 7pm\nNEXT MEETING\nDate: 09/01/2026'), '2026-08-04');
+  assert.equal(extractMeetingDateFromMinutesText('Date: ________\nNEXT MEETING\nDate: 09/01/2026', 'Minutes_08-12-2026.docx'), '2026-08-12');
+
+  const fixturePath = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'boosters-minutes-dated.docx');
+  const buf = readFileSync(fixturePath);
+  const parsed = await parseBoostersMinutesDocx(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), 'boosters-minutes-dated.docx');
+  assert.equal(parsed.meeting_date, '2026-08-04');
+  assert.equal(parsed.meeting_date_display, '08/04/2026');
+  assert.equal(parsed.fields.location, 'Band Room');
+  assert.equal(parsed.fields.treasurer_report, 'Balance is healthy.');
+  assert.equal(parsed.fields.action_item_1, 'Send reminder email');
+  assert.equal(parsed.fields.next_meeting_date, '09/01/2026');
+  assert.equal(parsed.fields.next_meeting_time, '7:00 PM');
+  assert.equal(parsed.fields.submitted_by, 'Secretary Sue');
+  assert.match(parsed.body_html, /minutes-docx/);
+  assert.match(parsed.body_html, /MINUTES_FIELDS_V1:/);
+  assert.match(parsed.body_html, /Band Room/);
+
+  const fields = parseBoostersMinutesFieldsFromText(parsed.plain_text);
+  assert.equal(fields.call_to_order_by, 'Jane President');
+  assert.match(fields.members_present, /Alice/);
+});
 
 test('ensemble body helpers extract and replace only the content section', () => {
   const page = '<section class="page-hero"><h1>Ensembles</h1></section><section class="content"><div class="wrap"><div class="grid cards"><article class="card"><h3>Marching</h3></article></div></div></section>';

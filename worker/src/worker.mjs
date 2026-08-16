@@ -187,8 +187,11 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-cms-20260805-72';
+const ASSET_VERSION = 'minutes-upload-beside-add-20260816';
 const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
+const MINUTES_DOCX_MAX_BYTES = 8_000_000;
+const MINUTES_DOCX_MAX_LABEL = '8 MB';
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -3658,6 +3661,322 @@ export function normalizeMinutesPayload(payload = {}, existing = null) {
   return { meeting_date, body_html };
 }
 
+function utf8Decode(bytes) {
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+async function inflateRawDeflate(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('DOCX decompression is not supported in this runtime');
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function findZipCentralDirectory(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const minEOCD = 22;
+  const maxComment = 0xffff;
+  const start = Math.max(0, bytes.byteLength - (minEOCD + maxComment));
+  for (let i = bytes.byteLength - minEOCD; i >= start; i -= 1) {
+    if (view.getUint32(i, true) !== 0x06054b50) continue;
+    const entries = view.getUint16(i + 10, true);
+    const size = view.getUint32(i + 12, true);
+    const offset = view.getUint32(i + 16, true);
+    if (offset + size > bytes.byteLength) continue;
+    return { entries, offset };
+  }
+  return null;
+}
+
+export async function readZipEntryBytes(buffer, entryName) {
+  const wanted = String(entryName || '').replace(/^\/+/, '');
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findZipCentralDirectory(bytes);
+  if (!eocd) throw new Error('Invalid DOCX archive');
+  let offset = eocd.offset;
+  for (let i = 0; i < eocd.entries; i += 1) {
+    if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error('Invalid DOCX central directory');
+    }
+    const method = view.getUint16(offset + 10, true);
+    const compSize = view.getUint32(offset + 20, true);
+    const nameLen = view.getUint16(offset + 28, true);
+    const extraLen = view.getUint16(offset + 30, true);
+    const commentLen = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = utf8Decode(bytes.subarray(offset + 46, offset + 46 + nameLen));
+    offset += 46 + nameLen + extraLen + commentLen;
+    if (name !== wanted && !name.endsWith(`/${wanted}`)) continue;
+    if (localOffset + 30 > bytes.byteLength || view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`Corrupt DOCX entry: ${wanted}`);
+    }
+    const localNameLen = view.getUint16(localOffset + 26, true);
+    const localExtraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    const data = bytes.subarray(dataStart, dataStart + compSize);
+    if (method === 0) return data.slice();
+    if (method === 8) return inflateRawDeflate(data);
+    throw new Error(`Unsupported DOCX compression method (${method})`);
+  }
+  return null;
+}
+
+export function docxXmlToPlainText(xml = '') {
+  let text = String(xml || '');
+  text = text
+    .replace(/<w:tab\b[^:]*\/>/gi, '\t')
+    .replace(/<w:br\b[^:]*\/>/gi, '\n')
+    .replace(/<\/w:p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function cleanMinutesDocxBlank(value, { multiline = false } = {}) {
+  const raw = String(value || '').replace(/[_\u2013\u2014\-.]{2,}/g, ' ');
+  if (multiline) {
+    return raw
+      .split(/\n+/)
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+  return raw.replace(/\s+/g, ' ').trim();
+}
+
+export function extractMeetingDateFromFilename(filename = '') {
+  const base = String(filename || '').split(/[/\\]/).pop() || '';
+  const iso = base.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/);
+  if (iso) return parseMeetingDateInput(`${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`);
+  const slashy = base.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2})/);
+  if (slashy) return parseMeetingDateInput(`${slashy[1]}/${slashy[2]}/${slashy[3]}`);
+  const compact = base.match(/(?<!\d)(\d{8})(?!\d)/);
+  if (compact) return parseMeetingDateInput(compact[1]);
+  return null;
+}
+
+export function extractMeetingDateFromMinutesText(text = '', filename = '') {
+  const source = String(text || '');
+  const beforeNext = source.split(/\bNEXT\s+MEETING\b/i)[0] || source;
+  const labeled = beforeNext.match(/\bDate\s*:\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{8})/i);
+  if (labeled) {
+    const parsed = parseMeetingDateInput(labeled[1]);
+    if (parsed) return parsed;
+  }
+  const anySlash = beforeNext.match(/\b([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})\b/);
+  if (anySlash) {
+    const parsed = parseMeetingDateInput(anySlash[1]);
+    if (parsed) return parsed;
+  }
+  return extractMeetingDateFromFilename(filename);
+}
+
+function captureLabeledLine(text, label) {
+  const re = new RegExp(`${label}\\s*:\\s*([^\\n]*)`, 'i');
+  const match = String(text || '').match(re);
+  let value = cleanMinutesDocxBlank(match?.[1] || '');
+  if (/^date$/i.test(label)) {
+    value = value.replace(/\s+Time\s*:.*$/i, '').trim();
+  }
+  return value;
+}
+
+function sectionBodyBetween(text, startRe, endRe) {
+  const source = String(text || '');
+  const start = source.search(startRe);
+  if (start < 0) return '';
+  const afterStart = source.slice(start).replace(startRe, '');
+  const end = afterStart.search(endRe);
+  const body = end >= 0 ? afterStart.slice(0, end) : afterStart;
+  return cleanMinutesDocxBlank(body, { multiline: true });
+}
+
+export function parseBoostersMinutesFieldsFromText(text = '') {
+  const source = String(text || '');
+  const header = source.split(/\bCALL\s+TO\s+ORDER\b/i)[0] || source;
+  const nextMeetingBlock = sectionBodyBetween(source, /\bNEXT\s+MEETING\b/i, /\bADJOURNMENT\b/i);
+  const callBlock = sectionBodyBetween(source, /\bCALL\s+TO\s+ORDER\b/i, /\bATTENDANCE\b/i);
+  const callMatch = callBlock.match(/called to order at\s+(.+?)\s+by\s+(.+?)\.?$/im);
+  const attendance = sectionBodyBetween(source, /\bATTENDANCE\b/i, /\bAPPROVAL\s+OF\s+PREVIOUS\s+MEETING\s+MINUTES\b/i);
+  const presentMatch = attendance.match(/Members\s+Present\s*:?\s*([\s\S]*?)(?=Members\s+Absent\s*:|$)/i);
+  const absentMatch = attendance.match(/Members\s+Absent\s*:?\s*([\s\S]*)$/i);
+  const approval = sectionBodyBetween(source, /\bAPPROVAL\s+OF\s+PREVIOUS\s+MEETING\s+MINUTES\b/i, /\bTREASURER'?S\s+REPORT/i);
+  const motionLine = approval.match(/Motion\s+to\s+approve\s*:\s*(.+?)(?:\s{2,}|\s+Seconded\s+by\s*:|$)/i);
+  const secondLine = approval.match(/Seconded\s+by\s*:\s*(.+)$/im);
+  const voteLine = approval.match(/Vote\s*\/?\s*Action\s*:\s*(.+)$/im);
+  const actionBlock = sectionBodyBetween(source, /\bACTION\s+ITEMS\b/i, /\bNEXT\s+MEETING\b/i);
+  const actionItems = [...actionBlock.matchAll(/^\s*(?:\d+[\).]|[-*])\s*(.+)$/gm)]
+    .map((match) => cleanMinutesDocxBlank(match[1]))
+    .filter(Boolean);
+  const adjourn = sectionBodyBetween(source, /\bADJOURNMENT\b/i, /$/);
+  const adjournMatch = adjourn.match(/adjourned at\s+(.+?)\.?$/im);
+  const submitted = captureLabeledLine(adjourn, 'Submitted by');
+  return {
+    meeting_time: captureLabeledLine(header, 'Time'),
+    location: captureLabeledLine(header, 'Location'),
+    called_by: captureLabeledLine(header, 'Meeting Called By'),
+    call_to_order_time: cleanMinutesDocxBlank(callMatch?.[1] || ''),
+    call_to_order_by: cleanMinutesDocxBlank(callMatch?.[2] || ''),
+    members_present: cleanMinutesDocxBlank(presentMatch?.[1] || '', { multiline: true }),
+    members_absent: cleanMinutesDocxBlank(absentMatch?.[1] || '', { multiline: true }),
+    previous_minutes_motion: cleanMinutesDocxBlank(motionLine?.[1] || ''),
+    previous_minutes_second: cleanMinutesDocxBlank(secondLine?.[1] || ''),
+    previous_minutes_vote: cleanMinutesDocxBlank(voteLine?.[1] || ''),
+    treasurer_report: sectionBodyBetween(source, /\bTREASURER'?S\s+REPORT(?:\s*\/\s*FINANCIAL\s+UPDATE)?\b/i, /\bDIRECTOR\s*\/\s*BAND\s+PROGRAM\s+UPDATE\b/i),
+    director_update: sectionBodyBetween(source, /\bDIRECTOR\s*\/\s*BAND\s+PROGRAM\s+UPDATE\b/i, /\bOLD\s+BUSINESS\b/i),
+    old_business: sectionBodyBetween(source, /\bOLD\s+BUSINESS\b/i, /\bNEW\s+BUSINESS\b/i),
+    new_business: sectionBodyBetween(source, /\bNEW\s+BUSINESS\b/i, /\bFUNDRAISING\b/i),
+    fundraising: sectionBodyBetween(source, /\bFUNDRAISING\b/i, /\bUPCOMING\s+EVENTS/i)
+      .replace(/^Fundraisers discussed, planned, or currently in progress:\s*/i, '')
+      .trim(),
+    upcoming_events: sectionBodyBetween(source, /\bUPCOMING\s+EVENTS(?:\s*&\s*ACTIVITIES)?\b/i, /\bVOLUNTEER\s+NEEDS\b/i),
+    volunteer_needs: sectionBodyBetween(source, /\bVOLUNTEER\s+NEEDS\b/i, /\bADDITIONAL\s+DISCUSSION\b/i),
+    additional_discussion: sectionBodyBetween(source, /\bADDITIONAL\s+DISCUSSION\b/i, /\bACTION\s+ITEMS\b/i),
+    action_item_1: actionItems[0] || '',
+    action_item_2: actionItems[1] || '',
+    action_item_3: actionItems[2] || '',
+    next_meeting_date: captureLabeledLine(nextMeetingBlock, 'Date'),
+    next_meeting_time: captureLabeledLine(nextMeetingBlock, 'Time'),
+    adjourned_at: cleanMinutesDocxBlank(adjournMatch?.[1] || ''),
+    submitted_by: submitted,
+  };
+}
+
+function minutesMultilineHtmlFromText(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trimEnd());
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return '<p><em>Not recorded.</em></p>';
+  return lines.map((line) => `<p>${escapeHtml(line || ' ')}</p>`).join('');
+}
+
+export function buildMinutesDocxBodyHtmlFromFields(fields = {}, meetingDateDisplay = '') {
+  const values = { ...fields };
+  const date = meetingDateDisplay || formatMeetingDateDisplay(values.meeting_date) || '';
+  const time = String(values.meeting_time || '').trim();
+  const location = String(values.location || '').trim();
+  const calledBy = String(values.called_by || '').trim();
+  const subtitle = String(values.meeting_subtitle || '').trim();
+  const callTime = String(values.call_to_order_time || '').trim();
+  const callBy = String(values.call_to_order_by || '').trim();
+  const actions = [values.action_item_1, values.action_item_2, values.action_item_3]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+  const fieldsPayload = {
+    version: 1,
+    template: 'east-forsyth-boosters-v1',
+    meeting_date: date,
+    meeting_subtitle: String(values.meeting_subtitle || ''),
+    meeting_time: String(values.meeting_time || ''),
+    location: String(values.location || ''),
+    called_by: String(values.called_by || ''),
+    call_to_order_time: String(values.call_to_order_time || ''),
+    call_to_order_by: String(values.call_to_order_by || ''),
+    members_present: String(values.members_present || ''),
+    members_absent: String(values.members_absent || ''),
+    previous_minutes_motion: String(values.previous_minutes_motion || ''),
+    previous_minutes_second: String(values.previous_minutes_second || ''),
+    previous_minutes_vote: String(values.previous_minutes_vote || ''),
+    treasurer_report: String(values.treasurer_report || ''),
+    director_update: String(values.director_update || ''),
+    old_business: String(values.old_business || ''),
+    new_business: String(values.new_business || ''),
+    fundraising: String(values.fundraising || ''),
+    upcoming_events: String(values.upcoming_events || ''),
+    volunteer_needs: String(values.volunteer_needs || ''),
+    additional_discussion: String(values.additional_discussion || ''),
+    action_item_1: String(values.action_item_1 || ''),
+    action_item_2: String(values.action_item_2 || ''),
+    action_item_3: String(values.action_item_3 || ''),
+    next_meeting_date: String(values.next_meeting_date || ''),
+    next_meeting_time: String(values.next_meeting_time || ''),
+    adjourned_at: String(values.adjourned_at || ''),
+    submitted_by: String(values.submitted_by || ''),
+  };
+  const encodedFields = btoa(unescape(encodeURIComponent(JSON.stringify(fieldsPayload))));
+  return `<div class="minutes-docx">
+<div class="draft">MINUTES_FIELDS_V1:${encodedFields}</div>
+<div class="kicker">East Forsyth Band Boosters</div>
+<h2>Meeting Minutes</h2>
+${subtitle ? `<p><em>${escapeHtml(subtitle)}</em></p>` : ''}
+<p><strong>Date:</strong> ${escapeHtml(date)}${time ? ` · <strong>Time:</strong> ${escapeHtml(time)}` : ''}${location ? ` · <strong>Location:</strong> ${escapeHtml(location)}` : ''}</p>
+${calledBy ? `<p><strong>Meeting Called By:</strong> ${escapeHtml(calledBy)}</p>` : ''}
+<h3>Call to Order</h3>
+<p>The regular meeting of the East Forsyth Band Boosters was called to order at ${escapeHtml(callTime || '__________')} by ${escapeHtml(callBy || '________________')}.</p>
+<h3>Attendance</h3>
+<p><strong>Members Present:</strong></p>
+${minutesMultilineHtmlFromText(values.members_present)}
+<p><strong>Members Absent:</strong></p>
+${minutesMultilineHtmlFromText(values.members_absent)}
+<h3>Approval of Previous Meeting Minutes</h3>
+<p>The minutes from the previous meeting were reviewed.</p>
+<p><strong>Motion to approve:</strong> ${escapeHtml(values.previous_minutes_motion || '________________')} · <strong>Seconded by:</strong> ${escapeHtml(values.previous_minutes_second || '________________')}</p>
+<p><strong>Vote/Action:</strong> ${escapeHtml(values.previous_minutes_vote || '________________')}</p>
+<h3>Treasurer's Report / Financial Update</h3>
+${minutesMultilineHtmlFromText(values.treasurer_report)}
+<h3>Director / Band Program Update</h3>
+${minutesMultilineHtmlFromText(values.director_update)}
+<h3>Old Business</h3>
+${minutesMultilineHtmlFromText(values.old_business)}
+<h3>New Business</h3>
+${minutesMultilineHtmlFromText(values.new_business)}
+<h3>Fundraising</h3>
+<p>Fundraisers discussed, planned, or currently in progress:</p>
+${minutesMultilineHtmlFromText(values.fundraising)}
+<h3>Upcoming Events &amp; Activities</h3>
+${minutesMultilineHtmlFromText(values.upcoming_events)}
+<h3>Volunteer Needs</h3>
+${minutesMultilineHtmlFromText(values.volunteer_needs)}
+<h3>Additional Discussion</h3>
+${minutesMultilineHtmlFromText(values.additional_discussion)}
+<h3>Action Items</h3>
+${actions ? `<ol>${actions}</ol>` : '<p><em>No action items recorded.</em></p>'}
+<h3>Next Meeting</h3>
+<p><strong>Date:</strong> ${escapeHtml(values.next_meeting_date || '________________')} · <strong>Time:</strong> ${escapeHtml(values.next_meeting_time || '________________')}</p>
+<h3>Adjournment</h3>
+<p><strong>Meeting Adjourned:</strong> ${escapeHtml(values.adjourned_at || '__________')} · <strong>Submitted by:</strong> ${escapeHtml(values.submitted_by || '________________')}</p>
+<p><em>Secretary, East Forsyth Band Boosters</em></p>
+</div>`;
+}
+
+export async function parseBoostersMinutesDocx(arrayBuffer, filename = '') {
+  const entry = await readZipEntryBytes(arrayBuffer, 'word/document.xml');
+  if (!entry) throw new Error('DOCX is missing word/document.xml');
+  const plain = docxXmlToPlainText(utf8Decode(entry));
+  if (!plain) throw new Error('DOCX did not contain readable meeting minutes text');
+  const meeting_date = extractMeetingDateFromMinutesText(plain, filename);
+  if (!meeting_date) {
+    throw new Error('Could not find a meeting date in the DOCX. Add Date: MM/DD/YYYY near the top, or include the date in the filename.');
+  }
+  const fields = parseBoostersMinutesFieldsFromText(plain);
+  const meeting_date_display = formatMeetingDateDisplay(meeting_date);
+  const body_html = sanitizeRichHtml(buildMinutesDocxBodyHtmlFromFields(fields, meeting_date_display));
+  if (!body_html.replace(/<[^>]+>/g, '').trim()) {
+    throw new Error('DOCX did not contain usable minutes content');
+  }
+  return {
+    meeting_date,
+    meeting_date_display,
+    fields,
+    body_html,
+    plain_text: plain,
+  };
+}
+
 export function minutesEditableUntil(createdAt) {
   const created = new Date(createdAt || 0);
   if (Number.isNaN(created.getTime())) return null;
@@ -3695,8 +4014,20 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
   const dateLabel = formatMeetingDateDisplay(minutes.meeting_date_display || minutes.meeting_date);
   const recorder = String(minutes.created_by_name || '').trim();
   const body = sanitizeRichHtml(minutes.body_html || '');
-  // Letterhead mark is fixed in code (not CMS-editable).
+  const isDocxMinutes = /\bminutes-docx\b/.test(body);
+  // Letterhead assets are fixed in code (not CMS-editable).
   const letterheadMark = MINUTES_LETTERHEAD_MARK;
+  const letterheadBanner = MINUTES_LETTERHEAD_BANNER;
+  const chrome = isDocxMinutes
+    ? `<header class="letterhead letterhead-banner-wrap" aria-hidden="true">
+      <img class="letterhead-banner" src="${escapeHtml(letterheadBanner)}" alt="" draggable="false">
+    </header>`
+    : `<header class="letterhead" aria-hidden="true">
+      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
+    </header>
+    <p class="doc-kicker">${escapeHtml(title)}</p>
+    <h1>Booster Meeting Minutes</h1>
+    <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3721,6 +4052,7 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       background: #fff;
       box-shadow: 0 10px 30px rgba(15, 34, 58, 0.18);
     }
+    .sheet.docx { padding-top: 0.45in; }
     .letterhead {
       display: flex;
       justify-content: center;
@@ -3728,6 +4060,15 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       pointer-events: none;
       user-select: none;
       -webkit-user-select: none;
+    }
+    .letterhead-banner-wrap { display: block; margin: 0 0 10px; }
+    .letterhead-banner {
+      display: block;
+      width: 100%;
+      max-height: 1.35in;
+      object-fit: contain;
+      object-position: center top;
+      -webkit-user-drag: none;
     }
     .letterhead-mark {
       display: block;
@@ -3762,6 +4103,11 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
     .body p { margin: 0 0 0.85em; }
     .body p:last-child { margin-bottom: 0; }
     .body ul, .body ol { margin: 0 0 0.85em; padding-left: 1.3em; }
+    .body h2 { margin: 0 0 10px; font: 700 16pt/1.2 "Work Sans", system-ui, sans-serif; color: #10233c; text-align: center; }
+    .body h3 { margin: 1.1em 0 0.45em; font: 800 10pt/1.25 "Work Sans", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #10233c; }
+    .body .kicker { margin: 0 0 6px; font: 700 9pt/1.2 "Work Sans", system-ui, sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: #c8121d; text-align: center; }
+    .body .draft { display: none !important; }
+    .body .minutes-docx { margin: 0; }
     .toolbar {
       position: sticky;
       top: 0;
@@ -3787,18 +4133,14 @@ export function renderMinutesDocumentHtml(site = {}, minutes = {}) {
       .toolbar { display: none !important; }
       .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; }
       .letterhead-mark { opacity: 0.24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letterhead-banner { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button></div>
-  <main class="sheet">
-    <header class="letterhead" aria-hidden="true">
-      <img class="letterhead-mark" src="${escapeHtml(letterheadMark)}" alt="" draggable="false">
-    </header>
-    <p class="doc-kicker">${escapeHtml(title)}</p>
-    <h1>Booster Meeting Minutes</h1>
-    <p class="meta">${escapeHtml(dateLabel)}${recorder ? ` · Recorded by ${escapeHtml(recorder)}` : ''}</p>
+  <main class="sheet${isDocxMinutes ? ' docx' : ''}">
+    ${chrome}
     <div class="body">${body || '<p>No minutes content.</p>'}</div>
   </main>
 </body>
@@ -4078,7 +4420,7 @@ export function sanitizeRichHtml(dirty) {
       const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
       const className = String(classMatch?.[1] || classMatch?.[2] || '')
         .split(/\s+/)
-        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
+        .filter((name) => ['kicker', 'tag', 'draft', 'minutes-docx'].includes(name))
         .join(' ');
       return className ? `<div class="${className}">` : '<div>';
     }
@@ -5357,6 +5699,52 @@ async function handleApi(request, env, url) {
       return jsonResponse({ detail: `Could not save minutes: ${error?.message || error}` }, 500);
     }
   }
+  if (url.pathname === '/api/admin/minutes/upload' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canManageMeetingMinutes(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+    }
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ detail: 'Expected multipart form upload with a .docx file' }, 400);
+    }
+    const file = form.get('file') || form.get('docx') || form.get('minutes');
+    if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
+      return jsonResponse({ detail: 'Choose a .docx meeting minutes file to upload' }, 422);
+    }
+    const filename = String(file.name || 'minutes.docx');
+    const lower = filename.toLowerCase();
+    if (!lower.endsWith('.docx')) {
+      return jsonResponse({ detail: 'Only .docx Word files are supported for minutes upload' }, 422);
+    }
+    const size = Number(file.size || 0);
+    if (size <= 0) return jsonResponse({ detail: 'Uploaded DOCX file is empty' }, 422);
+    if (size > MINUTES_DOCX_MAX_BYTES) {
+      return jsonResponse({ detail: `DOCX must be ${MINUTES_DOCX_MAX_LABEL} or smaller` }, 422);
+    }
+    let parsed;
+    try {
+      parsed = await parseBoostersMinutesDocx(await file.arrayBuffer(), filename);
+    } catch (error) {
+      return jsonResponse({ detail: error?.message || 'Could not read the DOCX minutes file' }, 422);
+    }
+    try {
+      const result = await env.DB.prepare(
+        'INSERT INTO booster_meeting_minutes (meeting_date, body_html, created_by) VALUES (?, ?, ?)',
+      ).bind(parsed.meeting_date, parsed.body_html, auth.user.id).run();
+      const createdId = Number(result?.meta?.last_row_id || 0);
+      const created = createdId ? await getMeetingMinutesById(env, createdId, auth.user) : null;
+      if (!created?.id) {
+        return jsonResponse({ detail: 'Minutes uploaded but could not be reloaded. Refresh and check the list.' }, 500);
+      }
+      return jsonResponse(created, 201);
+    } catch (error) {
+      return jsonResponse({ detail: `Could not save uploaded minutes: ${error?.message || error}` }, 500);
+    }
+  }
   const minutesDocumentMatch = url.pathname.match(/^\/api\/admin\/minutes\/(\d+)\/document$/);
   if (minutesDocumentMatch && request.method === 'GET') {
     const auth = await requireLogin(request, env);
@@ -6165,7 +6553,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor. Only Super Admins can delete.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it in a floating frame, or click Add Minutes to create a new entry.</p></div></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Click a meeting to open the document in a floating frame. Secretaries can add or edit minutes in a separate editor, or upload a completed .docx. Only Super Admins can delete.</p></div><div class="panel-actions minutes-panel-actions"><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx" data-minutes-manage-actions>Upload .docx</button><input id="minutes-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><div id="minutes-empty" class="admin-card minutes-empty"><p class="kicker">Archive</p><h2>Select minutes to view</h2><p class="muted">Choose a meeting date from the list to open it, or add / upload minutes below.</p><div class="minutes-empty-actions" data-minutes-manage-actions><button class="btn primary" type="button" data-minutes-empty-add>Add Minutes</button><button class="btn outline" type="button" data-minutes-empty-upload>Upload .docx file</button></div><label class="minutes-upload-drop" data-minutes-manage-actions data-minutes-dropzone><span><strong>Drop a .docx here</strong> or choose a file to import. The meeting date is read from the document for list placement.</span><input id="minutes-docx-file-drop" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label></div></div></div>
 <div id="minutes-view-modal" class="minutes-frame-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-view-dismiss aria-label="Close minutes document"></button>
   <div class="minutes-view-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-view-title">
@@ -6189,21 +6577,131 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <div id="minutes-editor-modal" class="minutes-frame-modal minutes-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-editor-dismiss aria-label="Close minutes editor"></button>
-  <div class="minutes-editor-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
-    <div class="minutes-editor-head">
+  <div class="minutes-editor-dialog minutes-docx-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
+    <div class="minutes-editor-head minutes-docx-toolbar">
       <div>
         <p class="kicker">Boosters</p>
         <h2 id="minutes-editor-title">Add Minutes</h2>
       </div>
-      <button class="btn outline" type="button" data-minutes-editor-dismiss>Close</button>
-    </div>
-    <form id="minutes-form" class="stack minutes-editor-form" novalidate>
-      <input type="hidden" name="minutes_id" value="">
-      <label>Meeting date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="08/04/2026" maxlength="10" aria-describedby="minutes-date-hint"><small id="minutes-date-hint" class="field-hint">Defaults to today. Type digits and slashes are inserted for you.</small></label>
-      <label class="full form-rich-label"><span>Minutes</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="body_html" data-rich-mode="block" data-placeholder="Enter the meeting minutes…" aria-label="Meeting minutes"></div><input type="hidden" name="body_html"></label>
-      <div class="panel-actions minutes-form-actions">
-        <button class="btn primary" data-minutes-submit type="submit">Save minutes</button>
+      <div class="panel-actions minutes-docx-toolbar-actions">
+        <button class="btn outline" type="button" id="upload-minutes-docx-editor" data-minutes-manage-actions>Upload .docx</button>
+        <button class="btn primary" data-minutes-submit form="minutes-form" type="submit">Save minutes</button>
         <button class="btn outline" type="button" id="cancel-minutes-edit">Cancel</button>
+      </div>
+    </div>
+    <form id="minutes-form" class="stack minutes-editor-form minutes-docx-form" novalidate>
+      <input type="hidden" name="minutes_id" value="">
+      <input type="hidden" name="body_html" value="">
+      <div class="minutes-docx-scroll">
+        <article class="minutes-docx-sheet" data-minutes-template="east-forsyth-boosters-v1">
+          <header class="minutes-docx-letterhead">
+            <img class="minutes-docx-banner" src="${MINUTES_LETTERHEAD_BANNER}" alt="East Forsyth Band Boosters letterhead" draggable="false">
+          </header>
+
+          <h1 class="minutes-docx-doc-title">Meeting Minutes</h1>
+          <label class="minutes-docx-subtitle-label"><span class="sr-only">Meeting subtitle</span>
+            <input name="meeting_subtitle" type="text" maxlength="200" placeholder="Optional subtitle (for example: Election of New Officers)" autocomplete="off" class="minutes-docx-subtitle">
+          </label>
+
+          <div class="minutes-docx-meta-row">
+            <label class="minutes-docx-blank">Date <small>MM/DD/YYYY</small><input name="meeting_date" type="text" inputmode="numeric" autocomplete="off" required placeholder="________" maxlength="10" aria-describedby="minutes-date-hint"></label>
+            <label class="minutes-docx-blank">Time<input name="meeting_time" type="text" maxlength="80" placeholder="________" autocomplete="off"></label>
+            <label class="minutes-docx-blank minutes-docx-blank-wide">Location<input name="location" type="text" maxlength="200" placeholder="________" autocomplete="off"></label>
+          </div>
+          <p id="minutes-date-hint" class="field-hint minutes-docx-hint">Defaults to today. Type digits and slashes are inserted for you.</p>
+          <label class="minutes-docx-blank minutes-docx-called-by">Meeting Called By<input name="called_by" type="text" maxlength="160" placeholder="________________" autocomplete="name"></label>
+
+          <section class="minutes-docx-section">
+            <h2>Call to Order</h2>
+            <p class="minutes-docx-prompt">The regular meeting of the East Forsyth Band Boosters was called to order at
+              <input name="call_to_order_time" type="text" maxlength="40" placeholder="________" class="minutes-docx-inline"> by
+              <input name="call_to_order_by" type="text" maxlength="120" placeholder="________________" class="minutes-docx-inline minutes-docx-inline-wide">.
+            </p>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Attendance</h2>
+            <label class="minutes-docx-blank-block">Members Present<textarea name="members_present" rows="2" maxlength="4000" placeholder="________________________________________________________________"></textarea></label>
+            <label class="minutes-docx-blank-block">Members Absent<textarea name="members_absent" rows="2" maxlength="4000" placeholder="________________________________________________________________"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Approval of Previous Meeting Minutes</h2>
+            <p class="minutes-docx-prompt">The minutes from the previous meeting were reviewed.</p>
+            <div class="minutes-docx-meta-row minutes-docx-meta-row-2">
+              <label class="minutes-docx-blank">Motion to approve<input name="previous_minutes_motion" type="text" maxlength="160" placeholder="________________"></label>
+              <label class="minutes-docx-blank">Seconded by<input name="previous_minutes_second" type="text" maxlength="160" placeholder="________________"></label>
+            </div>
+            <label class="minutes-docx-blank minutes-docx-blank-full">Vote / Action<input name="previous_minutes_vote" type="text" maxlength="300" placeholder="________________________________________________________________"></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Treasurer's Report / Financial Update</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Treasurer report</span><textarea name="treasurer_report" rows="3" maxlength="8000" placeholder="Write the financial update…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Director / Band Program Update</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Director update</span><textarea name="director_update" rows="3" maxlength="8000" placeholder="Write the program update…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Old Business</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Old business</span><textarea name="old_business" rows="3" maxlength="8000" placeholder="Old business notes…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>New Business</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">New business</span><textarea name="new_business" rows="3" maxlength="8000" placeholder="New business notes…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Fundraising</h2>
+            <p class="minutes-docx-prompt">Fundraisers discussed, planned, or currently in progress:</p>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Fundraising</span><textarea name="fundraising" rows="3" maxlength="8000" placeholder="Fundraising notes…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Upcoming Events &amp; Activities</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Upcoming events</span><textarea name="upcoming_events" rows="3" maxlength="8000" placeholder="Upcoming events…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Volunteer Needs</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Volunteer needs</span><textarea name="volunteer_needs" rows="2" maxlength="8000" placeholder="Volunteer needs…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Additional Discussion</h2>
+            <label class="minutes-docx-blank-block"><span class="sr-only">Additional discussion</span><textarea name="additional_discussion" rows="3" maxlength="8000" placeholder="Additional discussion…"></textarea></label>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Action Items</h2>
+            <ol class="minutes-docx-actions">
+              <li><input name="action_item_1" type="text" maxlength="500" placeholder="________________________________________________________________"></li>
+              <li><input name="action_item_2" type="text" maxlength="500" placeholder="________________________________________________________________"></li>
+              <li><input name="action_item_3" type="text" maxlength="500" placeholder="________________________________________________________________"></li>
+            </ol>
+          </section>
+
+          <section class="minutes-docx-section">
+            <h2>Next Meeting</h2>
+            <div class="minutes-docx-meta-row minutes-docx-meta-row-2">
+              <label class="minutes-docx-blank">Date<input name="next_meeting_date" type="text" maxlength="80" placeholder="________"></label>
+              <label class="minutes-docx-blank">Time<input name="next_meeting_time" type="text" maxlength="80" placeholder="________"></label>
+            </div>
+          </section>
+
+          <section class="minutes-docx-section minutes-docx-adjournment">
+            <h2>Adjournment</h2>
+            <div class="minutes-docx-footer-fields">
+              <label class="minutes-docx-blank">Meeting Adjourned<input name="adjourned_at" type="text" maxlength="40" placeholder="________"></label>
+              <label class="minutes-docx-blank">Submitted by<input name="submitted_by" type="text" maxlength="160" placeholder="________________"></label>
+            </div>
+            <p class="minutes-docx-footer-note">Secretary, East Forsyth Band Boosters</p>
+          </section>
+        </article>
       </div>
       <p class="status" id="minutes-status"></p>
     </form>
