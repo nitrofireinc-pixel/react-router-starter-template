@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  assertAuditSqlIsAppendOnly,
   auditCategoryFromPath,
   buildAdminAuditExportPdfBase64,
   buildAdminAuditExportText,
@@ -10,6 +11,7 @@ import {
   decryptAuditPayload,
   encryptAuditPayload,
   enrichMailAuditMeta,
+  isSecurityLogPath,
   redactAuditObject,
   serializeAuditRow,
   sha256Hex,
@@ -26,6 +28,21 @@ test('shouldAuditAdminApiRequest logs mutations but skips reads and security-log
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log.pdf', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/mail', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/events', 'POST'), false);
+});
+
+test('security log paths are recognized for mutation blocking', () => {
+  assert.equal(isSecurityLogPath('/api/admin/security-log'), true);
+  assert.equal(isSecurityLogPath('/api/admin/security-log.pdf'), true);
+  assert.equal(isSecurityLogPath('/api/admin/security-log/extra'), true);
+  assert.equal(isSecurityLogPath('/api/admin/users'), false);
+});
+
+test('audit SQL guard allows insert/select and rejects update/delete', () => {
+  assert.equal(assertAuditSqlIsAppendOnly('INSERT INTO admin_audit_log (action) VALUES (?)'), true);
+  assert.equal(assertAuditSqlIsAppendOnly('SELECT id FROM admin_audit_log'), true);
+  assert.throws(() => assertAuditSqlIsAppendOnly('UPDATE admin_audit_log SET summary = ?'), /append-only/);
+  assert.throws(() => assertAuditSqlIsAppendOnly('DELETE FROM admin_audit_log'), /append-only/);
+  assert.throws(() => assertAuditSqlIsAppendOnly('DROP TABLE admin_audit_log'), /append-only/);
 });
 
 test('redactAuditObject strips passwords and binary payloads', () => {

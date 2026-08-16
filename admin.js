@@ -1972,6 +1972,9 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
 }
 
 function activateTab(name) {
+  if (name === 'security-log' && !isSuperAdmin()) {
+    return Promise.resolve(false);
+  }
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
@@ -2004,6 +2007,7 @@ function activateTab(name) {
       initCheckoutPanel().catch(() => {});
     }
     if (name === 'security-log') {
+      if (!isSuperAdmin()) return;
       loadSecurityLog().catch(() => {});
     }
     closeAdminNav();
@@ -2630,7 +2634,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    isSuperAdmin() && ['Security Log', 'View and print encrypted login and CMS change history. Super Admin only — not editable.', 'security-log', 'Security', 'tab'],
+    isSuperAdmin() && ['Security Log', 'View and print the sealed audit vault. Super Admin only — cannot be edited or granted to others.', 'security-log', 'Security', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents() && ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab'],
   ].filter(Boolean);
@@ -3734,7 +3738,11 @@ function formatUserLastLoginLabel(value) {
 }
 
 async function loadSecurityLog() {
-  if (!isSuperAdmin()) return;
+  if (!isSuperAdmin()) {
+    const list = document.querySelector('#security-log-list');
+    if (list) list.innerHTML = '<p class="error">Security log is Super Admin only.</p>';
+    return;
+  }
   const list = document.querySelector('#security-log-list');
   const status = document.querySelector('#security-log-status');
   const download = document.querySelector('#download-security-log');
@@ -3746,9 +3754,10 @@ async function loadSecurityLog() {
   if (action) params.set('action', action);
   if (download) {
     download.href = `/api/admin/security-log.pdf?${params.toString()}`;
+    download.setAttribute('rel', 'noopener');
   }
   try {
-    if (status) status.textContent = 'Loading security log…';
+    if (status) status.textContent = 'Loading sealed security log…';
     const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
     const entries = Array.isArray(data.entries) ? data.entries : [];
     if (!entries.length) {
@@ -3785,7 +3794,7 @@ async function loadSecurityLog() {
     }
     if (status) {
       const total = data.total || entries.length;
-      status.textContent = `Showing ${entries.length} of ${total} encrypted log entr${total === 1 ? 'y' : 'ies'} (super admin view/print only).`;
+      status.textContent = `Showing ${entries.length} of ${total} sealed entr${total === 1 ? 'y' : 'ies'} · view/print only · not editable.`;
     }
   } catch (error) {
     list.innerHTML = `<p class="error">${escapeHtml(error.message || 'Security log unavailable')}</p>`;

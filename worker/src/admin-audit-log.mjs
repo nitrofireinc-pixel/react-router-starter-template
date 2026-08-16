@@ -1,13 +1,23 @@
 /**
  * Super-admin-only CMS security audit log.
  *
- * Isolated from public pages, logos, and site content. Stored in D1
- * (admin_audit_log) with AES-256-GCM encryption at rest and SHA-256
- * integrity hashing. View / print / PDF export only — no edit APIs.
+ * ISOLATION CONTRACT (do not weaken):
+ * - Independent of public pages, logos, sections, and site content edits.
+ * - Append-only INSERT. No UPDATE / DELETE / DROP APIs or helpers.
+ * - View / print / PDF export only. Never editable, including by Super Admin.
+ * - Access is Super Admin role only — never a grantable permission scope.
+ * - Stored in D1 (admin_audit_log) with AES-256-GCM encryption + SHA-256 integrity.
  */
 
 export const ADMIN_AUDIT_TABLE = 'admin_audit_log';
 export const ADMIN_AUDIT_ENC_VERSION = 1;
+export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
+  'security-log',
+  'security',
+  'audit',
+  'audit-log',
+  'admin-audit',
+]);
 
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
@@ -31,6 +41,25 @@ const SENSITIVE_KEYS = new Set([
   'private_key',
 ]);
 
+export function isSecurityLogPath(pathname = '') {
+  const path = String(pathname || '');
+  return path === '/api/admin/security-log'
+    || path === '/api/admin/security-log.txt'
+    || path === '/api/admin/security-log.pdf'
+    || path.startsWith('/api/admin/security-log/');
+}
+
+/** Reject any SQL that could alter or erase sealed audit rows. */
+export function assertAuditSqlIsAppendOnly(sql = '') {
+  const normalized = String(sql || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized.includes(ADMIN_AUDIT_TABLE)) return true;
+  if (normalized.startsWith('insert into')) return true;
+  if (normalized.startsWith('select ')) return true;
+  if (normalized.startsWith('create table if not exists')) return true;
+  if (normalized.startsWith('alter table') && normalized.includes('add column')) return true;
+  throw new Error('Security audit log is append-only (INSERT/SELECT only).');
+}
+
 export function isMutatingHttpMethod(method = '') {
   return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(method || '').toUpperCase());
 }
@@ -38,13 +67,7 @@ export function isMutatingHttpMethod(method = '') {
 export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   const path = String(pathname || '');
   if (!path.startsWith('/api/admin')) return false;
-  if (
-    path === '/api/admin/security-log'
-    || path === '/api/admin/security-log.txt'
-    || path === '/api/admin/security-log.pdf'
-  ) {
-    return false;
-  }
+  if (isSecurityLogPath(path)) return false;
   if (path === '/api/admin/me') return false;
   // Staff mail is logged with recipient/body details in the mail handler.
   if (path === '/api/admin/mail') return false;
@@ -286,19 +309,19 @@ export async function writeAdminAuditLog(env, entry = {}) {
     return null;
   }
   try {
-    const result = await env.DB.prepare(
-      `INSERT INTO ${ADMIN_AUDIT_TABLE}
+    const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
         (action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    assertAuditSqlIsAppendOnly(insertSql);
+    const result = await env.DB.prepare(insertSql).bind(
+      // Index fields only (needed for Super Admin filters). Details are sealed in ciphertext.
       action,
       category,
-      method,
-      path,
+      '',
+      '',
       record.status,
       record.actor_user_id,
       actorUsername,
-      // Cleartext index columns stay empty; details live only in ciphertext.
       '',
       '',
       '',
@@ -489,17 +512,17 @@ export async function listAdminAuditLogs(env, {
     binds.push(`%${actorFilter}%`);
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const countRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE} ${where}`,
-  ).bind(...binds).first();
-  const rows = await env.DB.prepare(
-    `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
+  const countSql = `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE} ${where}`;
+  const listSql = `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
             ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version
      FROM ${ADMIN_AUDIT_TABLE}
      ${where}
      ORDER BY datetime(created_at) DESC, id DESC
-     LIMIT ? OFFSET ?`,
-  ).bind(...binds, safeLimit, safeOffset).all();
+     LIMIT ? OFFSET ?`;
+  assertAuditSqlIsAppendOnly(countSql);
+  assertAuditSqlIsAppendOnly(listSql);
+  const countRow = await env.DB.prepare(countSql).bind(...binds).first();
+  const rows = await env.DB.prepare(listSql).bind(...binds, safeLimit, safeOffset).all();
   const entries = [];
   for (const row of rows.results || []) {
     entries.push(await deserializeEncryptedAuditRow(env, row));
@@ -513,6 +536,8 @@ export async function listAdminAuditLogs(env, {
     integrity: 'sha-256',
     encryption: 'aes-256-gcm',
     access: 'super_admin_only',
+    mode: 'view_print_only',
+    editable: false,
   };
 }
 
