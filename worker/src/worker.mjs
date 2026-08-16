@@ -187,8 +187,10 @@ const SESSION_COOKIE = 'efband_session';
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'admin-maintenance-preview-20260816';
-const MINUTES_LETTERHEAD_MARK = `/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}`;
+const ASSET_VERSION = 'center-header-blue-regiment-20260816';
+const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
+const MINUTES_LETTERHEAD_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
+const PUBLIC_BRAND_MARK = MINUTES_LETTERHEAD_MARK;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
 const MINUTES_DOCX_MAX_BYTES = 8_000_000;
 const MINUTES_DOCX_MAX_LABEL = '8 MB';
@@ -6345,7 +6347,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
+<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a><button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages)}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
