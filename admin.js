@@ -2650,7 +2650,7 @@ function renderDashboard() {
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
-    canEditContact() && ['Contact Form', 'Edit topics and the email each contact topic delivers to.', 'contact', 'Connect', 'tab'],
+    canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
     canCreateEvents()
@@ -4369,6 +4369,55 @@ function bindPhotoDragAndDrop(list) {
   });
 }
 
+function contactRecipientOptions() {
+  const fromMail = Array.isArray(state.mailRecipients) ? state.mailRecipients : [];
+  if (fromMail.length) return fromMail;
+  return (state.users || [])
+    .filter((user) => Number(user.active) !== 0)
+    .map((user) => {
+      const email = String(user.username || '').trim().toLowerCase();
+      return {
+        id: Number(user.id),
+        display_name: user.display_name,
+        username: user.username,
+        email,
+        can_email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+      };
+    })
+    .filter((user) => user.can_email);
+}
+
+function selectedContactRecipientIds(form = document.querySelector('#contact-topic-form')) {
+  if (!form) return [];
+  return [...form.querySelectorAll('input[name="recipient_user_ids"]:checked')]
+    .map((input) => Number(input.value))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function renderContactRecipientBoxes(selectedIds = []) {
+  const box = document.querySelector('#contact-topic-recipient-boxes');
+  if (!box) return;
+  const selected = new Set((selectedIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  const options = contactRecipientOptions();
+  box.innerHTML = options.length
+    ? options.map((user) => `
+      <label class="checkline contact-recipient-option">
+        <input type="checkbox" name="recipient_user_ids" value="${escapeAttr(user.id)}" ${selected.has(Number(user.id)) ? 'checked' : ''}>
+        <span><b>${escapeHtml(user.display_name || user.username)}</b><small>${escapeHtml(user.email || user.username)}</small></span>
+      </label>
+    `).join('')
+    : '<p class="draft">No CMS users with email logins are available yet. Add users in User Management first.</p>';
+}
+
+function contactTopicRecipientSummary(topic) {
+  const recipients = Array.isArray(topic?.recipients) ? topic.recipients : [];
+  if (recipients.length) {
+    return recipients.map((user) => user.display_name || user.email || user.username).join(', ');
+  }
+  if (Array.isArray(topic?.emails) && topic.emails.length) return topic.emails.join(', ');
+  return topic?.email || 'No recipients';
+}
+
 function renderContactTopics() {
   const list = document.querySelector('#contact-topics-list');
   if (!list) return;
@@ -4376,7 +4425,7 @@ function renderContactTopics() {
   list.innerHTML = ordered.length
     ? ordered.map((topic) => `
     <article class="admin-row">
-      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(topic.email || 'No delivery email')}</span><small>${topic.active ? 'Active' : 'Hidden'}</small></div>
+      <div><b>${escapeHtml(topic.label)}</b><span>${escapeHtml(contactTopicRecipientSummary(topic))}</span><small>${topic.active ? 'Active' : 'Hidden'}${Array.isArray(topic.recipients) && topic.recipients.length > 1 ? ` · ${topic.recipients.length} recipients` : ''}</small></div>
       <div class="row-actions"><button type="button" data-edit-contact-topic="${topic.id}">Edit</button><button type="button" data-delete-contact-topic="${topic.id}">Delete</button></div>
     </article>
   `).join('')
@@ -4386,8 +4435,9 @@ function renderContactTopics() {
     const topic = state.contactTopics.find((item) => item.id === Number(button.dataset.editContactTopic));
     if (!topic) return;
     const form = document.querySelector('#contact-topic-form');
-    fillForm(form, topic);
+    fillForm(form, { id: topic.id, label: topic.label });
     form.elements.active.checked = Boolean(Number(topic.active));
+    renderContactRecipientBoxes(topic.recipient_user_ids || topic.recipients?.map((user) => user.id) || []);
     document.querySelector('#contact-topic-status').textContent = `Editing “${topic.label}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
@@ -4432,8 +4482,12 @@ async function loadContactDeliveryStatus() {
 
 async function loadContactTopics() {
   if (!canEditContact()) return;
+  if (!state.mailRecipients.length) {
+    state.mailRecipients = await jsonFetch('/api/admin/mail/recipients').catch(() => []);
+  }
   state.contactTopics = await jsonFetch('/api/admin/contact/topics');
   state.contactMessages = await jsonFetch('/api/admin/contact/messages').catch(() => []);
+  renderContactRecipientBoxes(selectedContactRecipientIds());
   renderContactTopics();
   renderContactMessages();
   await loadContactDeliveryStatus();
@@ -5653,15 +5707,17 @@ function bindForms() {
     const status = document.querySelector('#contact-topic-status');
     const payload = formPayload(form);
     payload.active = Boolean(form.elements.active?.checked);
+    payload.recipient_user_ids = selectedContactRecipientIds(form);
     const id = String(payload.id || '').trim();
     delete payload.id;
     delete payload.sort_order;
+    delete payload.email;
     if (!payload.label?.trim()) {
       if (status) status.textContent = 'Topic label is required.';
       return;
     }
-    if (!payload.email?.trim()) {
-      if (status) status.textContent = 'Delivery email is required.';
+    if (!payload.recipient_user_ids.length) {
+      if (status) status.textContent = 'Select at least one CMS user to receive this topic.';
       return;
     }
     try {
@@ -5673,6 +5729,7 @@ function bindForms() {
       form.reset();
       formControl(form, 'id').value = '';
       form.elements.active.checked = true;
+      renderContactRecipientBoxes([]);
       await loadContactTopics();
     } catch (error) {
       if (status) status.textContent = `Could not save topic: ${error.message}`;
@@ -5684,6 +5741,7 @@ function bindForms() {
     form.reset();
     formControl(form, 'id').value = '';
     form.elements.active.checked = true;
+    renderContactRecipientBoxes([]);
     document.querySelector('#contact-topic-status').textContent = 'Creating a new contact topic.';
     formControl(form, 'label')?.focus();
   });

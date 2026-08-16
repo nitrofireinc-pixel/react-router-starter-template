@@ -3800,3 +3800,9 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   }
 }
 
+.contact-topic-recipients{margin:0;padding:12px 14px;border:1px solid #e1e8f1;border-radius:16px;background:#f8fafc}
+.contact-topic-recipients legend{padding:0 6px;font-weight:800;color:#10233c}
+.contact-recipient-boxes{display:grid;gap:8px;margin-top:10px;max-height:min(42vh,360px);overflow:auto}
+.contact-recipient-option{align-items:flex-start!important}
+.contact-recipient-option span{display:grid;gap:2px}
+.contact-recipient-option small{color:#64748b;font-weight:600}

@@ -205,7 +205,7 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
 const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
-const ASSET_VERSION = 'website-guide-api-20260816';
+const ASSET_VERSION = 'contact-topic-recipients-20260816';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -773,7 +773,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
@@ -878,6 +878,12 @@ async function initDb(env) {
   } catch {
     // Column already exists on upgraded databases.
   }
+  try {
+    await env.DB.prepare("ALTER TABLE contact_topics ADD COLUMN recipient_user_ids TEXT NOT NULL DEFAULT '[]'").run();
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+  await migrateContactTopicRecipients(env);
   const legacySponsors = await env.DB.prepare('SELECT id, address, city, state FROM sponsors').all();
   for (const row of legacySponsors.results || []) {
     const rawAddress = String(row.address || '');
@@ -3546,22 +3552,209 @@ export function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
+export function parseRecipientUserIds(value) {
+  let raw = value;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw || '[]');
+    } catch {
+      raw = [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const ids = [];
+  for (const item of raw) {
+    const id = Number(item);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
 export function normalizeContactTopicPayload(payload = {}, existing = null) {
   const label = String(payload.label ?? existing?.label ?? '').trim();
+  const hasRecipientField = Object.prototype.hasOwnProperty.call(payload, 'recipient_user_ids')
+    || Object.prototype.hasOwnProperty.call(payload, 'recipient_ids')
+    || Object.prototype.hasOwnProperty.call(payload, 'recipients');
+  const recipientSource = hasRecipientField
+    ? (payload.recipient_user_ids ?? payload.recipient_ids ?? payload.recipients)
+    : (existing?.recipient_user_ids ?? []);
+  const recipient_user_ids = parseRecipientUserIds(recipientSource);
+  // Keep email only as a derived/cache field for message history display.
   const email = String(payload.email ?? existing?.email ?? '').trim().toLowerCase();
   return {
     label,
     email,
+    recipient_user_ids,
     // Topics are displayed A–Z by label; sort_order is unused in the UI.
     sort_order: 0,
     active: payload.active === false || payload.active === 0 ? 0 : 1,
   };
 }
 
+export function formatContactRecipientLabel(user = {}) {
+  const name = String(user.display_name || '').trim();
+  const email = String(user.email || user.username || '').trim().toLowerCase();
+  if (name && email) return `${name} <${email}>`;
+  return name || email || 'Unknown user';
+}
+
+export function contactTopicHasRecipients(topic = {}) {
+  const ids = parseRecipientUserIds(topic.recipient_user_ids);
+  if (ids.length) return true;
+  const emails = String(topic.email || '')
+    .split(/[,;]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => isValidEmail(value));
+  return emails.length > 0;
+}
+
+async function listContactRecipientUsers(env, { activeOnly = true } = {}) {
+  const where = activeOnly ? 'WHERE active = 1' : '';
+  const rows = await env.DB.prepare(
+    `SELECT id, username, display_name, role, active FROM users ${where} ORDER BY display_name COLLATE NOCASE, username COLLATE NOCASE, id`,
+  ).all();
+  return (rows.results || [])
+    .map((user) => {
+      const email = String(user.username || '').trim().toLowerCase();
+      return {
+        id: Number(user.id),
+        username: user.username,
+        display_name: user.display_name,
+        role: user.role,
+        active: Number(user.active) === 1,
+        email,
+        can_email: isValidEmail(email),
+      };
+    })
+    .filter((user) => user.can_email);
+}
+
+async function resolveContactTopicRecipients(env, topic = {}, users = null) {
+  const catalog = users || await listContactRecipientUsers(env, { activeOnly: false });
+  const byId = new Map(catalog.map((user) => [user.id, user]));
+  const ids = parseRecipientUserIds(topic.recipient_user_ids);
+  const recipients = [];
+  const emails = [];
+  const seen = new Set();
+  for (const id of ids) {
+    const user = byId.get(id);
+    if (!user || !user.active || !user.can_email) continue;
+    if (seen.has(user.email)) continue;
+    seen.add(user.email);
+    recipients.push(user);
+    emails.push(user.email);
+  }
+  // Legacy fallback: free-form email(s) until topics are remapped to CMS users.
+  if (!emails.length) {
+    for (const email of String(topic.email || '').split(/[,;]+/).map((value) => value.trim().toLowerCase())) {
+      if (!isValidEmail(email) || seen.has(email)) continue;
+      seen.add(email);
+      emails.push(email);
+      const matched = catalog.find((user) => user.email === email);
+      recipients.push(matched || {
+        id: null,
+        username: email,
+        display_name: email,
+        email,
+        can_email: true,
+        active: true,
+        legacy: true,
+      });
+    }
+  }
+  return { recipients, emails, recipient_user_ids: recipients.map((user) => user.id).filter(Boolean) };
+}
+
+export function serializeContactTopic(row = {}, recipientInfo = null) {
+  const recipient_user_ids = parseRecipientUserIds(row.recipient_user_ids);
+  const emails = recipientInfo?.emails
+    || String(row.email || '').split(/[,;]+/).map((value) => value.trim().toLowerCase()).filter((value) => isValidEmail(value));
+  const recipients = recipientInfo?.recipients || [];
+  return {
+    id: row.id,
+    label: row.label,
+    email: emails.join(', '),
+    emails,
+    recipient_user_ids: recipientInfo?.recipient_user_ids || recipient_user_ids,
+    recipients: recipients.map((user) => ({
+      id: user.id,
+      display_name: user.display_name,
+      username: user.username,
+      email: user.email,
+      legacy: Boolean(user.legacy),
+    })),
+    sort_order: Number(row.sort_order) || 0,
+    active: Number(row.active) === 1 ? 1 : 0,
+  };
+}
+
+async function migrateContactTopicRecipients(env) {
+  const rows = await env.DB.prepare('SELECT id, email, recipient_user_ids FROM contact_topics').all().catch(() => ({ results: [] }));
+  const users = await listContactRecipientUsers(env, { activeOnly: false });
+  const byEmail = new Map(users.map((user) => [user.email, user.id]));
+  for (const row of rows.results || []) {
+    const existingIds = parseRecipientUserIds(row.recipient_user_ids);
+    if (existingIds.length) continue;
+    const matched = [];
+    const seen = new Set();
+    for (const email of String(row.email || '').split(/[,;]+/).map((value) => value.trim().toLowerCase())) {
+      const id = byEmail.get(email);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      matched.push(id);
+    }
+    if (!matched.length) continue;
+    await env.DB.prepare('UPDATE contact_topics SET recipient_user_ids = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .bind(JSON.stringify(matched), row.id)
+      .run();
+  }
+}
+
 async function getContactTopics(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, label, email, sort_order, active FROM contact_topics ${where} ORDER BY label COLLATE NOCASE, id`).all();
-  return rows.results || [];
+  const rows = await env.DB.prepare(
+    `SELECT id, label, email, recipient_user_ids, sort_order, active FROM contact_topics ${where} ORDER BY label COLLATE NOCASE, id`,
+  ).all();
+  const users = await listContactRecipientUsers(env, { activeOnly: false });
+  return (rows.results || []).map((row) => serializeContactTopic(row, resolveContactTopicRecipientsSync(row, users)));
+}
+
+function resolveContactTopicRecipientsSync(topic = {}, users = []) {
+  // Sync helper used when the user catalog is already loaded.
+  const byId = new Map(users.map((user) => [user.id, user]));
+  const ids = parseRecipientUserIds(topic.recipient_user_ids);
+  const recipients = [];
+  const emails = [];
+  const seen = new Set();
+  for (const id of ids) {
+    const user = byId.get(id);
+    if (!user || !user.active || !user.can_email) continue;
+    if (seen.has(user.email)) continue;
+    seen.add(user.email);
+    recipients.push(user);
+    emails.push(user.email);
+  }
+  if (!emails.length) {
+    for (const email of String(topic.email || '').split(/[,;]+/).map((value) => value.trim().toLowerCase())) {
+      if (!isValidEmail(email) || seen.has(email)) continue;
+      seen.add(email);
+      emails.push(email);
+      const matched = users.find((user) => user.email === email);
+      recipients.push(matched || {
+        id: null,
+        username: email,
+        display_name: email,
+        email,
+        can_email: true,
+        active: true,
+        legacy: true,
+      });
+    }
+  }
+  return { recipients, emails, recipient_user_ids: recipients.map((user) => user.id).filter(Boolean) };
 }
 
 export function renderContactForm(topics = []) {
@@ -3802,6 +3995,10 @@ async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attach
 }
 
 async function sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName }) {
+  const recipients = (Array.isArray(to) ? to : [to])
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter((value) => isValidEmail(value));
+  if (!recipients.length) throw new Error('Mailchannels recipient email is invalid');
   const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
     method: 'POST',
     headers: {
@@ -3810,7 +4007,7 @@ async function sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail,
     },
     body: JSON.stringify({
       personalizations: [{
-        to: [{ email: to }],
+        to: recipients.map((email) => ({ email })),
         ...(replyTo ? { reply_to: [{ email: replyTo }] } : {}),
       }],
       from: { email: fromEmail, name: fromName },
@@ -3854,19 +4051,26 @@ async function sendViaFormSubmit({ to, replyTo, subject, text, name }) {
 async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
   const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
   const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
-  if (!isValidEmail(to)) throw new Error('Topic email is invalid');
+  const recipients = (Array.isArray(to) ? to : String(to || '').split(/[,;]+/))
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter((value, index, list) => isValidEmail(value) && list.indexOf(value) === index);
+  if (!recipients.length) throw new Error('Topic recipient email is invalid');
 
   const provider = resolveContactEmailProvider(env);
   if (provider === 'resend') {
     if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
-    return sendViaResend(env, { to, replyTo, subject, text, fromEmail, fromName });
+    return sendViaResend(env, { to: recipients, replyTo, subject, text, fromEmail, fromName });
   }
   if (provider === 'mailchannels') {
     if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address');
-    return sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName });
+    return sendViaMailchannels(env, { to: recipients, replyTo, subject, text, fromEmail, fromName });
   }
   if (provider === 'formsubmit') {
-    return sendViaFormSubmit({ to, replyTo, subject, text, name });
+    // FormSubmit accepts one inbox per request; fan out for multi-recipient topics.
+    for (const recipient of recipients) {
+      await sendViaFormSubmit({ to: recipient, replyTo, subject, text, name });
+    }
+    return { provider: 'formsubmit' };
   }
   throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
 }
@@ -5541,7 +5745,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));
   if (url.pathname === '/api/booster-members' && request.method === 'GET') return jsonResponse(await getBoosterMembers(env));
   if (url.pathname === '/api/contact/topics' && request.method === 'GET') {
-    const topics = (await getContactTopics(env)).filter((topic) => isValidEmail(topic.email));
+    const topics = (await getContactTopics(env)).filter((topic) => (topic.emails || []).length > 0);
     return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
   }
   if (url.pathname === '/api/contact' && request.method === 'POST') {
@@ -5559,15 +5763,17 @@ async function routeApi(request, env, url, ctx = null) {
     if (name.length > 120 || message.length > 5000) {
       return jsonResponse({ detail: 'Message is too long' }, 422);
     }
-    const topic = await env.DB.prepare('SELECT id, label, email, active FROM contact_topics WHERE id = ?').bind(topicId).first();
-    if (!topic || !topic.active) return jsonResponse({ detail: 'Selected topic is unavailable' }, 422);
-    if (!isValidEmail(topic.email)) {
+    const topicRow = await env.DB.prepare('SELECT id, label, email, recipient_user_ids, active FROM contact_topics WHERE id = ?').bind(topicId).first();
+    if (!topicRow || !topicRow.active) return jsonResponse({ detail: 'Selected topic is unavailable' }, 422);
+    const recipientInfo = await resolveContactTopicRecipients(env, topicRow);
+    if (!recipientInfo.emails.length) {
       return jsonResponse({ detail: 'This topic is not configured for delivery yet. Please try another topic or email the band office directly.' }, 503);
     }
-    const subject = `EFHS Band contact: ${topic.label}`;
+    const subject = `EFHS Band contact: ${topicRow.label}`;
     const text = [
-      `Topic: ${topic.label}`,
+      `Topic: ${topicRow.label}`,
       `From: ${name} <${email}>`,
+      `Delivered to: ${recipientInfo.emails.join(', ')}`,
       '',
       message,
       '',
@@ -5576,14 +5782,14 @@ async function routeApi(request, env, url, ctx = null) {
     let delivered = 0;
     let deliveryError = '';
     try {
-      await sendContactEmail(env, { to: topic.email, replyTo: email, subject, text, name });
+      await sendContactEmail(env, { to: recipientInfo.emails, replyTo: email, subject, text, name });
       delivered = 1;
     } catch (error) {
       deliveryError = String(error?.message || error || 'Delivery failed');
     }
     await env.DB.prepare(
       'INSERT INTO contact_messages (topic_id, topic_label, to_email, name, email, message, delivered, delivery_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).bind(topic.id, topic.label, topic.email, name, email, message, delivered, deliveryError).run();
+    ).bind(topicRow.id, topicRow.label, recipientInfo.emails.join(', '), name, email, message, delivered, deliveryError).run();
     if (!delivered) {
       return jsonResponse({
         ok: true,
@@ -6366,9 +6572,26 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const topic = normalizeContactTopicPayload(await request.json());
     if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
-    if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
-    const result = await env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email, topic.sort_order, topic.active).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(result.meta.last_row_id).first());
+    if (!topic.recipient_user_ids.length) {
+      return jsonResponse({ detail: 'Select at least one CMS user to receive this topic' }, 422);
+    }
+    const recipientInfo = await resolveContactTopicRecipients(env, topic);
+    if (!recipientInfo.emails.length) {
+      return jsonResponse({ detail: 'Selected users need a valid email login username' }, 422);
+    }
+    const result = await env.DB.prepare(
+      'INSERT INTO contact_topics (label, email, recipient_user_ids, sort_order, active) VALUES (?, ?, ?, ?, ?)',
+    ).bind(
+      topic.label,
+      recipientInfo.emails.join(', '),
+      JSON.stringify(recipientInfo.recipient_user_ids),
+      topic.sort_order,
+      topic.active,
+    ).run();
+    const created = await env.DB.prepare('SELECT id, label, email, recipient_user_ids, sort_order, active FROM contact_topics WHERE id = ?')
+      .bind(result.meta.last_row_id)
+      .first();
+    return jsonResponse(serializeContactTopic(created, await resolveContactTopicRecipients(env, created)));
   }
   const contactTopicMatch = url.pathname.match(/^\/api\/admin\/contact\/topics\/(\d+)$/);
   if (contactTopicMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -6386,9 +6609,25 @@ async function routeApi(request, env, url, ctx = null) {
     if (!existing) return jsonResponse({ detail: 'Topic not found' }, 404);
     const topic = normalizeContactTopicPayload(await request.json(), existing);
     if (!topic.label) return jsonResponse({ detail: 'Topic label is required' }, 422);
-    if (!isValidEmail(topic.email)) return jsonResponse({ detail: 'A valid delivery email is required' }, 422);
-    await env.DB.prepare('UPDATE contact_topics SET label = ?, email = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(topic.label, topic.email, topic.sort_order, topic.active, id).run();
-    return jsonResponse(await env.DB.prepare('SELECT id, label, email, sort_order, active FROM contact_topics WHERE id = ?').bind(id).first());
+    if (!topic.recipient_user_ids.length) {
+      return jsonResponse({ detail: 'Select at least one CMS user to receive this topic' }, 422);
+    }
+    const recipientInfo = await resolveContactTopicRecipients(env, topic);
+    if (!recipientInfo.emails.length) {
+      return jsonResponse({ detail: 'Selected users need a valid email login username' }, 422);
+    }
+    await env.DB.prepare(
+      'UPDATE contact_topics SET label = ?, email = ?, recipient_user_ids = ?, sort_order = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(
+      topic.label,
+      recipientInfo.emails.join(', '),
+      JSON.stringify(recipientInfo.recipient_user_ids),
+      topic.sort_order,
+      topic.active,
+      id,
+    ).run();
+    const updated = await env.DB.prepare('SELECT id, label, email, recipient_user_ids, sort_order, active FROM contact_topics WHERE id = ?').bind(id).first();
+    return jsonResponse(serializeContactTopic(updated, await resolveContactTopicRecipients(env, updated)));
   }
   if (url.pathname === '/api/admin/contact/delivery' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
@@ -7479,19 +7718,23 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-contact" class="cms-panel">
-<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and assign the email each topic should deliver to.</p><p class="notice" id="contact-delivery-status">Checking email delivery…</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
+<div class="panel-head"><div><p class="kicker">Connect</p><h1>Contact Form</h1><p>Create topics for the public form and choose which CMS users receive each inquiry. Multiple users can share a topic.</p><p class="notice" id="contact-delivery-status">Checking email delivery…</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-contact-page" data-edit-shortcut="contact">Edit page text</button><button class="btn primary" type="button" id="new-contact-topic">Add Topic</button></div></div>
 <div class="editor-layout">
 <form id="contact-topic-form" class="admin-card stack">
 <input type="hidden" name="id">
 <div class="form-grid">
-<label>Topic label<input name="label" required maxlength="120" placeholder="General question"></label>
-<label>Send messages to<input name="email" type="email" required maxlength="200" placeholder="band@example.com"></label>
+<label class="full">Topic label<input name="label" required maxlength="120" placeholder="General question"></label>
 <label class="checkline"><input name="active" type="checkbox" checked> Active on contact form</label>
 </div>
+<fieldset class="contact-topic-recipients">
+  <legend>Deliver messages to</legend>
+  <p class="muted">Select one or more CMS users. Their login email receives the inquiry for this topic.</p>
+  <div id="contact-topic-recipient-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
 <button class="btn primary" type="submit">Save Topic</button>
 <p class="status" id="contact-topic-status"></p>
 </form>
-<div class="admin-card"><h2>Topics</h2><p class="muted">Topics are listed A–Z. Only active topics with a valid delivery email appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Topics</h2><p class="muted">Topics are listed A–Z. Only active topics with at least one CMS recipient appear on the public contact form.</p><div id="contact-topics-list" class="admin-list"></div></div>
 <div class="admin-card"><h2>Recent Messages</h2><p class="muted">Messages are stored even if email delivery is unavailable.</p><div id="contact-messages-list" class="admin-list"></div></div>
 </div>
 </section>
