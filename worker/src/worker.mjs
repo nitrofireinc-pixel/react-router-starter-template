@@ -3977,10 +3977,16 @@ export async function parseBoostersMinutesDocx(arrayBuffer, filename = '') {
   };
 }
 
-export function minutesEditableUntil(createdAt) {
-  const created = new Date(createdAt || 0);
-  if (Number.isNaN(created.getTime())) return null;
-  return new Date(created.getTime() + (MINUTES_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+export function minutesEditableUntil(meetingDate) {
+  // 10-day secretary edit window starts on the meeting date (not upload/submit time).
+  const iso = parseMeetingDateInput(meetingDate) || (
+    String(meetingDate || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(meetingDate) : ''
+  );
+  if (!iso) return null;
+  const [year, month, day] = iso.split('-').map(Number);
+  const start = Date.UTC(year, month - 1, day);
+  if (Number.isNaN(start)) return null;
+  return new Date(start + (MINUTES_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
 }
 
 export function canViewMeetingMinutes(user) {
@@ -3998,7 +4004,7 @@ export function canEditMeetingMinutes(user, record, now = new Date()) {
   if (!user || !record) return false;
   if (!canManageMeetingMinutes(user)) return false;
   if (isSuperAdmin(user)) return true;
-  const until = minutesEditableUntil(record.created_at);
+  const until = minutesEditableUntil(record.meeting_date);
   if (!until) return false;
   return now.getTime() <= until.getTime();
 }
@@ -4158,7 +4164,7 @@ function serializeMinutesRow(row, user = null) {
     created_by_name: row.created_by_name || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
-    editable_until: minutesEditableUntil(row.created_at)?.toISOString() || null,
+    editable_until: minutesEditableUntil(row.meeting_date)?.toISOString() || null,
     can_view: canViewMeetingMinutes(user),
     can_edit: canEditMeetingMinutes(user, row),
     can_manage: canManageMeetingMinutes(user),
@@ -5777,7 +5783,7 @@ async function handleApi(request, env, url) {
       return jsonResponse({ ok: true });
     }
     if (!canEditMeetingMinutes(auth.user, existing)) {
-      return jsonResponse({ detail: 'Meeting minutes can only be edited by the secretary within 10 days of submission' }, 403);
+      return jsonResponse({ detail: 'Meeting minutes can only be edited by the secretary within 10 days of the meeting date' }, 403);
     }
     let payload;
     try {
