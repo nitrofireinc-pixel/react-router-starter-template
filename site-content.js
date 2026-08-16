@@ -291,6 +291,19 @@ async function maybeShowHomepageSponsorAd() {
   }
 }
 
+function ensurePublicBrandMark() {
+  document.querySelectorAll('header.site-header a.brand').forEach((brand) => {
+    const logo = brand.querySelector('img:not(.brand-mark)');
+    if (logo) logo.classList.add('brand-logo');
+    if (brand.querySelector('img.brand-mark')) return;
+    const mark = document.createElement('img');
+    mark.className = 'brand-mark';
+    mark.src = '/assets/efhs-blue-regiment-mark.png';
+    mark.alt = 'East Forsyth Blue Regiment';
+    brand.appendChild(mark);
+  });
+}
+
 function ensureSiteChrome(header, mount) {
   if (!header) return null;
   let chrome = document.querySelector('[data-site-chrome]');
@@ -494,6 +507,7 @@ async function loadPublicContent() {
       const plainTitle = String(site.title).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       if (plainTitle) document.title = document.title.replace('East Forsyth Band', plainTitle);
     }
+    ensurePublicBrandMark();
   }
 
   document.querySelectorAll('[data-events]').forEach(container => {
@@ -1634,6 +1648,7 @@ function bindDonateButtons(root = document) {
   });
 }
 
+ensurePublicBrandMark();
 hydrateMarqueeFromCache();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
