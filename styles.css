@@ -692,7 +692,8 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   .image-admin-shell .panel-head > .btn,
   .image-admin-shell .panel-actions .btn,
   .image-admin-shell .page-settings-actions .btn,
-  .image-admin-shell .row-actions .btn{
+  .image-admin-shell .row-actions .btn,
+  .image-admin-shell .events-month-nav .btn{
     width:auto;
   }
   .image-admin-shell .page-settings-actions,
@@ -1336,27 +1337,31 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 }
 .events-list-head h2{margin:0;color:#10233c}
 .events-month-nav{
-  display:flex;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
   align-items:center;
-  justify-content:space-between;
   gap:10px;
   padding:10px 12px;
   border:1px solid #e1e8f1;
   border-radius:16px;
   background:#f7f9fc;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
 }
 .events-month-current{
   display:grid;
   justify-items:center;
   gap:6px;
   min-width:0;
-  flex:1 1 auto;
   text-align:center;
 }
 .events-month-current b{
   color:#10233c;
   font-size:1.05rem;
   letter-spacing:-.02em;
+  line-height:1.2;
+  overflow-wrap:anywhere;
 }
 .events-month-btn{
   min-width:44px;
@@ -1364,17 +1369,29 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   padding:8px 14px;
   font-size:1.15rem;
   line-height:1;
+  width:auto;
   flex:0 0 auto;
 }
 .events-month-today{
   min-height:32px;
   padding:6px 12px;
   font-size:.78rem;
+  width:auto;
+  white-space:nowrap;
 }
 @media(max-width:720px){
-  .events-month-nav{gap:8px;padding:10px}
-  .events-month-current b{font-size:.98rem}
-  .events-month-btn{min-width:40px;min-height:38px}
+  .events-month-nav{gap:8px;padding:8px 10px}
+  .events-month-current b{font-size:.95rem}
+  .events-month-btn{
+    min-width:40px;
+    min-height:38px;
+    padding:8px 12px;
+  }
+  .events-month-today{
+    min-height:30px;
+    padding:5px 10px;
+    font-size:.74rem;
+  }
 }
 .event-admin-title{
   display:block;
