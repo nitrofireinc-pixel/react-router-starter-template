@@ -448,7 +448,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=fix-calendar-month-20260818/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=fix-calendar-deploy-20260818/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1334,7 +1334,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /fix-calendar-month-20260818/);
+  assert.match(workerSrc, /fix-calendar-deploy-20260818/);
   assert.match(workerSrc, /\/api\/calendar-events/);
   assert.match(workerSrc, /ensureCalendarMonthMount/);
   assert.match(workerSrc, /canAccessWebsiteGuide/);
@@ -1389,6 +1389,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(styles, /is-minutes-viewing/);
   assert.match(styles, /minutes-mobile-viewing/);
   assert.match(styles, /\.events-month-nav/);
+  assert.match(styles, /events-month-nav \.btn/);
+  assert.match(styles, /grid-template-columns:auto minmax\(0,1fr\) auto/);
   assert.match(styles, /\.security-log-entry/);
   assert.match(styles, /\.dash-card-security/);
   assert.match(styles, /order:9999/);
