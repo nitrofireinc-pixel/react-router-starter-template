@@ -573,6 +573,35 @@ function showCalendarDayToast(title, dayEvents) {
   window.setTimeout(() => root.querySelector('[data-calendar-day-close]')?.focus(), 40);
 }
 
+function eventCalendarParts(event) {
+  const year = eventYearForCalendar(event);
+  const monthIndex = MONTH_CALENDAR_LABELS.indexOf(String(event?.date_label || '').trim());
+  const day = eventDayNumber(event);
+  if (!Number.isFinite(year) || monthIndex < 0 || day == null) return null;
+  return { year, monthIndex, day };
+}
+
+function calendarDaySortKey(year, monthIndex, day) {
+  return (Number(year) * 10000) + ((Number(monthIndex) + 1) * 100) + Number(day);
+}
+
+/** Pick today if it has dated events; otherwise the soonest later day with events. */
+function findNextDayWithEvents(allEvents, from = getPublicZonedYmd()) {
+  const fromKey = calendarDaySortKey(from.year, from.month - 1, from.day);
+  const buckets = new Map();
+  for (const event of Array.isArray(allEvents) ? allEvents : []) {
+    const parts = eventCalendarParts(event);
+    if (!parts) continue;
+    const key = calendarDaySortKey(parts.year, parts.monthIndex, parts.day);
+    if (key < fromKey) continue;
+    if (!buckets.has(key)) buckets.set(key, { ...parts, events: [] });
+    buckets.get(key).events.push(event);
+  }
+  const keys = [...buckets.keys()].sort((a, b) => a - b);
+  if (!keys.length) return null;
+  return buckets.get(keys[0]);
+}
+
 function renderMonthCalendar(container, allEvents, view) {
   const { year, monthIndex } = view;
   const today = getPublicZonedYmd();
@@ -680,15 +709,26 @@ function renderMonthCalendar(container, allEvents, view) {
   });
 }
 
+function autoOpenCalendarDayToast(container, allEvents) {
+  if (!container || container._calendarAutoOpened) return;
+  container._calendarAutoOpened = true;
+  const target = findNextDayWithEvents(allEvents);
+  if (!target?.events?.length) return;
+  const title = `${MONTH_CALENDAR_NAMES[target.monthIndex]} ${target.day}, ${target.year}`;
+  window.setTimeout(() => showCalendarDayToast(title, target.events), 60);
+}
+
 function initMonthCalendars(allEvents) {
   const today = getPublicZonedYmd();
+  const nextDay = findNextDayWithEvents(allEvents, today);
   document.querySelectorAll('[data-month-calendar]').forEach((container) => {
     const view = container._calendarView || {
-      year: today.year,
-      monthIndex: today.month - 1,
+      year: nextDay?.year ?? today.year,
+      monthIndex: nextDay?.monthIndex ?? (today.month - 1),
     };
     container._calendarView = view;
     renderMonthCalendar(container, allEvents, view);
+    autoOpenCalendarDayToast(container, allEvents);
   });
 }
 
