@@ -772,17 +772,146 @@ async function loadPublicContent() {
     `).join('');
   });
 
-  document.querySelectorAll('[data-photo-gallery]').forEach(container => {
-    if (!photos.length) return;
-    container.innerHTML = photos.map(photo => `
-      <figure class="gallery-item"><img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text)}"><figcaption>${formatInlineRichText(photo.caption || photo.alt_text)}</figcaption></figure>
-    `).join('');
+  document.querySelectorAll('[data-photo-gallery]').forEach((container) => {
+    renderPhotoGallery(container, photos);
   });
+  bindPhotoGalleries();
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
   bindDonateButtons();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
+}
+
+function sortPhotosByRecent(photos = []) {
+  return [...(Array.isArray(photos) ? photos : [])].sort((a, b) => {
+    const aTime = Date.parse(a?.created_at || '') || 0;
+    const bTime = Date.parse(b?.created_at || '') || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+}
+
+function isBrandGalleryPlaceholder(src = '') {
+  const value = String(src || '').toLowerCase();
+  return /efhs-photo-[12]\.png|efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/.test(value);
+}
+
+function renderPhotoGallery(container, photos = []) {
+  if (!container) return;
+  // Drop brand/logo placeholders immediately so they never flash on Gallery.
+  container.querySelectorAll('.gallery-item img').forEach((img) => {
+    if (isBrandGalleryPlaceholder(img.getAttribute('src') || img.src)) {
+      img.closest('.gallery-item')?.remove();
+    }
+  });
+  let list = Array.isArray(photos) ? [...photos] : [];
+  const sortMode = String(container.dataset.sort || '').trim().toLowerCase();
+  if (sortMode === 'recent') list = sortPhotosByRecent(list);
+  const rawLimit = container.dataset.limit;
+  if (rawLimit !== undefined && rawLimit !== '') {
+    const limit = Math.max(0, Number(rawLimit) || 0);
+    list = list.slice(0, limit);
+  }
+  if (!list.length) {
+    container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
+    return;
+  }
+  container.innerHTML = list.map((photo) => `
+    <figure class="gallery-item" data-photo-open>
+      <button type="button" class="gallery-item-trigger" aria-label="View ${escapeHtml(photo.alt_text || photo.caption || 'photo')}">
+        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" draggable="false">
+      </button>
+      <figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>
+    </figure>
+  `).join('');
+}
+
+function protectPhotoMedia(root = document) {
+  const block = (event) => {
+    event.preventDefault();
+    return false;
+  };
+  root.querySelectorAll('.gallery-item img, .photo-lightbox-image, .photo-lightbox-frame').forEach((el) => {
+    if (el.dataset.photoProtected === '1') return;
+    el.dataset.photoProtected = '1';
+    el.setAttribute('draggable', 'false');
+    el.addEventListener('contextmenu', block);
+    el.addEventListener('dragstart', block);
+  });
+}
+
+function closePhotoLightbox() {
+  const modal = document.querySelector('.photo-lightbox');
+  if (!modal) return;
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  document.body.classList.remove('photo-lightbox-open');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+  }, 280);
+}
+
+function openPhotoLightbox({ src, alt = '', caption = '' } = {}) {
+  if (!src) return;
+  closePhotoLightbox();
+  const modal = document.createElement('aside');
+  modal.className = 'photo-lightbox';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', caption || alt || 'Photo');
+  modal.innerHTML = `
+    <button type="button" class="photo-lightbox-backdrop" aria-label="Close photo"></button>
+    <div class="photo-lightbox-panel">
+      <button type="button" class="photo-lightbox-close" aria-label="Close photo">×</button>
+      <div class="photo-lightbox-frame">
+        <img class="photo-lightbox-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt || caption || 'Band photo')}" draggable="false">
+      </div>
+      ${caption || alt ? `<p class="photo-lightbox-caption">${escapeHtml(caption || alt)}</p>` : ''}
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add('photo-lightbox-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+  protectPhotoMedia(modal);
+  modal.querySelector('.photo-lightbox-close')?.addEventListener('click', closePhotoLightbox);
+  modal.querySelector('.photo-lightbox-backdrop')?.addEventListener('click', closePhotoLightbox);
+  modal.querySelector('.photo-lightbox-close')?.focus();
+}
+
+function bindPhotoGalleries(root = document) {
+  if (!window.__efPhotoLightboxKeysBound) {
+    window.__efPhotoLightboxKeysBound = true;
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && document.querySelector('.photo-lightbox')) {
+        closePhotoLightbox();
+      }
+    });
+    document.addEventListener('contextmenu', (event) => {
+      if (event.target?.closest?.('.gallery-item, .photo-lightbox')) {
+        event.preventDefault();
+      }
+    });
+  }
+  root.querySelectorAll('[data-photo-gallery]').forEach((container) => {
+    if (container.dataset.photoBound === '1') return;
+    container.dataset.photoBound = '1';
+    container.addEventListener('click', (event) => {
+      const trigger = event.target.closest?.('[data-photo-open], .gallery-item-trigger');
+      if (!trigger || !container.contains(trigger)) return;
+      const item = trigger.closest('.gallery-item') || trigger;
+      const img = item.querySelector('img');
+      if (!img?.src) return;
+      event.preventDefault();
+      const caption = item.querySelector('figcaption')?.textContent?.trim() || '';
+      openPhotoLightbox({
+        src: img.currentSrc || img.src,
+        alt: img.alt || '',
+        caption,
+      });
+    });
+  });
+  protectPhotoMedia(root);
 }
 
 function buildContactFormHtml(topics = []) {
