@@ -209,7 +209,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'email-list-subscribe-qr-20260820';
+const ASSET_VERSION = 'branded-qr-20260820';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -9611,6 +9611,14 @@ export default {
     if (url.pathname === '/subscribe' || url.pathname === '/subscribe/') {
       const target = new URL('/calendar.html', url.origin);
       target.searchParams.set('subscribe', '1');
+      return Response.redirect(target.toString(), 302);
+    }
+    if (url.pathname === '/sponsor' || url.pathname === '/sponsor/') {
+      return Response.redirect(new URL('/become-a-sponsor.html', url.origin).toString(), 302);
+    }
+    if (url.pathname === '/donate' || url.pathname === '/donate/') {
+      const target = new URL('/sponsors.html', url.origin);
+      target.searchParams.set('donate', '1');
       return Response.redirect(target.toString(), 302);
     }
     if (url.pathname === '/admin/login') return handleLogin(request, env);

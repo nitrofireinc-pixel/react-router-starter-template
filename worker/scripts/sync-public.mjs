@@ -20,6 +20,7 @@ for (const name of [
   'fundraising.html',
   'sponsors.html',
   'become-a-sponsor.html',
+  'qr.html',
   'sponsor-payment-complete.html',
   'directors.html',
   'ensembles.html',

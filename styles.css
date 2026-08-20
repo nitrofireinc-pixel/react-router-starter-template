@@ -2133,6 +2133,51 @@ body.sponsor-map-open{overflow:hidden}
 .email-list-signup-qr:focus-visible{
   color:var(--red);
 }
+.qr-code-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:36px 28px;
+  align-items:start;
+  justify-items:center;
+  padding:12px 0 28px;
+}
+.qr-code-card{
+  margin:0;
+  display:grid;
+  gap:14px;
+  justify-items:center;
+  text-align:center;
+}
+.qr-code-card a{
+  display:block;
+  line-height:0;
+}
+.qr-code-card img{
+  width:min(240px, 70vw);
+  height:auto;
+  background:#fff;
+  border:1px solid var(--line);
+  padding:10px;
+}
+.qr-code-card figcaption{
+  margin:0;
+  color:var(--navy);
+  font-weight:900;
+  font-size:clamp(1.35rem, 2.6vw, 1.85rem);
+  letter-spacing:-.03em;
+  line-height:1.1;
+}
+@media (max-width:760px){
+  .qr-code-grid{grid-template-columns:1fr; gap:28px}
+}
+@media print{
+  .utility,
+  .site-header,
+  .footer,
+  .page-hero{display:none!important}
+  .qr-code-grid{padding-top:24px}
+  .qr-code-card img{border-color:#ccc}
+}
 .email-list-topics{
   border:0;
   margin:0;
