@@ -5,8 +5,9 @@ account_id = "d4e69b2379a7e3c86020154cf70a1d07"
 workers_dev = true
 
 [assets]
-directory = "./assets"
+directory = "./worker/public"
 binding = "ASSETS"
+run_worker_first = true
 
 [vars]
 EFBAND_ADMIN_USERNAME = "admin@efhsband.org"
