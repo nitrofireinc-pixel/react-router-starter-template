@@ -209,7 +209,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'email-list-subscribe-once-20260820';
+const ASSET_VERSION = 'email-list-subscribe-qr-20260820';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -724,6 +724,7 @@ function randomEmailListToken(bytes = 24) {
 
 export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'Get email updates', detail = 'Join the band email list. Reply STOP to any message to unsubscribe.', buttonLabel = 'Subscribe' } = {}) {
   const topicList = normalizeEmailListTopics(topics, { defaultAll: true }).join(',');
+  const qrSrc = `/assets/email-list-subscribe-qr.png?v=${ASSET_VERSION}`;
   return `<section class="content email-list-signup" data-email-list-signup data-email-list-topics="${escapeAttr(topicList)}">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
@@ -732,6 +733,10 @@ export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'G
     </div>
     <div class="email-list-signup-action">
       <button type="button" class="btn primary" data-email-list-open>${escapeHtml(buttonLabel)}</button>
+      <a class="email-list-signup-qr" href="/subscribe" aria-label="Open email subscribe form">
+        <img src="${escapeAttr(qrSrc)}" width="96" height="96" alt="QR code that opens email subscribe">
+        <span>Scan to subscribe</span>
+      </a>
     </div>
   </div>
 </section>`;
@@ -739,7 +744,9 @@ export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'G
 
 export function ensureEmailListSignupSlot(html, options = {}) {
   const source = String(html || '');
-  if (/data-email-list-open/i.test(source) && /data-email-list-signup/i.test(source)) return source;
+  if (/data-email-list-open/i.test(source) && /data-email-list-signup/i.test(source) && /email-list-signup-qr/i.test(source)) {
+    return source;
+  }
   const stripped = source.replace(/<section\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/section>/gi, '');
   return `${stripped}${renderEmailListSignup(options)}`;
 }
@@ -9601,6 +9608,11 @@ export default {
       }
     }
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
+    if (url.pathname === '/subscribe' || url.pathname === '/subscribe/') {
+      const target = new URL('/calendar.html', url.origin);
+      target.searchParams.set('subscribe', '1');
+      return Response.redirect(target.toString(), 302);
+    }
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).

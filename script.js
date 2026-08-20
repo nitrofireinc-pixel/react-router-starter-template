@@ -890,4 +890,48 @@ function syncAddToHomeButtonState(button) {
     button.dataset.boundEmailListOpen = '1';
     button.addEventListener('click', () => openEmailListModal(button));
   });
+
+  function shouldAutoOpenSubscribe() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('subscribe') === '1' || params.get('email-subscribe') === '1') return true;
+      const hash = String(window.location.hash || '').replace(/^#/, '').toLowerCase();
+      return hash === 'subscribe' || hash === 'email-subscribe';
+    } catch {
+      return false;
+    }
+  }
+
+  function clearSubscribeDeepLink() {
+    try {
+      const url = new URL(window.location.href);
+      let changed = false;
+      if (url.searchParams.has('subscribe')) {
+        url.searchParams.delete('subscribe');
+        changed = true;
+      }
+      if (url.searchParams.has('email-subscribe')) {
+        url.searchParams.delete('email-subscribe');
+        changed = true;
+      }
+      if (/^(email-)?subscribe$/i.test(url.hash.replace(/^#/, ''))) {
+        url.hash = '';
+        changed = true;
+      }
+      if (changed) {
+        const next = `${url.pathname}${url.search}${url.hash}`;
+        window.history.replaceState({}, '', next || url.pathname);
+      }
+    } catch {
+      // Ignore history cleanup failures.
+    }
+  }
+
+  if (shouldAutoOpenSubscribe()) {
+    const trigger = document.querySelector('[data-email-list-open]');
+    if (trigger) {
+      clearSubscribeDeepLink();
+      window.setTimeout(() => openEmailListModal(trigger), 120);
+    }
+  }
 })();

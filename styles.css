@@ -2106,6 +2106,32 @@ body.sponsor-map-open{overflow:hidden}
 }
 .email-list-signup-action{
   flex:0 0 auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:16px 20px;
+}
+.email-list-signup-qr{
+  display:inline-grid;
+  justify-items:center;
+  gap:6px;
+  text-decoration:none;
+  color:var(--navy);
+  font-weight:800;
+  font-size:.78rem;
+  letter-spacing:.02em;
+}
+.email-list-signup-qr img{
+  width:96px;
+  height:96px;
+  display:block;
+  background:#fff;
+  border:1px solid var(--line);
+  padding:6px;
+}
+.email-list-signup-qr:hover,
+.email-list-signup-qr:focus-visible{
+  color:var(--red);
 }
 .email-list-topics{
   border:0;
