@@ -2073,6 +2073,49 @@ body.sponsor-map-open{overflow:hidden}
   outline-offset:2px;
 }
 
+.email-list-signup{
+  padding-top:28px;
+  padding-bottom:64px;
+  background:
+    linear-gradient(180deg, rgba(0,33,66,.04), transparent 42%),
+    var(--soft);
+}
+.email-list-signup-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
+  gap:28px;
+  align-items:end;
+  border-top:1px solid var(--line);
+  padding-top:28px;
+}
+.email-list-signup-copy h2{
+  margin:0 0 8px;
+  color:var(--navy);
+  font-size:clamp(1.45rem,2.4vw,2rem);
+  letter-spacing:-.03em;
+}
+.email-list-signup-copy p{
+  margin:0;
+  color:var(--muted);
+  max-width:36rem;
+}
+.email-list-signup-form{
+  display:grid;
+  gap:12px;
+}
+.email-list-topics{
+  border:0;
+  margin:0;
+  padding:0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px 18px;
+}
+.email-list-signup-form .status{margin:0;min-height:1.2em}
+@media (max-width:760px){
+  .email-list-signup-inner{grid-template-columns:1fr;align-items:start}
+}
+
 /* Public maintenance landing */
 .maintenance-body{
   min-height:100vh;

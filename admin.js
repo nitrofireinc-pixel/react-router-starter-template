@@ -523,6 +523,8 @@ function formPayload(form) {
   if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
   const boostersDuesEnabled = formControl(form, 'boosters_dues_enabled');
   if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
+  const notifyEmail = formControl(form, 'notify_email_subscribers');
+  if (notifyEmail) payload.notify_email_subscribers = Boolean(notifyEmail.checked);
   return payload;
 }
 
@@ -2754,6 +2756,12 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (galleryHint) galleryHint.hidden = page.slug !== 'gallery';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
     if (ensemblesHint) ensemblesHint.hidden = page.slug !== 'ensembles';
+    const fundraisingNotify = form.querySelector('[data-fundraising-notify]');
+    if (fundraisingNotify) {
+      fundraisingNotify.hidden = page.slug !== 'fundraising';
+      const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
+      if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
+    }
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     syncPageSettingsAccess();
@@ -4379,6 +4387,8 @@ function renderEventsList() {
     formControl(form, 'event_year').value = String(event.event_year || defaultEventYear());
     setEventBoosterPlacement(form, event.show_on_boosters);
     setEventRepeatFields(form, event);
+    const notifyEmail = formControl(form, 'notify_email_subscribers');
+    if (notifyEmail) notifyEmail.checked = true;
     if (status) status.textContent = `Editing “${plainTextFromHtml(event.title) || 'event'}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     form.querySelector('[data-rich-input="title"]')?.focus();
@@ -6174,6 +6184,8 @@ function bindForms() {
       formControl(form, 'event_year').value = String(defaultEventYear());
       setEventBoosterPlacement(form, 0);
       resetEventRepeatFields(form);
+      const notifyEmail = formControl(form, 'notify_email_subscribers');
+      if (notifyEmail) notifyEmail.checked = true;
       await loadEvents();
     } catch (error) {
       if (status) status.textContent = `Could not save event: ${error.message}`;
@@ -6207,6 +6219,8 @@ function bindForms() {
     formControl(form, 'event_year').value = String(defaultEventYear());
     setEventBoosterPlacement(form, 0);
     resetEventRepeatFields(form);
+    const notifyEmail = formControl(form, 'notify_email_subscribers');
+    if (notifyEmail) notifyEmail.checked = true;
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
     form.querySelector('[data-rich-input="title"]')?.focus();

@@ -714,3 +714,37 @@ function syncAddToHomeButtonState(button) {
     showAddToHomeSheet({ os, canInstall: Boolean(window.__efhsDeferredInstallPrompt) });
   });
 })();
+
+(function bindEmailListSignupForms() {
+  document.querySelectorAll('[data-email-list-form]').forEach((form) => {
+    if (form.dataset.boundEmailList === '1') return;
+    form.dataset.boundEmailList = '1';
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = form.querySelector('[data-email-list-status]');
+      const email = String(new FormData(form).get('email') || '').trim();
+      const topics = [...form.querySelectorAll('input[name="topics"]:checked')].map((input) => input.value);
+      if (status) status.textContent = 'Subscribing…';
+      try {
+        const response = await fetch('/api/email-subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            topics,
+            source: form.closest('[data-email-list-signup]')?.dataset.source || location.pathname || 'website',
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Could not subscribe');
+        if (status) status.textContent = payload.detail || 'You are subscribed.';
+        form.reset();
+        form.querySelectorAll('input[name="topics"]').forEach((input) => {
+          input.checked = true;
+        });
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not subscribe.';
+      }
+    });
+  });
+})();
