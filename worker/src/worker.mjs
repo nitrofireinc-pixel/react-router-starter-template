@@ -807,6 +807,69 @@ async function listActiveEmailSubscribers(env, topic = '') {
   });
 }
 
+export function buildEmailListWelcomeMessage({ topics = EMAIL_LIST_TOPICS, unsubscribeToken = '' } = {}) {
+  const siteUrl = 'https://efhsband.org';
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: true });
+  const topicLabels = topicList.map((topic) => (topic === 'fundraising' ? 'fundraising' : 'calendar'));
+  const topicPhrase = topicLabels.length === 2
+    ? 'calendar and fundraising updates'
+    : `${topicLabels[0] || 'band'} updates`;
+  const unsubUrl = unsubscribeToken
+    ? `${siteUrl}/api/email-unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : `${siteUrl}/calendar.html`;
+  return {
+    subject: 'Welcome to East Forsyth Band email updates',
+    text: [
+      'You are subscribed to East Forsyth Band email updates.',
+      '',
+      `You will receive ${topicPhrase} from this list.`,
+      '',
+      'How to unsubscribe:',
+      `- Reply STOP to this email (or any list email), or`,
+      `- Open this link: ${unsubUrl}`,
+      '',
+      `Calendar: ${siteUrl}/calendar.html`,
+      `Fundraising: ${siteUrl}/fundraising.html`,
+      '',
+      'East Forsyth Band Boosters',
+    ].join('\n'),
+    html: [
+      '<p><strong>You are subscribed to East Forsyth Band email updates.</strong></p>',
+      `<p>You will receive ${escapeHtml(topicPhrase)} from this list.</p>`,
+      '<p><strong>How to unsubscribe</strong></p>',
+      '<ul>',
+      `<li>Reply <strong>STOP</strong> to this email (or any list email), or</li>`,
+      `<li><a href="${escapeAttr(unsubUrl)}">Unsubscribe with one click</a></li>`,
+      '</ul>',
+      `<p><a href="${siteUrl}/calendar.html">Calendar</a> · <a href="${siteUrl}/fundraising.html">Fundraising</a></p>`,
+      '<p>East Forsyth Band Boosters</p>',
+    ].join(''),
+  };
+}
+
+export async function sendEmailListWelcome(env, { email, topics, unsubscribeToken } = {}) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, skipped: true, detail: 'RESEND_API_KEY is not configured' };
+  }
+  const to = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(to)) return { ok: false, detail: 'Recipient email is invalid' };
+  const message = buildEmailListWelcomeMessage({ topics, unsubscribeToken });
+  try {
+    await sendViaResend(env, {
+      to,
+      replyTo: EMAIL_LIST_REPLY_TO,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Welcome email failed' };
+  }
+}
+
 export function buildEmailListUpdateMessage({ topic = 'calendar', action = 'updated', event = null, pageTitle = '' } = {}) {
   const siteUrl = 'https://efhsband.org';
   if (topic === 'fundraising') {
@@ -6548,6 +6611,16 @@ async function routeApi(request, env, url, ctx = null) {
       source: payload.source || 'website',
     });
     if (!result.ok) return jsonResponse({ detail: result.detail }, 422);
+    // Best-effort welcome mail for the subscriber only — do not fail the signup.
+    try {
+      await sendEmailListWelcome(env, {
+        email: result.email,
+        topics: result.topics,
+        unsubscribeToken: result.unsubscribe_token,
+      });
+    } catch {
+      // Welcome delivery is best-effort.
+    }
     return jsonResponse({
       ok: true,
       email: result.email,
