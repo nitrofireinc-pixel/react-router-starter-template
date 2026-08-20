@@ -847,10 +847,13 @@ export async function subscribeEmailList(env, {
       topics: saved.topics,
       previous_topics: existing.topics,
       topics_label: formatEmailListTopicsLabel(saved.topics),
+      previous_topics_label: formatEmailListTopicsLabel(existing.topics),
+      unsubscribe_token: saved.unsubscribe_token,
       detail: unchanged
         ? `You're still subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`
         : `Updated — you're now subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`,
       send_welcome: false,
+      send_topics_email: !unchanged,
     };
   }
 
@@ -963,6 +966,75 @@ export async function sendEmailListWelcome(env, { email, topics, unsubscribeToke
     return { ok: true };
   } catch (error) {
     return { ok: false, detail: error?.message || 'Welcome email failed' };
+  }
+}
+
+export function buildEmailListTopicsChangedMessage({
+  previousTopics = [],
+  topics = EMAIL_LIST_TOPICS,
+  unsubscribeToken = '',
+} = {}) {
+  const siteUrl = 'https://efhsband.org';
+  const beforeLabel = formatEmailListTopicsLabel(previousTopics);
+  const afterLabel = formatEmailListTopicsLabel(topics);
+  const unsubUrl = unsubscribeToken
+    ? `${siteUrl}/api/email-unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : `${siteUrl}/calendar.html`;
+  return {
+    subject: 'Your East Forsyth Band email preferences were updated',
+    text: [
+      'You updated your East Forsyth Band email subscription.',
+      '',
+      `Before: ${beforeLabel}`,
+      `Now: ${afterLabel}`,
+      '',
+      `You will now receive ${afterLabel === 'Calendar and Fundraising' ? 'calendar and fundraising updates' : `${afterLabel.toLowerCase()} updates`} from this list.`,
+      '',
+      'How to unsubscribe:',
+      '- Reply STOP to this email (or any list email), or',
+      `- Open this link: ${unsubUrl}`,
+      '',
+      'East Forsyth Band Boosters',
+    ].join('\n'),
+    html: [
+      '<p><strong>You updated your East Forsyth Band email subscription.</strong></p>',
+      `<p>Before: <strong>${escapeHtml(beforeLabel)}</strong><br>Now: <strong>${escapeHtml(afterLabel)}</strong></p>`,
+      `<p>You will now receive ${escapeHtml(afterLabel === 'Calendar and Fundraising' ? 'calendar and fundraising updates' : `${afterLabel.toLowerCase()} updates`)} from this list.</p>`,
+      '<p><strong>How to unsubscribe</strong></p>',
+      '<ul>',
+      '<li>Reply <strong>STOP</strong> to this email (or any list email), or</li>',
+      `<li><a href="${escapeAttr(unsubUrl)}">Unsubscribe with one click</a></li>`,
+      '</ul>',
+      '<p>East Forsyth Band Boosters</p>',
+    ].join(''),
+  };
+}
+
+export async function sendEmailListTopicsChanged(env, {
+  email,
+  previousTopics,
+  topics,
+  unsubscribeToken,
+} = {}) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, skipped: true, detail: 'RESEND_API_KEY is not configured' };
+  }
+  const to = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(to)) return { ok: false, detail: 'Recipient email is invalid' };
+  const message = buildEmailListTopicsChangedMessage({ previousTopics, topics, unsubscribeToken });
+  try {
+    await sendViaResend(env, {
+      to,
+      replyTo: EMAIL_LIST_REPLY_TO,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Topics update email failed' };
   }
 }
 
@@ -6718,12 +6790,24 @@ async function routeApi(request, env, url, ctx = null) {
       } catch {
         // Welcome delivery is best-effort.
       }
+    } else if (result.send_topics_email) {
+      try {
+        await sendEmailListTopicsChanged(env, {
+          email: result.email,
+          previousTopics: result.previous_topics,
+          topics: result.topics,
+          unsubscribeToken: result.unsubscribe_token,
+        });
+      } catch {
+        // Topics-change delivery is best-effort.
+      }
     }
     return jsonResponse({
       ok: true,
       email: result.email,
       topics: result.topics,
       topics_label: result.topics_label || formatEmailListTopicsLabel(result.topics),
+      previous_topics: result.previous_topics || [],
       already_subscribed: Boolean(result.already_subscribed),
       updated: Boolean(result.updated),
       unchanged: Boolean(result.unchanged),
