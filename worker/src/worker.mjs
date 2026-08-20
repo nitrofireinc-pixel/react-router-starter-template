@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'calendar-auto-open-day-20260819';
+const ASSET_VERSION = 'boosters-dues-dev-20260820';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -779,6 +779,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', city TEXT NOT NULL DEFAULT \'Kernersville\', state TEXT NOT NULL DEFAULT \'NC\', logo_url TEXT NOT NULL DEFAULT \'\', level TEXT NOT NULL DEFAULT \'Sponsor\', mark_text TEXT NOT NULL DEFAULT \'★\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, homepage_ad INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS sponsor_applications (id INTEGER PRIMARY KEY AUTOINCREMENT, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', business_name TEXT NOT NULL, address TEXT NOT NULL DEFAULT \'\', phone TEXT NOT NULL DEFAULT \'\', email TEXT NOT NULL DEFAULT \'\', logo_url TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_link_id TEXT NOT NULL DEFAULT \'\', square_checkout_url TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', sponsor_id INTEGER, paid_at TEXT, invoice_sent_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS donations (id INTEGER PRIMARY KEY AUTOINCREMENT, donor_name TEXT NOT NULL, amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS dues_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL, amount_display TEXT NOT NULL DEFAULT \'\', status TEXT NOT NULL DEFAULT \'pending_payment\', square_payment_id TEXT NOT NULL DEFAULT \'\', completion_token TEXT NOT NULL DEFAULT \'\', failure_detail TEXT NOT NULL DEFAULT \'\', receipt_sent_at TEXT, paid_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS staff_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'\', bio TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -3631,6 +3632,175 @@ export async function recordDonorPaymentLedger(env, donation = {}) {
   return refreshPaymentLedgerXml(env);
 }
 
+export async function recordDuesPaymentLedger(env, dues = {}) {
+  const id = Number(dues.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'dues',
+    refType: 'dues_payment',
+    refId: id,
+    name: dues.student_name || dues.name || '',
+    address: dues.email || '',
+    amountCents: dues.amount_cents,
+    amountDisplay: dues.amount_display,
+    packageLabel: 'Band dues',
+    note: dues.email ? `Receipt: ${dues.email}` : '',
+    moneyExchanged: true,
+    paidAt: dues.paid_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export async function recordDuesFailedLedger(env, dues = {}) {
+  const id = Number(dues.id || 0);
+  if (!id) return null;
+  const failure = String(dues.failure_detail || 'Payment failed').trim().slice(0, 400);
+  await upsertPaymentLedgerEntry(env, {
+    kind: 'dues',
+    refType: 'dues_failed',
+    refId: id,
+    name: dues.student_name || dues.name || '',
+    address: dues.email || '',
+    amountCents: dues.amount_cents,
+    amountDisplay: dues.amount_display,
+    packageLabel: 'Band dues (failed)',
+    note: failure,
+    moneyExchanged: false,
+    paidAt: dues.updated_at || new Date().toISOString(),
+  });
+  return refreshPaymentLedgerXml(env);
+}
+
+export function buildDuesReceipt(dues = {}, { failed = false } = {}) {
+  const studentName = String(dues.student_name || '').trim() || 'Student';
+  const email = String(dues.email || '').trim().toLowerCase();
+  const amountDisplay = String(dues.amount_display || '').trim()
+    || formatLedgerAmountDisplay(dues.amount_cents)
+    || '$0';
+  const receiptNumber = `DU-${Number(dues.id || 0) || 'pending'}`;
+  const whenLabel = formatSponsorInvoiceDate(dues.paid_at || dues.updated_at || new Date().toISOString());
+  const failure = String(dues.failure_detail || '').trim() || 'The card payment could not be completed.';
+  if (failed) {
+    const subject = `Band dues payment unsuccessful — East Forsyth Band Boosters (${receiptNumber})`;
+    const text = [
+      'East Forsyth Band Boosters — band dues payment receipt',
+      '',
+      'This message confirms that a band dues payment attempt was unsuccessful.',
+      'No charge was completed for this attempt.',
+      '',
+      `Receipt number: ${receiptNumber}`,
+      `Date: ${whenLabel}`,
+      `Student name: ${studentName}`,
+      `Email: ${email || '—'}`,
+      `Amount attempted: ${amountDisplay}`,
+      'Payment status: Failed',
+      `Details: ${failure}`,
+      '',
+      'You can try again from the Band Boosters dues payment page.',
+      '',
+      'East Forsyth Band Boosters',
+      'https://efhsband.org',
+    ].join('\n');
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
+        <h1 style="font-size:22px;margin:0 0 12px">Band dues payment unsuccessful</h1>
+        <p style="margin:0 0 14px">This message confirms that a band dues payment attempt was <strong>unsuccessful</strong>. No charge was completed for this attempt.</p>
+        <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
+          <tr><td style="padding:6px 0;color:#64748b">Receipt number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(receiptNumber)}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(whenLabel)}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Student name</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(studentName)}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Amount attempted</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Failed</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Details</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(failure)}</strong></td></tr>
+        </table>
+        <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+      </div>
+    `.trim();
+    return {
+      to: email,
+      subject,
+      text,
+      html,
+      receipt_number: receiptNumber,
+      from_email: SPONSOR_INVOICE_FROM_EMAIL,
+      from_name: SPONSOR_INVOICE_FROM_NAME,
+    };
+  }
+  const subject = `Band dues payment receipt — East Forsyth Band Boosters (${receiptNumber})`;
+  const text = [
+    'Thank you for paying band dues to the East Forsyth Band Boosters.',
+    '',
+    'This receipt confirms your successful band dues payment.',
+    '',
+    `Receipt number: ${receiptNumber}`,
+    `Date: ${whenLabel}`,
+    `Student name: ${studentName}`,
+    `Email: ${email || '—'}`,
+    `Amount: ${amountDisplay}`,
+    'Payment status: Paid',
+    '',
+    'East Forsyth Band Boosters',
+    'East Forsyth High School Band',
+    'https://efhsband.org',
+  ].join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10233c;max-width:640px">
+      <h1 style="font-size:22px;margin:0 0 12px">Band dues payment receipt</h1>
+      <p style="margin:0 0 14px">Thank you for paying band dues to the <strong>East Forsyth Band Boosters</strong>.</p>
+      <p style="margin:0 0 18px">This receipt confirms your successful band dues payment.</p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 18px">
+        <tr><td style="padding:6px 0;color:#64748b">Receipt number</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(receiptNumber)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Date</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(whenLabel)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Student name</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(studentName)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Email</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(email || '—')}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Amount</td><td style="padding:6px 0;text-align:right"><strong>${escapeHtml(amountDisplay)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#64748b">Payment status</td><td style="padding:6px 0;text-align:right"><strong>Paid</strong></td></tr>
+      </table>
+      <p style="margin:0;color:#64748b;font-size:14px">East Forsyth Band Boosters · <a href="https://efhsband.org">efhsband.org</a></p>
+    </div>
+  `.trim();
+  return {
+    to: email,
+    subject,
+    text,
+    html,
+    receipt_number: receiptNumber,
+    from_email: SPONSOR_INVOICE_FROM_EMAIL,
+    from_name: SPONSOR_INVOICE_FROM_NAME,
+  };
+}
+
+export async function sendDuesReceipt(env, dues = {}, { failed = false } = {}) {
+  const receipt = buildDuesReceipt(dues, { failed });
+  if (!isValidEmail(receipt.to)) {
+    return { ok: false, detail: 'Receipt email is missing or invalid' };
+  }
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, detail: 'Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.' };
+  }
+  try {
+    await sendViaResend(env, {
+      to: receipt.to,
+      subject: receipt.subject,
+      text: receipt.text,
+      html: receipt.html,
+      fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
+      fromName: SPONSOR_INVOICE_FROM_NAME,
+    });
+    const id = Number(dues.id || 0);
+    if (id) {
+      const sentAt = new Date().toISOString();
+      await env.DB.prepare(
+        'UPDATE dues_payments SET receipt_sent_at = ?, updated_at = ? WHERE id = ?',
+      ).bind(sentAt, sentAt, id).run();
+    }
+    return { ok: true, detail: 'Receipt emailed', receipt_number: receipt.receipt_number };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Could not send receipt email' };
+  }
+}
+
 export async function recordManualSponsorPaymentLedger(env, sponsor = {}, {
   amountCents = 0,
   amountDisplay = '',
@@ -6332,6 +6502,202 @@ async function routeApi(request, env, url, ctx = null) {
       amount_display: donation.amount_display,
       payment_id: payment.payment_id,
       detail: `Thank you, ${donation.donor_name}! Your ${donation.amount_display} donation was received.`,
+    });
+  }
+  if (url.pathname === '/api/dues' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    const studentName = String(payload.student_name || payload.child_name || payload.name || '').trim();
+    const email = String(payload.email || '').trim().toLowerCase();
+    const amountDisplay = String(payload.amount_display || '').trim();
+    const amountCents = resolveSponsorAmountCents({
+      amountCents: payload.amount_cents,
+      amountDisplay: payload.amount_display || amountDisplay || payload.amount,
+    });
+    if (!studentName || studentName.length > 160) {
+      return jsonResponse({ detail: 'Student full name is required' }, 422);
+    }
+    if (!isValidEmail(email)) {
+      return jsonResponse({ detail: 'A valid receipt email is required' }, 422);
+    }
+    if (!amountCents || amountCents < 100) {
+      return jsonResponse({ detail: 'Enter a dues amount of at least $1' }, 422);
+    }
+    if (amountCents > 2_500_000) {
+      return jsonResponse({ detail: 'Dues amount cannot exceed $25,000' }, 422);
+    }
+    const display = amountDisplay || formatSponsorAmountDisplay(amountCents);
+    const now = new Date().toISOString();
+    const completionToken = crypto.randomUUID().replace(/-/g, '');
+    const insert = await env.DB.prepare(
+      `INSERT INTO dues_payments
+        (student_name, email, amount_cents, amount_display, status, completion_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
+    ).bind(studentName, email, amountCents, display, completionToken, now, now).run();
+    const duesId = insert.meta.last_row_id;
+    const configured = squareCheckoutConfigured(env);
+    const applicationId = squareApplicationId(env);
+    const location = configured ? await resolveSquareLocationId(env) : { ok: false, location_id: '' };
+    const webPayments = Boolean(configured && applicationId && location.ok && location.location_id);
+    return jsonResponse({
+      ok: true,
+      id: duesId,
+      student_name: studentName,
+      email,
+      amount_cents: amountCents,
+      amount_display: display,
+      completion_token: completionToken,
+      payment_ready: webPayments,
+      web_payments: webPayments,
+      mock_enabled: squareMockPayEnabled(env),
+      detail: webPayments
+        ? 'Dues payment saved. Continue to Square to pay.'
+        : (configured
+          ? 'Dues payment saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.'
+          : 'Dues payment saved. Square payment is not connected yet.'),
+    });
+  }
+  const duesPayMatch = url.pathname.match(/^\/api\/dues\/(\d+)\/pay$/);
+  if (duesPayMatch && request.method === 'POST') {
+    const duesId = Number(duesPayMatch[1]);
+    const payload = await request.json().catch(() => ({}));
+    const token = String(payload.token || '').trim();
+    const sourceId = String(payload.source_id || payload.sourceId || '').trim();
+    const mock = Boolean(payload.mock);
+    if (!duesId) return jsonResponse({ detail: 'Dues payment not found' }, 404);
+    const dues = await env.DB.prepare(
+      `SELECT id, student_name, email, amount_cents, amount_display, status, square_payment_id, completion_token, failure_detail, receipt_sent_at, paid_at, updated_at
+       FROM dues_payments WHERE id = ?`,
+    ).bind(duesId).first();
+    if (!dues) return jsonResponse({ detail: 'Dues payment not found' }, 404);
+    if (!token || token !== String(dues.completion_token || '')) {
+      return jsonResponse({ detail: 'Invalid payment completion token' }, 403);
+    }
+    if (['paid', 'paid_mock'].includes(String(dues.status || '')) || dues.paid_at) {
+      return jsonResponse({
+        ok: true,
+        created: false,
+        dues_id: duesId,
+        student_name: dues.student_name,
+        email: dues.email,
+        amount_cents: dues.amount_cents,
+        amount_display: dues.amount_display,
+        detail: 'This band dues payment was already completed. Thank you!',
+      });
+    }
+
+    async function finalizeDuesFailure(detail) {
+      const failedAt = new Date().toISOString();
+      const failureDetail = String(detail || 'Payment failed').trim().slice(0, 500);
+      await env.DB.prepare(
+        `UPDATE dues_payments
+         SET status = 'payment_failed', failure_detail = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(failureDetail, failedAt, duesId).run();
+      const failedRow = { ...dues, status: 'payment_failed', failure_detail: failureDetail, updated_at: failedAt };
+      try {
+        await recordDuesFailedLedger(env, failedRow);
+      } catch { /* ledger is best-effort */ }
+      let receipt = { ok: false, detail: '' };
+      try {
+        receipt = await sendDuesReceipt(env, failedRow, { failed: true });
+      } catch (error) {
+        receipt = { ok: false, detail: error?.message || 'Could not send failed receipt' };
+      }
+      return jsonResponse({
+        ok: false,
+        failed: true,
+        dues_id: duesId,
+        student_name: dues.student_name,
+        email: dues.email,
+        amount_cents: dues.amount_cents,
+        amount_display: dues.amount_display,
+        receipt_sent: Boolean(receipt.ok),
+        receipt_detail: receipt.detail || '',
+        detail: failureDetail,
+      }, 422);
+    }
+
+    if (mock) {
+      if (!squareMockPayEnabled(env)) {
+        return jsonResponse({ detail: 'Mock payments are disabled' }, 403);
+      }
+      const paidAt = new Date().toISOString();
+      await env.DB.prepare(
+        `UPDATE dues_payments
+         SET status = 'paid_mock', failure_detail = '', paid_at = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(paidAt, paidAt, duesId).run();
+      const paidRow = { ...dues, paid_at: paidAt, status: 'paid_mock', failure_detail: '' };
+      try {
+        await recordDuesPaymentLedger(env, paidRow);
+      } catch { /* ledger is best-effort */ }
+      let receipt = { ok: false, detail: '' };
+      try {
+        receipt = await sendDuesReceipt(env, paidRow, { failed: false });
+      } catch (error) {
+        receipt = { ok: false, detail: error?.message || 'Could not send receipt' };
+      }
+      return jsonResponse({
+        ok: true,
+        mock: true,
+        created: true,
+        dues_id: duesId,
+        student_name: dues.student_name,
+        email: dues.email,
+        amount_cents: dues.amount_cents,
+        amount_display: dues.amount_display,
+        receipt_sent: Boolean(receipt.ok),
+        receipt_detail: receipt.detail || '',
+        detail: `Thank you! Band dues of ${dues.amount_display} for ${dues.student_name} were recorded.`,
+      });
+    }
+    if (!sourceId) return finalizeDuesFailure('Payment card token is required');
+    if (!squareCheckoutConfigured(env)) {
+      return finalizeDuesFailure('Square payment is not connected yet');
+    }
+    const payment = await createSquareCardPayment(env, {
+      sourceId,
+      amountCents: dues.amount_cents,
+      referenceId: `dues-${duesId}`,
+      note: `EFHS Band dues — ${dues.student_name}`,
+    });
+    if (!payment.ok) {
+      return finalizeDuesFailure(payment.detail || 'Square payment failed');
+    }
+    const paidAt = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE dues_payments
+       SET square_payment_id = ?, status = 'paid', failure_detail = '', paid_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).bind(payment.payment_id || '', paidAt, paidAt, duesId).run();
+    const paidRow = {
+      ...dues,
+      paid_at: paidAt,
+      status: 'paid',
+      square_payment_id: payment.payment_id || '',
+      failure_detail: '',
+    };
+    try {
+      await recordDuesPaymentLedger(env, paidRow);
+    } catch { /* ledger is best-effort */ }
+    let receipt = { ok: false, detail: '' };
+    try {
+      receipt = await sendDuesReceipt(env, paidRow, { failed: false });
+    } catch (error) {
+      receipt = { ok: false, detail: error?.message || 'Could not send receipt' };
+    }
+    return jsonResponse({
+      ok: true,
+      created: true,
+      dues_id: duesId,
+      student_name: dues.student_name,
+      email: dues.email,
+      amount_cents: dues.amount_cents,
+      amount_display: dues.amount_display,
+      payment_id: payment.payment_id,
+      receipt_sent: Boolean(receipt.ok),
+      receipt_detail: receipt.detail || '',
+      detail: `Thank you! Band dues of ${dues.amount_display} for ${dues.student_name} were received.`,
     });
   }
   if (url.pathname === '/api/staff' && request.method === 'GET') return jsonResponse(await getStaff(env));

@@ -820,6 +820,7 @@ async function loadPublicContent() {
   bindSponsorMapCards();
   bindSponsorTierSignup();
   bindDonateButtons();
+  bindDuesButtons();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
@@ -1110,6 +1111,7 @@ function hideSponsorSignupConfirm(modal) {
 function openSponsorSignupModal(pkg) {
   closeSponsorMapModal();
   closeDonateModal({ immediate: true });
+  closeDuesModal({ immediate: true });
   closeSponsorSignupModal({ immediate: true });
   sponsorSignupState = { ...pkg, draft: null, application: null };
 
@@ -1711,6 +1713,7 @@ function openDonateModal() {
   closeSponsorMapModal();
   closeSponsorSignupModal({ immediate: true });
   closeDonateModal({ immediate: true });
+  closeDuesModal({ immediate: true });
   donateModalState = { draft: null, donation: null };
 
   const modal = document.createElement('aside');
@@ -2042,11 +2045,411 @@ function bindDonateButtons(root = document) {
   });
 }
 
+
+let duesModalState = null;
+
+function closeDuesModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.dues-modal');
+  if (!modal) {
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    duesModalState = null;
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    duesModalState = null;
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal, .dues-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+    duesModalState = null;
+  }, 280);
+}
+
+function showDuesConfirm(modal) {
+  const confirm = modal.querySelector('[data-dues-confirm]');
+  if (!confirm) return;
+  confirm.hidden = false;
+  confirm.querySelector('[data-confirm-no]')?.focus();
+}
+
+function hideDuesConfirm(modal) {
+  const confirm = modal.querySelector('[data-dues-confirm]');
+  if (!confirm) return;
+  confirm.hidden = true;
+}
+
+function openDuesModal() {
+  closeSponsorMapModal();
+  closeSponsorSignupModal({ immediate: true });
+  closeDonateModal({ immediate: true });
+  closeDuesModal({ immediate: true });
+  duesModalState = { draft: null, dues: null };
+
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal dues-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Pay band dues');
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-dues-cancel aria-label="Cancel dues payment"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head" data-dues-head>
+        <span class="sponsor-signup-kicker">Band Boosters</span>
+        <h3>Pay band dues</h3>
+        <p data-dues-head-copy>Enter the student&rsquo;s full name, payment amount, and an email for the receipt. Then continue to secure Square checkout.</p>
+      </div>
+      <div class="sponsor-signup-step" data-dues-step="details">
+        <form class="sponsor-signup-form" data-dues-form novalidate>
+          <label>Student full name<input name="student_name" required autocomplete="name" maxlength="160" placeholder="First and last name"></label>
+          <label>Receipt email<input name="email" type="email" required autocomplete="email" maxlength="200" placeholder="parent@example.com"></label>
+          <label>Amount paying
+            <input name="amount" type="text" inputmode="decimal" required maxlength="12" placeholder="50.00" aria-describedby="dues-amount-hint">
+          </label>
+          <p class="sponsor-signup-pay-note" id="dues-amount-hint">Enter any amount of $1 or more (USD). A receipt is emailed after payment succeeds or fails.</p>
+          <p class="status" data-dues-status></p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-dues-cancel>Cancel</button>
+            <button class="btn primary" type="submit">Next</button>
+          </div>
+        </form>
+      </div>
+      <div class="sponsor-signup-step" data-dues-step="payment" hidden>
+        <div class="sponsor-signup-payment-body" data-dues-pay-body>
+          <div class="sponsor-signup-summary">
+            <p><span>Student</span><strong data-dues-pay-name></strong></p>
+            <p><span>Email</span><strong data-dues-pay-email></strong></p>
+            <p><span>Amount</span><strong data-dues-pay-amount></strong></p>
+          </div>
+          <p class="sponsor-signup-pay-note">Your receipt will be emailed from no-reply@efhsband.org after checkout.</p>
+          <p class="status" data-dues-pay-status></p>
+        </div>
+        <div class="sponsor-signup-actions sponsor-signup-actions-split" data-dues-pay-actions>
+          <button class="btn outline" type="button" data-dues-cancel>Cancel</button>
+          <div class="sponsor-signup-actions-end">
+            <button class="btn outline" type="button" data-dues-back>Back</button>
+            <button class="btn primary" type="button" data-dues-pay>Pay with Square</button>
+          </div>
+        </div>
+      </div>
+      <div class="sponsor-signup-confirm" data-dues-confirm hidden>
+        <div class="sponsor-signup-confirm-card" role="alertdialog" aria-labelledby="dues-confirm-title" aria-describedby="dues-confirm-copy">
+          <h4 id="dues-confirm-title">Are you sure?</h4>
+          <p id="dues-confirm-copy">Canceling closes this payment window and discards the unpaid dues draft.</p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-confirm-no>No</button>
+            <button class="btn primary" type="button" data-confirm-yes>Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+
+  const form = modal.querySelector('[data-dues-form]');
+  const detailsStep = modal.querySelector('[data-dues-step="details"]');
+  const paymentStep = modal.querySelector('[data-dues-step="payment"]');
+  const payBody = modal.querySelector('[data-dues-pay-body]');
+  const status = modal.querySelector('[data-dues-status]');
+
+  function finishDuesToast(detail, { failed = false } = {}) {
+    closeDuesModal({ immediate: true });
+    const toast = document.createElement('div');
+    toast.className = failed ? 'sponsor-signup-toast dues-toast is-failed' : 'sponsor-signup-toast dues-toast';
+    toast.setAttribute('role', 'status');
+    toast.textContent = detail || (failed ? 'Payment failed.' : 'Thank you for paying band dues!');
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => toast.remove(), 280);
+    }, failed ? 5600 : 4200);
+  }
+
+  function loadSquareWebSdk(environment = 'production') {
+    const existing = document.querySelector('script[data-square-web-sdk]');
+    if (existing && window.Square) return Promise.resolve(window.Square);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.dataset.squareWebSdk = '1';
+      script.src = environment === 'sandbox'
+        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+        : 'https://web.squarecdn.com/v1/square.js';
+      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
+      script.onerror = () => reject(new Error('Could not load Square payment form'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function embedCardCheckout(dues, config) {
+    if (!payBody) return;
+    modal.classList.add('is-checkout');
+    const headCopy = modal.querySelector('[data-dues-head-copy]');
+    const amountDisplay = dues.amount_display || formatDonateAmountDisplay(dues.amount_cents);
+    if (headCopy) {
+      headCopy.innerHTML = `Enter card details to pay <strong>${escapeHtml(amountDisplay)}</strong> in band dues.`;
+    }
+    payBody.innerHTML = `
+      <div class="sponsor-signup-summary">
+        <p><span>Student</span><strong>${escapeHtml(dues.student_name || duesModalState.draft?.studentName || '')}</strong></p>
+        <p><span>Email</span><strong>${escapeHtml(dues.email || duesModalState.draft?.email || '')}</strong></p>
+        <p><span>Amount</span><strong>${escapeHtml(amountDisplay)}</strong></p>
+      </div>
+      <div class="sponsor-signup-card-box">
+        <div id="dues-square-card" class="sponsor-signup-card-host"></div>
+      </div>
+      <p class="status" data-dues-pay-status>Loading secure card form…</p>
+    `;
+    const liveStatus = payBody.querySelector('[data-dues-pay-status]');
+    const payContinue = modal.querySelector('[data-dues-pay]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = true;
+      payContinue.textContent = `Pay ${amountDisplay}`;
+    }
+    const Square = await loadSquareWebSdk(config.environment || 'production');
+    const payments = Square.payments(config.application_id, config.location_id);
+    const card = await payments.card();
+    await card.attach('#dues-square-card');
+    if (liveStatus) {
+      liveStatus.innerHTML = `
+        <span class="sponsor-signup-square-status">
+          <svg class="sponsor-signup-square-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M4.5 0A4.5 4.5 0 0 0 0 4.5v15A4.5 4.5 0 0 0 4.5 24h15a4.5 4.5 0 0 0 4.5-4.5v-15A4.5 4.5 0 0 0 19.5 0h-15Zm2.036 7.536h4.928v4.928H6.536V7.536Zm6 0H17.464v4.928h-4.928V7.536Zm-6 6h4.928v4.928H6.536v-4.928Zm6 0H17.464v4.928h-4.928v-4.928Z"/>
+          </svg>
+          <span>Square Secure Payment Ready.</span>
+        </span>
+      `;
+    }
+    if (payContinue) {
+      payContinue.disabled = false;
+      payContinue.onclick = async () => {
+        payContinue.disabled = true;
+        if (liveStatus) liveStatus.textContent = 'Processing payment…';
+        try {
+          const verificationDetails = {
+            amount: (Number(dues.amount_cents) / 100).toFixed(2),
+            currencyCode: 'USD',
+            intent: 'CHARGE',
+            customerInitiated: true,
+            sellerKeyedIn: false,
+            billingContact: {
+              givenName: String(dues.student_name || duesModalState.draft?.studentName || 'Student').slice(0, 100),
+              email: String(dues.email || duesModalState.draft?.email || '').slice(0, 100),
+              countryCode: 'US',
+            },
+          };
+          const result = await card.tokenize(verificationDetails);
+          if (result.status !== 'OK' || !result.token) {
+            const message = result.errors?.[0]?.message || 'Card could not be processed.';
+            throw new Error(message);
+          }
+          const response = await fetch(`/api/dues/${encodeURIComponent(dues.id)}/pay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: dues.completion_token,
+              source_id: result.token,
+            }),
+          });
+          const paid = await response.json().catch(() => ({}));
+          if (!response.ok || !paid.ok) {
+            const failDetail = paid.detail || 'Payment failed';
+            finishDuesToast(
+              paid.receipt_sent
+                ? `${failDetail} A failed-payment receipt was emailed.`
+                : failDetail,
+              { failed: true },
+            );
+            return;
+          }
+          finishDuesToast(
+            paid.receipt_sent
+              ? `${paid.detail || 'Payment received.'} A receipt was emailed.`
+              : (paid.detail || 'Payment received. Thank you!'),
+          );
+        } catch (error) {
+          if (liveStatus) liveStatus.textContent = error.message || 'Payment failed.';
+          payContinue.disabled = false;
+        }
+      };
+    }
+  }
+
+  async function ensureDuesPayment() {
+    const draft = duesModalState?.draft;
+    if (!draft) throw new Error('Student details are required.');
+    if (duesModalState.dues?.id && duesModalState.dues.completion_token
+      && Number(duesModalState.dues.amount_cents) === Number(draft.amountCents)
+      && String(duesModalState.dues.student_name || '') === draft.studentName
+      && String(duesModalState.dues.email || '') === draft.email) {
+      return duesModalState.dues;
+    }
+    const response = await fetch('/api/dues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        student_name: draft.studentName,
+        email: draft.email,
+        amount_cents: draft.amountCents,
+        amount_display: draft.amountDisplay,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || 'Could not save dues payment');
+    duesModalState.dues = result;
+    return result;
+  }
+
+  function resetPaymentStepPreview() {
+    modal.classList.remove('is-checkout');
+    const draft = duesModalState?.draft;
+    if (payBody) {
+      payBody.innerHTML = `
+        <div class="sponsor-signup-summary">
+          <p><span>Student</span><strong data-dues-pay-name>${escapeHtml(draft?.studentName || '')}</strong></p>
+          <p><span>Email</span><strong data-dues-pay-email>${escapeHtml(draft?.email || '')}</strong></p>
+          <p><span>Amount</span><strong data-dues-pay-amount>${escapeHtml(draft?.amountDisplay || '')}</strong></p>
+        </div>
+        <p class="sponsor-signup-pay-note">Your receipt will be emailed from no-reply@efhsband.org after checkout.</p>
+        <p class="status" data-dues-pay-status></p>
+      `;
+    }
+    const payContinue = modal.querySelector('[data-dues-pay]');
+    if (payContinue) {
+      payContinue.hidden = false;
+      payContinue.disabled = false;
+      payContinue.textContent = 'Pay with Square';
+      payContinue.onclick = null;
+    }
+    const headCopy = modal.querySelector('[data-dues-head-copy]');
+    if (headCopy) {
+      headCopy.textContent = "Enter the student's full name, payment amount, and an email for the receipt. Then continue to secure Square checkout.";
+    }
+  }
+
+  modal.querySelectorAll('[data-dues-cancel]').forEach((button) => {
+    button.addEventListener('click', () => showDuesConfirm(modal));
+  });
+  modal.querySelector('[data-confirm-no]')?.addEventListener('click', () => hideDuesConfirm(modal));
+  modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => closeDuesModal());
+
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (status) status.textContent = '';
+    const studentName = String(form.elements.student_name?.value || '').trim();
+    const email = String(form.elements.email?.value || '').trim().toLowerCase();
+    const amountRaw = String(form.elements.amount?.value || '').trim();
+    const amountCents = parseDonateAmountCents(amountRaw);
+    if (!studentName) {
+      if (status) status.textContent = "Please enter the student's full name.";
+      form.elements.student_name?.focus();
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (status) status.textContent = 'Please enter a valid receipt email.';
+      form.elements.email?.focus();
+      return;
+    }
+    if (!amountCents || amountCents < 100) {
+      if (status) status.textContent = 'Enter a dues amount of at least $1.';
+      form.elements.amount?.focus();
+      return;
+    }
+    if (amountCents > 2_500_000) {
+      if (status) status.textContent = 'Dues amount cannot exceed $25,000.';
+      form.elements.amount?.focus();
+      return;
+    }
+    const amountDisplay = formatDonateAmountDisplay(amountCents);
+    duesModalState.draft = { studentName, email, amountCents, amountDisplay };
+    duesModalState.dues = null;
+    resetPaymentStepPreview();
+    detailsStep.hidden = true;
+    paymentStep.hidden = false;
+    modal.querySelector('[data-dues-pay]')?.focus();
+  });
+
+  modal.querySelector('[data-dues-back]')?.addEventListener('click', () => {
+    resetPaymentStepPreview();
+    paymentStep.hidden = true;
+    detailsStep.hidden = false;
+    if (status) status.textContent = '';
+    form?.elements.student_name?.focus();
+  });
+
+  async function startSquarePayment() {
+    const payButton = modal.querySelector('[data-dues-pay]');
+    const statusEl = modal.querySelector('[data-dues-pay-status]');
+    if (statusEl) statusEl.textContent = 'Saving dues payment…';
+    if (payButton) payButton.disabled = true;
+    try {
+      const dues = await ensureDuesPayment();
+      const configResponse = await fetch('/api/sponsor-checkout/config', { cache: 'no-store' });
+      const config = await configResponse.json().catch(() => ({}));
+      if (!configResponse.ok || !config.web_payments) {
+        throw new Error(config.detail || 'Square card payments are not ready yet.');
+      }
+      await embedCardCheckout(dues, config);
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not start payment.';
+      if (payButton) {
+        payButton.disabled = false;
+        payButton.textContent = 'Pay with Square';
+      }
+    }
+  }
+
+  modal.querySelector('[data-dues-pay]')?.addEventListener('click', () => {
+    if (modal.classList.contains('is-checkout')) return;
+    startSquarePayment();
+  });
+
+  form?.querySelector('input[name="student_name"]')?.focus();
+}
+
+function bindDuesButtons(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('[data-dues-open]').forEach((button) => {
+    if (button.dataset.duesBound === '1') return;
+    if (button.closest('#page-preview, .cms-shell, .admin-body')) return;
+    if (button.hasAttribute('disabled')) return;
+    button.dataset.duesBound = '1';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      openDuesModal();
+    });
+  });
+}
+
 ensurePublicBrandMark();
 hydrateMarqueeFromCache();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  const dues = document.querySelector('.dues-modal');
+  if (dues) {
+    const confirm = dues.querySelector('[data-dues-confirm]');
+    if (confirm && !confirm.hidden) {
+      hideDuesConfirm(dues);
+      return;
+    }
+    showDuesConfirm(dues);
+    return;
+  }
   const donate = document.querySelector('.donate-modal');
   if (donate) {
     const confirm = donate.querySelector('[data-donate-confirm]');

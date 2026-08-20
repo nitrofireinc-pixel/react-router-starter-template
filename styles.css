@@ -4254,3 +4254,34 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   .calendar-day-toast-panel{transition:none}
 }
 
+
+
+/* Band dues payment preview + modal */
+.dues-dev-section{padding-top:42px}
+.dues-dev-banner{
+  margin:0 0 18px;
+  padding:12px 14px;
+  border:1px solid #f1d45b;
+  border-radius:14px;
+  background:#fff8dc;
+  color:#57470a;
+  font-weight:750;
+  line-height:1.4;
+}
+.dues-dev-card{max-width:720px}
+.dues-dev-card h2{margin:.2rem 0 .55rem;color:#10233c}
+.dues-dev-list{margin:12px 0 0;padding-left:1.15rem;color:#5b6f88;line-height:1.5}
+.dues-dev-list li{margin:0 0 .45rem}
+.dues-dev-actions{margin-top:18px}
+.dues-modal .sponsor-signup-panel{width:min(520px,100%)}
+.sponsor-signup-toast.dues-toast.is-failed{background:#7f1d1d;border-color:#991b1b}
+@media(max-width:700px){
+  .dues-dev-section{padding-top:28px}
+  .dues-dev-actions{flex-direction:column;align-items:stretch}
+  .dues-dev-actions .btn{width:100%;justify-content:center}
+  .dues-modal .sponsor-signup-panel{border-radius:18px 18px 0 0}
+  .dues-modal .sponsor-signup-actions,
+  .dues-modal .sponsor-signup-actions-split{flex-wrap:wrap}
+  .dues-modal .sponsor-signup-actions-end{width:100%;display:flex;gap:10px}
+  .dues-modal .sponsor-signup-actions-end .btn{flex:1 1 auto}
+}

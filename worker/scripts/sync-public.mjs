@@ -14,6 +14,8 @@ for (const name of [
   'calendar.html',
   'contact.html',
   'boosters.html',
+  'dues-dev.html',
+  'gallery.html',
   'resources.html',
   'fundraising.html',
   'sponsors.html',
