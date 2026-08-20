@@ -767,6 +767,31 @@ function syncAddToHomeButtonState(button) {
     window.setTimeout(() => modal.remove(), 280);
   }
 
+  function applyTopicChecks(form, topics) {
+    const wanted = new Set((Array.isArray(topics) ? topics : []).map((value) => String(value || '').toLowerCase()));
+    form.querySelectorAll('input[name="topics"]').forEach((input) => {
+      input.checked = wanted.has(String(input.value || '').toLowerCase());
+    });
+  }
+
+  function enterManageMode(modal, form, payload = {}) {
+    modal.dataset.emailListUpdate = '1';
+    const heading = modal.querySelector('.sponsor-signup-head h3');
+    const copy = modal.querySelector('.sponsor-signup-head p');
+    const submit = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-email-list-status]');
+    if (heading) heading.textContent = 'Update subscription';
+    if (copy) {
+      copy.textContent = 'You\'re already on the list. Change Calendar / Fundraising below, then save.';
+    }
+    if (submit) {
+      submit.textContent = 'Update';
+      submit.disabled = false;
+    }
+    applyTopicChecks(form, payload.topics || []);
+    if (status) status.textContent = payload.detail || 'Choose the topics you want, then Update.';
+  }
+
   function openEmailListModal(trigger) {
     closeEmailListModal({ immediate: true });
     const section = trigger.closest('[data-email-list-signup]') || document.querySelector('[data-email-list-signup]');
@@ -831,19 +856,28 @@ function syncAddToHomeButtonState(button) {
       const status = form.querySelector('[data-email-list-status]');
       const email = String(new FormData(form).get('email') || '').trim();
       const topics = [...form.querySelectorAll('input[name="topics"]:checked')].map((input) => input.value);
-      if (status) status.textContent = 'Subscribing…';
+      const updating = modal.dataset.emailListUpdate === '1';
+      if (status) status.textContent = updating ? 'Updating…' : 'Checking subscription…';
       const submit = form.querySelector('button[type="submit"]');
       if (submit) submit.disabled = true;
       try {
         const response = await fetch('/api/email-subscribe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email, topics, source }),
+          body: JSON.stringify({ email, topics, source, update: updating }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Could not subscribe');
+        if (payload.already_subscribed) {
+          enterManageMode(modal, form, payload);
+          return;
+        }
         closeEmailListModal({ immediate: true });
-        showSubscribedFlash('Subscribed!');
+        if (payload.updated) {
+          showSubscribedFlash(payload.unchanged ? 'You\'re all set!' : 'Updated!');
+        } else {
+          showSubscribedFlash('Subscribed!');
+        }
       } catch (error) {
         if (status) status.textContent = error.message || 'Could not subscribe.';
         if (submit) submit.disabled = false;

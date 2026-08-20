@@ -209,7 +209,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'email-list-subscribe-toast-20260820';
+const ASSET_VERSION = 'email-list-subscribe-once-20260820';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -744,14 +744,45 @@ export function ensureEmailListSignupSlot(html, options = {}) {
   return `${stripped}${renderEmailListSignup(options)}`;
 }
 
+export function formatEmailListTopicsLabel(topics = []) {
+  const list = normalizeEmailListTopics(topics, { defaultAll: false });
+  if (list.length >= 2) return 'Calendar and Fundraising';
+  if (list.includes('fundraising')) return 'Fundraising';
+  if (list.includes('calendar')) return 'Calendar';
+  return 'no topics';
+}
+
+export function emailListTopicsEqual(a, b) {
+  const left = normalizeEmailListTopics(a, { defaultAll: false }).slice().sort();
+  const right = normalizeEmailListTopics(b, { defaultAll: false }).slice().sort();
+  return left.length === right.length && left.every((topic, index) => topic === right[index]);
+}
+
+export async function getEmailSubscriber(env, email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) return null;
+  const row = await env.DB.prepare(
+    'SELECT email, topics, status, source, unsubscribe_token, created_at, updated_at, unsubscribed_at FROM email_subscribers WHERE email = ?',
+  ).bind(normalizedEmail).first();
+  if (!row) return null;
+  return {
+    email: row.email,
+    topics: normalizeEmailListTopics(row.topics, { defaultAll: true }),
+    status: String(row.status || 'active'),
+    source: row.source || '',
+    unsubscribe_token: row.unsubscribe_token || '',
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    unsubscribed_at: row.unsubscribed_at || null,
+  };
+}
+
 export async function upsertEmailSubscriber(env, { email, topics, source = 'website' } = {}) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!isValidEmail(normalizedEmail)) return { ok: false, detail: 'Enter a valid email address' };
   const topicList = normalizeEmailListTopics(topics, { defaultAll: true });
   if (!topicList.length) return { ok: false, detail: 'Choose at least one topic' };
-  const existing = await env.DB.prepare('SELECT email, unsubscribe_token, status FROM email_subscribers WHERE email = ?')
-    .bind(normalizedEmail)
-    .first();
+  const existing = await getEmailSubscriber(env, normalizedEmail);
   const token = existing?.unsubscribe_token || randomEmailListToken();
   await env.DB.prepare(
     `INSERT INTO email_subscribers (email, topics, status, source, unsubscribe_token, created_at, updated_at, unsubscribed_at)
@@ -768,8 +799,73 @@ export async function upsertEmailSubscriber(env, { email, topics, source = 'webs
     ok: true,
     email: normalizedEmail,
     topics: topicList,
+    previous_topics: existing?.topics || [],
+    created: !existing,
     reactivated: Boolean(existing && existing.status !== 'active'),
     unsubscribe_token: token,
+  };
+}
+
+export async function subscribeEmailList(env, {
+  email,
+  topics,
+  source = 'website',
+  update = false,
+} = {}) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) return { ok: false, detail: 'Enter a valid email address' };
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: false });
+  if (!topicList.length) return { ok: false, detail: 'Choose at least one topic' };
+
+  const existing = await getEmailSubscriber(env, normalizedEmail);
+  if (existing && existing.status === 'active' && !update) {
+    return {
+      ok: true,
+      already_subscribed: true,
+      email: existing.email,
+      topics: existing.topics,
+      topics_label: formatEmailListTopicsLabel(existing.topics),
+      detail: `You're already subscribed for ${formatEmailListTopicsLabel(existing.topics)}. Update your topics below if you want to change them.`,
+      send_welcome: false,
+    };
+  }
+
+  const saved = await upsertEmailSubscriber(env, {
+    email: normalizedEmail,
+    topics: topicList,
+    source,
+  });
+  if (!saved.ok) return saved;
+
+  if (existing && existing.status === 'active' && update) {
+    const unchanged = emailListTopicsEqual(existing.topics, saved.topics);
+    return {
+      ok: true,
+      updated: true,
+      unchanged,
+      email: saved.email,
+      topics: saved.topics,
+      previous_topics: existing.topics,
+      topics_label: formatEmailListTopicsLabel(saved.topics),
+      detail: unchanged
+        ? `You're still subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`
+        : `Updated — you're now subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`,
+      send_welcome: false,
+    };
+  }
+
+  return {
+    ok: true,
+    created: Boolean(saved.created),
+    reactivated: Boolean(saved.reactivated),
+    email: saved.email,
+    topics: saved.topics,
+    topics_label: formatEmailListTopicsLabel(saved.topics),
+    unsubscribe_token: saved.unsubscribe_token,
+    detail: saved.reactivated
+      ? 'Welcome back — your subscription is active again.'
+      : 'You are subscribed to band email updates.',
+    send_welcome: true,
   };
 }
 
@@ -6605,28 +6701,35 @@ async function routeApi(request, env, url, ctx = null) {
         .split(/[,;\s]+/)
         .map((value) => value.trim())
         .filter(Boolean);
-    const result = await upsertEmailSubscriber(env, {
+    const result = await subscribeEmailList(env, {
       email: payload.email,
       topics,
       source: payload.source || 'website',
+      update: Boolean(payload.update),
     });
     if (!result.ok) return jsonResponse({ detail: result.detail }, 422);
-    // Best-effort welcome mail for the subscriber only — do not fail the signup.
-    try {
-      await sendEmailListWelcome(env, {
-        email: result.email,
-        topics: result.topics,
-        unsubscribeToken: result.unsubscribe_token,
-      });
-    } catch {
-      // Welcome delivery is best-effort.
+    if (result.send_welcome) {
+      try {
+        await sendEmailListWelcome(env, {
+          email: result.email,
+          topics: result.topics,
+          unsubscribeToken: result.unsubscribe_token,
+        });
+      } catch {
+        // Welcome delivery is best-effort.
+      }
     }
     return jsonResponse({
       ok: true,
       email: result.email,
       topics: result.topics,
-      reactivated: result.reactivated,
-      detail: result.reactivated ? 'Welcome back — your subscription is active again.' : 'You are subscribed to band email updates.',
+      topics_label: result.topics_label || formatEmailListTopicsLabel(result.topics),
+      already_subscribed: Boolean(result.already_subscribed),
+      updated: Boolean(result.updated),
+      unchanged: Boolean(result.unchanged),
+      created: Boolean(result.created),
+      reactivated: Boolean(result.reactivated),
+      detail: result.detail,
     });
   }
   if (url.pathname === '/api/email-unsubscribe' && (request.method === 'POST' || request.method === 'GET')) {
