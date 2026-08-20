@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -474,6 +474,26 @@ test('ensureBoostersDuesSlot injects Pay dues button without removing meetings o
   assert.match(structured, /data-dues-open/);
   assert.match(structured, /data-booster-meetings/);
   assert.match(structured, /data-booster-members/);
+});
+
+test('boosters dues site setting can hide or restore the Pay dues card', () => {
+  assert.equal(isBoostersDuesEnabled({}), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: '1' }), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: 1 }), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: '0' }), false);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: 0 }), false);
+
+  const withDues = ensureBoostersDuesSlot('<div class="card" data-cms-field="body_text"><p>Info</p></div><article class="card"><span class="tag">Meetings</span></article>');
+  assert.match(withDues, /data-boosters-dues/);
+  const hidden = applyBoostersDuesVisibility(withDues, false);
+  assert.doesNotMatch(hidden, /data-boosters-dues/);
+  assert.doesNotMatch(hidden, /data-dues-open/);
+  assert.match(hidden, /data-cms-field="body_text"/);
+  assert.match(hidden, /Meetings/);
+  assert.equal(stripBoostersDuesSlot(withDues), hidden);
+  const restored = applyBoostersDuesVisibility(hidden, true);
+  assert.match(restored, /data-boosters-dues/);
+  assert.match(restored, /data-dues-open/);
 });
 
 test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraising body', () => {
@@ -1582,10 +1602,13 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /recordDuesFailedLedger/);
   assert.match(workerSrc, /sendDuesReceipt/);
   assert.match(workerSrc, /ensureBoostersDuesSlot/);
+  assert.match(workerSrc, /applyBoostersDuesVisibility/);
+  assert.match(workerSrc, /boosters_dues_enabled/);
   assert.match(workerSrc, /boosters-dues-toggle-20260821/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
   assert.match(siteContent, /data-dues-open/);
+  assert.match(siteContent, /boosters_dues_enabled/);
   assert.match(siteContent, /\/api\/dues/);
   assert.match(styles, /\.boosters-dues-card/);
   assert.match(styles, /dues-toast\.is-failed/);
@@ -1596,6 +1619,9 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(duesDev, /data-dues-open/);
   assert.match(duesDev, /noindex/);
   assert.match(duesDev, /Preview only/);
+  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
+  assert.match(adminSrc, /boosters_dues_enabled/);
+  assert.match(adminSrc, /data-boosters-dues-setting/);
 });
 
 test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel export, and dues', () => {

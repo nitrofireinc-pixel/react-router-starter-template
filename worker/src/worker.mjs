@@ -51,6 +51,7 @@ export const DEFAULT_SITE = {
   footer_note: 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.',
   logo_url: '/assets/efhs-logo.png',
   maintenance_mode: '0',
+  boosters_dues_enabled: '1',
   sponsor_ad_seconds: '6',
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
@@ -1000,8 +1001,10 @@ async function initDb(env) {
   }
   const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
   if (boostersPageRow?.body_html) {
-    const nextBoostersHtml = ensureBoostersDuesSlot(
+    const siteForDues = await getSite(env);
+    const nextBoostersHtml = applyBoostersDuesVisibility(
       ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
+      isBoostersDuesEnabled(siteForDues),
     );
     if (nextBoostersHtml !== boostersPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
@@ -1055,6 +1058,13 @@ async function initDb(env) {
 
 export function isMaintenanceMode(site = {}) {
   const value = site?.maintenance_mode;
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+}
+
+/** Band dues card on Boosters — on by default unless explicitly disabled. */
+export function isBoostersDuesEnabled(site = {}) {
+  const value = site?.boosters_dues_enabled;
+  if (value === undefined || value === null || value === '') return true;
   return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 }
 
@@ -1606,6 +1616,7 @@ async function getSite(env) {
   const payload = { ...DEFAULT_SITE };
   for (const row of rows.results || []) payload[row.key] = row.value;
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
+  payload.boosters_dues_enabled = isBoostersDuesEnabled(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
@@ -3197,6 +3208,31 @@ export function ensureBoostersDuesSlot(html) {
   return `${source}<section class="content soft"><div class="wrap">${dues}</div></section>`;
 }
 
+export function stripBoostersDuesSlot(html) {
+  return String(html || '').replace(
+    /<article\b[^>]*\bdata-boosters-dues\b[^>]*>[\s\S]*?<\/article>/gi,
+    '',
+  );
+}
+
+export function applyBoostersDuesVisibility(html, enabled = true) {
+  if (enabled) return ensureBoostersDuesSlot(html);
+  return stripBoostersDuesSlot(html);
+}
+
+async function syncBoostersDuesCmsBody(env, enabled) {
+  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
+  if (!boostersPageRow?.body_html) return;
+  const nextBoostersHtml = applyBoostersDuesVisibility(
+    ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
+    enabled,
+  );
+  if (nextBoostersHtml === boostersPageRow.body_html) return;
+  await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(nextBoostersHtml, boostersPageRow.id)
+    .run();
+}
+
 
 export const US_STATES = [
   ['AL', 'Alabama'],
@@ -4629,10 +4665,10 @@ export function renderBoosterMembersDirectory(members = []) {
   }).join('');
 }
 
-function renderBoostersPageBody(page, boosterMembers = []) {
+function renderBoostersPageBody(page, boosterMembers = [], { duesEnabled = true } = {}) {
   let html = ensureBoosterMeetingsSlot(page.body_html || '');
   html = ensureBoosterMembersSlot(html);
-  html = ensureBoostersDuesSlot(html);
+  html = applyBoostersDuesVisibility(html, duesEnabled);
   const directory = `<div class="directory" data-booster-members>${renderBoosterMembersDirectory(boosterMembers)}</div>`;
   return replaceMarkedDirectory(html, 'data-booster-members', directory) || `${html}${directory}`;
 }
@@ -5207,12 +5243,16 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
+function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
-  if (page.slug === 'boosters') return renderBoostersPageBody(page, boosterMembers);
+  if (page.slug === 'boosters') {
+    return renderBoostersPageBody(page, boosterMembers, {
+      duesEnabled: isBoostersDuesEnabled(site || {}),
+    });
+  }
   if (page.slug === 'fundraising') return ensureFundraisingDonateSlot(page.body_html);
   if (page.slug === 'calendar') return ensureCalendarMonthMount(page.body_html);
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
@@ -7269,6 +7309,14 @@ async function routeApi(request, env, url, ctx = null) {
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
+    if (payload.boosters_dues_enabled !== undefined) {
+      if (!isSuperAdmin(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admins can change the Band dues Boosters setting.' }, 403);
+      }
+      const duesEnabled = isBoostersDuesEnabled({ boosters_dues_enabled: payload.boosters_dues_enabled }) ? '1' : '0';
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('boosters_dues_enabled', duesEnabled).run();
+      await syncBoostersDuesCmsBody(env, duesEnabled === '1');
+    }
     return jsonResponse(await getSite(env));
   }
 
@@ -8903,7 +8951,7 @@ export function renderNav(pages, { loggedIn = false } = {}) {
 
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
@@ -9252,7 +9300,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="button" data-open-social-tab>Open Social Media</button>
   </div>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">

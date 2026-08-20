@@ -783,6 +783,14 @@ async function loadPublicContent() {
       if (plainTitle) document.title = document.title.replace('East Forsyth Band', plainTitle);
     }
     ensurePublicBrandMark();
+    const duesEnabled = !(
+      site.boosters_dues_enabled === 0
+      || site.boosters_dues_enabled === '0'
+      || site.boosters_dues_enabled === false
+    );
+    if (!duesEnabled) {
+      document.querySelectorAll('[data-boosters-dues]').forEach((node) => node.remove());
+    }
   }
 
   document.querySelectorAll('[data-events]').forEach(container => {

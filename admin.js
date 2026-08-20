@@ -523,6 +523,8 @@ function formPayload(form) {
   if (active) payload.active = Boolean(active.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
   if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
+  const boostersDuesEnabled = formControl(form, 'boosters_dues_enabled');
+  if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
   return payload;
 }
 
@@ -1209,7 +1211,16 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
   }
   if (layout === 'boosters') {
-    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card accent-card boosters-dues-card cms-boosters-dues-placeholder" data-boosters-dues><span class="tag">Band dues</span><h3>Pay band dues</h3><p>Pay student band dues securely online with a credit card. Enter the student&rsquo;s full name, the amount, and an email for the receipt.</p><div class="boosters-dues-actions"><button type="button" class="btn primary" data-dues-open disabled title="Pay dues opens on the public page">Pay dues</button></div></article><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
+    const duesEnabled = !(
+      state.site
+      && (state.site.boosters_dues_enabled === 0
+        || state.site.boosters_dues_enabled === '0'
+        || state.site.boosters_dues_enabled === false)
+    );
+    const duesCard = duesEnabled
+      ? `<article class="card accent-card boosters-dues-card cms-boosters-dues-placeholder" data-boosters-dues><span class="tag">Band dues</span><h3>Pay band dues</h3><p>Pay student band dues securely online with a credit card. Enter the student&rsquo;s full name, the amount, and an email for the receipt.</p><div class="boosters-dues-actions"><button type="button" class="btn primary" data-dues-open disabled title="Pay dues opens on the public page">Pay dues</button></div></article>`
+      : '';
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
     return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
@@ -2747,6 +2758,8 @@ function applyZernioQueryFeedback() {
 async function loadSite() {
   if (!hasPermission('site')) return;
   state.site = await jsonFetch('/api/site');
+  const duesSetting = document.querySelector('[data-boosters-dues-setting]');
+  if (duesSetting) duesSetting.hidden = !isSuperAdmin();
   fillForm(document.querySelector('#site-form'), state.site);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
@@ -5773,13 +5786,21 @@ function bindForms() {
     const status = document.querySelector('#site-status');
     const payload = formPayload(form);
     payload.maintenance_mode = Boolean(form.elements.maintenance_mode?.checked);
+    if (form.elements.boosters_dues_enabled) {
+      payload.boosters_dues_enabled = Boolean(form.elements.boosters_dues_enabled.checked);
+    }
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);
     if (status) {
+      const duesNote = form.elements.boosters_dues_enabled
+        ? (saved.boosters_dues_enabled
+          ? ' Band dues card is visible on Boosters.'
+          : ' Band dues card is hidden on Boosters.')
+        : '';
       status.textContent = saved.maintenance_mode
-        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
-        : 'Saved. The public site is live again.';
+        ? `Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.${duesNote}`
+        : `Saved. The public site is live again.${duesNote}`;
     }
   });
 
