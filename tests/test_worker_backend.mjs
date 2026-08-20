@@ -1604,6 +1604,9 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /ensureBoostersDuesSlot/);
   assert.match(workerSrc, /applyBoostersDuesVisibility/);
   assert.match(workerSrc, /boosters_dues_enabled/);
+  assert.match(workerSrc, /site-settings-switches/);
+  assert.match(workerSrc, /data-password-toggle/);
+  assert.match(workerSrc, /admin-password-toggle/);
   assert.match(workerSrc, /boosters-dues-toggle-20260821/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
@@ -1611,6 +1614,8 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(siteContent, /boosters_dues_enabled/);
   assert.match(siteContent, /\/api\/dues/);
   assert.match(styles, /\.boosters-dues-card/);
+  assert.match(styles, /\.site-settings-switches/);
+  assert.match(styles, /\.admin-password-toggle/);
   assert.match(styles, /dues-toast\.is-failed/);
   assert.match(boosters, /data-dues-open/);
   assert.match(boosters, />Pay dues</);
