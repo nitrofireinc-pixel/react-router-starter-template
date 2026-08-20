@@ -1624,10 +1624,10 @@ body.admin-upload-open{overflow:hidden}
   min-height:108px;
   padding:28px 32px;
   border-radius:22px;
-  background:linear-gradient(145deg,#001c38 0%,#063362 58%,#0a4478 100%);
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
   color:#fff;
-  border:1px solid rgba(255,255,255,.16);
-  box-shadow:0 24px 60px rgba(0,16,32,.45);
+  border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 24px 60px rgba(80,8,12,.4);
   text-align:center;
 }
 .admin-saved-toast-icon{
@@ -2081,12 +2081,17 @@ body.sponsor-map-open{overflow:hidden}
     var(--soft);
 }
 .email-list-signup-inner{
-  display:grid;
-  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
-  gap:28px;
-  align-items:end;
+  display:flex;
+  flex-wrap:wrap;
+  gap:20px 28px;
+  align-items:center;
+  justify-content:space-between;
   border-top:1px solid var(--line);
   padding-top:28px;
+}
+.email-list-signup-copy{
+  flex:1 1 16rem;
+  min-width:0;
 }
 .email-list-signup-copy h2{
   margin:0 0 8px;
@@ -2099,9 +2104,8 @@ body.sponsor-map-open{overflow:hidden}
   color:var(--muted);
   max-width:36rem;
 }
-.email-list-signup-form{
-  display:grid;
-  gap:12px;
+.email-list-signup-action{
+  flex:0 0 auto;
 }
 .email-list-topics{
   border:0;
@@ -2111,9 +2115,65 @@ body.sponsor-map-open{overflow:hidden}
   flex-wrap:wrap;
   gap:12px 18px;
 }
-.email-list-signup-form .status{margin:0;min-height:1.2em}
-@media (max-width:760px){
-  .email-list-signup-inner{grid-template-columns:1fr;align-items:start}
+.email-list-modal .sponsor-signup-form{
+  display:grid;
+  gap:12px;
+}
+.email-list-modal .email-list-topics .checkline{
+  font-weight:700;
+}
+.public-flash-toast{
+  position:fixed;
+  inset:0;
+  z-index:120;
+  display:grid;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  pointer-events:none;
+}
+.public-flash-toast-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(40,6,8,.42);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity .3s ease;
+}
+.public-flash-toast.is-visible .public-flash-toast-backdrop{opacity:1}
+.public-flash-toast.is-leaving .public-flash-toast-backdrop{opacity:0}
+.public-flash-toast-panel{
+  position:relative;
+  z-index:1;
+  width:min(320px,100%);
+  transform:translate3d(0,36px,0) scale(.94);
+  opacity:0;
+  transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
+}
+.public-flash-toast.is-visible .public-flash-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.public-flash-toast.is-leaving .public-flash-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
+.public-flash-toast-card{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:108px;
+  padding:28px 32px;
+  border-radius:22px;
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 24px 60px rgba(80,8,12,.4);
+  text-align:center;
+}
+.public-flash-toast-card strong{
+  color:#fff;
+  font-size:clamp(1.45rem,4vw,1.85rem);
+  font-weight:900;
+  letter-spacing:-.02em;
+  line-height:1.1;
+}
+@media (prefers-reduced-motion:reduce){
+  .public-flash-toast-backdrop,
+  .public-flash-toast-panel{transition:none}
 }
 
 /* Public maintenance landing */

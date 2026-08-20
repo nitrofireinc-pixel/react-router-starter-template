@@ -23,22 +23,15 @@
 </header>
 <main id="main">
 <section class="page-hero" data-cms-layout="calendar"><div class="page-title"><div class="kicker">Schedule</div><h1>Calendar</h1><p>A clean calendar landing page for rehearsals, performances, booster meetings, and trip deadlines.</p></div></section><section class="content soft"><div class="wrap"><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div></div></section>
-<section class="content email-list-signup" data-email-list-signup>
+<section class="content email-list-signup" data-email-list-signup data-email-list-topics="calendar,fundraising">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
       <h2>Email calendar updates</h2>
       <p>Get calendar changes by email. Reply STOP to any message to unsubscribe.</p>
     </div>
-    <form class="email-list-signup-form" data-email-list-form>
-      <label class="email-list-email"><span class="sr-only">Email address</span><input type="email" name="email" required autocomplete="email" maxlength="160" placeholder="you@example.com"></label>
-      <fieldset class="email-list-topics">
-        <legend class="sr-only">Topics</legend>
-        <label class="checkline"><input type="checkbox" name="topics" value="calendar" checked> Calendar</label>
-        <label class="checkline"><input type="checkbox" name="topics" value="fundraising" checked> Fundraising</label>
-      </fieldset>
-      <button class="btn primary" type="submit">Subscribe</button>
-      <p class="status email-list-status" data-email-list-status role="status" aria-live="polite"></p>
-    </form>
+    <div class="email-list-signup-action">
+      <button type="button" class="btn primary" data-email-list-open>Subscribe</button>
+    </div>
   </div>
 </section></main>
 <footer class="footer">

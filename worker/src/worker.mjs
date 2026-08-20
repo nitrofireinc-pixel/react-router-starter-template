@@ -209,7 +209,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'email-list-resend-inbound-20260820';
+const ASSET_VERSION = 'email-list-subscribe-toast-20260820';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -722,34 +722,26 @@ function randomEmailListToken(bytes = 24) {
   return [...arr].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'Get email updates', detail = 'Join the band email list. Reply STOP to any message to unsubscribe.' } = {}) {
-  const topicSet = new Set(normalizeEmailListTopics(topics, { defaultAll: true }));
-  const calendarChecked = topicSet.has('calendar') ? ' checked' : '';
-  const fundraisingChecked = topicSet.has('fundraising') ? ' checked' : '';
-  return `<section class="content email-list-signup" data-email-list-signup>
+export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'Get email updates', detail = 'Join the band email list. Reply STOP to any message to unsubscribe.', buttonLabel = 'Subscribe' } = {}) {
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: true }).join(',');
+  return `<section class="content email-list-signup" data-email-list-signup data-email-list-topics="${escapeAttr(topicList)}">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
       <h2>${escapeHtml(heading)}</h2>
       <p>${escapeHtml(detail)}</p>
     </div>
-    <form class="email-list-signup-form" data-email-list-form>
-      <label class="email-list-email"><span class="sr-only">Email address</span><input type="email" name="email" required autocomplete="email" maxlength="160" placeholder="you@example.com"></label>
-      <fieldset class="email-list-topics">
-        <legend class="sr-only">Topics</legend>
-        <label class="checkline"><input type="checkbox" name="topics" value="calendar"${calendarChecked}> Calendar</label>
-        <label class="checkline"><input type="checkbox" name="topics" value="fundraising"${fundraisingChecked}> Fundraising</label>
-      </fieldset>
-      <button class="btn primary" type="submit">Subscribe</button>
-      <p class="status email-list-status" data-email-list-status role="status" aria-live="polite"></p>
-    </form>
+    <div class="email-list-signup-action">
+      <button type="button" class="btn primary" data-email-list-open>${escapeHtml(buttonLabel)}</button>
+    </div>
   </div>
 </section>`;
 }
 
 export function ensureEmailListSignupSlot(html, options = {}) {
   const source = String(html || '');
-  if (/data-email-list-signup/i.test(source)) return source;
-  return `${source}${renderEmailListSignup(options)}`;
+  if (/data-email-list-open/i.test(source) && /data-email-list-signup/i.test(source)) return source;
+  const stripped = source.replace(/<section\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/section>/gi, '');
+  return `${stripped}${renderEmailListSignup(options)}`;
 }
 
 export async function upsertEmailSubscriber(env, { email, topics, source = 'website' } = {}) {

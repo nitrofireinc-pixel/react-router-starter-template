@@ -23,22 +23,15 @@
 </header>
 <main id="main">
 <section class="page-hero"><div class="page-title"><div class="kicker">Support</div><h1>Fundraising</h1><p>Centralize active campaigns, passive giving links, payment information, and fundraiser deadlines.</p></div></section><section class="content soft"><div class="wrap"><div class="grid cards"><article class="card"><span class="tag">Active</span><h3>Current Fundraiser</h3><p>Placeholder for campaign details, student credit rules, order deadlines, and pickup dates.</p></article><article class="card"><span class="tag">Ongoing</span><h3>Restaurant / Spirit Nights</h3><p>Placeholder for local partner nights and percentage-back events.</p></article><article class="card accent-card square-donate-card" data-square-donate><span class="tag">Donate</span><h3>Direct Support</h3><p>Give securely online to support instruments, travel, meals, uniforms, and student opportunities.</p><div class="square-donate"><button type="button" class="btn primary" data-donate-open>Donate</button></div></article></div></div></section>
-<section class="content email-list-signup" data-email-list-signup>
+<section class="content email-list-signup" data-email-list-signup data-email-list-topics="fundraising,calendar">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
       <h2>Email fundraising updates</h2>
       <p>Get campaign notes by email. Reply STOP to any message to unsubscribe.</p>
     </div>
-    <form class="email-list-signup-form" data-email-list-form>
-      <label class="email-list-email"><span class="sr-only">Email address</span><input type="email" name="email" required autocomplete="email" maxlength="160" placeholder="you@example.com"></label>
-      <fieldset class="email-list-topics">
-        <legend class="sr-only">Topics</legend>
-        <label class="checkline"><input type="checkbox" name="topics" value="fundraising" checked> Fundraising</label>
-        <label class="checkline"><input type="checkbox" name="topics" value="calendar" checked> Calendar</label>
-      </fieldset>
-      <button class="btn primary" type="submit">Subscribe</button>
-      <p class="status email-list-status" data-email-list-status role="status" aria-live="polite"></p>
-    </form>
+    <div class="email-list-signup-action">
+      <button type="button" class="btn primary" data-email-list-open>Subscribe</button>
+    </div>
   </div>
 </section></main>
 <footer class="footer">

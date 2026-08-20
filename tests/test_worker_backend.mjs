@@ -516,7 +516,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=email-list-resend-inbound-20260820/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=email-list-subscribe-toast-20260820/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1409,7 +1409,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /email-list-resend-inbound-20260820/);
+  assert.match(workerSrc, /email-list-subscribe-toast-20260820/);
   assert.match(workerSrc, /\/api\/calendar-events/);
   assert.match(workerSrc, /ensureCalendarMonthMount/);
   assert.match(workerSrc, /ensureGalleryPageSlot/);
@@ -1535,7 +1535,7 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /site-settings-switches/);
   assert.match(workerSrc, /data-password-toggle/);
   assert.match(workerSrc, /admin-password-toggle/);
-  assert.match(workerSrc, /email-list-resend-inbound-20260820/);
+  assert.match(workerSrc, /email-list-subscribe-toast-20260820/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
   assert.match(siteContent, /data-dues-open/);
@@ -1704,9 +1704,13 @@ test('extractEmailAddress and STOP detection', () => {
 test('ensureEmailListSignupSlot injects once', () => {
   const first = ensureEmailListSignupSlot('<section class="content soft"></section>');
   assert.match(first, /data-email-list-signup/);
-  assert.match(first, /data-email-list-form/);
+  assert.match(first, /data-email-list-open/);
+  assert.doesNotMatch(first, /data-email-list-form/);
   assert.equal(ensureEmailListSignupSlot(first), first);
   assert.match(renderEmailListSignup(), /Subscribe/);
+  const upgraded = ensureEmailListSignupSlot('<section class="content email-list-signup" data-email-list-signup><form data-email-list-form></form></section>');
+  assert.match(upgraded, /data-email-list-open/);
+  assert.doesNotMatch(upgraded, /data-email-list-form/);
 });
 
 test('buildEmailListUpdateMessage includes reply-stop guidance', () => {

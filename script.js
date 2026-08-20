@@ -715,36 +715,145 @@ function syncAddToHomeButtonState(button) {
   });
 })();
 
-(function bindEmailListSignupForms() {
-  document.querySelectorAll('[data-email-list-form]').forEach((form) => {
-    if (form.dataset.boundEmailList === '1') return;
-    form.dataset.boundEmailList = '1';
-    form.addEventListener('submit', async (event) => {
+(function bindEmailListSignup() {
+  let flashTimer = null;
+  let flashLeaveTimer = null;
+  let activeModal = null;
+
+  function showSubscribedFlash(message = 'Subscribed!') {
+    let root = document.querySelector('#public-flash-toast');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'public-flash-toast';
+      root.className = 'public-flash-toast';
+      root.setAttribute('role', 'status');
+      root.setAttribute('aria-live', 'polite');
+      root.innerHTML = `
+        <div class="public-flash-toast-backdrop" aria-hidden="true"></div>
+        <div class="public-flash-toast-panel">
+          <div class="public-flash-toast-card">
+            <strong data-flash-toast-message>Subscribed!</strong>
+          </div>
+        </div>`;
+      document.body.appendChild(root);
+    }
+    const msg = root.querySelector('[data-flash-toast-message]');
+    if (msg) msg.textContent = message;
+    window.clearTimeout(flashTimer);
+    window.clearTimeout(flashLeaveTimer);
+    root.classList.remove('is-leaving');
+    root.classList.remove('is-visible');
+    void root.offsetWidth;
+    root.classList.add('is-visible');
+    flashTimer = window.setTimeout(() => {
+      root.classList.add('is-leaving');
+      root.classList.remove('is-visible');
+      flashLeaveTimer = window.setTimeout(() => {
+        root.classList.remove('is-leaving');
+      }, 380);
+    }, 3000);
+  }
+
+  function closeEmailListModal({ immediate = false } = {}) {
+    const modal = activeModal || document.querySelector('.email-list-modal');
+    activeModal = null;
+    if (!modal) return;
+    document.body.classList.remove('sponsor-signup-open');
+    if (immediate) {
+      modal.remove();
+      return;
+    }
+    modal.classList.remove('is-visible');
+    window.setTimeout(() => modal.remove(), 280);
+  }
+
+  function openEmailListModal(trigger) {
+    closeEmailListModal({ immediate: true });
+    const section = trigger.closest('[data-email-list-signup]') || document.querySelector('[data-email-list-signup]');
+    const topicCsv = String(section?.dataset.emailListTopics || 'calendar,fundraising');
+    const selected = new Set(
+      topicCsv
+        .split(/[,;\s]+/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (!selected.size) {
+      selected.add('calendar');
+      selected.add('fundraising');
+    }
+    const calendarChecked = selected.has('calendar') ? ' checked' : '';
+    const fundraisingChecked = selected.has('fundraising') ? ' checked' : '';
+    const source = section?.dataset.source || location.pathname || 'website';
+
+    const modal = document.createElement('aside');
+    modal.className = 'sponsor-signup-modal email-list-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Subscribe to email updates');
+    modal.innerHTML = `
+      <button type="button" class="sponsor-signup-backdrop" data-email-list-cancel aria-label="Close subscribe form"></button>
+      <div class="sponsor-signup-panel">
+        <div class="sponsor-signup-head">
+          <span class="sponsor-signup-kicker">Email list</span>
+          <h3>Subscribe</h3>
+          <p>Get band updates by email. Reply STOP to any message to unsubscribe.</p>
+        </div>
+        <form class="sponsor-signup-form" data-email-list-form novalidate>
+          <label>Email address
+            <input type="email" name="email" required autocomplete="email" maxlength="160" placeholder="you@example.com">
+          </label>
+          <fieldset class="email-list-topics">
+            <legend>Topics</legend>
+            <label class="checkline"><input type="checkbox" name="topics" value="calendar"${calendarChecked}> Calendar</label>
+            <label class="checkline"><input type="checkbox" name="topics" value="fundraising"${fundraisingChecked}> Fundraising</label>
+          </fieldset>
+          <p class="status" data-email-list-status role="status" aria-live="polite"></p>
+          <div class="sponsor-signup-actions">
+            <button class="btn outline" type="button" data-email-list-cancel>Cancel</button>
+            <button class="btn primary" type="submit">Subscribe</button>
+          </div>
+        </form>
+      </div>`;
+
+    document.body.appendChild(modal);
+    document.body.classList.add('sponsor-signup-open');
+    activeModal = modal;
+    requestAnimationFrame(() => modal.classList.add('is-visible'));
+    modal.querySelector('input[name="email"]')?.focus();
+
+    modal.querySelectorAll('[data-email-list-cancel]').forEach((button) => {
+      button.addEventListener('click', () => closeEmailListModal());
+    });
+
+    const form = modal.querySelector('[data-email-list-form]');
+    form?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const status = form.querySelector('[data-email-list-status]');
       const email = String(new FormData(form).get('email') || '').trim();
       const topics = [...form.querySelectorAll('input[name="topics"]:checked')].map((input) => input.value);
       if (status) status.textContent = 'Subscribing…';
+      const submit = form.querySelector('button[type="submit"]');
+      if (submit) submit.disabled = true;
       try {
         const response = await fetch('/api/email-subscribe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            topics,
-            source: form.closest('[data-email-list-signup]')?.dataset.source || location.pathname || 'website',
-          }),
+          body: JSON.stringify({ email, topics, source }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Could not subscribe');
-        if (status) status.textContent = payload.detail || 'You are subscribed.';
-        form.reset();
-        form.querySelectorAll('input[name="topics"]').forEach((input) => {
-          input.checked = true;
-        });
+        closeEmailListModal({ immediate: true });
+        showSubscribedFlash('Subscribed!');
       } catch (error) {
         if (status) status.textContent = error.message || 'Could not subscribe.';
+        if (submit) submit.disabled = false;
       }
     });
+  }
+
+  document.querySelectorAll('[data-email-list-open]').forEach((button) => {
+    if (button.dataset.boundEmailListOpen === '1') return;
+    button.dataset.boundEmailListOpen = '1';
+    button.addEventListener('click', () => openEmailListModal(button));
   });
 })();
