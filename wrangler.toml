@@ -3,10 +3,14 @@ main = "worker/src/worker.mjs"
 compatibility_date = "2026-07-29"
 account_id = "d4e69b2379a7e3c86020154cf70a1d07"
 workers_dev = true
+routes = [
+  { pattern = "efhsband.org/*", zone_name = "efhsband.org" }
+]
 
 [assets]
-directory = "./assets"
+directory = "./worker/public"
 binding = "ASSETS"
+run_worker_first = true
 
 [vars]
 EFBAND_ADMIN_USERNAME = "admin@efhsband.org"
