@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'instagram-gallery-autopost-20260821';
+const ASSET_VERSION = 'zernio-db-api-key-20260821';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1671,22 +1671,54 @@ export function isInstagramPublishableImage(photo = {}) {
   return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(filename) || !/\.[a-z0-9]+(\?|$)/i.test(filename);
 }
 
-function zernioConfigured(env) {
-  return Boolean(String(env.ZERNIO_API_KEY || '').trim());
+export const ZERNIO_API_KEY_CONTENT_KEY = 'zernio_api_key';
+
+export async function resolveZernioApiKey(env) {
+  const fromEnv = String(env?.ZERNIO_API_KEY || '').trim();
+  if (fromEnv) return { key: fromEnv, source: 'env' };
+  try {
+    const fromDb = String(await getSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY) || '').trim();
+    if (fromDb) return { key: fromDb, source: 'database' };
+  } catch {
+    // Database may be unavailable during early boot; treat as unset.
+  }
+  return { key: '', source: 'none' };
+}
+
+async function zernioConfigured(env) {
+  return Boolean((await resolveZernioApiKey(env)).key);
 }
 
 async function zernioApi(env, path, options = {}) {
-  const apiKey = String(env.ZERNIO_API_KEY || '').trim();
-  if (!apiKey) throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets.');
-  const response = await fetch(`${ZERNIO_API_BASE}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  const resolved = await resolveZernioApiKey(env);
+  const apiKey = resolved.key;
+  if (!apiKey) {
+    throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets, or paste it in Social Media (Super Admin).');
+  }
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
+  const { timeoutMs: _ignoredTimeout, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${ZERNIO_API_BASE}${path}`, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(fetchOptions.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Zernio request timed out. Try again in a moment.');
+    }
+    throw new Error(error?.message || 'Could not reach Zernio');
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let data = null;
   try {
@@ -1844,7 +1876,8 @@ async function ensureZernioProfileId(env) {
 }
 
 async function getZernioFacebookStatus(env, { sync = false } = {}) {
-  const configured = zernioConfigured(env);
+  const resolvedKey = await resolveZernioApiKey(env);
+  const configured = Boolean(resolvedKey.key);
   let stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
   let pending = await getZernioFacebookPending(env);
   let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || pending?.profileId || '').trim();
@@ -1871,6 +1904,7 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
     } catch (error) {
       return {
         configured,
+        configured_source: resolvedKey.source,
         connected: Boolean(stored?.accountId),
         needsPageSelection: Boolean(pending && !stored?.accountId),
         profileId,
@@ -1893,6 +1927,7 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   }
   return {
     configured,
+    configured_source: resolvedKey.source,
     connected: Boolean(stored?.accountId),
     needsPageSelection,
     profileId,
@@ -1905,7 +1940,7 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
         : (needsPageSelection
           ? 'Facebook login finished. Choose which Page to connect below.'
           : 'Ready to connect a Facebook Page via OAuth. Use Connect Facebook from https://efhsband.org/admin.'))
-      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
+      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, or paste the key under Social Media (Super Admin).',
   };
 }
 
@@ -2005,7 +2040,8 @@ async function setInstagramGalleryAutopostEnabled(env, enabled) {
 }
 
 async function getZernioInstagramStatus(env, { sync = false } = {}) {
-  const configured = zernioConfigured(env);
+  const resolvedKey = await resolveZernioApiKey(env);
+  const configured = Boolean(resolvedKey.key);
   let stored = parseZernioInstagramConnection(await getSiteContentValue(env, ZERNIO_INSTAGRAM_KEY));
   let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim();
   let galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
@@ -2031,6 +2067,7 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
     } catch (error) {
       return {
         configured,
+        configured_source: resolvedKey.source,
         connected: Boolean(stored?.accountId),
         profileId,
         account: stored,
@@ -2045,6 +2082,7 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
   }
   return {
     configured,
+    configured_source: resolvedKey.source,
     connected: Boolean(stored?.accountId),
     profileId,
     account: stored,
@@ -2054,12 +2092,12 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
       ? (stored?.accountId
         ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`
         : 'Instagram is not linked in the CMS yet. If you already connected it in Zernio, click Refresh status. Otherwise use Connect Instagram.')
-      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
+      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, or paste the key under Social Media (Super Admin).',
   };
 }
 
 export async function maybePublishGalleryPhotoToInstagram(env, request, photo = {}) {
-  if (!zernioConfigured(env)) {
+  if (!(await zernioConfigured(env))) {
     return { attempted: false, ok: false, reason: 'not_configured' };
   }
   if (Number(photo.sort_order) < 0) {
@@ -2116,7 +2154,7 @@ async function handleZernioInstagramConnect(request, env) {
   if (!hasPermission(user, 'site')) {
     return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Instagram.</p><p><a href="/admin">Back to CMS</a></p>', 403);
   }
-  if (!zernioConfigured(env)) {
+  if (!(await zernioConfigured(env))) {
     return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
   }
   try {
@@ -2516,7 +2554,7 @@ async function handleZernioFacebookConnect(request, env) {
   if (!hasPermission(user, 'site')) {
     return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
   }
-  if (!zernioConfigured(env)) {
+  if (!(await zernioConfigured(env))) {
     return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
   }
   try {
@@ -7208,11 +7246,40 @@ async function routeApi(request, env, url, ctx = null) {
     const sync = url.searchParams.get('sync') === '1' || url.searchParams.get('refresh') === '1';
     return jsonResponse(await getZernioFacebookStatus(env, { sync }));
   }
+  if (url.pathname === '/api/admin/zernio/api-key' && request.method === 'POST') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    let payload;
+    try {
+      payload = await request.json();
+    } catch {
+      return jsonResponse({ detail: 'Invalid JSON body' }, 400);
+    }
+    if (payload?.clear === true) {
+      await setSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY, '');
+      return jsonResponse({
+        ok: true,
+        cleared: true,
+        ...(await getZernioFacebookStatus(env)),
+      });
+    }
+    const apiKey = String(payload?.api_key || payload?.apiKey || '').trim();
+    if (!apiKey) return jsonResponse({ detail: 'api_key is required' }, 422);
+    if (apiKey.length < 8 || apiKey.length > 500) {
+      return jsonResponse({ detail: 'api_key length looks invalid' }, 422);
+    }
+    await setSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY, apiKey);
+    return jsonResponse({
+      ok: true,
+      saved: true,
+      ...(await getZernioFacebookStatus(env)),
+    });
+  }
   if (url.pathname === '/api/admin/zernio/facebook' && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const status = await getZernioFacebookStatus(env);
-    if (status.account?.accountId && zernioConfigured(env)) {
+    if (status.account?.accountId && (await zernioConfigured(env))) {
       try {
         await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
       } catch {
@@ -7226,7 +7293,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/pages' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const pending = await getZernioFacebookPending(env);
     if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.', pages: [] }, 400);
     try {
@@ -7239,7 +7306,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/select-page' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const pending = await getZernioFacebookPending(env);
     if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.' }, 400);
     let pageId = '';
@@ -7299,7 +7366,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     try {
       const data = await zernioApi(env, '/posts?limit=20');
       const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
@@ -7311,7 +7378,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const status = await getZernioFacebookStatus(env, { sync: true });
     if (!status.connected) return jsonResponse({ detail: 'Connect a Facebook Page before posting.' }, 400);
     let body;
@@ -7338,7 +7405,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const status = await getZernioInstagramStatus(env);
-    if (status.account?.accountId && zernioConfigured(env)) {
+    if (status.account?.accountId && (await zernioConfigured(env))) {
       try {
         await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
       } catch {
@@ -9184,6 +9251,19 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
   <p class="status" id="zernio-facebook-message"></p>
 </div>
+<form id="zernio-api-key-form" class="admin-card stack" hidden>
+  <div class="utility-links-head">
+    <h2>Zernio API key</h2>
+    <p class="muted">Super Admin only. Paste your Zernio API key here if the Cloudflare secret is missing at runtime. Env secrets still take priority when present. Facebook and Instagram share this key.</p>
+  </div>
+  <p class="notice" id="zernio-api-key-source">Checking API key…</p>
+  <label class="full">API key<input name="api_key" type="password" autocomplete="off" spellcheck="false" maxlength="500" placeholder="Paste Zernio API key"></label>
+  <div class="panel-actions">
+    <button class="btn primary" type="submit">Save API key</button>
+    <button class="btn outline" type="button" id="zernio-api-key-clear" hidden>Clear saved key</button>
+  </div>
+  <p class="status" id="zernio-api-key-status"></p>
+</form>
 <div class="admin-card stack" id="zernio-facebook-pages-card" hidden>
   <div class="utility-links-head">
     <h2>Choose Facebook Page</h2>
