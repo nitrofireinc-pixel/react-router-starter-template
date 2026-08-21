@@ -2379,14 +2379,12 @@ function renderZernioFacebookStatus(status) {
     siteStatusEl.classList.toggle('ok', Boolean(status?.connected));
   }
   if (connectBtn) {
-    connectBtn.hidden = !status?.configured;
+    connectBtn.hidden = !(status?.configured || status?.connected);
     connectBtn.textContent = status?.connected
       ? 'Reconnect Facebook'
       : (status?.needsPageSelection ? 'Restart Facebook connect' : 'Connect Facebook');
     // Always start OAuth from the custom domain so the callback keeps the CMS session.
-    if (status?.configured) {
-      connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
-    }
+    connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
   }
   if (refreshBtn) refreshBtn.hidden = false;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
