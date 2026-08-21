@@ -4545,9 +4545,18 @@ function syncPhotoFormMode(editing = false) {
   const fileInput = formControl(form, 'file');
   const hint = form.querySelector('[data-photo-file-hint]');
   const submit = form.querySelector('[data-photo-submit]');
-  if (fileInput) fileInput.required = !editing;
-  if (hint) hint.textContent = editing ? 'Leave empty to keep the current image' : 'Required for new uploads';
-  if (submit) submit.textContent = editing ? 'Save photo' : 'Upload photo';
+  if (fileInput) {
+    fileInput.required = !editing;
+    fileInput.multiple = !editing;
+    if (editing) fileInput.removeAttribute('multiple');
+    else fileInput.setAttribute('multiple', 'multiple');
+  }
+  if (hint) {
+    hint.textContent = editing
+      ? 'Leave empty to keep the current image'
+      : 'Select one or more images · oversized files auto-resize under 1.9 MB';
+  }
+  if (submit) submit.textContent = editing ? 'Save photo' : 'Upload photo(s)';
 }
 
 function resetPhotoForm() {
@@ -4558,7 +4567,122 @@ function resetPhotoForm() {
   formControl(form, 'photo_id').value = '';
   syncPhotoFormMode(false);
   const status = document.querySelector('#photo-status');
-  if (status) status.textContent = 'Upload a new gallery photo.';
+  if (status) status.textContent = 'Upload one or more gallery photos.';
+}
+
+const GALLERY_UPLOAD_MAX_BYTES = 1_850_000;
+const GALLERY_UPLOAD_MAX_EDGE = 2400;
+
+function galleryUploadBaseName(file) {
+  return String(file?.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+}
+
+function loadImageElementFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Could not read image “${file.name || 'photo'}”.`));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToJpegBlob(canvas, quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+  });
+}
+
+async function compressImageForGalleryUpload(file, {
+  maxBytes = GALLERY_UPLOAD_MAX_BYTES,
+  maxEdge = GALLERY_UPLOAD_MAX_EDGE,
+} = {}) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || 'photo');
+  if (type.includes('svg')) {
+    if (Number(file.size || 0) > maxBytes) {
+      throw new Error(`“${name}” is an SVG over the upload limit. Export it as JPG/PNG first.`);
+    }
+    return file;
+  }
+  if (!type.startsWith('image/')) {
+    throw new Error(`“${name}” is not a supported image file.`);
+  }
+
+  // Already small enough and not a huge pixel count — upload as-is when possible.
+  const image = await loadImageElementFromFile(file);
+  const needsShrink = Number(file.size || 0) > maxBytes
+    || Math.max(image.naturalWidth || 0, image.naturalHeight || 0) > maxEdge;
+  if (!needsShrink) return file;
+
+  let width = image.naturalWidth || image.width;
+  let height = image.naturalHeight || image.height;
+  if (!width || !height) throw new Error(`“${name}” could not be resized.`);
+
+  const scaleToEdge = Math.min(1, maxEdge / Math.max(width, height));
+  width = Math.max(1, Math.round(width * scaleToEdge));
+  height = Math.max(1, Math.round(height * scaleToEdge));
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('This browser cannot resize images for upload.');
+
+  let quality = 0.9;
+  let blob = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
+    blob = await canvasToJpegBlob(canvas, quality);
+    if (blob && blob.size <= maxBytes) break;
+    if (quality > 0.55) {
+      quality = Math.max(0.5, quality - 0.1);
+    } else {
+      width = Math.max(640, Math.round(width * 0.82));
+      height = Math.max(640, Math.round(height * 0.82));
+      quality = 0.82;
+    }
+  }
+
+  if (!blob) throw new Error(`Could not compress “${name}”.`);
+  if (blob.size > maxBytes) {
+    throw new Error(`“${name}” is still too large after resizing. Try a smaller crop.`);
+  }
+
+  const outName = `${galleryUploadBaseName(file)}.jpg`;
+  return new File([blob], outName, { type: 'image/jpeg', lastModified: Date.now() });
+}
+
+async function uploadPreparedGalleryPhoto({ file, altText, caption }) {
+  const body = new FormData();
+  body.append('file', file, file.name);
+  body.append('alt_text', altText);
+  body.append('caption', caption || '');
+  return jsonFetch('/api/admin/photos', { method: 'POST', body });
+}
+
+function summarizeGalleryUploadResults(results) {
+  const ok = results.filter((row) => row.ok);
+  const failed = results.filter((row) => !row.ok);
+  const igOk = ok.filter((row) => row.instagram?.ok).length;
+  const igFail = ok.filter((row) => row.instagram?.attempted && row.instagram?.error).length;
+  const parts = [];
+  if (ok.length) parts.push(`Uploaded ${ok.length} photo${ok.length === 1 ? '' : 's'}.`);
+  if (failed.length) {
+    const names = failed.slice(0, 3).map((row) => row.name).join(', ');
+    parts.push(`${failed.length} failed${names ? ` (${names}${failed.length > 3 ? ', …' : ''})` : ''}.`);
+  }
+  if (igOk) parts.push(`${igOk} posted to Instagram.`);
+  if (igFail) parts.push(`${igFail} Instagram post${igFail === 1 ? '' : 's'} failed.`);
+  return parts.join(' ') || 'Upload finished.';
 }
 
 function editPhoto(photo) {
@@ -6312,11 +6436,12 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#photo-status');
+    const submit = form.querySelector('[data-photo-submit]');
     syncFormRichEditors(form);
     const photoId = String(formControl(form, 'photo_id')?.value || '').trim();
     const altText = String(formControl(form, 'alt_text')?.value || '').trim();
     const caption = String(formControl(form, 'caption')?.value || '').trim();
-    const file = form.elements.file?.files?.[0];
+    const files = Array.from(form.elements.file?.files || []);
     if (!altText) {
       status.textContent = 'Alt text is required.';
       return;
@@ -6336,34 +6461,52 @@ function bindForms() {
       }
       return;
     }
-    if (!file) {
-      status.textContent = 'Choose a photo file first.';
+    if (!files.length) {
+      status.textContent = 'Choose one or more photo files first.';
       return;
     }
-    const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
-    status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
+    if (submit) submit.disabled = true;
+    const results = [];
     try {
-      const uploaded = await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      for (let index = 0; index < files.length; index += 1) {
+        const original = files[index];
+        const label = original.name || `photo ${index + 1}`;
+        status.textContent = `Preparing ${index + 1} of ${files.length}: ${label}…`;
+        try {
+          const prepared = await compressImageForGalleryUpload(original);
+          const preparedKb = Math.max(1, Math.round(Number(prepared.size || 0) / 1024));
+          const resizedNote = prepared.size !== original.size || prepared.name !== original.name
+            ? ` (resized to ${preparedKb} KB)`
+            : ` (${preparedKb} KB)`;
+          status.textContent = `Uploading ${index + 1} of ${files.length}: ${prepared.name || label}${resizedNote}…`;
+          const photoAlt = files.length === 1 ? altText : `${altText} (${index + 1})`;
+          const photoCaption = files.length === 1
+            ? caption
+            : (caption ? `${caption} (${index + 1})` : '');
+          const uploaded = await uploadPreparedGalleryPhoto({
+            file: prepared,
+            altText: photoAlt,
+            caption: photoCaption,
+          });
+          results.push({
+            ok: true,
+            name: label,
+            instagram: uploaded?.instagram || null,
+          });
+        } catch (error) {
+          results.push({
+            ok: false,
+            name: label,
+            error: String(error?.message || error || 'Upload failed'),
+          });
+          console.error('Gallery photo upload failed', { name: label, error });
+        }
+      }
       resetPhotoForm();
       await loadPhotos();
-      const ig = uploaded?.instagram;
-      if (ig?.ok) {
-        status.textContent = 'Photo uploaded and posted to Instagram.';
-      } else if (ig?.attempted && ig?.error) {
-        status.textContent = `Photo uploaded, but Instagram post failed: ${ig.error}`;
-      } else if (ig?.reason === 'not_connected') {
-        status.textContent = 'Photo uploaded. Connect Instagram on Social Media to auto-post gallery photos.';
-      } else if (ig?.reason === 'autopost_disabled') {
-        status.textContent = 'Photo uploaded. Instagram gallery auto-post is currently off.';
-      } else if (ig?.reason === 'unsupported_format') {
-        status.textContent = 'Photo uploaded. SVG files are not auto-posted to Instagram.';
-      } else {
-        status.textContent = 'Photo uploaded.';
-      }
-    } catch (error) {
-      const detail = String(error?.message || '').trim() || 'Unknown error';
-      status.textContent = `Photo upload failed: ${detail}`;
-      console.error('Photo upload failed', { name: file.name, type: file.type, size: file.size, error });
+      status.textContent = summarizeGalleryUploadResults(results);
+    } finally {
+      if (submit) submit.disabled = false;
     }
   });
 
