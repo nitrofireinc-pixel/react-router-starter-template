@@ -15,6 +15,8 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/connect',
   '/api/admin/zernio/facebook/disconnect',
   '/api/admin/zernio/facebook/pages',
+  '/api/admin/zernio/instagram',
+  '/api/admin/zernio/instagram/settings',
 ];
 
 let savedToastTimer = null;
@@ -318,7 +320,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2453,6 +2455,76 @@ async function loadZernioFacebookStatus({ sync = false } = {}) {
   }
 }
 
+function renderZernioInstagramStatus(status) {
+  state.zernioInstagram = status || null;
+  const statusEl = document.querySelector('#zernio-instagram-status');
+  const connectBtn = document.querySelector('#zernio-instagram-connect');
+  const refreshBtn = document.querySelector('#zernio-instagram-refresh');
+  const disconnectBtn = document.querySelector('#zernio-instagram-disconnect');
+  const autopostRow = document.querySelector('#zernio-instagram-autopost-row');
+  const autopost = document.querySelector('#zernio-instagram-autopost');
+  const detail = status?.detail || (status?.connected ? 'Instagram connected.' : 'Instagram not connected.');
+  if (statusEl) {
+    statusEl.textContent = detail;
+    statusEl.classList.toggle('ok', Boolean(status?.connected));
+  }
+  if (connectBtn) {
+    connectBtn.hidden = !status?.configured;
+    connectBtn.textContent = status?.connected ? 'Reconnect Instagram' : 'Connect Instagram';
+    if (status?.configured) {
+      connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/instagram/connect');
+    }
+  }
+  if (refreshBtn) refreshBtn.hidden = !status?.configured;
+  if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
+  if (autopostRow) autopostRow.hidden = !status?.connected;
+  if (autopost) {
+    autopost.checked = status?.gallery_autopost !== false;
+    autopost.disabled = !status?.connected;
+  }
+}
+
+async function loadZernioInstagramStatus({ sync = false } = {}) {
+  if (!hasPermission('site')) return null;
+  const statusEl = document.querySelector('#zernio-instagram-status');
+  try {
+    const path = sync ? '/api/admin/zernio/instagram?sync=1' : '/api/admin/zernio/instagram';
+    const status = await jsonFetch(path);
+    renderZernioInstagramStatus(status);
+    return status;
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not check Instagram connection.';
+    renderZernioInstagramStatus({
+      configured: false,
+      connected: false,
+      gallery_autopost: true,
+      detail: error.message || 'Could not check Instagram connection.',
+    });
+    return null;
+  }
+}
+
+async function saveZernioInstagramAutopost(enabled) {
+  const messageEl = document.querySelector('#zernio-instagram-message');
+  if (messageEl) messageEl.textContent = 'Saving Instagram settings…';
+  try {
+    const status = await jsonFetch('/api/admin/zernio/instagram/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ gallery_autopost: Boolean(enabled) }),
+    });
+    renderZernioInstagramStatus(status);
+    if (messageEl) {
+      messageEl.textContent = status.gallery_autopost
+        ? 'Gallery auto-post is on. New Photos uploads will publish to Instagram.'
+        : 'Gallery auto-post is off.';
+    }
+    return status;
+  } catch (error) {
+    if (messageEl) messageEl.textContent = error.message || 'Could not save Instagram settings.';
+    return null;
+  }
+}
+
 function formatZernioPostWhen(post) {
   const raw = post?.publishedAt || post?.scheduledFor || post?.createdAt || post?.created_at || '';
   if (!raw) return '';
@@ -2591,8 +2663,9 @@ async function loadZernioEventQueue() {
 
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
-  // Sync from Zernio when opening Social so dashboard-connected Pages appear in CMS.
+  // Sync from Zernio when opening Social so dashboard-connected accounts appear in CMS.
   await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
+  await loadZernioInstagramStatus({ sync: sync || !state.zernioInstagram?.connected });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   if (state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {
@@ -2608,17 +2681,18 @@ function applyZernioQueryFeedback() {
   if (tab) activateTab(tab);
   const zernio = String(params.get('zernio') || '').trim();
   if (!zernio) return;
-  const messageEl = document.querySelector('#zernio-facebook-message');
-  if (messageEl) {
+  const facebookMessageEl = document.querySelector('#zernio-facebook-message');
+  const instagramMessageEl = document.querySelector('#zernio-instagram-message');
+  if (facebookMessageEl) {
     if (zernio === 'facebook_connected') {
-      messageEl.textContent = 'Facebook Page connected successfully.';
+      facebookMessageEl.textContent = 'Facebook Page connected successfully.';
     } else if (zernio === 'facebook_select') {
-      messageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
+      facebookMessageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
     } else if (zernio === 'facebook_pending') {
-      messageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
+      facebookMessageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
     } else if (zernio === 'facebook_error') {
       const detail = params.get('detail') || 'Facebook connect failed.';
-      messageEl.textContent = detail;
+      facebookMessageEl.textContent = detail;
       const statusEl = document.querySelector('#zernio-facebook-status');
       if (statusEl && /no_facebook_pages|did not share any Pages/i.test(detail)) {
         statusEl.textContent = detail;
@@ -2626,7 +2700,19 @@ function applyZernioQueryFeedback() {
       }
     }
   }
-  if (zernio === 'facebook_connected' || zernio === 'facebook_pending' || zernio === 'facebook_select') {
+  if (instagramMessageEl) {
+    if (zernio === 'instagram_connected') {
+      instagramMessageEl.textContent = 'Instagram connected successfully. Gallery auto-post is ready.';
+    } else if (zernio === 'instagram_error') {
+      instagramMessageEl.textContent = params.get('detail') || 'Instagram connect failed.';
+    }
+  }
+  if (
+    zernio === 'facebook_connected'
+    || zernio === 'facebook_pending'
+    || zernio === 'facebook_select'
+    || zernio === 'instagram_connected'
+  ) {
     loadSocialPanel({ sync: true }).catch(() => {});
   }
   params.delete('zernio');
@@ -2676,7 +2762,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    hasPermission('site') && ['Social Media', 'Add Instagram, YouTube, and other account links, or connect Facebook to publish posts.', 'social', 'Social', 'tab'],
+    hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
@@ -5651,6 +5737,38 @@ function bindForms() {
     }
   });
 
+  document.querySelector('#zernio-instagram-refresh')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-instagram-message');
+    if (messageEl) messageEl.textContent = 'Refreshing…';
+    try {
+      await loadZernioInstagramStatus({ sync: true });
+      if (messageEl) {
+        messageEl.textContent = state.zernioInstagram?.connected
+          ? 'Instagram connection refreshed from Zernio.'
+          : 'No Instagram account found yet. Connect Instagram here or in the Zernio dashboard, then refresh.';
+      }
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not refresh Instagram status.';
+    }
+  });
+
+  document.querySelector('#zernio-instagram-disconnect')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-instagram-message');
+    if (!confirm('Disconnect Instagram from Zernio for this site?')) return;
+    if (messageEl) messageEl.textContent = 'Disconnecting…';
+    try {
+      await jsonFetch('/api/admin/zernio/instagram', { method: 'DELETE' });
+      await loadZernioInstagramStatus();
+      if (messageEl) messageEl.textContent = 'Instagram disconnected.';
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not disconnect Instagram.';
+    }
+  });
+
+  document.querySelector('#zernio-instagram-autopost')?.addEventListener('change', async (event) => {
+    await saveZernioInstagramAutopost(Boolean(event.currentTarget.checked));
+  });
+
   document.querySelectorAll('#zernio-post-form input[name="publish_mode"]').forEach((input) => {
     input.addEventListener('change', syncZernioPublishModeUi);
   });
@@ -6226,10 +6344,23 @@ function bindForms() {
     const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
     status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
     try {
-      await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      const uploaded = await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
       resetPhotoForm();
       await loadPhotos();
-      status.textContent = 'Photo uploaded.';
+      const ig = uploaded?.instagram;
+      if (ig?.ok) {
+        status.textContent = 'Photo uploaded and posted to Instagram.';
+      } else if (ig?.attempted && ig?.error) {
+        status.textContent = `Photo uploaded, but Instagram post failed: ${ig.error}`;
+      } else if (ig?.reason === 'not_connected') {
+        status.textContent = 'Photo uploaded. Connect Instagram on Social Media to auto-post gallery photos.';
+      } else if (ig?.reason === 'autopost_disabled') {
+        status.textContent = 'Photo uploaded. Instagram gallery auto-post is currently off.';
+      } else if (ig?.reason === 'unsupported_format') {
+        status.textContent = 'Photo uploaded. SVG files are not auto-posted to Instagram.';
+      } else {
+        status.textContent = 'Photo uploaded.';
+      }
     } catch (error) {
       const detail = String(error?.message || '').trim() || 'Unknown error';
       status.textContent = `Photo upload failed: ${detail}`;

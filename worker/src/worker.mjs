@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-social-accounts-20260821';
+const ASSET_VERSION = 'instagram-gallery-autopost-20260821';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -220,6 +220,8 @@ const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
 const ZERNIO_FACEBOOK_PENDING_KEY = 'zernio_facebook_pending';
 const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
 const ZERNIO_FACEBOOK_EVENTS_KEY = 'zernio_facebook_events';
+const ZERNIO_INSTAGRAM_KEY = 'zernio_instagram';
+const ZERNIO_INSTAGRAM_AUTOPOST_KEY = 'zernio_instagram_gallery_autopost';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
@@ -676,6 +678,18 @@ function publicSiteOrigin(request, env = {}) {
 
 function zernioFacebookCallbackUrl(request, env = {}) {
   return `${publicSiteOrigin(request, env)}/admin/zernio/facebook/callback`;
+}
+
+function zernioInstagramCallbackUrl(request, env = {}) {
+  return `${publicSiteOrigin(request, env)}/admin/zernio/instagram/callback`;
+}
+
+export function absolutePublicAssetUrl(request, env, pathOrUrl = '') {
+  const raw = String(pathOrUrl || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const origin = publicSiteOrigin(request, env);
+  return `${origin}${raw.startsWith('/') ? raw : `/${raw}`}`;
 }
 
 function getCookie(request, name) {
@@ -1617,6 +1631,46 @@ export function parseZernioFacebookConnection(value) {
   }
 }
 
+export function parseZernioInstagramConnection(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || 'null') : value;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const accountId = String(parsed.accountId || parsed._id || '').trim();
+    if (!accountId) return null;
+    return {
+      accountId,
+      profileId: String(parsed.profileId || '').trim(),
+      platform: 'instagram',
+      name: String(parsed.name || parsed.displayName || parsed.username || 'Instagram').trim(),
+      username: String(parsed.username || '').trim(),
+      connectedAt: String(parsed.connectedAt || '').trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function isInstagramGalleryAutopostEnabled(raw) {
+  const value = String(raw ?? '1').trim().toLowerCase();
+  if (!value) return true;
+  return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
+}
+
+export function galleryInstagramCaption(photo = {}) {
+  const caption = htmlToPlainText(photo.caption || '').trim();
+  if (caption) return caption.slice(0, 2200);
+  const alt = String(photo.alt_text || '').trim();
+  if (alt) return alt.slice(0, 2200);
+  return 'New photo from East Forsyth Band';
+}
+
+export function isInstagramPublishableImage(photo = {}) {
+  const filename = String(photo.filename || photo.original_name || photo.url || '').toLowerCase();
+  if (!filename) return false;
+  if (filename.endsWith('.svg') || filename.includes('.svg?')) return false;
+  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(filename) || !/\.[a-z0-9]+(\?|$)/i.test(filename);
+}
+
 function zernioConfigured(env) {
   return Boolean(String(env.ZERNIO_API_KEY || '').trim());
 }
@@ -1855,19 +1909,27 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   };
 }
 
-export function normalizeZernioPostPayload(payload = {}, account = null) {
+export function normalizeZernioPostPayload(payload = {}, account = null, platform = 'facebook') {
   const content = String(payload.content || '').trim();
   const mediaUrl = String(payload.media_url || payload.image_url || '').trim();
   const publishNow = payload.publish_now !== false && !payload.scheduled_for;
   const scheduledFor = String(payload.scheduled_for || '').trim();
   const timezone = String(payload.timezone || 'America/New_York').trim() || 'America/New_York';
+  const targetPlatform = String(platform || account?.platform || 'facebook').trim().toLowerCase() || 'facebook';
   if (!content) throw new Error('Post content is required.');
   if (content.length > 5000) throw new Error('Post content is too long.');
-  if (!account?.accountId) throw new Error('Connect a Facebook Page before posting.');
+  if (!account?.accountId) {
+    throw new Error(targetPlatform === 'instagram'
+      ? 'Connect Instagram before posting.'
+      : 'Connect a Facebook Page before posting.');
+  }
+  if (targetPlatform === 'instagram' && !mediaUrl) {
+    throw new Error('Instagram posts require an image URL.');
+  }
   if (mediaUrl && !/^https?:\/\//i.test(mediaUrl)) throw new Error('Media URL must start with http:// or https://');
   const body = {
     content,
-    platforms: [{ platform: 'facebook', accountId: account.accountId }],
+    platforms: [{ platform: targetPlatform, accountId: account.accountId }],
   };
   if (mediaUrl) body.mediaItems = [{ type: 'image', url: mediaUrl }];
   if (publishNow) body.publishNow = true;
@@ -1907,6 +1969,199 @@ async function syncZernioFacebookConnection(env, profileId = '') {
   await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify(connection));
   if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
   return connection;
+}
+
+async function syncZernioInstagramConnection(env, profileId = '') {
+  const preferredProfileId = String(profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+  const data = await zernioApi(env, '/accounts');
+  const accounts = Array.isArray(data?.accounts) ? data.accounts : (Array.isArray(data) ? data : []);
+  const instagramAccounts = accounts.filter((account) => String(account?.platform || '').toLowerCase() === 'instagram');
+  const instagram = instagramAccounts.find((account) => zernioAccountProfileId(account) === preferredProfileId)
+    || instagramAccounts.find((account) => String(account?.profileId?.name || '').trim().toLowerCase() === 'east forsyth band')
+    || instagramAccounts[instagramAccounts.length - 1]
+    || null;
+  if (!instagram) return null;
+  const connection = {
+    accountId: String(instagram._id || instagram.accountId || instagram.id || '').trim(),
+    profileId: preferredProfileId || zernioAccountProfileId(instagram),
+    platform: 'instagram',
+    name: String(instagram.displayName || instagram.name || instagram.username || 'Instagram').trim(),
+    username: String(instagram.username || '').trim(),
+    connectedAt: new Date().toISOString(),
+  };
+  if (!connection.accountId) return null;
+  await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, JSON.stringify(connection));
+  if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
+  return connection;
+}
+
+async function getInstagramGalleryAutopostEnabled(env) {
+  return isInstagramGalleryAutopostEnabled(await getSiteContentValue(env, ZERNIO_INSTAGRAM_AUTOPOST_KEY));
+}
+
+async function setInstagramGalleryAutopostEnabled(env, enabled) {
+  await setSiteContentValue(env, ZERNIO_INSTAGRAM_AUTOPOST_KEY, enabled ? '1' : '0');
+  return enabled;
+}
+
+async function getZernioInstagramStatus(env, { sync = false } = {}) {
+  const configured = zernioConfigured(env);
+  let stored = parseZernioInstagramConnection(await getSiteContentValue(env, ZERNIO_INSTAGRAM_KEY));
+  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim();
+  let galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
+  if (configured && sync) {
+    try {
+      profileId = await ensureZernioProfileId(env);
+      const live = await syncZernioInstagramConnection(env, profileId);
+      if (live) {
+        stored = live;
+      } else if (stored?.accountId) {
+        const data = await zernioApi(env, '/accounts');
+        const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+        const stillThere = accounts.some((account) => (
+          String(account?.platform || '').toLowerCase() === 'instagram'
+          && String(account?._id || account?.accountId || '') === stored.accountId
+        ));
+        if (!stillThere) {
+          await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, '');
+          stored = null;
+        }
+      }
+      galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
+    } catch (error) {
+      return {
+        configured,
+        connected: Boolean(stored?.accountId),
+        profileId,
+        account: stored,
+        gallery_autopost: galleryAutopost,
+        connectPath: '/admin/zernio/instagram/connect',
+        detail: stored?.accountId
+          ? `Connected: ${stored.name || stored.username || stored.accountId}`
+          : `Could not refresh Instagram status: ${error.message}`,
+        error: error.message,
+      };
+    }
+  }
+  return {
+    configured,
+    connected: Boolean(stored?.accountId),
+    profileId,
+    account: stored,
+    gallery_autopost: galleryAutopost,
+    connectPath: '/admin/zernio/instagram/connect',
+    detail: configured
+      ? (stored?.accountId
+        ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`
+        : 'Instagram is not linked in the CMS yet. If you already connected it in Zernio, click Refresh status. Otherwise use Connect Instagram.')
+      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
+  };
+}
+
+export async function maybePublishGalleryPhotoToInstagram(env, request, photo = {}) {
+  if (!zernioConfigured(env)) {
+    return { attempted: false, ok: false, reason: 'not_configured' };
+  }
+  if (Number(photo.sort_order) < 0) {
+    return { attempted: false, ok: false, reason: 'utility_upload' };
+  }
+  if (!isInstagramPublishableImage(photo)) {
+    return { attempted: false, ok: false, reason: 'unsupported_format' };
+  }
+  const status = await getZernioInstagramStatus(env, { sync: true });
+  if (!status.connected || !status.account?.accountId) {
+    return { attempted: false, ok: false, reason: 'not_connected' };
+  }
+  if (!status.gallery_autopost) {
+    return { attempted: false, ok: false, reason: 'autopost_disabled' };
+  }
+  const mediaUrl = absolutePublicAssetUrl(request, env, photo.url);
+  if (!mediaUrl) {
+    return { attempted: false, ok: false, reason: 'missing_media_url' };
+  }
+  try {
+    const body = normalizeZernioPostPayload({
+      content: galleryInstagramCaption(photo),
+      media_url: mediaUrl,
+      publish_now: true,
+    }, status.account, 'instagram');
+    const created = await zernioApi(env, '/posts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const postId = String(created?.post?._id || created?.post?.id || created?._id || created?.id || '').trim();
+    return {
+      attempted: true,
+      ok: true,
+      reason: 'published',
+      post_id: postId,
+      media_url: mediaUrl,
+      account: status.account?.username || status.account?.name || '',
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      reason: 'publish_failed',
+      error: String(error?.message || error || 'Instagram publish failed'),
+      media_url: mediaUrl,
+    };
+  }
+}
+
+async function handleZernioInstagramConnect(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Instagram.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  if (!zernioConfigured(env)) {
+    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
+  }
+  try {
+    const profileId = await ensureZernioProfileId(env);
+    const redirectUrl = zernioInstagramCallbackUrl(request, env);
+    const query = new URLSearchParams({
+      profileId,
+      redirect_url: redirectUrl,
+    });
+    const data = await zernioApi(env, `/connect/instagram?${query.toString()}`);
+    const authUrl = String(data?.authUrl || data?.url || '').trim();
+    if (!authUrl) throw new Error('Zernio did not return an Instagram OAuth URL.');
+    return redirect(authUrl);
+  } catch (error) {
+    const message = escapeHtml(error?.message || 'Could not start Instagram OAuth');
+    return htmlResponse(`<!doctype html><title>Instagram connect failed</title><p>${message}</p><p><a href="/admin">Back to CMS</a></p>`, 502);
+  }
+}
+
+async function handleZernioInstagramCallback(request, env) {
+  await initDb(env);
+  const url = new URL(request.url);
+  const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
+  if (error) {
+    return redirect(`/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent(error)}`);
+  }
+  let nextPath = '/admin?tab=social&zernio=instagram_connected';
+  try {
+    const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+    if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+    const connection = await syncZernioInstagramConnection(env, profileId);
+    if (!connection) {
+      nextPath = `/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent('Instagram OAuth finished, but no Instagram account was found on the Zernio profile. Connect Instagram in Zernio, then click Refresh status.')}`;
+    }
+  } catch (callbackError) {
+    nextPath = `/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent(callbackError?.message || 'Instagram connect failed')}`;
+  }
+  const user = await currentUser(request, env);
+  if (!user) {
+    return redirect(`/admin/login?next=${encodeURIComponent(nextPath)}`);
+  }
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  return redirect(nextPath);
 }
 
 function emptyFacebookEventSyncState() {
@@ -7073,6 +7328,35 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
 
+  if (url.pathname === '/api/admin/zernio/instagram' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const sync = String(url.searchParams.get('sync') || '') === '1';
+    return jsonResponse(await getZernioInstagramStatus(env, { sync }));
+  }
+  if (url.pathname === '/api/admin/zernio/instagram' && request.method === 'DELETE') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const status = await getZernioInstagramStatus(env);
+    if (status.account?.accountId && zernioConfigured(env)) {
+      try {
+        await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
+      } catch {
+        // Clear local link even if remote disconnect fails.
+      }
+    }
+    await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, '');
+    return jsonResponse(await getZernioInstagramStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/instagram/settings' && request.method === 'PUT') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const enabled = payload.gallery_autopost !== false && payload.gallery_autopost !== 0 && payload.gallery_autopost !== '0';
+    await setInstagramGalleryAutopostEnabled(env, enabled);
+    return jsonResponse(await getZernioInstagramStatus(env));
+  }
+
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
@@ -8277,13 +8561,25 @@ async function routeApi(request, env, url, ctx = null) {
       // Gallery uploads omit sort_order (auto-assigned). Negative values still hide staff/logo utility images.
       const rawSort = form.get('sort_order');
       const sortOrder = rawSort === null || rawSort === '' ? 0 : Number(rawSort);
-      return jsonResponse(await storeImageUpload(
+      const stored = await storeImageUpload(
         env,
         form.get('file'),
         String(form.get('alt_text') || ''),
         String(form.get('caption') || ''),
         sortOrder,
-      ));
+      );
+      let instagram = null;
+      try {
+        instagram = await maybePublishGalleryPhotoToInstagram(env, request, stored);
+      } catch (error) {
+        instagram = {
+          attempted: true,
+          ok: false,
+          reason: 'publish_failed',
+          error: String(error?.message || error || 'Instagram publish failed'),
+        };
+      }
+      return jsonResponse({ ...stored, instagram });
     } catch (error) {
       return jsonResponse({ detail: error.message }, 400);
     }
@@ -8748,6 +9044,8 @@ export default {
     if (url.pathname === '/admin/logout') return logout(request, env);
     if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
     if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
+    if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
+    if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
@@ -8846,7 +9144,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
-<div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook through Zernio to publish or schedule posts.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">
 <form id="social-links-form" class="admin-card stack utility-links-card social-links-card">
   <div class="utility-links-head"><h2>Account links</h2><p class="muted">These URLs power the social icons above the footer brand on every public page. Leave a URL blank to show a faded placeholder until that network is ready.</p></div>
@@ -8856,6 +9154,23 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
   <p class="status" id="social-links-status"></p>
 </form>
+<div class="admin-card stack zernio-instagram-card">
+  <div class="utility-links-head">
+    <h2>Instagram connection</h2>
+    <p class="muted">Connect the band Instagram Business/Creator account through Zernio. If you already linked it in the Zernio dashboard, click Refresh status. When gallery auto-post is on, new Photos tab uploads publish to Instagram automatically.</p>
+  </div>
+  <p class="notice" id="zernio-instagram-status">Checking Instagram connection…</p>
+  <label class="toggle-line" id="zernio-instagram-autopost-row" hidden>
+    <span><b>Auto-post new gallery photos</b><small>Publishes each new gallery upload (not staff/logo utility images) to Instagram with the photo title/caption.</small></span>
+    <input id="zernio-instagram-autopost" name="instagram_gallery_autopost" type="checkbox" role="switch" aria-label="Auto-post new gallery photos to Instagram" checked>
+  </label>
+  <div class="panel-actions">
+    <a class="btn primary" id="zernio-instagram-connect" href="/admin/zernio/instagram/connect">Connect Instagram</a>
+    <button class="btn outline" type="button" id="zernio-instagram-refresh" hidden>Refresh status</button>
+    <button class="btn outline" type="button" id="zernio-instagram-disconnect" hidden>Disconnect</button>
+  </div>
+  <p class="status" id="zernio-instagram-message"></p>
+</div>
 <div class="admin-card stack zernio-facebook-card">
   <div class="utility-links-head">
     <h2>Facebook connection</h2>
@@ -9188,7 +9503,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </fieldset>
 <fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="events-list-head"><div><h2>Events by month</h2><span class="status" id="events-count"></span></div><nav class="events-month-nav" aria-label="Calendar month"><button type="button" class="btn outline events-month-btn" id="events-month-prev" aria-label="Previous month">‹</button><div class="events-month-current"><b id="events-month-label">August 2026</b><button type="button" class="btn outline events-month-today" id="events-month-today">This month</button></div><button type="button" class="btn outline events-month-btn" id="events-month-next" aria-label="Next month">›</button></nav></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text. When Instagram is connected on Social Media with gallery auto-post on, new gallery uploads publish to Instagram automatically (JPG/PNG/WEBP/GIF).</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">
