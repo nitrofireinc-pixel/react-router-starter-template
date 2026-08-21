@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'zernio-db-api-key-20260821';
+const ASSET_VERSION = 'instagram-shared-zernio-key-20260821';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -2090,9 +2090,9 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
     connectPath: '/admin/zernio/instagram/connect',
     detail: configured
       ? (stored?.accountId
-        ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`
-        : 'Instagram is not linked in the CMS yet. If you already connected it in Zernio, click Refresh status. Otherwise use Connect Instagram.')
-      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, or paste the key under Social Media (Super Admin).',
+        ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'} · using same Zernio key as Facebook`
+        : 'Instagram is not linked in the CMS yet. If you already connected it in Zernio, click Refresh status. Otherwise use Connect Instagram. Uses the same Zernio key as Facebook — no separate key needed.')
+      : 'Zernio is not configured yet. Facebook and Instagram share one key; connect Facebook first or ask a Super Admin to restore the saved Zernio key.',
   };
 }
 
@@ -9224,7 +9224,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack zernio-instagram-card">
   <div class="utility-links-head">
     <h2>Instagram connection</h2>
-    <p class="muted">Connect the band Instagram Business/Creator account through Zernio. If you already linked it in the Zernio dashboard, click Refresh status. When gallery auto-post is on, new Photos tab uploads publish to Instagram automatically.</p>
+    <p class="muted">Uses the same Zernio API key as Facebook — no separate key to enter. Refresh pulls the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically.</p>
   </div>
   <p class="notice" id="zernio-instagram-status">Checking Instagram connection…</p>
   <label class="toggle-line" id="zernio-instagram-autopost-row" hidden>
@@ -9251,19 +9251,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
   <p class="status" id="zernio-facebook-message"></p>
 </div>
-<form id="zernio-api-key-form" class="admin-card stack" hidden>
-  <div class="utility-links-head">
-    <h2>Zernio API key</h2>
-    <p class="muted">Super Admin only. Paste your Zernio API key here if the Cloudflare secret is missing at runtime. Env secrets still take priority when present. Facebook and Instagram share this key.</p>
-  </div>
-  <p class="notice" id="zernio-api-key-source">Checking API key…</p>
-  <label class="full">API key<input name="api_key" type="password" autocomplete="off" spellcheck="false" maxlength="500" placeholder="Paste Zernio API key"></label>
-  <div class="panel-actions">
-    <button class="btn primary" type="submit">Save API key</button>
-    <button class="btn outline" type="button" id="zernio-api-key-clear" hidden>Clear saved key</button>
-  </div>
-  <p class="status" id="zernio-api-key-status"></p>
-</form>
 <div class="admin-card stack" id="zernio-facebook-pages-card" hidden>
   <div class="utility-links-head">
     <h2>Choose Facebook Page</h2>
