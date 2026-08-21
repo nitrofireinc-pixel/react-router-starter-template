@@ -1624,10 +1624,10 @@ body.admin-upload-open{overflow:hidden}
   min-height:108px;
   padding:28px 32px;
   border-radius:22px;
-  background:linear-gradient(145deg,#001c38 0%,#063362 58%,#0a4478 100%);
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
   color:#fff;
-  border:1px solid rgba(255,255,255,.16);
-  box-shadow:0 24px 60px rgba(0,16,32,.45);
+  border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 24px 60px rgba(80,8,12,.4);
   text-align:center;
 }
 .admin-saved-toast-icon{
@@ -2090,6 +2090,158 @@ body.sponsor-map-open{overflow:hidden}
 .toggle-line input[type="checkbox"]:focus-visible{
   outline:3px solid rgba(231,19,33,.35);
   outline-offset:2px;
+}
+
+.email-list-signup{
+  padding-top:28px;
+  padding-bottom:64px;
+  background:
+    linear-gradient(180deg, rgba(0,33,66,.04), transparent 42%),
+    var(--soft);
+}
+.email-list-signup-inner{
+  display:flex;
+  flex-wrap:wrap;
+  gap:20px 28px;
+  align-items:center;
+  justify-content:space-between;
+  border-top:1px solid var(--line);
+  padding-top:28px;
+}
+.email-list-signup-copy{
+  flex:1 1 16rem;
+  min-width:0;
+}
+.email-list-signup-copy h2{
+  margin:0 0 8px;
+  color:var(--navy);
+  font-size:clamp(1.45rem,2.4vw,2rem);
+  letter-spacing:-.03em;
+}
+.email-list-signup-copy p{
+  margin:0;
+  color:var(--muted);
+  max-width:36rem;
+}
+.email-list-signup-action{
+  flex:0 0 auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:16px 20px;
+}
+.qr-code-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:36px 28px;
+  align-items:start;
+  justify-items:center;
+  padding:12px 0 28px;
+}
+.qr-code-card{
+  margin:0;
+  display:grid;
+  gap:14px;
+  justify-items:center;
+  text-align:center;
+}
+.qr-code-card a{
+  display:block;
+  line-height:0;
+}
+.qr-code-card img{
+  width:min(240px, 70vw);
+  height:auto;
+  background:#fff;
+  border:1px solid var(--line);
+  padding:10px;
+}
+.qr-code-card figcaption{
+  margin:0;
+  color:var(--navy);
+  font-weight:900;
+  font-size:clamp(1.35rem, 2.6vw, 1.85rem);
+  letter-spacing:-.03em;
+  line-height:1.1;
+}
+@media (max-width:760px){
+  .qr-code-grid{grid-template-columns:1fr; gap:28px}
+}
+@media print{
+  .utility,
+  .site-header,
+  .footer,
+  .page-hero{display:none!important}
+  .qr-code-grid{padding-top:24px}
+  .qr-code-card img{border-color:#ccc}
+}
+.email-list-topics{
+  border:0;
+  margin:0;
+  padding:0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px 18px;
+}
+.email-list-modal .sponsor-signup-form{
+  display:grid;
+  gap:12px;
+}
+.email-list-modal .email-list-topics .checkline{
+  font-weight:700;
+}
+.public-flash-toast{
+  position:fixed;
+  inset:0;
+  z-index:120;
+  display:grid;
+  place-items:center;
+  padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  pointer-events:none;
+}
+.public-flash-toast-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(40,6,8,.42);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity .3s ease;
+}
+.public-flash-toast.is-visible .public-flash-toast-backdrop{opacity:1}
+.public-flash-toast.is-leaving .public-flash-toast-backdrop{opacity:0}
+.public-flash-toast-panel{
+  position:relative;
+  z-index:1;
+  width:min(320px,100%);
+  transform:translate3d(0,36px,0) scale(.94);
+  opacity:0;
+  transition:transform .5s cubic-bezier(.22,1,.36,1),opacity .3s ease;
+}
+.public-flash-toast.is-visible .public-flash-toast-panel{transform:translate3d(0,0,0) scale(1);opacity:1}
+.public-flash-toast.is-leaving .public-flash-toast-panel{transform:translate3d(0,20px,0) scale(.97);opacity:0}
+.public-flash-toast-card{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:108px;
+  padding:28px 32px;
+  border-radius:22px;
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 24px 60px rgba(80,8,12,.4);
+  text-align:center;
+}
+.public-flash-toast-card strong{
+  color:#fff;
+  font-size:clamp(1.45rem,4vw,1.85rem);
+  font-weight:900;
+  letter-spacing:-.02em;
+  line-height:1.1;
+}
+@media (prefers-reduced-motion:reduce){
+  .public-flash-toast-backdrop,
+  .public-flash-toast-panel{transition:none}
 }
 
 /* Public maintenance landing */

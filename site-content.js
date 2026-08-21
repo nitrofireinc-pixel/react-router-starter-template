@@ -841,7 +841,49 @@ async function loadPublicContent() {
   bindSponsorTierSignup();
   bindDonateButtons();
   bindDuesButtons();
+  maybeAutoOpenDonate();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
+}
+
+function shouldAutoOpenDonate() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('donate') === '1') return true;
+    const hash = String(window.location.hash || '').replace(/^#/, '').toLowerCase();
+    return hash === 'donate';
+  } catch {
+    return false;
+  }
+}
+
+function clearDonateDeepLink() {
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    if (url.searchParams.has('donate')) {
+      url.searchParams.delete('donate');
+      changed = true;
+    }
+    if (/^donate$/i.test(url.hash.replace(/^#/, ''))) {
+      url.hash = '';
+      changed = true;
+    }
+    if (changed) {
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState({}, '', next || url.pathname);
+    }
+  } catch {
+    // Ignore history cleanup failures.
+  }
+}
+
+function maybeAutoOpenDonate() {
+  if (isCmsAdminPreviewContext(document)) return;
+  if (!shouldAutoOpenDonate()) return;
+  clearDonateDeepLink();
+  window.setTimeout(() => {
+    try { openDonateModal(); } catch { /* donate UI unavailable on this page */ }
+  }, 140);
 }
 
 function sortPhotosByRecent(photos = []) {
