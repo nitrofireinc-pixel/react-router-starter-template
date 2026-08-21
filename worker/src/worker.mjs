@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'marquee-tier-colors-20260821';
+const ASSET_VERSION = 'facebook-calendar-post-20260821';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -7348,9 +7348,12 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/events/publish' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    return jsonResponse({
-      detail: 'Calendar updates are no longer posted to Facebook. Ignore suggestions from the Social tab instead.',
-    }, 410);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    try {
+      return jsonResponse(await publishFacebookEventQueue(env), 201);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not publish calendar updates' }, 502);
+    }
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
@@ -9251,11 +9254,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack" id="zernio-facebook-events-card" hidden>
   <div class="utility-links-head">
     <h2>Suggested calendar updates</h2>
-    <p class="muted">New or changed calendar events appear here for awareness. They are not posted to Facebook. Ignore any suggestion you do not need.</p>
+    <p class="muted">New or changed calendar events appear here. Post them as one Facebook update, or ignore any you do not need.</p>
   </div>
   <p class="notice" id="zernio-facebook-events-summary">Checking calendar suggestions…</p>
   <div id="zernio-facebook-events-list" class="admin-list zernio-events-queue-list"></div>
   <div class="panel-actions">
+    <button class="btn primary" type="button" id="zernio-facebook-events-publish" hidden>Post calendar updates to Facebook</button>
     <button class="btn outline" type="button" id="zernio-facebook-events-ignore-all" hidden>Ignore all suggestions</button>
   </div>
   <p class="status" id="zernio-facebook-events-status"></p>
