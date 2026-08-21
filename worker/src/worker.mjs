@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'instagram-shared-zernio-key-20260821';
+const ASSET_VERSION = 'instagram-refresh-always-20260821';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -2041,11 +2041,14 @@ async function setInstagramGalleryAutopostEnabled(env, enabled) {
 
 async function getZernioInstagramStatus(env, { sync = false } = {}) {
   const resolvedKey = await resolveZernioApiKey(env);
-  const configured = Boolean(resolvedKey.key);
   let stored = parseZernioInstagramConnection(await getSiteContentValue(env, ZERNIO_INSTAGRAM_KEY));
-  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || '').trim();
+  const facebookStored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
+  // Instagram shares Facebook's Zernio key — never require a separate key.
+  const configured = Boolean(resolvedKey.key) || Boolean(stored?.accountId) || Boolean(facebookStored?.accountId);
+  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || facebookStored?.profileId || '').trim();
   let galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
-  if (configured && sync) {
+  const canCallZernio = Boolean(resolvedKey.key);
+  if (canCallZernio && sync) {
     try {
       profileId = await ensureZernioProfileId(env);
       const live = await syncZernioInstagramConnection(env, profileId);
@@ -2066,33 +2069,40 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
       galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
     } catch (error) {
       return {
-        configured,
-        configured_source: resolvedKey.source,
+        configured: true,
+        configured_source: resolvedKey.source === 'none' ? 'shared' : resolvedKey.source,
         connected: Boolean(stored?.accountId),
         profileId,
         account: stored,
         gallery_autopost: galleryAutopost,
         connectPath: '/admin/zernio/instagram/connect',
         detail: stored?.accountId
-          ? `Connected: ${stored.name || stored.username || stored.accountId}`
-          : `Could not refresh Instagram status: ${error.message}`,
+          ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`
+          : `Could not refresh Instagram from Zernio: ${error.message}`,
         error: error.message,
       };
     }
   }
+  const connected = Boolean(stored?.accountId);
+  let detail;
+  if (connected) {
+    detail = `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`;
+  } else if (canCallZernio) {
+    detail = 'Instagram is not linked yet. Click Refresh status to pull the account already connected in Zernio (same key as Facebook).';
+  } else if (facebookStored?.accountId) {
+    detail = 'Facebook is connected. Click Refresh status to link Instagram with the same Zernio setup.';
+  } else {
+    detail = 'Connect Facebook first (or Refresh after linking Instagram in Zernio). Instagram uses the same Zernio key — no separate key to enter.';
+  }
   return {
     configured,
-    configured_source: resolvedKey.source,
-    connected: Boolean(stored?.accountId),
+    configured_source: resolvedKey.source === 'none' && configured ? 'shared' : resolvedKey.source,
+    connected,
     profileId,
     account: stored,
     gallery_autopost: galleryAutopost,
     connectPath: '/admin/zernio/instagram/connect',
-    detail: configured
-      ? (stored?.accountId
-        ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'} · using same Zernio key as Facebook`
-        : 'Instagram is not linked in the CMS yet. If you already connected it in Zernio, click Refresh status. Otherwise use Connect Instagram. Uses the same Zernio key as Facebook — no separate key needed.')
-      : 'Zernio is not configured yet. Facebook and Instagram share one key; connect Facebook first or ask a Super Admin to restore the saved Zernio key.',
+    detail,
   };
 }
 
@@ -9224,7 +9234,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack zernio-instagram-card">
   <div class="utility-links-head">
     <h2>Instagram connection</h2>
-    <p class="muted">Uses the same Zernio API key as Facebook — no separate key to enter. Refresh pulls the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically.</p>
+    <p class="muted">Uses the same Zernio key as Facebook — nothing to paste. Click Refresh status to load the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically.</p>
   </div>
   <p class="notice" id="zernio-instagram-status">Checking Instagram connection…</p>
   <label class="toggle-line" id="zernio-instagram-autopost-row" hidden>
@@ -9232,8 +9242,8 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <input id="zernio-instagram-autopost" name="instagram_gallery_autopost" type="checkbox" role="switch" aria-label="Auto-post new gallery photos to Instagram" checked>
   </label>
   <div class="panel-actions">
-    <a class="btn primary" id="zernio-instagram-connect" href="/admin/zernio/instagram/connect">Connect Instagram</a>
-    <button class="btn outline" type="button" id="zernio-instagram-refresh" hidden>Refresh status</button>
+    <a class="btn primary" id="zernio-instagram-connect" href="/admin/zernio/instagram/connect" hidden>Connect Instagram</a>
+    <button class="btn outline" type="button" id="zernio-instagram-refresh">Refresh status</button>
     <button class="btn outline" type="button" id="zernio-instagram-disconnect" hidden>Disconnect</button>
   </div>
   <p class="status" id="zernio-instagram-message"></p>

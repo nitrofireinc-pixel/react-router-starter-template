@@ -2388,7 +2388,7 @@ function renderZernioFacebookStatus(status) {
       connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
     }
   }
-  if (refreshBtn) refreshBtn.hidden = !status?.configured;
+  if (refreshBtn) refreshBtn.hidden = false;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
   if (postForm) postForm.hidden = !status?.connected;
   const eventsCard = document.querySelector('#zernio-facebook-events-card');
@@ -2464,18 +2464,18 @@ function renderZernioInstagramStatus(status) {
   const autopostRow = document.querySelector('#zernio-instagram-autopost-row');
   const autopost = document.querySelector('#zernio-instagram-autopost');
   const detail = status?.detail || (status?.connected ? 'Instagram connected.' : 'Instagram not connected.');
+  // Share Facebook's Zernio setup — never block Refresh behind a separate API key form.
+  const ready = Boolean(status?.configured || status?.connected || state.zernioFacebook?.configured || state.zernioFacebook?.connected);
   if (statusEl) {
     statusEl.textContent = detail;
     statusEl.classList.toggle('ok', Boolean(status?.connected));
   }
   if (connectBtn) {
-    connectBtn.hidden = !status?.configured;
+    connectBtn.hidden = !ready;
     connectBtn.textContent = status?.connected ? 'Reconnect Instagram' : 'Connect Instagram';
-    if (status?.configured) {
-      connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/instagram/connect');
-    }
+    connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/instagram/connect');
   }
-  if (refreshBtn) refreshBtn.hidden = !status?.configured;
+  if (refreshBtn) refreshBtn.hidden = false;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
   if (autopostRow) autopostRow.hidden = !status?.connected;
   if (autopost) {
@@ -2665,7 +2665,8 @@ async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
   // Sync from Zernio when opening Social so dashboard-connected accounts appear in CMS.
   await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
-  await loadZernioInstagramStatus({ sync: sync || !state.zernioInstagram?.connected });
+  // Always sync Instagram so the shared Facebook/Zernio key picks up the linked account.
+  await loadZernioInstagramStatus({ sync: true });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   if (state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {
