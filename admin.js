@@ -2676,7 +2676,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
+    hasPermission('site') && ['Social Media', 'Add Instagram, YouTube, and other account links, or connect Facebook to publish posts.', 'social', 'Social', 'tab'],
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
@@ -5611,7 +5611,7 @@ function bindForms() {
       });
       state.socialLinks = saved.social_links || links;
       renderSocialLinksEditor();
-      if (status) status.textContent = 'Footer social links saved. Icons appear on every public page when a URL is set.';
+      if (status) status.textContent = 'Social links saved. Icons appear on every public page when a URL is set.';
     } catch (error) {
       if (status) status.textContent = `Could not save social links: ${error.message}`;
     }
