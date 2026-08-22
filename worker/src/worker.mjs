@@ -7350,7 +7350,16 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
-    return jsonResponse(await listCaldevEvents(env));
+    let events = await listCaldevEvents(env);
+    if (!events.length) {
+      try {
+        await seedCaldevFromProduction(env, { getEvents, clear: true });
+        events = await listCaldevEvents(env);
+      } catch {
+        // Seeding is best-effort for the lab page.
+      }
+    }
+    return jsonResponse(events);
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
     return jsonResponse(CALDEV_TRACKS);
