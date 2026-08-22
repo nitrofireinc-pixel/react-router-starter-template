@@ -321,7 +321,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], caldevEvents: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2011,7 +2011,10 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
 }
 
 function activateTab(name) {
-  if (name === 'security-log' && !isSuperAdmin()) {
+    if (name === 'security-log' && !isSuperAdmin()) {
+    return Promise.resolve(false);
+  }
+  if (name === 'caldev' && !isSuperAdmin()) {
     return Promise.resolve(false);
   }
   const pagesPanel = document.querySelector('#tab-pages');
@@ -2051,6 +2054,10 @@ function activateTab(name) {
     if (name === 'security-log') {
       if (!isSuperAdmin()) return;
       loadSecurityLog({ resetPage: true }).catch(() => {});
+    }
+    if (name === 'caldev') {
+      if (!isSuperAdmin()) return;
+      loadCaldevEvents().catch(() => {});
     }
     if (name === 'events') {
       renderEventsList();
@@ -2216,6 +2223,7 @@ function showAllowedPanels() {
     social: hasPermission('site'),
     users: hasPermission('users'),
     'security-log': isSuperAdmin(),
+    caldev: isSuperAdmin(),
     events: canViewEvents(),
     photos: hasPermission('photos'),
   };
@@ -2805,6 +2813,7 @@ function renderDashboard() {
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
+    isSuperAdmin() && ['Schedule Board', 'Test calendar lab at /caldev — seed, edit, and delete without touching the live calendar.', 'caldev', 'Lab', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -4558,6 +4567,134 @@ async function loadEvents() {
   if (!canViewEvents()) return;
   state.events = await jsonFetch('/api/admin/events');
   renderEventsList();
+}
+
+function resetCaldevForm() {
+  const form = document.querySelector('#caldev-form');
+  if (!form) return;
+  form.hidden = true;
+  form.reset();
+  form.elements.id.value = '';
+  if (form.elements.all_day) form.elements.all_day.checked = true;
+}
+
+function openCaldevForm(event = null) {
+  const form = document.querySelector('#caldev-form');
+  if (!form || !isSuperAdmin()) return;
+  form.hidden = false;
+  form.elements.id.value = event?.id || '';
+  form.elements.title.value = event?.title || '';
+  form.elements.track.value = event?.track || 'other';
+  form.elements.start_date.value = event?.start_date || '';
+  form.elements.end_date.value = event?.end_date || '';
+  form.elements.start_time.value = event?.start_time || '';
+  form.elements.end_time.value = event?.end_time || '';
+  form.elements.location.value = event?.location || '';
+  form.elements.description.value = event?.description || '';
+  form.elements.all_day.checked = event ? Boolean(Number(event.all_day)) : true;
+  form.elements.title.focus();
+}
+
+function renderCaldevList() {
+  const list = document.querySelector('#caldev-list');
+  if (!list) return;
+  const events = Array.isArray(state.caldevEvents) ? state.caldevEvents : [];
+  if (!events.length) {
+    list.innerHTML = '<p class="draft">No Schedule Board events yet. Seed from the live calendar or add one manually.</p>';
+    return;
+  }
+  list.innerHTML = events.map((event) => {
+    const when = event.start_date
+      ? `${escapeHtml(event.start_date)}${event.start_time ? ` · ${escapeHtml(event.start_time)}` : ''}`
+      : 'Date TBD';
+    return `<article class="caldev-cms-item">
+      <div>
+        <b>${escapeHtml(event.title)}</b>
+        <small>${escapeHtml(event.track || 'other')} · ${when}</small>
+        ${event.location ? `<small>${escapeHtml(event.location)}</small>` : ''}
+      </div>
+      <div class="caldev-cms-item-actions">
+        <button type="button" class="btn outline" data-caldev-edit="${event.id}">Edit</button>
+        <button type="button" class="btn outline" data-caldev-delete="${event.id}">Delete</button>
+      </div>
+    </article>`;
+  }).join('');
+  list.querySelectorAll('[data-caldev-edit]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const event = state.caldevEvents.find((item) => Number(item.id) === Number(button.dataset.caldevEdit));
+      if (event) openCaldevForm(event);
+    });
+  });
+  list.querySelectorAll('[data-caldev-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!isSuperAdmin()) return;
+      if (!confirm('Delete this Schedule Board event? The live calendar is not affected.')) return;
+      try {
+        await jsonFetch(`/api/admin/caldev/events/${button.dataset.caldevDelete}`, { method: 'DELETE' });
+        await loadCaldevEvents();
+      } catch (error) {
+        alert(error.message || 'Could not delete board event.');
+      }
+    });
+  });
+}
+
+async function loadCaldevEvents() {
+  if (!isSuperAdmin()) return;
+  const payload = await jsonFetch('/api/admin/caldev/events');
+  state.caldevEvents = Array.isArray(payload?.events) ? payload.events : (Array.isArray(payload) ? payload : []);
+  renderCaldevList();
+}
+
+function bindCaldevPanel() {
+  if (window.__caldevPanelBound) return;
+  window.__caldevPanelBound = true;
+  document.querySelector('#caldev-new')?.addEventListener('click', () => openCaldevForm());
+  document.querySelector('#caldev-cancel')?.addEventListener('click', () => resetCaldevForm());
+  document.querySelector('#caldev-seed')?.addEventListener('click', async () => {
+    if (!isSuperAdmin()) return;
+    if (!confirm('Replace Schedule Board events with a fresh copy from the live calendar?')) return;
+    try {
+      const result = await jsonFetch('/api/admin/caldev/seed', {
+        method: 'POST',
+        body: JSON.stringify({ clear: true }),
+      });
+      state.caldevEvents = Array.isArray(result?.events) ? result.events : [];
+      resetCaldevForm();
+      renderCaldevList();
+      alert(`Seeded ${result?.inserted ?? 0} board event(s) from the live calendar.`);
+    } catch (error) {
+      alert(error.message || 'Could not seed Schedule Board.');
+    }
+  });
+  document.querySelector('#caldev-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!isSuperAdmin()) return;
+    const form = event.currentTarget;
+    const id = String(form.elements.id.value || '').trim();
+    const payload = {
+      title: form.elements.title.value,
+      track: form.elements.track.value,
+      start_date: form.elements.start_date.value,
+      end_date: form.elements.end_date.value,
+      start_time: form.elements.start_time.value,
+      end_time: form.elements.end_time.value,
+      location: form.elements.location.value,
+      description: form.elements.description.value,
+      all_day: form.elements.all_day.checked,
+    };
+    try {
+      if (id) {
+        await jsonFetch(`/api/admin/caldev/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        await jsonFetch('/api/admin/caldev/events', { method: 'POST', body: JSON.stringify(payload) });
+      }
+      resetCaldevForm();
+      await loadCaldevEvents();
+    } catch (error) {
+      alert(error.message || 'Could not save board event.');
+    }
+  });
 }
 
 function bindEventsMonthNav() {
@@ -6757,6 +6894,7 @@ bindEventsMonthNav();
 bindMailComposer();
 bindMinutesPanel();
 bindEnsemblesBodyPanel();
+bindCaldevPanel();
 refreshAll()
   .then(() => {
     applyZernioQueryFeedback();

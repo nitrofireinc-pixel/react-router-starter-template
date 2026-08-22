@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "npm run build:pages",
-    "test:worker": "node --test tests/test_worker_backend.mjs",
+    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs",
     "test:pages-build": "node --test tests/test_pages_build.mjs",
     "test:cms-guide-pdf": "node --test tests/test_cms_guide_pdf.mjs",
     "build:cms-guide-pdf": "node worker/scripts/build-cms-guide-pdf.mjs",
