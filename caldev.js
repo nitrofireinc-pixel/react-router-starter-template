@@ -131,11 +131,13 @@
 
     return `
       <div class="caldev-toolbar">
-        <div class="caldev-toolbar-nav">
-          <button type="button" class="caldev-icon-btn" data-caldev-shift="-1" aria-label="Previous">‹</button>
-          <button type="button" class="btn outline caldev-today-btn" data-caldev-today>Today</button>
-          <button type="button" class="caldev-icon-btn" data-caldev-shift="1" aria-label="Next">›</button>
+        <div class="caldev-toolbar-start">
           <h2 class="caldev-range-title">${escapeHtml(label)}</h2>
+          <div class="caldev-toolbar-nav">
+            <button type="button" class="caldev-icon-btn" data-caldev-shift="-1" aria-label="Previous">‹</button>
+            <button type="button" class="btn outline caldev-today-btn" data-caldev-today>Today</button>
+            <button type="button" class="caldev-icon-btn" data-caldev-shift="1" aria-label="Next">›</button>
+          </div>
         </div>
         <div class="caldev-toolbar-end">
           <div class="caldev-view-switch" role="group" aria-label="Schedule views">
