@@ -4844,15 +4844,18 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .cms-caldev-check{display:flex!important;align-items:center;gap:8px;font-weight:750!important}
 .cms-caldev-check input{width:auto}
 .cms-caldev-time-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cms-caldev-time-row[hidden]{display:none!important}
 .cms-caldev-editor-actions{display:flex;flex-wrap:wrap;gap:8px}
 .cms-caldev-optional{font-weight:650;color:#5b6472}
 .cms-caldev-danger{color:#9f1239;border-color:#f1c0cb}
 .cms-caldev-repeat{
   margin:0;padding:12px;border:1px solid #e1e8f1;border-radius:14px;display:grid;gap:10px;
 }
+.cms-caldev-repeat[hidden]{display:none!important}
 .cms-caldev-repeat legend{padding:0 6px;color:var(--navy);font-weight:900}
 .cms-caldev-repeat-toggle{display:flex;gap:16px;flex-wrap:wrap}
 .cms-caldev-repeat-options{display:grid;gap:10px}
+.cms-caldev-repeat-options[hidden]{display:none!important}
 .cms-caldev-repeat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .cms-caldev-repeat-heading{margin:0 0 6px;font-size:.78rem;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#5b6f88}
 .cms-caldev-repeat-checks{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}
