@@ -20,5 +20,8 @@ if (!/run_worker_first\s*=\s*true/.test(toml)) {
 if (!/efhsband\.org\/\*/.test(toml)) {
   fail('wrangler.toml must keep the efhsband.org/* route so Worker deploys continue serving the live domain.');
 }
+if (!/^name\s*=\s*"efhsband-live"/m.test(toml)) {
+  fail('wrangler.toml name must be "efhsband-live" — that Worker owns the efhsband.org route and production secrets. Deploying as "efhsband" only updates workers.dev.');
+}
 
 console.log('check:worker-assets ok');

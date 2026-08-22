@@ -14,6 +14,7 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.match(toml, /directory\s*=\s*"\.\/worker\/public"/);
   assert.match(toml, /run_worker_first\s*=\s*true/);
   assert.match(toml, /efhsband\.org\/\*/);
+  assert.match(toml, /^name\s*=\s*"efhsband-live"/m);
   assert.doesNotMatch(toml, /directory\s*=\s*"\.\/assets"/);
 });
 
