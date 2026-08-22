@@ -3661,6 +3661,12 @@ body.minutes-frame-open{overflow:hidden}
   display:grid;
   gap:8px;
 }
+.square-connect-card{margin-bottom:18px}
+.square-connect-card .notice.ok{
+  background:#e8f7ee;
+  border-color:#9ad4b2;
+  color:#0f5132;
+}
 @media(max-width:900px){
   .checkout-layout{grid-template-columns:1fr}
 }

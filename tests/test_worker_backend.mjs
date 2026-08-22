@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, parseSquareSettings, resolveSquareRuntimeEnv, SQUARE_SETTINGS_KEY, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -473,7 +473,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=boosters-dues-dev-20260820/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=square-connect-20260822/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -647,6 +647,76 @@ test('sponsor amount helpers parse display currency into cents', () => {
   assert.equal(squareMockPayEnabled({}), false);
   assert.equal(squareMockPayEnabled({ SQUARE_ALLOW_MOCK_PAY: '1' }), true);
   assert.equal(squareMockPayEnabled({ SQUARE_ALLOW_MOCK_PAY: '0' }), false);
+});
+
+test('Square settings parse from CMS JSON and fall back when env secrets are missing', async () => {
+  const parsed = parseSquareSettings(JSON.stringify({
+    access_token: 'Bearer "sq0atp-test-token"',
+    application_id: 'sq0idp-app',
+    location_id: 'LTEST',
+    environment: 'sandbox',
+  }));
+  assert.equal(parsed.access_token, 'sq0atp-test-token');
+  assert.equal(parsed.application_id, 'sq0idp-app');
+  assert.equal(parsed.location_id, 'LTEST');
+  assert.equal(parsed.environment, 'sandbox');
+  assert.equal(parseSquareSettings('not-json').access_token, '');
+
+  const prefersEnv = await resolveSquareRuntimeEnv({
+    SQUARE_ACCESS_TOKEN: 'env-token',
+    SQUARE_APPLICATION_ID: 'env-app',
+    DB: {
+      prepare() {
+        return {
+          bind() { return this; },
+          async first() {
+            return { value: JSON.stringify({ access_token: 'db-token', application_id: 'db-app', location_id: 'LDB' }) };
+          },
+        };
+      },
+    },
+  });
+  assert.equal(prefersEnv.source, 'env');
+  assert.equal(prefersEnv.env.SQUARE_ACCESS_TOKEN, 'env-token');
+  assert.equal(prefersEnv.env.SQUARE_APPLICATION_ID, 'env-app');
+  assert.equal(prefersEnv.env.SQUARE_LOCATION_ID, 'LDB');
+
+  const rows = {
+    [SQUARE_SETTINGS_KEY]: JSON.stringify({
+      square_access_token: 'db-token-value',
+      square_application_id: 'sq0idp-db',
+      square_location_id: 'LDB',
+      environment: 'production',
+    }),
+  };
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...args) {
+          this.args = args;
+          return this;
+        },
+        async first() {
+          if (String(sql).includes('SELECT value FROM site_content')) {
+            const key = this.args[0];
+            return Object.prototype.hasOwnProperty.call(rows, key) ? { value: rows[key] } : null;
+          }
+          return null;
+        },
+      };
+    },
+  };
+  const fromDb = await resolveSquareRuntimeEnv({ DB: db });
+  assert.equal(fromDb.source, 'database');
+  assert.equal(fromDb.configured, true);
+  assert.equal(fromDb.env.SQUARE_ACCESS_TOKEN, 'db-token-value');
+  assert.equal(fromDb.env.SQUARE_APPLICATION_ID, 'sq0idp-db');
+  assert.equal(fromDb.env.SQUARE_LOCATION_ID, 'LDB');
+  assert.equal(fromDb.has_database_settings, true);
+
+  const missing = await resolveSquareRuntimeEnv({});
+  assert.equal(missing.configured, false);
+  assert.equal(missing.source, '');
 });
 
 test('ensureSponsorTiersSection injects Bronze Silver Gold packages once', () => {
@@ -1363,10 +1433,14 @@ test('push service worker and web app manifest assets exist', () => {
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminSrc, /function canViewEvents/);
   assert.match(adminSrc, /Browse calendar events by month \(view only\)/);
+  assert.match(adminSrc, /\/api\/admin\/checkout\/settings/);
+  assert.match(adminSrc, /sandbox\.web\.squarecdn\.com\/v1\/square\.js/);
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /boosters-dues-dev-20260820/);
+  assert.match(workerSrc, /square-connect-20260822/);
+  assert.match(workerSrc, /square-connect-form/);
+  assert.match(workerSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(workerSrc, /\/api\/calendar-events/);
   assert.match(workerSrc, /ensureCalendarMonthMount/);
   assert.match(workerSrc, /ensureGalleryPageSlot/);
@@ -1485,7 +1559,7 @@ test('dues payment helpers and preview assets are present', () => {
   assert.match(workerSrc, /recordDuesPaymentLedger/);
   assert.match(workerSrc, /recordDuesFailedLedger/);
   assert.match(workerSrc, /sendDuesReceipt/);
-  assert.match(workerSrc, /boosters-dues-dev-20260820/);
+  assert.match(workerSrc, /square-connect-20260822/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
   assert.match(siteContent, /data-dues-open/);

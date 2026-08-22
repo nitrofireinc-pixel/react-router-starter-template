@@ -327,7 +327,7 @@
 <h3>9.2 Donate</h3>
 <p>From Sponsors and Fundraising — donor name, amount, Square card when configured.</p>
 <h3>9.3 Officer Checkout (CMS)</h3>
-<p>Described in §7.9. Requires Square: <span class="mono">SQUARE_ACCESS_TOKEN</span>, <span class="mono">SQUARE_APPLICATION_ID</span> (or <span class="mono">SQUARE_APP_ID</span>), optional <span class="mono">SQUARE_LOCATION_ID</span>, <span class="mono">SQUARE_ENVIRONMENT</span>.</p>
+<p>Described in §7.9. Requires Square: <span class="mono">SQUARE_ACCESS_TOKEN</span>, <span class="mono">SQUARE_APPLICATION_ID</span> (or <span class="mono">SQUARE_APP_ID</span>), optional <span class="mono">SQUARE_LOCATION_ID</span>, <span class="mono">SQUARE_ENVIRONMENT</span>. If Cloudflare secrets are missing on a host (for example <span class="mono">efhsband.org</span> vs Pages), Super Admin can paste the same credentials on CMS → Checkout. Saved values live in the shared database and Cloudflare secrets still win when present.</p>
 
 <h2>10. Login, sessions &amp; passwords</h2>
 <ul>
@@ -360,7 +360,7 @@
   <tr><td>User missing a menu or Dashboard card</td><td>User Management permissions; Super Admin bypasses checks</td></tr>
   <tr><td>Website Guide missing or 403</td><td>Only Super Admins see the card and can download the PDF</td></tr>
   <tr><td>Security Log missing</td><td>Must be Super Admin role — cannot be granted via checkboxes</td></tr>
-  <tr><td>Checkout / donate form missing</td><td>Square token + application id + location configuration</td></tr>
+  <tr><td>Checkout / donate form missing</td><td>Square token + application id + location. Super Admin can connect them on CMS → Checkout if Cloudflare secrets are missing on that host.</td></tr>
   <tr><td>Site stuck on maintenance</td><td>Site Settings → maintenance mode; only Super Admins preview live pages with the gold banner</td></tr>
   <tr><td>Cannot edit older minutes</td><td>Secretaries: 10-day window from meeting date; Super Admins can still edit</td></tr>
   <tr><td>Calendar view-only</td><td>Expected without <span class="mono">events</span> / <span class="mono">events:manage</span>; grant permission to allow create/edit</td></tr>
