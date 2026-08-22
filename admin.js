@@ -2813,7 +2813,7 @@ function renderDashboard() {
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    isSuperAdmin() && ['Schedule Board', 'Test calendar lab at /caldev.html — seed, edit, and delete without touching the live calendar.', 'caldev', 'Lab', 'tab', 'caldev'],
+    isSuperAdmin() && ['Schedule Board', 'Test calendar lab at /caldev — seed, edit, and delete without touching the live calendar.', 'caldev', 'Lab', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
