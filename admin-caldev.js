@@ -401,6 +401,10 @@
     panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
     panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
     panel.querySelector('[name="repeat_no"]').checked = !form.repeat;
+    const yesRadio = panel.querySelector('[data-cms-caldev-repeat-yes]');
+    const noRadio = panel.querySelector('[data-cms-caldev-repeat-no]');
+    if (yesRadio) yesRadio.checked = !!form.repeat;
+    if (noRadio) noRadio.checked = !form.repeat;
     const daySet = new Set((form.repeat_days || []).map(Number));
     panel.querySelectorAll('input[name="repeat_day"]').forEach((input) => {
       input.checked = daySet.has(Number(input.value));
