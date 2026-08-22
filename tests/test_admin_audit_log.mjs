@@ -51,12 +51,16 @@ test('redactAuditObject strips passwords and binary payloads', () => {
     password: 'secret',
     data_base64: 'AAAA',
     nested: { new_password: 'x', title: 'Hello' },
+    square_access_token: 'sq0atp-secret',
+    access_token: 'also-secret',
   });
   assert.equal(redacted.username, 'editor@example.com');
   assert.equal(redacted.password, '[redacted]');
   assert.equal(redacted.data_base64, '[redacted]');
   assert.equal(redacted.nested.new_password, '[redacted]');
   assert.equal(redacted.nested.title, 'Hello');
+  assert.equal(redacted.square_access_token, '[redacted]');
+  assert.equal(redacted.access_token, '[redacted]');
 });
 
 test('mail audit meta captures subject recipients and body excerpt', () => {

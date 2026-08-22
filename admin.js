@@ -8,6 +8,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/mail',
   '/api/admin/password',
   '/api/admin/checkout/pay',
+  '/api/admin/checkout/settings',
   '/api/admin/zernio/facebook/events/publish',
   '/api/admin/zernio/facebook/events/ignore-all',
   '/api/admin/zernio/facebook/events/',
@@ -3106,7 +3107,7 @@ function loadAdminSquareWebSdk(environment = 'production') {
     const script = document.createElement('script');
     script.dataset.squareWebSdk = '1';
     script.src = environment === 'sandbox'
-      ? 'https://sandbox.web.squareupsandbox.com/v1/square.js'
+      ? 'https://sandbox.web.squarecdn.com/v1/square.js'
       : 'https://web.squarecdn.com/v1/square.js';
     script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
     script.onerror = () => reject(new Error('Could not load Square payment form'));
@@ -3117,6 +3118,31 @@ function loadAdminSquareWebSdk(environment = 'production') {
 let checkoutCardController = null;
 let checkoutInitPromise = null;
 
+function renderSquareConnectStatus(config = {}) {
+  const form = document.querySelector('#square-connect-form');
+  const source = document.querySelector('#square-connect-source');
+  const clearBtn = document.querySelector('#square-connect-clear');
+  const canManage = Boolean(isSuperAdmin() && config.can_manage !== false);
+  if (form) form.hidden = !canManage;
+  if (clearBtn) clearBtn.hidden = !(canManage && config.database_saved);
+  if (!source) return;
+  if (!config.configured) {
+    source.textContent = config.detail || 'Square is not connected on this host. Paste the production access token and application ID to enable checkout.';
+    source.classList.remove('ok');
+    return;
+  }
+  source.classList.add('ok');
+  if (config.configured_source === 'database') {
+    source.textContent = config.web_payments
+      ? 'Using Square credentials saved in the CMS database. Cloudflare secrets take priority when present.'
+      : (config.detail || 'Saved Square credentials are incomplete.');
+    return;
+  }
+  source.textContent = config.configured_source === 'env'
+    ? (config.detail || 'Using Cloudflare Square secrets.')
+    : (config.detail || 'Square is connected.');
+}
+
 async function initCheckoutPanel() {
   if (!canAccessCheckout()) return;
   if (checkoutInitPromise) return checkoutInitPromise;
@@ -3125,6 +3151,7 @@ async function initCheckoutPanel() {
     const status = document.querySelector('#checkout-status');
     const submit = document.querySelector('#checkout-submit');
     const host = document.querySelector('#admin-square-card');
+    const connectForm = document.querySelector('#square-connect-form');
     if (!form || !host) return;
     if (status) status.textContent = 'Loading Square…';
     if (submit) submit.disabled = true;
@@ -3135,6 +3162,18 @@ async function initCheckoutPanel() {
       }
       host.innerHTML = '';
       const config = await jsonFetch('/api/admin/checkout/config');
+      renderSquareConnectStatus(config);
+      if (connectForm && isSuperAdmin()) {
+        if (config.application_id && connectForm.elements.square_application_id && !connectForm.elements.square_application_id.value) {
+          connectForm.elements.square_application_id.value = config.application_id;
+        }
+        if (config.location_id && connectForm.elements.square_location_id && !connectForm.elements.square_location_id.value) {
+          connectForm.elements.square_location_id.value = config.location_id;
+        }
+        if (config.environment && connectForm.elements.square_environment) {
+          connectForm.elements.square_environment.value = config.environment === 'sandbox' ? 'sandbox' : 'production';
+        }
+      }
       if (!config.web_payments) {
         if (status) status.textContent = config.detail || 'Square card checkout is not configured.';
         return;
@@ -6576,6 +6615,63 @@ function bindForms() {
   document.querySelector('#new-photo')?.addEventListener('click', () => {
     resetPhotoForm();
     document.querySelector('#photo-form [data-rich-input="caption"]')?.focus();
+  });
+
+  document.querySelector('#square-connect-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!isSuperAdmin()) return;
+    const form = event.currentTarget;
+    const statusEl = document.querySelector('#square-connect-status');
+    const accessToken = String(form.elements.square_access_token?.value || '').trim();
+    const applicationId = String(form.elements.square_application_id?.value || '').trim();
+    if (!accessToken) {
+      if (statusEl) statusEl.textContent = 'Paste a Square access token first.';
+      form.elements.square_access_token?.focus();
+      return;
+    }
+    if (!applicationId) {
+      if (statusEl) statusEl.textContent = 'Application ID is required.';
+      form.elements.square_application_id?.focus();
+      return;
+    }
+    if (statusEl) statusEl.textContent = 'Verifying Square…';
+    try {
+      const result = await jsonFetch('/api/admin/checkout/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          square_access_token: accessToken,
+          square_application_id: applicationId,
+          square_location_id: String(form.elements.square_location_id?.value || '').trim(),
+          square_environment: String(form.elements.square_environment?.value || 'production').trim(),
+        }),
+      });
+      form.elements.square_access_token.value = '';
+      showSavedToast(result.detail || 'Square connected.');
+      if (statusEl) statusEl.textContent = result.detail || 'Square connected.';
+      await initCheckoutPanel();
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not connect Square.';
+    }
+  });
+
+  document.querySelector('#square-connect-clear')?.addEventListener('click', async () => {
+    if (!isSuperAdmin()) return;
+    const statusEl = document.querySelector('#square-connect-status');
+    if (!confirm('Clear the Square credentials saved in the CMS?')) return;
+    if (statusEl) statusEl.textContent = 'Clearing…';
+    try {
+      const result = await jsonFetch('/api/admin/checkout/settings', {
+        method: 'POST',
+        body: JSON.stringify({ clear: true }),
+      });
+      const form = document.querySelector('#square-connect-form');
+      form?.reset();
+      showSavedToast('Saved Square credentials cleared.');
+      if (statusEl) statusEl.textContent = result.detail || 'Saved Square credentials cleared.';
+      await initCheckoutPanel();
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error.message || 'Could not clear Square credentials.';
+    }
   });
 
   document.querySelector('#checkout-form')?.addEventListener('submit', async (event) => {
