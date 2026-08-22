@@ -4536,13 +4536,13 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .caldev-wrap{max-width:1180px}
 .caldev-app{display:grid;gap:16px}
 .caldev-toolbar{
-  display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;
+  display:grid;justify-items:center;gap:12px;text-align:center;
   padding:14px 16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
   box-shadow:0 10px 28px rgba(0,33,66,.06);
 }
-.caldev-toolbar-start{display:grid;gap:10px;min-width:0}
-.caldev-toolbar-nav{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.caldev-range-title{margin:0;color:var(--navy);font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:900;letter-spacing:-.03em;line-height:1.15}
+.caldev-toolbar-start{display:grid;gap:10px;justify-items:center;min-width:0;width:100%}
+.caldev-toolbar-nav{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px}
+.caldev-range-title{margin:0;color:var(--navy);font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:900;letter-spacing:-.03em;line-height:1.15;text-align:center}
 .caldev-icon-btn{
   width:42px;height:42px;border:1px solid #d5deea;border-radius:14px;background:#fff;color:var(--navy);
   font-size:1.45rem;font-weight:700;line-height:1;cursor:pointer;
