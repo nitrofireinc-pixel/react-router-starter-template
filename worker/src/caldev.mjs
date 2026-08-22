@@ -68,6 +68,7 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
   const title = stripSimpleHtml(payload.title ?? existing?.title ?? '').slice(0, 200);
   const description = stripSimpleHtml(payload.description ?? existing?.description ?? '').slice(0, 4000);
   const location = stripSimpleHtml(payload.location ?? existing?.location ?? '').slice(0, 200);
+  const who = stripSimpleHtml(payload.who ?? existing?.who ?? '').slice(0, 200);
   let start_date = String(payload.start_date ?? existing?.start_date ?? '').trim();
   if (start_date && !isIsoDate(start_date)) start_date = '';
   let end_date = String(payload.end_date ?? existing?.end_date ?? '').trim();
@@ -86,6 +87,7 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
     title,
     description,
     location,
+    who,
     start_date,
     end_date,
     start_time: /^\d{1,2}:\d{2}/.test(start_time) ? start_time.slice(0, 5) : '',
@@ -96,6 +98,29 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
   };
 }
 
+/** Move an event to a new start date while preserving multi-day span. */
+export function shiftCaldevEventToDate(event, nextStartDate) {
+  if (!isIsoDate(nextStartDate)) return null;
+  const currentStart = String(event?.start_date || '');
+  const currentEnd = String(event?.end_date || '');
+  let end_date = '';
+  if (currentStart && currentEnd && currentEnd >= currentStart) {
+    const startMs = Date.parse(`${currentStart}T00:00:00Z`);
+    const endMs = Date.parse(`${currentEnd}T00:00:00Z`);
+    const nextMs = Date.parse(`${nextStartDate}T00:00:00Z`);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && Number.isFinite(nextMs)) {
+      const spanDays = Math.round((endMs - startMs) / 86400000);
+      const shifted = new Date(nextMs + (spanDays * 86400000));
+      end_date = `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+    }
+  }
+  return {
+    ...event,
+    start_date: nextStartDate,
+    end_date,
+  };
+}
+
 export function hydrateCaldevRow(row) {
   if (!row) return null;
   return {
@@ -103,6 +128,7 @@ export function hydrateCaldevRow(row) {
     title: String(row.title || ''),
     description: String(row.description || ''),
     location: String(row.location || ''),
+    who: String(row.who || ''),
     start_date: String(row.start_date || ''),
     end_date: String(row.end_date || ''),
     start_time: String(row.start_time || ''),
@@ -134,6 +160,7 @@ export async function ensureCaldevSchema(env) {
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       location TEXT NOT NULL DEFAULT '',
+      who TEXT NOT NULL DEFAULT '',
       start_date TEXT NOT NULL DEFAULT '',
       end_date TEXT NOT NULL DEFAULT '',
       start_time TEXT NOT NULL DEFAULT '',
@@ -145,12 +172,21 @@ export async function ensureCaldevSchema(env) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
+  try {
+    await env.DB.prepare("ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''").run();
+  } catch {
+    // Column already exists.
+  }
 }
+
+const CALDEV_SELECT = `
+  id, title, description, location, who, start_date, end_date, start_time, end_time,
+  track, all_day, source_event_id, created_at, updated_at
+`;
 
 export async function listCaldevEvents(env) {
   const rows = await env.DB.prepare(`
-    SELECT id, title, description, location, start_date, end_date, start_time, end_time,
-           track, all_day, source_event_id, created_at, updated_at
+    SELECT ${CALDEV_SELECT}
     FROM caldev_events
     ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
   `).all();
@@ -159,8 +195,7 @@ export async function listCaldevEvents(env) {
 
 export async function getCaldevEventById(env, id) {
   const row = await env.DB.prepare(`
-    SELECT id, title, description, location, start_date, end_date, start_time, end_time,
-           track, all_day, source_event_id, created_at, updated_at
+    SELECT ${CALDEV_SELECT}
     FROM caldev_events WHERE id = ?
   `).bind(Number(id)).first();
   return hydrateCaldevRow(row);
@@ -170,13 +205,14 @@ export async function insertCaldevEvent(env, payload) {
   const p = normalizeCaldevPayload(payload);
   const result = await env.DB.prepare(`
     INSERT INTO caldev_events (
-      title, description, location, start_date, end_date, start_time, end_time,
+      title, description, location, who, start_date, end_date, start_time, end_time,
       track, all_day, source_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     p.title,
     p.description,
     p.location,
+    p.who,
     p.start_date,
     p.end_date,
     p.start_time,
@@ -192,7 +228,7 @@ export async function updateCaldevEvent(env, id, payload, existing) {
   const p = normalizeCaldevPayload(payload, existing);
   await env.DB.prepare(`
     UPDATE caldev_events SET
-      title = ?, description = ?, location = ?, start_date = ?, end_date = ?,
+      title = ?, description = ?, location = ?, who = ?, start_date = ?, end_date = ?,
       start_time = ?, end_time = ?, track = ?, all_day = ?, source_event_id = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
@@ -200,6 +236,7 @@ export async function updateCaldevEvent(env, id, payload, existing) {
     p.title,
     p.description,
     p.location,
+    p.who,
     p.start_date,
     p.end_date,
     p.start_time,
@@ -228,6 +265,7 @@ export function productionEventToCaldevPayload(event) {
     title,
     description,
     location: '',
+    who: '',
     start_date,
     end_date: '',
     start_time: '',

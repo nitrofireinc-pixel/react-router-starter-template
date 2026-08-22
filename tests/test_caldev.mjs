@@ -8,6 +8,7 @@ import {
   normalizeCaldevTrack,
   productionEventToCaldevPayload,
   productionEventToStartDate,
+  shiftCaldevEventToDate,
   stripSimpleHtml,
 } from '../worker/src/caldev.mjs';
 
@@ -23,6 +24,7 @@ test('caldev payload normalization strips html and validates dates', () => {
   const parsed = normalizeCaldevPayload({
     title: '<span>Game Night</span>',
     description: '<p>Away at Parkland</p>',
+    who: ' Marching Band ',
     start_date: '2026-10-09',
     end_date: '2026-10-08',
     start_time: '18:30',
@@ -31,6 +33,7 @@ test('caldev payload normalization strips html and validates dates', () => {
   });
   assert.equal(parsed.title, 'Game Night');
   assert.equal(parsed.description, 'Away at Parkland');
+  assert.equal(parsed.who, 'Marching Band');
   assert.equal(parsed.start_date, '2026-10-09');
   assert.equal(parsed.end_date, '2026-10-09');
   assert.equal(parsed.start_time, '18:30');
@@ -66,4 +69,14 @@ test('production events map into caldev seed payloads', () => {
     { start_date: '2026-10-01', title: 'A' },
     { start_date: '2026-10-02', title: 'B' },
   ), -1);
+});
+
+test('shiftCaldevEventToDate preserves multi-day span', () => {
+  const shifted = shiftCaldevEventToDate({
+    start_date: '2026-08-03',
+    end_date: '2026-08-05',
+    title: 'Spirit week',
+  }, '2026-09-10');
+  assert.equal(shifted.start_date, '2026-09-10');
+  assert.equal(shifted.end_date, '2026-09-12');
 });

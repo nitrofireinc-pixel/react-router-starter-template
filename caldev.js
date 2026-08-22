@@ -17,8 +17,14 @@
     cursor: startOfMonth(new Date()),
     hiddenTracks: new Set(),
     selectedId: null,
+    draft: null, // create/edit form model
+    mode: 'view', // view | edit | create
+    canEdit: false,
     loading: true,
+    saving: false,
     error: '',
+    notice: '',
+    draggingId: null,
   };
 
   function startOfMonth(date) {
@@ -57,6 +63,39 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function emptyDraft(overrides = {}) {
+    return {
+      id: null,
+      title: '',
+      who: '',
+      location: '',
+      description: '',
+      track: 'other',
+      start_date: isoDate(new Date()),
+      end_date: '',
+      start_time: '',
+      end_time: '',
+      all_day: true,
+      ...overrides,
+    };
+  }
+
+  function eventToDraft(event) {
+    return emptyDraft({
+      id: event.id,
+      title: event.title || '',
+      who: event.who || '',
+      location: event.location || '',
+      description: event.description || '',
+      track: event.track || 'other',
+      start_date: event.start_date || '',
+      end_date: event.end_date || '',
+      start_time: event.start_time || '',
+      end_time: event.end_time || '',
+      all_day: Boolean(Number(event.all_day)) || !event.start_time,
+    });
   }
 
   function visibleEvents() {
@@ -100,20 +139,176 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
-  async function loadEvents() {
-    state.loading = true;
-    state.error = '';
-    render();
+  function shiftDatePreservingSpan(event, nextStart) {
+    const currentStart = String(event?.start_date || '');
+    const currentEnd = String(event?.end_date || '');
+    let end_date = '';
+    if (currentStart && currentEnd && currentEnd >= currentStart) {
+      const a = parseIso(currentStart);
+      const b = parseIso(currentEnd);
+      const n = parseIso(nextStart);
+      if (a && b && n) {
+        const span = Math.round((b - a) / 86400000);
+        end_date = isoDate(addDays(n, span));
+      }
+    }
+    return { start_date: nextStart, end_date };
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || payload.error || 'Request failed');
+    return payload;
+  }
+
+  async function refreshSession() {
     try {
-      const response = await fetch('/api/caldev/events', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error('Could not load Schedule Board events');
-      state.events = await response.json();
+      const session = await api('/api/session');
+      state.canEdit = Boolean(session?.logged_in && session?.is_super_admin);
+    } catch {
+      state.canEdit = false;
+    }
+  }
+
+  async function loadEvents({ quiet = false } = {}) {
+    if (!quiet) {
+      state.loading = true;
+      state.error = '';
+      render();
+    }
+    try {
+      state.events = await api('/api/caldev/events');
     } catch (error) {
       state.error = error?.message || 'Could not load events';
       state.events = [];
     } finally {
       state.loading = false;
       render();
+    }
+  }
+
+  function openCreate(dateIso = '') {
+    if (!state.canEdit) return;
+    state.mode = 'create';
+    state.selectedId = null;
+    state.draft = emptyDraft({ start_date: dateIso || isoDate(state.cursor) });
+    render();
+  }
+
+  function openView(id) {
+    state.selectedId = Number(id);
+    state.mode = 'view';
+    state.draft = null;
+    render();
+  }
+
+  function openEdit(event) {
+    if (!state.canEdit || !event) return;
+    state.selectedId = event.id;
+    state.mode = 'edit';
+    state.draft = eventToDraft(event);
+    render();
+  }
+
+  function closePanel() {
+    state.selectedId = null;
+    state.mode = 'view';
+    state.draft = null;
+    render();
+  }
+
+  async function saveDraft() {
+    if (!state.canEdit || !state.draft || state.saving) return;
+    const draft = state.draft;
+    if (!String(draft.title || '').trim()) {
+      state.notice = 'Add a title to save.';
+      render();
+      return;
+    }
+    state.saving = true;
+    state.notice = '';
+    render();
+    const payload = {
+      title: draft.title,
+      who: draft.who,
+      location: draft.location,
+      description: draft.description,
+      track: draft.track,
+      start_date: draft.start_date,
+      end_date: draft.end_date,
+      start_time: draft.all_day ? '' : draft.start_time,
+      end_time: draft.all_day ? '' : draft.end_time,
+      all_day: draft.all_day,
+    };
+    try {
+      let saved;
+      if (draft.id) {
+        saved = await api(`/api/admin/caldev/events/${draft.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        saved = await api('/api/admin/caldev/events', { method: 'POST', body: JSON.stringify(payload) });
+      }
+      await loadEvents({ quiet: true });
+      state.selectedId = saved.id;
+      state.mode = 'view';
+      state.draft = null;
+      state.notice = 'Saved.';
+    } catch (error) {
+      state.notice = error.message || 'Could not save.';
+    } finally {
+      state.saving = false;
+      render();
+    }
+  }
+
+  async function deleteSelected() {
+    const event = selectedEvent();
+    if (!state.canEdit || !event) return;
+    if (!confirm(`Delete “${event.title}”?`)) return;
+    state.saving = true;
+    render();
+    try {
+      await api(`/api/admin/caldev/events/${event.id}`, { method: 'DELETE' });
+      state.selectedId = null;
+      state.mode = 'view';
+      state.draft = null;
+      state.notice = 'Deleted.';
+      await loadEvents({ quiet: true });
+    } catch (error) {
+      state.notice = error.message || 'Could not delete.';
+    } finally {
+      state.saving = false;
+      render();
+    }
+  }
+
+  async function rescheduleEvent(id, nextDate) {
+    if (!state.canEdit || !nextDate) return;
+    const event = state.events.find((item) => Number(item.id) === Number(id));
+    if (!event || event.start_date === nextDate) return;
+    const shifted = shiftDatePreservingSpan(event, nextDate);
+    // Optimistic UI
+    event.start_date = shifted.start_date;
+    event.end_date = shifted.end_date;
+    render();
+    try {
+      await api(`/api/admin/caldev/events/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...event,
+          start_date: shifted.start_date,
+          end_date: shifted.end_date,
+        }),
+      });
+      state.notice = `Moved to ${formatLongDate(nextDate)}.`;
+      await loadEvents({ quiet: true });
+    } catch (error) {
+      state.notice = error.message || 'Could not reschedule.';
+      await loadEvents({ quiet: true });
     }
   }
 
@@ -134,14 +329,21 @@
           <button type="button" class="caldev-icon-btn" data-caldev-shift="1" aria-label="Next">›</button>
           <h2 class="caldev-range-title">${escapeHtml(label)}</h2>
         </div>
-        <div class="caldev-view-switch" role="group" aria-label="Schedule views">
-          ${['month', 'week', 'rundown'].map((view) => `
-            <button type="button" class="caldev-view-btn${state.view === view ? ' is-active' : ''}" data-caldev-view="${view}">
-              ${view === 'rundown' ? 'Rundown' : view[0].toUpperCase() + view.slice(1)}
-            </button>
-          `).join('')}
+        <div class="caldev-toolbar-end">
+          <div class="caldev-view-switch" role="group" aria-label="Schedule views">
+            ${['month', 'week', 'rundown'].map((view) => `
+              <button type="button" class="caldev-view-btn${state.view === view ? ' is-active' : ''}" data-caldev-view="${view}">
+                ${view === 'rundown' ? 'Rundown' : view[0].toUpperCase() + view.slice(1)}
+              </button>
+            `).join('')}
+          </div>
+          ${state.canEdit ? '<button type="button" class="btn primary" data-caldev-create>New event</button>' : ''}
         </div>
       </div>
+      <p class="caldev-hint">${state.canEdit
+        ? 'Tip: drag an event onto another day to reschedule. Click a day to add. Click an event to edit.'
+        : 'View only. Super Admins can edit and drag events after logging into the CMS.'}</p>
+      ${state.notice ? `<p class="caldev-notice" role="status">${escapeHtml(state.notice)}</p>` : ''}
     `;
   }
 
@@ -149,7 +351,7 @@
     return `
       <aside class="caldev-filters" aria-label="Program tracks">
         <h3>Tracks</h3>
-        <p class="caldev-filters-note">Toggle program lanes. Inspired by shared team calendars — built for Blue Regiment.</p>
+        <p class="caldev-filters-note">Show only the lanes you need.</p>
         <ul class="caldev-track-list">
           ${TRACKS.map((track) => {
             const checked = !state.hiddenTracks.has(track.id);
@@ -169,7 +371,8 @@
           <h4>Needs a date</h4>
           ${undatedEvents().length
             ? undatedEvents().map((event) => `
-                <button type="button" class="caldev-undated-item" data-caldev-open="${event.id}">
+                <button type="button" class="caldev-undated-item" data-caldev-open="${event.id}"
+                  ${state.canEdit ? `draggable="true" data-caldev-drag="${event.id}"` : ''}>
                   ${trackChip(event.track)}
                   <strong>${escapeHtml(event.title)}</strong>
                 </button>
@@ -178,6 +381,15 @@
         </div>
       </aside>
     `;
+  }
+
+  function eventChip(event, extraClass = '') {
+    const track = TRACK_MAP[event.track] || TRACK_MAP.other;
+    const dragAttrs = state.canEdit
+      ? `draggable="true" data-caldev-drag="${event.id}"`
+      : '';
+    return `<button type="button" class="caldev-event-chip ${extraClass}" style="--caldev-track:${track.color}"
+      data-caldev-open="${event.id}" ${dragAttrs} title="${escapeHtml(event.title)}">${escapeHtml(event.title)}</button>`;
   }
 
   function renderMonth() {
@@ -194,13 +406,14 @@
       const dayEvents = eventsOnDate(iso).slice(0, 4);
       const extra = Math.max(0, eventsOnDate(iso).length - dayEvents.length);
       cells.push(`
-        <div class="caldev-day${iso === todayIso ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
-          <div class="caldev-day-head"><span>${day}</span></div>
+        <div class="caldev-day${iso === todayIso ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}"
+          data-caldev-drop="${iso}" data-caldev-day="${iso}">
+          <div class="caldev-day-head">
+            <span>${day}</span>
+            ${state.canEdit ? `<button type="button" class="caldev-day-add" data-caldev-create-day="${iso}" aria-label="Add event on ${iso}">+</button>` : ''}
+          </div>
           <div class="caldev-day-events">
-            ${dayEvents.map((event) => {
-              const track = TRACK_MAP[event.track] || TRACK_MAP.other;
-              return `<button type="button" class="caldev-event-chip" style="--caldev-track:${track.color}" data-caldev-open="${event.id}" title="${escapeHtml(event.title)}">${escapeHtml(event.title)}</button>`;
-            }).join('')}
+            ${dayEvents.map((event) => eventChip(event)).join('')}
             ${extra ? `<span class="caldev-more">+${extra} more</span>` : ''}
           </div>
         </div>
@@ -224,17 +437,20 @@
           const iso = isoDate(date);
           const dayEvents = eventsOnDate(iso);
           return `
-            <section class="caldev-week-col${iso === todayIso ? ' is-today' : ''}">
+            <section class="caldev-week-col${iso === todayIso ? ' is-today' : ''}" data-caldev-drop="${iso}" data-caldev-day="${iso}">
               <header>
                 <span>${WEEKDAYS[date.getDay()]}</span>
                 <strong>${date.getDate()}</strong>
+                ${state.canEdit ? `<button type="button" class="caldev-day-add" data-caldev-create-day="${iso}" aria-label="Add event">+</button>` : ''}
               </header>
               <div class="caldev-week-events">
                 ${dayEvents.length
                   ? dayEvents.map((event) => {
                     const track = TRACK_MAP[event.track] || TRACK_MAP.other;
+                    const dragAttrs = state.canEdit ? `draggable="true" data-caldev-drag="${event.id}"` : '';
                     return `
-                      <button type="button" class="caldev-week-event" style="--caldev-track:${track.color}" data-caldev-open="${event.id}">
+                      <button type="button" class="caldev-week-event" style="--caldev-track:${track.color}"
+                        data-caldev-open="${event.id}" ${dragAttrs}>
                         <small>${escapeHtml(eventTimeLabel(event))}</small>
                         <strong>${escapeHtml(event.title)}</strong>
                       </button>
@@ -250,7 +466,7 @@
   }
 
   function renderRundown() {
-    const start = state.view === 'rundown' ? startOfMonth(state.cursor) : state.cursor;
+    const start = startOfMonth(state.cursor);
     const end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
     const startIso = isoDate(start);
     const endIso = isoDate(end);
@@ -272,16 +488,17 @@
     return `
       <div class="caldev-rundown">
         ${[...groups.entries()].map(([date, events]) => `
-          <section class="caldev-rundown-day">
+          <section class="caldev-rundown-day" data-caldev-drop="${date}">
             <h3>${escapeHtml(formatLongDate(date))}</h3>
             <ul>
               ${events.map((event) => `
                 <li>
-                  <button type="button" class="caldev-rundown-item" data-caldev-open="${event.id}">
+                  <button type="button" class="caldev-rundown-item" data-caldev-open="${event.id}"
+                    ${state.canEdit ? `draggable="true" data-caldev-drag="${event.id}"` : ''}>
                     ${trackChip(event.track)}
                     <span class="caldev-rundown-copy">
                       <strong>${escapeHtml(event.title)}</strong>
-                      <small>${escapeHtml(eventTimeLabel(event))}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
+                      <small>${escapeHtml(eventTimeLabel(event))}${event.who ? ` · ${escapeHtml(event.who)}` : ''}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
                       ${event.description ? `<span>${escapeHtml(event.description)}</span>` : ''}
                     </span>
                   </button>
@@ -294,7 +511,66 @@
     `;
   }
 
-  function renderDetail() {
+  function renderEditorFields(draft) {
+    return `
+      <label class="caldev-field">Title
+        <input name="title" maxlength="200" required value="${escapeHtml(draft.title)}" placeholder="Event name">
+      </label>
+      <label class="caldev-field">Track
+        <select name="track">
+          ${TRACKS.map((track) => `<option value="${track.id}" ${draft.track === track.id ? 'selected' : ''}>${escapeHtml(track.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="caldev-field">Who
+        <input name="who" maxlength="200" value="${escapeHtml(draft.who)}" placeholder="Who is involved">
+      </label>
+      <label class="caldev-field">Where
+        <input name="location" maxlength="200" value="${escapeHtml(draft.location)}" placeholder="Location">
+      </label>
+      <label class="caldev-field">Start date
+        <input name="start_date" type="date" value="${escapeHtml(draft.start_date)}">
+      </label>
+      <label class="caldev-field">End date
+        <input name="end_date" type="date" value="${escapeHtml(draft.end_date)}">
+      </label>
+      <label class="caldev-check"><input name="all_day" type="checkbox" ${draft.all_day ? 'checked' : ''}> All day</label>
+      <div class="caldev-time-row${draft.all_day ? ' is-disabled' : ''}">
+        <label class="caldev-field">Start time
+          <input name="start_time" type="time" value="${escapeHtml(draft.start_time)}" ${draft.all_day ? 'disabled' : ''}>
+        </label>
+        <label class="caldev-field">End time
+          <input name="end_time" type="time" value="${escapeHtml(draft.end_time)}" ${draft.all_day ? 'disabled' : ''}>
+        </label>
+      </div>
+      <label class="caldev-field full">Details
+        <textarea name="description" rows="5" placeholder="Notes, call times, what to bring…">${escapeHtml(draft.description)}</textarea>
+      </label>
+    `;
+  }
+
+  function renderPanel() {
+    if (state.mode === 'create' || state.mode === 'edit') {
+      const draft = state.draft || emptyDraft();
+      return `
+        <div class="caldev-detail is-editor" role="dialog" aria-modal="true" aria-labelledby="caldev-detail-title">
+          <div class="caldev-detail-backdrop" data-caldev-close></div>
+          <div class="caldev-detail-panel">
+            <button type="button" class="sponsor-flyin-close" data-caldev-close aria-label="Close">×</button>
+            <p class="caldev-detail-kicker">${state.mode === 'create' ? 'New event' : 'Edit event'}</p>
+            <h3 id="caldev-detail-title">${state.mode === 'create' ? 'Add to Schedule Board' : 'Update event'}</h3>
+            <form class="caldev-editor-form" data-caldev-editor>
+              ${renderEditorFields(draft)}
+              <div class="caldev-editor-actions">
+                <button class="btn primary" type="submit" ${state.saving ? 'disabled' : ''}>${state.saving ? 'Saving…' : 'Save'}</button>
+                <button class="btn outline" type="button" data-caldev-close>Cancel</button>
+                ${state.mode === 'edit' ? '<button class="btn outline caldev-danger" type="button" data-caldev-delete>Delete</button>' : ''}
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
     const event = selectedEvent();
     if (!event) return '';
     return `
@@ -305,8 +581,15 @@
           ${trackChip(event.track)}
           <h3 id="caldev-detail-title">${escapeHtml(event.title)}</h3>
           <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
-          ${event.location ? `<p class="caldev-detail-location">${escapeHtml(event.location)}</p>` : ''}
+          ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
+          ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
           ${event.description ? `<p class="caldev-detail-body">${escapeHtml(event.description)}</p>` : '<p class="draft">No details yet.</p>'}
+          ${state.canEdit ? `
+            <div class="caldev-editor-actions">
+              <button type="button" class="btn primary" data-caldev-edit="${event.id}">Edit</button>
+              <button type="button" class="btn outline caldev-danger" data-caldev-delete>Delete</button>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -320,15 +603,32 @@
       ${renderToolbar()}
       <div class="caldev-layout">
         ${renderFilters()}
-        <div class="caldev-board">
+        <div class="caldev-board${state.draggingId ? ' is-dragging' : ''}">
           ${state.loading ? '<p class="draft">Loading schedule…</p>' : ''}
           ${state.error ? `<p class="draft">${escapeHtml(state.error)}</p>` : ''}
           ${!state.loading && !state.error ? board : ''}
         </div>
       </div>
-      ${renderDetail()}
+      ${renderPanel()}
     `;
     bind(root);
+  }
+
+  function readDraftFromForm(form) {
+    const data = new FormData(form);
+    return emptyDraft({
+      id: state.draft?.id || null,
+      title: String(data.get('title') || ''),
+      who: String(data.get('who') || ''),
+      location: String(data.get('location') || ''),
+      description: String(data.get('description') || ''),
+      track: String(data.get('track') || 'other'),
+      start_date: String(data.get('start_date') || ''),
+      end_date: String(data.get('end_date') || ''),
+      start_time: String(data.get('start_time') || ''),
+      end_time: String(data.get('end_time') || ''),
+      all_day: form.elements.all_day?.checked !== false,
+    });
   }
 
   function bind(root) {
@@ -347,9 +647,15 @@
       });
     });
     root.querySelector('[data-caldev-today]')?.addEventListener('click', () => {
-      state.cursor = startOfMonth(new Date());
-      if (state.view === 'week') state.cursor = new Date();
+      state.cursor = state.view === 'week' ? new Date() : startOfMonth(new Date());
       render();
+    });
+    root.querySelector('[data-caldev-create]')?.addEventListener('click', () => openCreate());
+    root.querySelectorAll('[data-caldev-create-day]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openCreate(button.dataset.caldevCreateDay);
+      });
     });
     root.querySelectorAll('[data-caldev-track]').forEach((input) => {
       input.addEventListener('change', () => {
@@ -360,25 +666,81 @@
       });
     });
     root.querySelectorAll('[data-caldev-open]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        if (state.draggingId) return;
+        event.stopPropagation();
+        openView(button.dataset.caldevOpen);
+      });
+    });
+    root.querySelectorAll('[data-caldev-edit]').forEach((button) => {
       button.addEventListener('click', () => {
-        state.selectedId = Number(button.dataset.caldevOpen);
-        render();
+        const event = state.events.find((item) => Number(item.id) === Number(button.dataset.caldevEdit));
+        openEdit(event);
       });
     });
     root.querySelectorAll('[data-caldev-close]').forEach((node) => {
-      node.addEventListener('click', () => {
-        state.selectedId = null;
-        render();
+      node.addEventListener('click', () => closePanel());
+    });
+    root.querySelectorAll('[data-caldev-delete]').forEach((button) => {
+      button.addEventListener('click', () => deleteSelected());
+    });
+    root.querySelector('[data-caldev-editor]')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      state.draft = readDraftFromForm(event.currentTarget);
+      saveDraft();
+    });
+    root.querySelector('[data-caldev-editor] [name="all_day"]')?.addEventListener('change', (event) => {
+      state.draft = readDraftFromForm(event.target.form);
+      render();
+    });
+
+    // Drag and drop reschedule
+    root.querySelectorAll('[data-caldev-drag]').forEach((node) => {
+      node.addEventListener('dragstart', (event) => {
+        if (!state.canEdit) return;
+        state.draggingId = Number(node.dataset.caldevDrag);
+        event.dataTransfer.setData('text/caldev-id', String(state.draggingId));
+        event.dataTransfer.effectAllowed = 'move';
+        node.classList.add('is-dragging');
+        root.querySelector('.caldev-board')?.classList.add('is-dragging');
+      });
+      node.addEventListener('dragend', () => {
+        state.draggingId = null;
+        root.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+        root.querySelector('.caldev-board')?.classList.remove('is-dragging');
+        node.classList.remove('is-dragging');
+      });
+    });
+    root.querySelectorAll('[data-caldev-drop]').forEach((zone) => {
+      zone.addEventListener('dragover', (event) => {
+        if (!state.canEdit || !state.draggingId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        zone.classList.add('is-drop-target');
+      });
+      zone.addEventListener('dragleave', () => zone.classList.remove('is-drop-target'));
+      zone.addEventListener('drop', (event) => {
+        if (!state.canEdit) return;
+        event.preventDefault();
+        zone.classList.remove('is-drop-target');
+        const id = Number(event.dataTransfer.getData('text/caldev-id') || state.draggingId);
+        const nextDate = zone.dataset.caldevDrop;
+        state.draggingId = null;
+        rescheduleEvent(id, nextDate);
       });
     });
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.selectedId != null) {
-      state.selectedId = null;
-      render();
+    if (event.key === 'Escape' && (state.selectedId != null || state.mode === 'create' || state.mode === 'edit')) {
+      closePanel();
     }
   });
 
-  if (document.querySelector('#caldev-app')) loadEvents();
+  async function boot() {
+    await refreshSession();
+    await loadEvents();
+  }
+
+  if (document.querySelector('#caldev-app')) boot();
 })();
