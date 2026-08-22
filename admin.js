@@ -4792,11 +4792,30 @@ async function compressImageForGalleryUpload(file, {
   return new File([blob], outName, { type: 'image/jpeg', lastModified: Date.now() });
 }
 
-async function uploadPreparedGalleryPhoto({ file, altText, caption }) {
+function setPhotoFormStatus(message, { error = false } = {}) {
+  const status = document.querySelector('#photo-status');
+  if (status) {
+    status.textContent = message;
+    status.classList.toggle('is-error', !!error);
+    status.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+async function prepareImageFileForUpload(file, label = 'photo') {
+  if (!file) throw new Error(`Choose a ${label} file first.`);
+  try {
+    return await compressImageForGalleryUpload(file);
+  } catch (error) {
+    throw new Error(error?.message || `Could not prepare ${label}.`);
+  }
+}
+
+async function uploadPreparedGalleryPhoto({ file, altText, caption, sortOrder = null }) {
   const body = new FormData();
   body.append('file', file, file.name);
   body.append('alt_text', altText);
   body.append('caption', caption || '');
+  if (sortOrder != null && sortOrder !== '') body.append('sort_order', String(sortOrder));
   return jsonFetch('/api/admin/photos', { method: 'POST', body });
 }
 
@@ -4804,14 +4823,17 @@ function summarizeGalleryUploadResults(results) {
   const ok = results.filter((row) => row.ok);
   const failed = results.filter((row) => !row.ok);
   const igOk = ok.filter((row) => row.instagram?.ok).length;
+  const igQueued = ok.filter((row) => row.instagram?.reason === 'queued_background').length;
   const igFail = ok.filter((row) => row.instagram?.attempted && row.instagram?.error).length;
   const parts = [];
   if (ok.length) parts.push(`Uploaded ${ok.length} photo${ok.length === 1 ? '' : 's'}.`);
   if (failed.length) {
     const names = failed.slice(0, 3).map((row) => row.name).join(', ');
-    parts.push(`${failed.length} failed${names ? ` (${names}${failed.length > 3 ? ', …' : ''})` : ''}.`);
+    const detail = failed[0]?.error ? `: ${failed[0].error}` : '';
+    parts.push(`${failed.length} failed${names ? ` (${names}${failed.length > 3 ? ', …' : ''})` : ''}${detail}`);
   }
   if (igOk) parts.push(`${igOk} posted to Instagram.`);
+  else if (igQueued) parts.push('Instagram auto-post is running in the background.');
   if (igFail) parts.push(`${igFail} Instagram post${igFail === 1 ? '' : 's'} failed.`);
   return parts.join(' ') || 'Upload finished.';
 }
@@ -6111,22 +6133,25 @@ function bindForms() {
       delete payload.id;
       delete payload.photo_file;
       delete payload.sort_order;
+      if (!payload.name?.trim()) {
+        status.textContent = 'Name is required.';
+        formControl(form, 'name')?.focus();
+        return;
+      }
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Staff photo');
-        upload.set('caption', plainTextFromHtml(payload.role) || 'Directors & Staff');
-        // Negative sort keeps staff photos out of the public Photo gallery listing.
-        upload.set('sort_order', '-500');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        status.textContent = 'Uploading photo…';
+        const prepared = await prepareImageFileForUpload(file, 'staff photo');
+        const stored = await uploadPreparedGalleryPhoto({
+          file: prepared,
+          altText: payload.name || 'Staff photo',
+          caption: plainTextFromHtml(payload.role) || 'Directors & Staff',
+          sortOrder: -500,
+        });
         payload.photo_url = stored.url;
         formControl(form, 'photo_url').value = stored.url;
       }
-      if (!payload.name?.trim()) {
-        status.textContent = 'Name is required.';
-        return;
-      }
+      status.textContent = 'Saving…';
       await jsonFetch(id ? `/api/admin/staff/${id}` : '/api/admin/staff', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       status.textContent = id ? 'Staff member updated.' : 'Staff member created.';
       form.reset();
@@ -6161,21 +6186,25 @@ function bindForms() {
       delete payload.id;
       delete payload.photo_file;
       delete payload.sort_order;
+      if (!payload.name?.trim()) {
+        status.textContent = 'Name is required.';
+        formControl(form, 'name')?.focus();
+        return;
+      }
       const file = formControl(form, 'photo_file')?.files?.[0];
       if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Booster member photo');
-        upload.set('caption', plainTextFromHtml(payload.role) || 'Booster Members');
-        upload.set('sort_order', '-500');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        status.textContent = 'Uploading photo…';
+        const prepared = await prepareImageFileForUpload(file, 'booster photo');
+        const stored = await uploadPreparedGalleryPhoto({
+          file: prepared,
+          altText: payload.name || 'Booster member photo',
+          caption: plainTextFromHtml(payload.role) || 'Booster Members',
+          sortOrder: -500,
+        });
         payload.photo_url = stored.url;
         formControl(form, 'photo_url').value = stored.url;
       }
-      if (!payload.name?.trim()) {
-        status.textContent = 'Name is required.';
-        return;
-      }
+      status.textContent = 'Saving…';
       await jsonFetch(id ? `/api/admin/booster-members/${id}` : '/api/admin/booster-members', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       status.textContent = id ? 'Booster member updated.' : 'Booster member created.';
       form.reset();
@@ -6214,13 +6243,14 @@ function bindForms() {
     try {
       const file = formControl(form, 'logo_file')?.files?.[0];
       if (file) {
-        const upload = new FormData();
-        upload.set('file', file);
-        upload.set('alt_text', payload.name || 'Sponsor logo');
-        upload.set('caption', payload.level || 'Sponsor');
-        // Negative sort keeps sponsor logos out of the public Photo gallery listing.
-        upload.set('sort_order', '-400');
-        const stored = await jsonFetch('/api/admin/photos', { method: 'POST', body: upload });
+        if (status) status.textContent = 'Uploading logo…';
+        const prepared = await prepareImageFileForUpload(file, 'sponsor logo');
+        const stored = await uploadPreparedGalleryPhoto({
+          file: prepared,
+          altText: payload.name || 'Sponsor logo',
+          caption: payload.level || 'Sponsor',
+          sortOrder: -400,
+        });
         payload.logo_url = stored.url;
         formControl(form, 'logo_url').value = stored.url;
         syncSponsorLogoPreview(form, stored.url);
@@ -6582,19 +6612,19 @@ function bindForms() {
   document.querySelector('#photo-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    const status = document.querySelector('#photo-status');
     const submit = form.querySelector('[data-photo-submit]');
     syncFormRichEditors(form);
     const photoId = String(formControl(form, 'photo_id')?.value || '').trim();
     const altText = String(formControl(form, 'alt_text')?.value || '').trim();
     const caption = String(formControl(form, 'caption')?.value || '').trim();
-    const files = Array.from(form.elements.file?.files || []);
+    const files = Array.from(form.elements.file?.files || []).filter((file) => file && file.size > 0);
     if (!altText) {
-      status.textContent = 'Alt text is required.';
+      setPhotoFormStatus('Alt text is required before upload.', { error: true });
+      formControl(form, 'alt_text')?.focus();
       return;
     }
     if (photoId) {
-      status.textContent = 'Saving photo…';
+      setPhotoFormStatus('Saving photo…');
       try {
         await jsonFetch(`/api/admin/photos/${photoId}`, {
           method: 'PUT',
@@ -6602,14 +6632,16 @@ function bindForms() {
         });
         resetPhotoForm();
         await loadPhotos();
-        status.textContent = 'Photo updated.';
+        setPhotoFormStatus('Photo updated.');
+        showSavedToast('Photo updated.');
       } catch (error) {
-        status.textContent = `Could not save photo: ${error.message || 'Unknown error'}`;
+        setPhotoFormStatus(`Could not save photo: ${error.message || 'Unknown error'}`, { error: true });
       }
       return;
     }
     if (!files.length) {
-      status.textContent = 'Choose one or more photo files first.';
+      setPhotoFormStatus('Choose one or more photo files first.', { error: true });
+      formControl(form, 'file')?.focus();
       return;
     }
     if (submit) submit.disabled = true;
@@ -6618,14 +6650,14 @@ function bindForms() {
       for (let index = 0; index < files.length; index += 1) {
         const original = files[index];
         const label = original.name || `photo ${index + 1}`;
-        status.textContent = `Preparing ${index + 1} of ${files.length}: ${label}…`;
+        setPhotoFormStatus(`Preparing ${index + 1} of ${files.length}: ${label}…`);
         try {
-          const prepared = await compressImageForGalleryUpload(original);
+          const prepared = await prepareImageFileForUpload(original, 'gallery photo');
           const preparedKb = Math.max(1, Math.round(Number(prepared.size || 0) / 1024));
           const resizedNote = prepared.size !== original.size || prepared.name !== original.name
             ? ` (resized to ${preparedKb} KB)`
             : ` (${preparedKb} KB)`;
-          status.textContent = `Uploading ${index + 1} of ${files.length}: ${prepared.name || label}${resizedNote}…`;
+          setPhotoFormStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.name || label}${resizedNote}…`);
           const photoAlt = files.length === 1 ? altText : `${altText} (${index + 1})`;
           const photoCaption = files.length === 1
             ? caption
@@ -6651,7 +6683,9 @@ function bindForms() {
       }
       resetPhotoForm();
       await loadPhotos();
-      status.textContent = summarizeGalleryUploadResults(results);
+      const summary = summarizeGalleryUploadResults(results);
+      setPhotoFormStatus(summary, { error: results.every((row) => !row.ok) });
+      if (results.some((row) => row.ok)) showSavedToast(summary);
     } finally {
       if (submit) submit.disabled = false;
     }

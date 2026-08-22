@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'caldev-cms-edit-20260822';
+const ASSET_VERSION = 'fix-photo-upload-20260822';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -9740,17 +9740,22 @@ async function routeApi(request, env, url, ctx = null) {
         String(form.get('caption') || ''),
         sortOrder,
       );
-      let instagram = null;
-      try {
-        instagram = await maybePublishGalleryPhotoToInstagram(env, request, stored);
-      } catch (error) {
-        instagram = {
-          attempted: true,
-          ok: false,
-          reason: 'publish_failed',
-          error: String(error?.message || error || 'Instagram publish failed'),
-        };
+      // Return the saved photo immediately. Instagram autopost can take many seconds and
+      // made gallery uploads look like they did nothing while the request hung.
+      const publishTask = maybePublishGalleryPhotoToInstagram(env, request, stored).catch((error) => ({
+        attempted: true,
+        ok: false,
+        reason: 'publish_failed',
+        error: String(error?.message || error || 'Instagram publish failed'),
+      }));
+      if (ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(publishTask);
+        return jsonResponse({
+          ...stored,
+          instagram: { attempted: false, ok: false, reason: 'queued_background' },
+        });
       }
+      const instagram = await publishTask;
       return jsonResponse({ ...stored, instagram });
     } catch (error) {
       return jsonResponse({ detail: error.message }, 400);
