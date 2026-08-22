@@ -58,51 +58,38 @@ export EFBAND_DATA_DIR="/path/to/persistent/data"
 ## Static-only fallback
 You can still open `index.html` directly or run `python3 -m http.server 8080`, but the editable content, login, and uploads require the backend command above.
 
-## Cloudflare Worker backend
+## Production deploy (Cloudflare Worker)
 
-The repo also includes a Cloudflare-native Worker backend in `worker/src/worker.mjs`. It mirrors the local FastAPI backend with:
+**Live site:** `https://efhsband.org` is served by Worker **`efhsband-live`** (not Cloudflare Pages, not Worker `efhsband`).
 
-- `/health`
-- `/admin/login`
-- `/admin`
-- `/api/site`
-- `/api/events`
-- `/api/photos`
-- protected admin CRUD routes
-
-Cloudflare setup uses D1 for site text, events, password hash, and uploaded photo data. R2 can be added later for larger photo storage.
-
-Deploy commands:
+Always start from up-to-date **`main`**, then:
 
 ```bash
 npm run test:worker
-npm run test:pages-build
-npm run build:pages
+npm run deploy:worker
 ```
 
-### Cloudflare Pages Git deployment (required for the CMS)
+`deploy:worker` runs a guard (`check:worker-assets`), syncs static files into `worker/public/`, and deploys via `wrangler.toml`.
 
-The admin routes need an Advanced Mode Pages Worker. In the Cloudflare Pages project's **Build configuration**, set:
+### Do not change these `wrangler.toml` values
 
-- Build command: `npm run build` (or `npm run build:pages`)
-- Build output directory: `dist`
+| Setting | Required value | Why |
+|---|---|---|
+| `name` | `"efhsband-live"` | Owns `efhsband.org/*` and production secrets. Deploying as `efhsband` only updates a workers.dev sandbox and can recreate a confusing orphan Worker. |
+| `[assets] directory` | `"./worker/public"` | `"./assets"` 404s CSS/JS and trashes the live site. |
+| `run_worker_first` | `true` | CMS HTML must win over static files. |
+| `routes` | `efhsband.org/*` | Keeps deploys attached to the live domain. |
 
-The build is Node-only: it copies the static site into `dist/` and adds `dist/_worker.js` plus its `default-pages.mjs` runtime module. Deploying the repository root or only static files will serve the public site but makes `/admin` fall back to the homepage.
-
-Also retain the project-level D1 binding named `DB` and the production environment variables/secrets used by the CMS. After deploying, verify `https://efhsband.pages.dev/admin` redirects to `/admin/login` instead of rendering the homepage.
-
-For a direct Wrangler Pages deployment (requires `CLOUDFLARE_API_TOKEN`):
-
-```bash
-npm run deploy:pages
-```
-
-Do not use `npm run deploy:worker` for the public site — that targets a standalone Worker, not the Cloudflare Pages project.
+Zone route `efhsband.org/*` must stay pointed at script **`efhsband-live`**.
 
 Configured D1 database:
 
 - Name: `efhsband-db`
 - Binding: `DB`
+
+### Optional / non-production
+
+`npm run build:pages` / `deploy:pages` build a Pages bundle for experiments only. **Do not use Pages deploys for efhsband.org.**
 
 ## Tests
 
