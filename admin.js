@@ -4698,7 +4698,10 @@ function resetPhotoForm() {
   formControl(form, 'photo_id').value = '';
   syncPhotoFormMode(false);
   const status = document.querySelector('#photo-status');
-  if (status) status.textContent = 'Upload one or more gallery photos.';
+  if (status) {
+    status.textContent = 'Upload one or more gallery photos.';
+    status.classList.remove('is-error');
+  }
 }
 
 const GALLERY_UPLOAD_MAX_BYTES = 1_850_000;
