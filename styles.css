@@ -4832,8 +4832,16 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   display:grid;gap:12px;padding:18px 18px 16px;border-radius:18px;background:#fff;
   border:1px solid #d7e2ef;box-shadow:0 24px 60px rgba(8,18,32,.28);
 }
-.cms-caldev-editor-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.cms-caldev-editor-head h4{margin:0;color:var(--navy);font-size:1.25rem;font-weight:900}
+.cms-caldev-editor-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.cms-caldev-editor-head h4{margin:0;color:var(--navy);font-size:1.25rem;font-weight:900;line-height:1.2}
+.cms-caldev-close-btn{
+  flex:0 0 auto;width:auto;min-width:0;margin:0;padding:8px 14px;border:1px solid #f1c0cb;
+  border-radius:999px;background:#fff;color:#9f1239;font:inherit;font-size:.88rem;font-weight:800;
+  line-height:1;cursor:pointer;white-space:nowrap;
+}
+.cms-caldev-close-btn:hover,.cms-caldev-close-btn:focus-visible{
+  background:#fff1f2;border-color:#e11d48;color:#9f1239;outline:none;
+}
 .cms-caldev-editor-toast label{display:grid;gap:6px;color:var(--navy);font-weight:800;font-size:.86rem}
 .cms-caldev-editor-toast input,
 .cms-caldev-editor-toast select,

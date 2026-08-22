@@ -567,7 +567,7 @@
           <form class="cms-caldev-editor-toast" data-cms-caldev-editor hidden>
             <div class="cms-caldev-editor-head">
               <h4 data-cms-caldev-editor-title>Create Event</h4>
-              <button type="button" class="btn outline cms-caldev-icon-btn" data-cms-caldev-close aria-label="Close">×</button>
+              <button type="button" class="cms-caldev-close-btn" data-cms-caldev-close>Close</button>
             </div>
 
             <label class="cms-caldev-title-field">Title
