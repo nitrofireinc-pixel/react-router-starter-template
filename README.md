@@ -23,6 +23,7 @@ Website draft for the East Forsyth Band program with a lightweight custom backen
   - `/api/site`
   - `/api/events`
   - `/api/photos`
+  - `/api/sponsors`
 
 ## Local preview with backend
 
@@ -68,6 +69,7 @@ The repo also includes a Cloudflare-native Worker backend in `worker/src/worker.
 - `/api/site`
 - `/api/events`
 - `/api/photos`
+- `/api/sponsors`
 - protected admin CRUD routes
 
 Cloudflare setup uses D1 for site text, events, password hash, and uploaded photo data. R2 can be added later for larger photo storage.
