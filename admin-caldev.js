@@ -17,6 +17,7 @@
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
   ];
+  const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   let root = null;
   let events = [];
@@ -25,11 +26,13 @@
   let activeTracks = new Set(TRACKS.map((t) => t.id));
   let selectedId = null;
   let draggingId = null;
-  let moveModeId = null;
   let toastTimer = null;
   let saveBusy = false;
   let bound = false;
   let mounted = false;
+  let exceptionDates = [];
+  let lastTap = { id: null, at: 0 };
+  let longPress = { timer: null, id: null, active: false, startX: 0, startY: 0 };
 
   function pad(n) {
     return String(n).padStart(2, "0");
@@ -205,16 +208,20 @@
   async function persistMove(id, targetDateKey) {
     const current = events.find((e) => String(e.id) === String(id));
     if (!current) return;
+    if (eventDayKey(current) === targetDateKey) {
+      renderBoardOnly();
+      return;
+    }
     const next = shiftEventToDate(current, targetDateKey);
     const idx = events.findIndex((e) => String(e.id) === String(id));
     if (idx >= 0) events[idx] = { ...events[idx], ...next };
-    moveModeId = null;
+    selectedId = id;
     render();
     try {
       const saved = await updateEvent(id, payloadFromEvent(next));
       const i = events.findIndex((e) => String(e.id) === String(id));
       if (i >= 0) events[i] = saved;
-      showToast("Event moved");
+      showToast("Event rescheduled");
       render();
     } catch (err) {
       showToast(err.message || "Move failed", true);
@@ -232,10 +239,14 @@
       who: "",
       start_date: dateKey || toDateKey(new Date()),
       end_date: "",
-      start_time: "16:00",
-      end_time: "18:00",
-      all_day: false,
+      start_time: "",
+      end_time: "",
+      all_day: true,
       track: "rehearsal",
+      repeat: false,
+      repeat_days: [],
+      repeat_months: [],
+      repeat_exceptions: [],
     };
   }
 
@@ -248,22 +259,84 @@
       who: ev.who || "",
       start_date: eventDayKey(ev) || toDateKey(new Date()),
       end_date: String(ev.end_date || "").slice(0, 10),
-      start_time: ev.start_time || "16:00",
-      end_time: ev.end_time || "18:00",
+      start_time: ev.start_time || "",
+      end_time: ev.end_time || "",
       all_day: !!Number(ev.all_day) || !ev.start_time,
       track: ev.track || "other",
+      repeat: false,
+      repeat_days: [],
+      repeat_months: [],
+      repeat_exceptions: [],
     };
+  }
+
+  function expandRepeatDates(startDate, days, months, exceptions, year) {
+    const daySet = new Set((days || []).map(Number));
+    const monthSet = new Set((months || []).map(Number));
+    const skip = new Set((exceptions || []).map(String));
+    if (!daySet.size || !monthSet.size) return [startDate].filter(Boolean);
+    const out = [];
+    for (const month of [...monthSet].sort((a, b) => a - b)) {
+      const dim = new Date(year, month, 0).getDate();
+      for (let day = 1; day <= dim; day += 1) {
+        const d = new Date(year, month - 1, day);
+        if (!daySet.has(d.getDay())) continue;
+        const key = toDateKey(d);
+        if (skip.has(key)) continue;
+        out.push(key);
+      }
+    }
+    return out.length ? out : [startDate].filter(Boolean);
+  }
+
+  function sanitizeDescHtml(html) {
+    const allowed = /^(?:#text|B|STRONG|I|EM|U|BR|SPAN|DIV|P)$/i;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = String(html || "");
+    const walk = (node) => {
+      [...node.childNodes].forEach((child) => {
+        if (child.nodeType === 3) return;
+        if (child.nodeType !== 1 || !allowed.test(child.tagName)) {
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+          return;
+        }
+        if (child.tagName === "SPAN") {
+          const color = String(child.style.color || "").trim();
+          const size = String(child.style.fontSize || "").trim();
+          child.removeAttribute("style");
+          child.removeAttribute("class");
+          const styles = [];
+          if (color) styles.push(`color:${color}`);
+          if (size) styles.push(`font-size:${size}`);
+          if (styles.length) child.setAttribute("style", styles.join(";"));
+          else {
+            while (child.firstChild) node.insertBefore(child.firstChild, child);
+            node.removeChild(child);
+            return;
+          }
+        } else {
+          child.removeAttribute("style");
+          child.removeAttribute("class");
+        }
+        walk(child);
+      });
+    };
+    walk(wrap);
+    return wrap.innerHTML.trim();
   }
 
   function formFromDom() {
     const panel = root.querySelector("[data-cms-caldev-editor]");
     if (!panel) return null;
     const allDay = panel.querySelector('[name="all_day"]').checked;
+    const repeat = panel.querySelector('[name="repeat_yes"]').checked;
     const track = panel.querySelector('[name="track"]').value || "other";
+    const desc = sanitizeDescHtml(panel.querySelector("[data-cms-caldev-desc]")?.innerHTML || "");
     return {
       id: panel.dataset.eventId || null,
       title: panel.querySelector('[name="title"]').value.trim(),
-      description: panel.querySelector('[name="description"]').value.trim(),
+      description: desc,
       location: panel.querySelector('[name="location"]').value.trim(),
       who: panel.querySelector('[name="who"]').value.trim(),
       start_date: panel.querySelector('[name="start_date"]').value,
@@ -272,48 +345,29 @@
       end_time: allDay ? "" : panel.querySelector('[name="end_time"]').value,
       all_day: allDay,
       track,
+      repeat,
+      repeat_days: [...panel.querySelectorAll('input[name="repeat_day"]:checked')].map((el) => Number(el.value)),
+      repeat_months: [...panel.querySelectorAll('input[name="repeat_month"]:checked')].map((el) => Number(el.value)),
+      repeat_exceptions: [...exceptionDates],
     };
   }
 
-  function openEditor(form) {
-    selectedId = form.id || null;
-    moveModeId = null;
-    const panel = root.querySelector("[data-cms-caldev-editor]");
-    const empty = root.querySelector("[data-cms-caldev-editor-empty]");
-    if (!panel || !empty) return;
-    empty.hidden = true;
-    panel.hidden = false;
-    panel.dataset.eventId = form.id ? String(form.id) : "";
-    panel.querySelector('[name="title"]').value = form.title || "";
-    panel.querySelector('[name="description"]').value = form.description || "";
-    panel.querySelector('[name="location"]').value = form.location || "";
-    panel.querySelector('[name="who"]').value = form.who || "";
-    panel.querySelector('[name="start_date"]').value = form.start_date || "";
-    panel.querySelector('[name="end_date"]').value = form.end_date || "";
-    panel.querySelector('[name="start_time"]').value = form.start_time || "16:00";
-    panel.querySelector('[name="end_time"]').value = form.end_time || "18:00";
-    panel.querySelector('[name="all_day"]').checked = !!form.all_day;
-    panel.querySelector('[name="track"]').value = form.track || "other";
-    panel.querySelector("[data-cms-caldev-editor-title]").textContent = form.id ? "Edit event" : "New event";
-    panel.querySelector("[data-cms-caldev-delete]").hidden = !form.id;
-    panel.querySelector("[data-cms-caldev-move-btn]").hidden = !form.id || !isCompact();
-    toggleTimeFields();
-    panel.classList.add("is-open");
-    if (isCompact()) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  function renderExceptions() {
+    const list = root.querySelector("[data-cms-caldev-exceptions]");
+    if (!list) return;
+    const dates = [...exceptionDates].sort();
+    list.innerHTML = dates.length
+      ? dates.map((date) => `<li><span>${escapeHtml(date)}</span><button type="button" data-cms-caldev-remove-exception="${escapeHtml(date)}">Remove</button></li>`).join("")
+      : '<li class="draft">No skipped dates yet.</li>';
   }
 
-  function closeEditor() {
-    selectedId = null;
-    moveModeId = null;
+  function syncRepeatUi() {
     const panel = root.querySelector("[data-cms-caldev-editor]");
-    const empty = root.querySelector("[data-cms-caldev-editor-empty]");
-    if (panel) {
-      panel.hidden = true;
-      panel.classList.remove("is-open");
-      panel.dataset.eventId = "";
-    }
-    if (empty) empty.hidden = false;
-    renderBoardOnly();
+    if (!panel) return;
+    const on = panel.querySelector('[name="repeat_yes"]').checked;
+    const options = panel.querySelector("[data-cms-caldev-repeat-options]");
+    if (options) options.hidden = !on;
+    panel.querySelector('[name="repeat_no"]').checked = !on;
   }
 
   function toggleTimeFields() {
@@ -325,12 +379,68 @@
     });
   }
 
+  function openEditor(form) {
+    selectedId = form.id || null;
+    exceptionDates = Array.isArray(form.repeat_exceptions) ? [...form.repeat_exceptions] : [];
+    const overlay = root.querySelector("[data-cms-caldev-editor-overlay]");
+    const panel = root.querySelector("[data-cms-caldev-editor]");
+    if (!overlay || !panel) return;
+    overlay.hidden = false;
+    panel.hidden = false;
+    panel.dataset.eventId = form.id ? String(form.id) : "";
+    panel.querySelector("[data-cms-caldev-editor-title]").textContent = form.id ? "Edit Event" : "Create Event";
+    panel.querySelector('[name="title"]').value = form.title || "";
+    panel.querySelector('[name="start_date"]').value = form.start_date || "";
+    panel.querySelector('[name="end_date"]').value = form.end_date || "";
+    panel.querySelector('[name="start_time"]').value = form.start_time || "16:00";
+    panel.querySelector('[name="end_time"]').value = form.end_time || "18:00";
+    panel.querySelector('[name="all_day"]').checked = !!form.all_day;
+    panel.querySelector('[name="track"]').value = form.track || "other";
+    panel.querySelector('[name="who"]').value = form.who || "";
+    panel.querySelector('[name="location"]').value = form.location || "";
+    panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
+    panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
+    panel.querySelector('[name="repeat_no"]').checked = !form.repeat;
+    const daySet = new Set((form.repeat_days || []).map(Number));
+    panel.querySelectorAll('input[name="repeat_day"]').forEach((input) => {
+      input.checked = daySet.has(Number(input.value));
+    });
+    const monthSet = new Set((form.repeat_months || []).map(Number));
+    panel.querySelectorAll('input[name="repeat_month"]').forEach((input) => {
+      input.checked = monthSet.has(Number(input.value));
+    });
+    panel.querySelector("[data-cms-caldev-delete]").hidden = !form.id;
+    panel.querySelector("[data-cms-caldev-repeat-wrap]").hidden = !!form.id;
+    syncRepeatUi();
+    toggleTimeFields();
+    renderExceptions();
+    document.body.classList.add("cms-caldev-editor-open");
+    renderBoardOnly();
+    setTimeout(() => panel.querySelector('[name="title"]')?.focus(), 30);
+  }
+
+  function closeEditor() {
+    const overlay = root.querySelector("[data-cms-caldev-editor-overlay]");
+    const panel = root.querySelector("[data-cms-caldev-editor]");
+    if (overlay) overlay.hidden = true;
+    if (panel) {
+      panel.hidden = true;
+      panel.dataset.eventId = "";
+    }
+    document.body.classList.remove("cms-caldev-editor-open");
+    renderBoardOnly();
+  }
+
   async function saveEditor(ev) {
     ev.preventDefault();
     if (saveBusy) return;
     const payload = formFromDom();
     if (!payload || !payload.title) {
       showToast("Title is required", true);
+      return;
+    }
+    if (!payload.start_date && !payload.repeat) {
+      showToast("Date is required", true);
       return;
     }
     saveBusy = true;
@@ -342,15 +452,42 @@
         else events.push(saved);
         selectedId = saved.id;
         showToast("Event saved");
+      } else if (payload.repeat) {
+        const year = payload.start_date
+          ? Number(String(payload.start_date).slice(0, 4))
+          : cursor.getFullYear();
+        const dates = expandRepeatDates(
+          payload.start_date,
+          payload.repeat_days,
+          payload.repeat_months,
+          payload.repeat_exceptions,
+          year,
+        );
+        if (!dates.length) {
+          showToast("Choose at least one weekday and month for repeats", true);
+          return;
+        }
+        let createdCount = 0;
+        let last = null;
+        for (const dateKey of dates) {
+          last = await createEvent({
+            ...payload,
+            start_date: dateKey,
+            end_date: "",
+          });
+          events.push(last);
+          createdCount += 1;
+        }
+        selectedId = last?.id || null;
+        showToast(`Created ${createdCount} repeated event${createdCount === 1 ? "" : "s"}`);
       } else {
         const created = await createEvent(payload);
         events.push(created);
         selectedId = created.id;
         showToast("Event created");
       }
-      const current = events.find((e) => String(e.id) === String(selectedId));
-      if (current) openEditor(eventToForm(current));
-      renderBoardOnly();
+      closeEditor();
+      render();
     } catch (err) {
       showToast(err.message || "Save failed", true);
     } finally {
@@ -366,12 +503,32 @@
     try {
       await deleteEvent(id);
       events = events.filter((e) => String(e.id) !== String(id));
+      selectedId = null;
       closeEditor();
       showToast("Event deleted");
-      renderBoardOnly();
+      render();
     } catch (err) {
       showToast(err.message || "Delete failed", true);
     }
+  }
+
+  function applyDescCommand(cmd, value) {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    if (!editor) return;
+    editor.focus();
+    if (cmd === "foreColor" || cmd === "fontSize") {
+      document.execCommand(cmd === "fontSize" ? "fontSize" : "foreColor", false, cmd === "fontSize" ? "3" : value);
+      if (cmd === "fontSize") {
+        editor.querySelectorAll('font[size="3"]').forEach((node) => {
+          const span = document.createElement("span");
+          span.style.fontSize = value;
+          while (node.firstChild) span.appendChild(node.firstChild);
+          node.replaceWith(span);
+        });
+      }
+      return;
+    }
+    document.execCommand(cmd, false, null);
   }
 
   function renderShell() {
@@ -396,42 +553,104 @@
         </div>
         <div class="cms-caldev-hint" data-cms-caldev-hint></div>
         <div class="cms-caldev-tracks" data-cms-caldev-tracks></div>
-        <div class="cms-caldev-layout">
+        <div class="cms-caldev-layout cms-caldev-layout-solo">
           <div class="cms-caldev-main" data-cms-caldev-main></div>
-          <aside class="cms-caldev-side">
-            <div class="cms-caldev-editor-empty" data-cms-caldev-editor-empty>
-              <strong>Easy edit</strong>
-              <p>Click an event to edit. On desktop, drag to another day. On mobile, tap Move, then tap a day.</p>
+        </div>
+        <div class="cms-caldev-undated" data-cms-caldev-undated></div>
+
+        <div class="cms-caldev-editor-overlay" data-cms-caldev-editor-overlay hidden>
+          <button type="button" class="cms-caldev-editor-backdrop" data-cms-caldev-close aria-label="Close editor"></button>
+          <form class="cms-caldev-editor-toast" data-cms-caldev-editor hidden>
+            <div class="cms-caldev-editor-head">
+              <h4 data-cms-caldev-editor-title>Create Event</h4>
+              <button type="button" class="btn outline cms-caldev-icon-btn" data-cms-caldev-close aria-label="Close">×</button>
             </div>
-            <form class="cms-caldev-editor" data-cms-caldev-editor hidden>
-              <div class="cms-caldev-editor-head">
-                <h4 data-cms-caldev-editor-title>Edit event</h4>
-                <button type="button" class="btn outline cms-caldev-icon-btn" data-cms-caldev-close aria-label="Close">×</button>
+
+            <label class="cms-caldev-title-field">Title
+              <input name="title" required maxlength="200" placeholder="Event title" />
+            </label>
+
+            <label>Date
+              <input name="start_date" type="date" required />
+            </label>
+            <label>End date <span class="cms-caldev-optional">(optional)</span>
+              <input name="end_date" type="date" />
+            </label>
+
+            <fieldset class="cms-caldev-repeat" data-cms-caldev-repeat-wrap>
+              <legend>Repeat</legend>
+              <div class="cms-caldev-repeat-toggle">
+                <label class="cms-caldev-check"><input type="radio" name="repeat_choice" value="yes" data-cms-caldev-repeat-yes> <span>Yes</span></label>
+                <label class="cms-caldev-check"><input type="radio" name="repeat_choice" value="no" checked data-cms-caldev-repeat-no> <span>No</span></label>
+                <input type="checkbox" name="repeat_yes" hidden>
+                <input type="checkbox" name="repeat_no" checked hidden>
               </div>
-              <label>Title<input name="title" required maxlength="200" /></label>
-              <label>Start date<input name="start_date" type="date" required /></label>
-              <label>End date <span class="cms-caldev-optional">(optional)</span><input name="end_date" type="date" /></label>
-              <label class="cms-caldev-check"><input name="all_day" type="checkbox" /> All day</label>
-              <div class="cms-caldev-time-row" data-cms-caldev-time-field>
-                <label>Start<input name="start_time" type="time" /></label>
-                <label>End<input name="end_time" type="time" /></label>
+              <div class="cms-caldev-repeat-options" data-cms-caldev-repeat-options hidden>
+                <p class="muted">Creates one Schedule Board event for each matching weekday in the selected months. Exceptions skip specific dates.</p>
+                <div class="cms-caldev-repeat-grid">
+                  <div>
+                    <p class="cms-caldev-repeat-heading">Days</p>
+                    <div class="cms-caldev-repeat-checks">
+                      ${DOW.map((label, idx) => `<label class="cms-caldev-check"><input type="checkbox" name="repeat_day" value="${idx}"> ${label}</label>`).join("")}
+                    </div>
+                  </div>
+                  <div>
+                    <p class="cms-caldev-repeat-heading">Months</p>
+                    <div class="cms-caldev-repeat-checks">
+                      ${MONTH_SHORT.map((label, idx) => `<label class="cms-caldev-check"><input type="checkbox" name="repeat_month" value="${idx + 1}"> ${label}</label>`).join("")}
+                    </div>
+                  </div>
+                </div>
+                <label>Skip date
+                  <span class="cms-caldev-exception-row">
+                    <input type="date" data-cms-caldev-exception-input>
+                    <button type="button" class="btn outline" data-cms-caldev-add-exception>Add exception</button>
+                  </span>
+                </label>
+                <ul class="cms-caldev-exceptions" data-cms-caldev-exceptions></ul>
               </div>
-              <label>Track
-                <select name="track">
-                  ${TRACKS.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
-                </select>
-              </label>
-              <label>Who<input name="who" maxlength="200" /></label>
-              <label>Location<input name="location" maxlength="200" /></label>
-              <label>Details<textarea name="description" rows="4" maxlength="4000"></textarea></label>
-              <div class="cms-caldev-editor-actions">
-                <button type="submit" class="btn primary">Save</button>
-                <button type="button" class="btn outline" data-cms-caldev-move-btn hidden>Move</button>
-                <button type="button" class="btn outline cms-caldev-danger" data-cms-caldev-delete hidden>Delete</button>
+            </fieldset>
+
+            <label>Event type
+              <select name="track">
+                ${TRACKS.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
+              </select>
+            </label>
+
+            <label class="cms-caldev-check"><input name="all_day" type="checkbox" checked> All day</label>
+            <div class="cms-caldev-time-row" data-cms-caldev-time-field hidden>
+              <label>Start<input name="start_time" type="time" /></label>
+              <label>End<input name="end_time" type="time" /></label>
+            </div>
+
+            <label>Who<input name="who" maxlength="200" placeholder="Marching Band, Guard…" /></label>
+            <label>Location<input name="location" maxlength="200" /></label>
+
+            <label class="cms-caldev-desc-label">Description
+              <div class="cms-caldev-desc-toolbar" data-cms-caldev-desc-toolbar>
+                <button type="button" data-cms-caldev-desc-cmd="bold" title="Bold"><b>B</b></button>
+                <button type="button" data-cms-caldev-desc-cmd="italic" title="Italic"><i>I</i></button>
+                <button type="button" data-cms-caldev-desc-cmd="underline" title="Underline"><u>U</u></button>
+                <label title="Color"><span>Color</span><input type="color" data-cms-caldev-desc-color value="#002142"></label>
+                <label title="Size"><span>Size</span>
+                  <select data-cms-caldev-desc-size>
+                    <option value="">Normal</option>
+                    <option value="14px">Small</option>
+                    <option value="18px">Medium</option>
+                    <option value="22px">Large</option>
+                    <option value="28px">Extra large</option>
+                  </select>
+                </label>
               </div>
-            </form>
-            <div class="cms-caldev-undated" data-cms-caldev-undated></div>
-          </aside>
+              <div class="cms-caldev-desc" contenteditable="true" role="textbox" aria-multiline="true" data-cms-caldev-desc data-placeholder="Event details"></div>
+            </label>
+
+            <div class="cms-caldev-editor-actions">
+              <button type="submit" class="btn primary">Save</button>
+              <button type="button" class="btn outline" data-cms-caldev-close>Cancel</button>
+              <button type="button" class="btn outline cms-caldev-danger" data-cms-caldev-delete hidden>Delete</button>
+            </div>
+          </form>
         </div>
       </div>
     `;
@@ -451,15 +670,10 @@
   function renderHint() {
     const el = root.querySelector("[data-cms-caldev-hint]");
     if (!el) return;
-    if (moveModeId) {
-      el.hidden = false;
-      el.innerHTML = `<strong>Tap a day</strong> to move the event. <button type="button" class="btn outline" data-cms-caldev-cancel-move>Cancel</button>`;
-      return;
-    }
     el.hidden = false;
     el.textContent = isCompact()
-      ? "Tap an event to edit. Use Move, then tap a day to reschedule."
-      : "Drag events onto another day to reschedule. Click an event or empty day to edit.";
+      ? "Tap once to select. Double-tap to edit. Press and hold, then drag to reschedule. Use + to add."
+      : "Click once to select. Double-click to edit. Drag to reschedule. Use + to add an event.";
   }
 
   function renderUndated() {
@@ -475,9 +689,9 @@
     wrap.innerHTML = `<h4>Needs a date</h4>
       ${list.map((ev) => {
         const meta = trackMeta(ev.track);
-        return `<button type="button" class="cms-caldev-undated-item ${String(selectedId) === String(ev.id) ? "is-selected" : ""} ${String(moveModeId) === String(ev.id) ? "is-moving" : ""}"
+        return `<button type="button" class="cms-caldev-undated-item ${String(selectedId) === String(ev.id) ? "is-selected" : ""}"
           data-cms-caldev-event="${escapeHtml(ev.id)}"
-          draggable="${isCompact() ? "false" : "true"}"
+          draggable="true"
           style="--track:${meta.color}">
           <strong>${escapeHtml(ev.title)}</strong>
           <span>${escapeHtml(meta.label)}</span>
@@ -489,12 +703,10 @@
     const meta = trackMeta(ev.track);
     const time = eventTimeLabel(ev);
     const selected = String(selectedId) === String(ev.id);
-    const moving = String(moveModeId) === String(ev.id);
-    const draggable = !isCompact();
     return `<button type="button"
-      class="cms-caldev-chip ${selected ? "is-selected" : ""} ${moving ? "is-moving" : ""}"
+      class="cms-caldev-chip ${selected ? "is-selected" : ""}"
       data-cms-caldev-event="${escapeHtml(ev.id)}"
-      draggable="${draggable ? "true" : "false"}"
+      draggable="true"
       style="--track:${meta.color}"
       title="${escapeHtml(ev.title)}">
       <span class="cms-caldev-chip-time">${escapeHtml(time)}</span>
@@ -504,7 +716,7 @@
 
   function bindDropTarget(el, dateKey) {
     el.addEventListener("dragover", (e) => {
-      if (!draggingId || isCompact()) return;
+      if (!draggingId) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       el.classList.add("is-drop-target");
@@ -520,16 +732,6 @@
       if (!id) return;
       await persistMove(id, dateKey);
     });
-    if (moveModeId) {
-      el.classList.add("is-move-target");
-      el.addEventListener("click", async (e) => {
-        if (e.target.closest("[data-cms-caldev-event]")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const id = moveModeId;
-        await persistMove(id, dateKey);
-      });
-    }
   }
 
   function renderMonth() {
@@ -557,10 +759,10 @@
                 const inMonth = d.getMonth() === cursor.getMonth();
                 const dayEvents = eventsForDay(key);
                 const extra = Math.max(0, dayEvents.length - maxChips);
-                return `<div class="cms-caldev-cell ${inMonth ? "" : "is-out"} ${isToday(d) ? "is-today" : ""} ${moveModeId ? "is-move-target" : ""}"
+                return `<div class="cms-caldev-cell ${inMonth ? "" : "is-out"} ${isToday(d) ? "is-today" : ""}"
                   data-cms-caldev-day="${key}">
                   <div class="cms-caldev-cell-head">
-                    <button type="button" class="cms-caldev-daynum" data-cms-caldev-new-day="${key}">${d.getDate()}</button>
+                    <span class="cms-caldev-daynum">${d.getDate()}</span>
                     <button type="button" class="cms-caldev-add" data-cms-caldev-new-day="${key}" aria-label="Add event">+</button>
                   </div>
                   <div class="cms-caldev-cell-events">
@@ -584,7 +786,7 @@
         .map((d) => {
           const key = toDateKey(d);
           const dayEvents = eventsForDay(key);
-          return `<section class="cms-caldev-week-col ${isToday(d) ? "is-today" : ""} ${moveModeId ? "is-move-target" : ""}" data-cms-caldev-day="${key}">
+          return `<section class="cms-caldev-week-col ${isToday(d) ? "is-today" : ""}" data-cms-caldev-day="${key}">
             <header>
               <span>${DOW[d.getDay()]}</span>
               <strong>${d.getDate()}</strong>
@@ -621,20 +823,20 @@
       ${[...groups.entries()]
         .map(([key, dayEvents]) => {
           const d = parseDateKey(key);
-          return `<section class="cms-caldev-list-day ${moveModeId ? "is-move-target" : ""}" data-cms-caldev-day="${key}">
+          return `<section class="cms-caldev-list-day" data-cms-caldev-day="${key}">
             <header>
               <div>
                 <strong>${DOW_FULL[d.getDay()]}</strong>
                 <span>${MONTHS[d.getMonth()]} ${d.getDate()}</span>
               </div>
-              <button type="button" class="btn outline" data-cms-caldev-new-day="${key}">Add</button>
+              <button type="button" class="btn outline cms-caldev-add-list" data-cms-caldev-new-day="${key}">+</button>
             </header>
             ${dayEvents
               .map((ev) => {
                 const meta = trackMeta(ev.track);
-                return `<button type="button" class="cms-caldev-list-item ${String(selectedId) === String(ev.id) ? "is-selected" : ""} ${String(moveModeId) === String(ev.id) ? "is-moving" : ""}"
+                return `<button type="button" class="cms-caldev-list-item ${String(selectedId) === String(ev.id) ? "is-selected" : ""}"
                   data-cms-caldev-event="${escapeHtml(ev.id)}"
-                  draggable="${isCompact() ? "false" : "true"}"
+                  draggable="true"
                   style="--track:${meta.color}">
                   <div class="cms-caldev-list-time">${escapeHtml(eventTimeLabel(ev))}</div>
                   <div>
@@ -668,20 +870,28 @@
     main.querySelectorAll("[data-cms-caldev-day]").forEach((el) => {
       bindDropTarget(el, el.getAttribute("data-cms-caldev-day"));
     });
-
-    const moveBtn = root.querySelector("[data-cms-caldev-move-btn]");
-    if (moveBtn) moveBtn.hidden = !selectedId || !isCompact();
   }
 
   function render() {
     renderBoardOnly();
   }
 
+  function selectEvent(id) {
+    selectedId = id;
+    renderBoardOnly();
+  }
+
+  function openEventById(id) {
+    const ev = events.find((x) => String(x.id) === String(id));
+    if (!ev) return;
+    openEditor(eventToForm(ev));
+  }
+
   function onDragStart(e) {
-    if (isCompact()) return;
     const btn = e.target.closest("[data-cms-caldev-event]");
     if (!btn || !root.contains(btn)) return;
     draggingId = btn.getAttribute("data-cms-caldev-event");
+    selectedId = draggingId;
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/caldev-id", draggingId);
     e.dataTransfer.setData("text/plain", draggingId);
@@ -695,6 +905,20 @@
     root.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
   }
 
+  function clearLongPress() {
+    if (longPress.timer) clearTimeout(longPress.timer);
+    longPress.timer = null;
+    longPress.id = null;
+    longPress.active = false;
+    root?.querySelectorAll(".is-longpress").forEach((el) => el.classList.remove("is-longpress"));
+  }
+
+  function dayKeyFromPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const day = el?.closest?.("[data-cms-caldev-day]");
+    return day?.getAttribute("data-cms-caldev-day") || null;
+  }
+
   function bind() {
     if (bound) return;
     bound = true;
@@ -706,12 +930,6 @@
         if (activeTracks.has(id)) {
           if (activeTracks.size > 1) activeTracks.delete(id);
         } else activeTracks.add(id);
-        render();
-        return;
-      }
-
-      if (e.target.closest("[data-cms-caldev-cancel-move]")) {
-        moveModeId = null;
         render();
         return;
       }
@@ -741,14 +959,14 @@
 
       if (e.target.closest("[data-cms-caldev-new]")) {
         openEditor(blankForm(toDateKey(new Date())));
-        renderBoardOnly();
         return;
       }
 
       const newDay = e.target.closest("[data-cms-caldev-new-day]");
-      if (newDay && root.contains(newDay) && !moveModeId) {
+      if (newDay && root.contains(newDay)) {
+        e.preventDefault();
+        e.stopPropagation();
         openEditor(blankForm(newDay.getAttribute("data-cms-caldev-new-day")));
-        renderBoardOnly();
         return;
       }
 
@@ -760,28 +978,70 @@
         removeSelected();
         return;
       }
-      if (e.target.closest("[data-cms-caldev-move-btn]")) {
-        const panel = root.querySelector("[data-cms-caldev-editor]");
-        moveModeId = panel?.dataset.eventId || null;
-        if (isCompact() && panel) panel.classList.remove("is-open");
-        render();
-        showToast("Tap a day to move this event");
+      if (e.target.closest("[data-cms-caldev-add-exception]")) {
+        const input = root.querySelector("[data-cms-caldev-exception-input]");
+        const value = String(input?.value || "").trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value) && !exceptionDates.includes(value)) {
+          exceptionDates.push(value);
+          renderExceptions();
+        }
+        if (input) input.value = "";
+        return;
+      }
+      const removeEx = e.target.closest("[data-cms-caldev-remove-exception]");
+      if (removeEx) {
+        exceptionDates = exceptionDates.filter((d) => d !== removeEx.getAttribute("data-cms-caldev-remove-exception"));
+        renderExceptions();
+        return;
+      }
+
+      const descCmd = e.target.closest("[data-cms-caldev-desc-cmd]");
+      if (descCmd) {
+        e.preventDefault();
+        applyDescCommand(descCmd.getAttribute("data-cms-caldev-desc-cmd"));
         return;
       }
 
       const evBtn = e.target.closest("[data-cms-caldev-event]");
       if (evBtn && root.contains(evBtn)) {
-        if (moveModeId) return;
-        const ev = events.find((x) => String(x.id) === String(evBtn.getAttribute("data-cms-caldev-event")));
-        if (ev) {
-          openEditor(eventToForm(ev));
-          renderBoardOnly();
+        const id = evBtn.getAttribute("data-cms-caldev-event");
+        const now = Date.now();
+        const isDouble = lastTap.id === id && (now - lastTap.at) < 350;
+        lastTap = { id, at: now };
+        if (isDouble) {
+          openEventById(id);
+          return;
         }
+        selectEvent(id);
       }
+    });
+
+    root.addEventListener("dblclick", (e) => {
+      const evBtn = e.target.closest("[data-cms-caldev-event]");
+      if (!evBtn || !root.contains(evBtn)) return;
+      e.preventDefault();
+      openEventById(evBtn.getAttribute("data-cms-caldev-event"));
     });
 
     root.addEventListener("change", (e) => {
       if (e.target.matches('[name="all_day"]')) toggleTimeFields();
+      if (e.target.matches("[data-cms-caldev-repeat-yes]")) {
+        root.querySelector('[name="repeat_yes"]').checked = true;
+        root.querySelector('[name="repeat_no"]').checked = false;
+        syncRepeatUi();
+      }
+      if (e.target.matches("[data-cms-caldev-repeat-no]")) {
+        root.querySelector('[name="repeat_yes"]').checked = false;
+        root.querySelector('[name="repeat_no"]').checked = true;
+        syncRepeatUi();
+      }
+      if (e.target.matches("[data-cms-caldev-desc-color]")) {
+        applyDescCommand("foreColor", e.target.value);
+      }
+      if (e.target.matches("[data-cms-caldev-desc-size]") && e.target.value) {
+        applyDescCommand("fontSize", e.target.value);
+        e.target.value = "";
+      }
     });
 
     root.addEventListener("submit", (e) => {
@@ -790,6 +1050,69 @@
 
     root.addEventListener("dragstart", onDragStart);
     root.addEventListener("dragend", onDragEnd);
+
+    root.addEventListener("touchstart", (e) => {
+      const btn = e.target.closest("[data-cms-caldev-event]");
+      if (!btn || !root.contains(btn)) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      longPress.id = btn.getAttribute("data-cms-caldev-event");
+      longPress.startX = touch.clientX;
+      longPress.startY = touch.clientY;
+      longPress.active = false;
+      longPress.timer = setTimeout(() => {
+        longPress.active = true;
+        draggingId = longPress.id;
+        selectedId = longPress.id;
+        btn.classList.add("is-longpress", "is-dragging");
+        showToast("Drag to a day to reschedule");
+        renderBoardOnly();
+      }, 420);
+    }, { passive: true });
+
+    root.addEventListener("touchmove", (e) => {
+      if (!longPress.id) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      if (!longPress.active) {
+        const dx = Math.abs(touch.clientX - longPress.startX);
+        const dy = Math.abs(touch.clientY - longPress.startY);
+        if (dx > 12 || dy > 12) clearLongPress();
+        return;
+      }
+      e.preventDefault();
+      const key = dayKeyFromPoint(touch.clientX, touch.clientY);
+      root.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+      if (key) {
+        root.querySelector(`[data-cms-caldev-day="${key}"]`)?.classList.add("is-drop-target");
+      }
+    }, { passive: false });
+
+    root.addEventListener("touchend", async (e) => {
+      if (!longPress.id) return;
+      const id = longPress.id;
+      const wasActive = longPress.active;
+      const touch = e.changedTouches[0];
+      clearLongPress();
+      root.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+      draggingId = null;
+      if (!wasActive || !touch) return;
+      const key = dayKeyFromPoint(touch.clientX, touch.clientY);
+      if (key) await persistMove(id, key);
+      else renderBoardOnly();
+    });
+
+    root.addEventListener("touchcancel", () => {
+      clearLongPress();
+      draggingId = null;
+      root.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && root?.querySelector("[data-cms-caldev-editor-overlay]:not([hidden])")) {
+        closeEditor();
+      }
+    });
 
     window.addEventListener("resize", () => {
       if (!root?.isConnected) return;
