@@ -4554,7 +4554,21 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   padding:8px 14px;border-radius:999px;cursor:pointer;
 }
 .caldev-view-btn.is-active{background:var(--navy);color:#fff}
-.caldev-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
+.caldev-layout{display:grid;gap:16px;align-items:start}
+.caldev-legend{
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;
+  padding:12px 14px;border:1px solid #d5deea;border-radius:16px;background:#fff;
+  box-shadow:0 8px 22px rgba(0,33,66,.04);
+}
+.caldev-legend-label{
+  color:var(--navy);font-size:.78rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase;
+}
+.caldev-legend-list{
+  list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;
+}
+.caldev-legend-item{
+  display:inline-flex;align-items:center;gap:8px;color:#10233c;font-weight:750;font-size:.92rem;
+}
 .caldev-filters{
   padding:16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
   box-shadow:0 10px 28px rgba(0,33,66,.05);position:sticky;top:12px;
@@ -4565,6 +4579,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .caldev-track-toggle{display:flex;align-items:center;gap:10px;font-weight:750;color:#10233c;cursor:pointer}
 .caldev-track-swatch{
   width:14px;height:14px;border-radius:4px;background:var(--caldev-track);box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);
+  flex:0 0 auto;
 }
 .caldev-undated{margin-top:18px;padding-top:14px;border-top:1px solid #e4ebf4}
 .caldev-undated h4{margin:0 0 8px;color:var(--navy);font-size:.92rem}
@@ -4642,10 +4657,10 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 }
 .caldev-cms-item-actions{display:flex;gap:8px;align-items:center}
 @media(max-width:900px){
-  .caldev-layout{grid-template-columns:1fr}
-  .caldev-filters{position:static}
-  .caldev-week{grid-template-columns:1fr; }
+  .caldev-week{grid-template-columns:1fr}
   .caldev-day{min-height:84px}
+  .caldev-legend{padding:10px 12px}
+  .caldev-legend-item{font-size:.86rem}
 }
 @media(max-width:700px){
   .caldev-weekday-row{display:none}

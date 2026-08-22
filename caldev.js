@@ -15,7 +15,6 @@
     events: [],
     view: 'month',
     cursor: startOfMonth(new Date()),
-    hiddenTracks: new Set(),
     selectedId: null,
     loading: true,
     error: '',
@@ -68,7 +67,7 @@
   }
 
   function visibleEvents() {
-    return state.events.filter((event) => !state.hiddenTracks.has(event.track || 'other'));
+    return state.events;
   }
 
   function eventsOnDate(iso) {
@@ -80,10 +79,6 @@
       return event.start_date === iso;
     }).sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))
       || String(a.title || '').localeCompare(String(b.title || '')));
-  }
-
-  function undatedEvents() {
-    return visibleEvents().filter((event) => !event.start_date);
   }
 
   function selectedEvent() {
@@ -156,38 +151,22 @@
     `;
   }
 
-  function renderFilters() {
+  function renderLegend() {
     return `
-      <aside class="caldev-filters" aria-label="Program tracks">
-        <h3>Tracks</h3>
-        <p class="caldev-filters-note">Show only the lanes you need.</p>
-        <ul class="caldev-track-list">
+      <div class="caldev-legend" aria-label="Event color legend">
+        <span class="caldev-legend-label">Tracks</span>
+        <ul class="caldev-legend-list">
           ${TRACKS.map((track) => {
-            const checked = !state.hiddenTracks.has(track.id);
             const ink = track.ink || '#fff';
             return `
-              <li>
-                <label class="caldev-track-toggle">
-                  <input type="checkbox" data-caldev-track="${track.id}" ${checked ? 'checked' : ''}>
-                  <span class="caldev-track-swatch" style="--caldev-track:${track.color};--caldev-track-ink:${ink}"></span>
-                  <span>${escapeHtml(track.label)}</span>
-                </label>
+              <li class="caldev-legend-item">
+                <span class="caldev-track-swatch" style="--caldev-track:${track.color};--caldev-track-ink:${ink}" aria-hidden="true"></span>
+                <span>${escapeHtml(track.label)}</span>
               </li>
             `;
           }).join('')}
         </ul>
-        <div class="caldev-undated">
-          <h4>Needs a date</h4>
-          ${undatedEvents().length
-            ? undatedEvents().map((event) => `
-                <button type="button" class="caldev-undated-item" data-caldev-open="${event.id}">
-                  ${trackChip(event.track)}
-                  <strong>${escapeHtml(event.title)}</strong>
-                </button>
-              `).join('')
-            : '<p class="draft">None</p>'}
-        </div>
-      </aside>
+      </div>
     `;
   }
 
@@ -336,13 +315,11 @@
     root.classList.toggle('is-compact', isCompactLayout());
     root.innerHTML = `
       ${renderToolbar()}
-      <div class="caldev-layout">
-        ${renderFilters()}
-        <div class="caldev-board">
-          ${state.loading ? '<p class="draft">Loading schedule…</p>' : ''}
-          ${state.error ? `<p class="draft">${escapeHtml(state.error)}</p>` : ''}
-          ${!state.loading && !state.error ? board : ''}
-        </div>
+      ${renderLegend()}
+      <div class="caldev-board">
+        ${state.loading ? '<p class="draft">Loading schedule…</p>' : ''}
+        ${state.error ? `<p class="draft">${escapeHtml(state.error)}</p>` : ''}
+        ${!state.loading && !state.error ? board : ''}
       </div>
       ${renderDetail()}
     `;
@@ -368,14 +345,6 @@
     root.querySelector('[data-caldev-today]')?.addEventListener('click', () => {
       state.cursor = state.view === 'week' ? new Date() : startOfMonth(new Date());
       render();
-    });
-    root.querySelectorAll('[data-caldev-track]').forEach((input) => {
-      input.addEventListener('change', () => {
-        const id = input.dataset.caldevTrack;
-        if (input.checked) state.hiddenTracks.delete(id);
-        else state.hiddenTracks.add(id);
-        render();
-      });
     });
     root.querySelectorAll('[data-caldev-open]').forEach((button) => {
       button.addEventListener('click', () => {
