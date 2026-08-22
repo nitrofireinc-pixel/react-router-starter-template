@@ -4524,3 +4524,140 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   .dues-modal .sponsor-signup-actions-end{width:100%;display:flex;gap:10px}
   .dues-modal .sponsor-signup-actions-end .btn{flex:1 1 auto}
 }
+
+/* Schedule Board (caldev) — isolated test calendar */
+.caldev-body{background:linear-gradient(180deg,#eef3fa 0%,#f7f9fc 38%,#fff 100%)}
+.caldev-test-badge{
+  display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:.82rem;color:#57470a;
+}
+.caldev-hero .page-title p{max-width:42rem}
+.caldev-section{padding-top:8px}
+.caldev-wrap{max-width:1180px}
+.caldev-app{display:grid;gap:16px}
+.caldev-toolbar{
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
+  box-shadow:0 10px 28px rgba(0,33,66,.06);
+}
+.caldev-toolbar-nav{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.caldev-range-title{margin:0;color:var(--navy);font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:900;letter-spacing:-.03em}
+.caldev-icon-btn{
+  width:42px;height:42px;border:1px solid #d5deea;border-radius:14px;background:#fff;color:var(--navy);
+  font-size:1.45rem;font-weight:700;line-height:1;cursor:pointer;
+}
+.caldev-icon-btn:hover,.caldev-icon-btn:focus-visible{background:#eef3fa;outline:none}
+.caldev-today-btn{min-height:42px}
+.caldev-view-switch{display:inline-flex;padding:4px;border-radius:999px;background:#eef3fa;gap:4px}
+.caldev-view-btn{
+  border:0;background:transparent;color:#35506f;font:inherit;font-weight:800;font-size:.88rem;
+  padding:8px 14px;border-radius:999px;cursor:pointer;
+}
+.caldev-view-btn.is-active{background:var(--navy);color:#fff}
+.caldev-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
+.caldev-filters{
+  padding:16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
+  box-shadow:0 10px 28px rgba(0,33,66,.05);position:sticky;top:12px;
+}
+.caldev-filters h3{margin:0 0 6px;color:var(--navy);font-size:1.05rem}
+.caldev-filters-note{margin:0 0 14px;color:#5b6472;font-size:.86rem;line-height:1.45}
+.caldev-track-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.caldev-track-toggle{display:flex;align-items:center;gap:10px;font-weight:750;color:#10233c;cursor:pointer}
+.caldev-track-swatch{
+  width:14px;height:14px;border-radius:4px;background:var(--caldev-track);box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);
+}
+.caldev-undated{margin-top:18px;padding-top:14px;border-top:1px solid #e4ebf4}
+.caldev-undated h4{margin:0 0 8px;color:var(--navy);font-size:.92rem}
+.caldev-undated-item{
+  width:100%;display:grid;gap:4px;margin:0 0 8px;padding:10px;border:1px solid #e1e8f1;border-radius:12px;
+  background:#f8fafc;text-align:left;font:inherit;cursor:pointer;
+}
+.caldev-undated-item:hover{border-color:#b7c8dc}
+.caldev-board{
+  min-height:420px;padding:16px;border:1px solid #d5deea;border-radius:18px;
+  background:
+    radial-gradient(circle at 10% 0, rgba(253,215,3,.12), transparent 32%),
+    linear-gradient(180deg,#f7f9fc 0%,#fff 58%);
+  box-shadow:0 16px 40px rgba(0,33,66,.07);
+}
+.caldev-weekday-row,.caldev-month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.caldev-weekday-row{margin-bottom:8px}
+.caldev-weekday-row span{
+  text-align:center;color:#5b6f88;font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+}
+.caldev-day{
+  min-height:108px;padding:8px;border:1px solid #e4ebf4;border-radius:14px;background:rgba(255,255,255,.78);
+  display:flex;flex-direction:column;gap:6px;
+}
+.caldev-day.is-spacer{background:transparent;border-color:transparent}
+.caldev-day.is-today{border-color:rgba(0,33,66,.28);box-shadow:inset 0 0 0 1px rgba(0,33,66,.08)}
+.caldev-day-head{display:flex;justify-content:space-between;color:var(--navy);font-weight:900}
+.caldev-day-events{display:grid;gap:4px}
+.caldev-event-chip{
+  display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  border:0;border-left:4px solid var(--caldev-track);border-radius:8px;background:#102b4a;color:#fff;
+  font:inherit;font-size:.74rem;font-weight:750;padding:5px 7px;text-align:left;cursor:pointer;
+}
+.caldev-event-chip:hover{filter:brightness(1.08)}
+.caldev-more{color:#5b6f88;font-size:.72rem;font-weight:800}
+.caldev-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.caldev-week-col{min-height:320px;padding:10px;border:1px solid #e4ebf4;border-radius:14px;background:rgba(255,255,255,.8)}
+.caldev-week-col.is-today{border-color:rgba(0,33,66,.28)}
+.caldev-week-col header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;color:var(--navy)}
+.caldev-week-col header span{font-size:.72rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#5b6f88}
+.caldev-week-events{display:grid;gap:8px}
+.caldev-week-event{
+  display:grid;gap:2px;padding:8px;border:0;border-left:4px solid var(--caldev-track);border-radius:10px;
+  background:#102b4a;color:#fff;text-align:left;font:inherit;cursor:pointer;
+}
+.caldev-week-event small{opacity:.85;font-weight:700}
+.caldev-rundown{display:grid;gap:16px}
+.caldev-rundown-day h3{margin:0 0 8px;color:var(--navy);font-size:1.05rem}
+.caldev-rundown-day ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.caldev-rundown-item{
+  width:100%;display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid #e1e8f1;
+  border-radius:14px;background:#fff;text-align:left;font:inherit;cursor:pointer;
+}
+.caldev-rundown-item:hover{border-color:#b7c8dc}
+.caldev-rundown-copy{display:grid;gap:3px}
+.caldev-rundown-copy small,.caldev-rundown-copy span{color:#5b6472}
+.caldev-track-pill{
+  display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:var(--caldev-track);
+  color:var(--caldev-track-ink,#fff);font-size:.68rem;font-weight:900;letter-spacing:.04em;text-transform:uppercase;
+}
+.caldev-detail{position:fixed;inset:0;z-index:80;display:grid;place-items:center}
+.caldev-detail-backdrop{position:absolute;inset:0;background:rgba(8,18,32,.48)}
+.caldev-detail-panel{
+  position:relative;z-index:1;width:min(460px,92vw);max-height:min(80vh,640px);overflow:auto;
+  padding:22px 22px 24px;border-radius:20px;background:#fff;box-shadow:0 24px 60px rgba(0,33,66,.28);
+}
+.caldev-detail-panel h3{margin:10px 0 6px;color:var(--navy);font-size:1.35rem}
+.caldev-detail-when,.caldev-detail-location{margin:0 0 8px;color:#5b6472;font-weight:700}
+.caldev-detail-body{margin:0;color:#243447;line-height:1.5}
+.caldev-cms-preview-link{margin-left:8px}
+.caldev-cms-list{display:grid;gap:10px;margin-top:14px}
+.caldev-cms-item{
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;padding:12px 14px;
+  border:1px solid #e1e8f1;border-radius:14px;background:#fff;
+}
+.caldev-cms-item-actions{display:flex;gap:8px;align-items:center}
+@media(max-width:900px){
+  .caldev-layout{grid-template-columns:1fr}
+  .caldev-filters{position:static}
+  .caldev-week{grid-template-columns:1fr; }
+  .caldev-day{min-height:84px}
+}
+@media(max-width:700px){
+  .caldev-weekday-row{display:none}
+  .caldev-month-grid{grid-template-columns:1fr; }
+  .caldev-day.is-spacer{display:none}
+  .caldev-toolbar{padding:12px}
+}
+
+.dash-card-caldev{
+  background:linear-gradient(160deg,#002142 0%,#014990 52%,#0b3a6b 100%);
+  border-color:#002142;color:#fff;box-shadow:0 18px 44px rgba(0,33,66,.28);
+}
+.dash-card-caldev span{color:rgba(253,215,3,.95)}
+.dash-card-caldev b,.dash-card-caldev small{color:#fff}
+.dash-card-caldev small{color:rgba(255,255,255,.86)}
+.dash-card-caldev:hover{filter:brightness(1.04);transform:translateY(-1px)}

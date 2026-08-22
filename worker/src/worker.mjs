@@ -16,6 +16,24 @@ import {
   sendPushNotification,
   serializeVapidKeys,
 } from './web-push-browser/index.js';
+import {
+  CALDEV_TRACKS,
+  clearCaldevEvents,
+  deleteCaldevEvent,
+  ensureCaldevSchema,
+  getCaldevEventById,
+  insertCaldevEvent,
+  listCaldevEvents,
+  normalizeCaldevPayload,
+  seedCaldevFromProduction,
+  updateCaldevEvent,
+} from './caldev.mjs';
+
+export {
+  CALDEV_TRACKS,
+  normalizeCaldevPayload,
+  seedCaldevFromProduction,
+} from './caldev.mjs';
 
 export const DEFAULT_UTILITY_LINKS = [
   { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
@@ -1413,7 +1431,23 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL DEFAULT '',
+      start_date TEXT NOT NULL DEFAULT '',
+      end_date TEXT NOT NULL DEFAULT '',
+      start_time TEXT NOT NULL DEFAULT '',
+      end_time TEXT NOT NULL DEFAULT '',
+      track TEXT NOT NULL DEFAULT 'other',
+      all_day INTEGER NOT NULL DEFAULT 1,
+      source_event_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
   ]);
+  await ensureCaldevSchema(env);
   try {
     await env.DB.prepare("ALTER TABLE admin_audit_log ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''").run();
   } catch {
@@ -7314,6 +7348,13 @@ async function routeApi(request, env, url, ctx = null) {
     // Full month view needs past and future months, not only upcoming rows.
     return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
+  if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
+    await ensureCaldevSchema(env);
+    return jsonResponse(await listCaldevEvents(env));
+  }
+  if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
+    return jsonResponse(CALDEV_TRACKS);
+  }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
     const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
@@ -9509,6 +9550,59 @@ async function routeApi(request, env, url, ctx = null) {
     }
     return jsonResponse(await getEvents(env, { upcomingOnly: false, includeCreators: true, expandRepeats: false }));
   }
+  if (url.pathname === '/api/admin/caldev/events' && request.method === 'GET') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    return jsonResponse({
+      events: await listCaldevEvents(env),
+      tracks: CALDEV_TRACKS,
+      preview_url: '/caldev.html',
+    });
+  }
+  if (url.pathname === '/api/admin/caldev/events' && request.method === 'POST') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const payload = await request.json().catch(() => ({}));
+    const p = normalizeCaldevPayload(payload);
+    if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
+    const created = await insertCaldevEvent(env, p);
+    return jsonResponse(created, 201);
+  }
+  if (url.pathname === '/api/admin/caldev/seed' && request.method === 'POST') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const payload = await request.json().catch(() => ({}));
+    const result = await seedCaldevFromProduction(env, {
+      getEvents,
+      clear: payload?.clear !== false,
+    });
+    return jsonResponse({
+      ok: true,
+      ...result,
+      events: await listCaldevEvents(env),
+    });
+  }
+  const caldevMatch = url.pathname.match(/^\/api\/admin\/caldev\/events\/(\d+)$/);
+  if (caldevMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const id = Number(caldevMatch[1]);
+    const existing = await getCaldevEventById(env, id);
+    if (!existing) return jsonResponse({ detail: 'Event not found' }, 404);
+    if (request.method === 'DELETE') {
+      await deleteCaldevEvent(env, id);
+      return jsonResponse({ ok: true, id });
+    }
+    const payload = await request.json().catch(() => ({}));
+    const p = normalizeCaldevPayload(payload, existing);
+    if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
+    const updated = await updateCaldevEvent(env, id, p, existing);
+    return jsonResponse(updated);
+  }
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -10146,7 +10240,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -10540,7 +10634,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Lab</p><h1>Schedule Board</h1><p>Super Admin only test calendar (<code>/caldev.html</code>). Edits here never change the live Calendar Events list. Seed copies current production events into this sandbox.</p></div><div class="panel-actions"><a class="btn outline" href="/caldev.html">Open preview</a><button class="btn outline" type="button" id="caldev-seed">Seed from live calendar</button><button class="btn primary" type="button" id="caldev-new">New board event</button></div></div><form id="caldev-form" class="stack-form" hidden><input type="hidden" name="id"><div class="form-grid"><label>Title<input name="title" required maxlength="200"></label><label>Track<select name="track"><option value="game">Games</option><option value="rehearsal">Rehearsals</option><option value="meeting">Meetings</option><option value="deadline">Deadlines</option><option value="trip">Trips</option><option value="other">Other</option></select></label><label>Start date<input name="start_date" type="date"></label><label>End date<input name="end_date" type="date"></label><label>Start time<input name="start_time" type="time"></label><label>End time<input name="end_time" type="time"></label><label class="full">Location<input name="location" maxlength="200"></label><label class="full">Details<textarea name="description" rows="4"></textarea></label><label class="check-row"><input name="all_day" type="checkbox" checked> All day</label></div><div class="panel-actions"><button class="btn primary" type="submit">Save board event</button><button class="btn outline" type="button" id="caldev-cancel">Cancel</button></div></form><div id="caldev-list" class="caldev-cms-list"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
