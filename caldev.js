@@ -154,7 +154,7 @@
   function renderLegend() {
     return `
       <div class="caldev-legend" aria-label="Event color legend">
-        <span class="caldev-legend-label">Tracks</span>
+        <span class="caldev-legend-label">Legend</span>
         <ul class="caldev-legend-list">
           ${TRACKS.map((track) => {
             const ink = track.ink || '#fff';
