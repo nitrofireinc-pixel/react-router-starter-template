@@ -13,7 +13,7 @@
 
   const state = {
     events: [],
-    view: 'month',
+    view: 'rundown',
     cursor: startOfMonth(new Date()),
     selectedId: null,
     loading: true,
