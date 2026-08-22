@@ -4680,7 +4680,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .dash-card-caldev:hover{filter:brightness(1.04);transform:translateY(-1px)}
 
 /* Schedule Board editor + drag-drop */
-.caldev-toolbar-end{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.caldev-toolbar-end{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px}
 .caldev-hint{margin:0;color:#5b6472;font-size:.9rem;font-weight:650}
 .caldev-notice{
   margin:0;padding:10px 12px;border-radius:12px;background:#eef6ff;border:1px solid #c9ddf5;
@@ -4730,7 +4730,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .caldev-week-col header strong{margin-left:auto}
 @media(max-width:700px){
   .caldev-time-row{grid-template-columns:1fr}
-  .caldev-toolbar-end{width:100%}
+  .caldev-toolbar-end{width:100%;justify-content:center}
 }
 
 /* CMS Schedule Board editor (drag-drop + easy edit) */
