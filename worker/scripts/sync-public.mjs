@@ -29,6 +29,7 @@ for (const name of [
   'script.js',
   'site-content.js',
   'caldev.js',
+  'admin-caldev.js',
   'admin.js',
   'push-sw.js',
   'manifest.webmanifest',

@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'caldev-dnd-20260822';
+const ASSET_VERSION = 'caldev-cms-edit-20260822';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -10167,7 +10167,7 @@ async function serveStaticOrCms(request, env, url) {
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
+  if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
     if (assetName === 'push-sw.js') {
@@ -10644,7 +10644,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Lab</p><h1>Schedule Board</h1><p>Super Admin only test calendar (<code>/caldev</code>). Edits here never change the live Calendar Events list. Seed copies current production events into this sandbox.</p></div><div class="panel-actions"><a class="btn outline" href="/caldev">Open preview</a><button class="btn outline" type="button" id="caldev-seed">Seed from live calendar</button><button class="btn primary" type="button" id="caldev-new">New board event</button></div></div><form id="caldev-form" class="stack-form" hidden><input type="hidden" name="id"><div class="form-grid"><label>Title<input name="title" required maxlength="200"></label><label>Track<select name="track"><option value="game">Games</option><option value="rehearsal">Rehearsals</option><option value="meeting">Meetings</option><option value="deadline">Deadlines</option><option value="trip">Trips</option><option value="other">Other</option></select></label><label>Start date<input name="start_date" type="date"></label><label>End date<input name="end_date" type="date"></label><label>Start time<input name="start_time" type="time"></label><label>End time<input name="end_time" type="time"></label><label class="full">Location<input name="location" maxlength="200"></label><label class="full">Details<textarea name="description" rows="4"></textarea></label><label class="check-row"><input name="all_day" type="checkbox" checked> All day</label></div><div class="panel-actions"><button class="btn primary" type="submit">Save board event</button><button class="btn outline" type="button" id="caldev-cancel">Cancel</button></div></form><div id="caldev-list" class="caldev-cms-list"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Lab</p><h1>Schedule Board</h1><p>Super Admin editing only. Drag events to reschedule on desktop; use Move on mobile. The public <code>/caldev</code> page is view-only and never editable. Edits here never change the live Calendar Events list.</p></div><div class="panel-actions"><a class="btn outline" href="/caldev" target="_blank" rel="noopener">Open public view</a><button class="btn outline" type="button" id="caldev-seed">Seed from live calendar</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
@@ -10720,4 +10720,4 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </div>
   </form>
 </dialog>
-<script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
+<script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
