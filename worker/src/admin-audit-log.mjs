@@ -34,6 +34,7 @@ const SENSITIVE_KEYS = new Set([
   'content',
   'attachment_content',
   'square_access_token',
+  'access_token',
   'authorization',
   'cookie',
   'secret',
@@ -94,7 +95,7 @@ export function auditCategoryFromPath(pathname = '') {
 export function redactAuditValue(key, value, depth = 0) {
   if (depth > 4) return '[truncated]';
   const normalizedKey = String(key || '').trim().toLowerCase();
-  if (SENSITIVE_KEYS.has(normalizedKey) || normalizedKey.includes('password') || normalizedKey.endsWith('_base64')) {
+  if (SENSITIVE_KEYS.has(normalizedKey) || normalizedKey.includes('password') || normalizedKey.includes('access_token') || normalizedKey.endsWith('_base64')) {
     return '[redacted]';
   }
   if (Array.isArray(value)) {

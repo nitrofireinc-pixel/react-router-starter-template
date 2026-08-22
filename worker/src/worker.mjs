@@ -208,7 +208,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'boosters-dues-dev-20260820';
+const ASSET_VERSION = 'square-connect-20260822';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1137,12 +1137,46 @@ export function normalizeSponsorTierKey(value) {
   return '';
 }
 
-export function squareAccessToken(env = {}) {
-  return String(env.SQUARE_ACCESS_TOKEN || '')
+export const SQUARE_SETTINGS_KEY = 'square_settings';
+
+export function emptySquareSettings() {
+  return {
+    access_token: '',
+    application_id: '',
+    location_id: '',
+    environment: 'production',
+  };
+}
+
+export function sanitizeSquareAccessToken(value = '') {
+  return String(value || '')
     .trim()
     .replace(/^Bearer\s+/i, '')
     .replace(/^["']+|["']+$/g, '')
     .trim();
+}
+
+export function normalizeSquareEnvironment(value = '') {
+  return String(value || '').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production';
+}
+
+export function parseSquareSettings(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || 'null') : value;
+    if (!parsed || typeof parsed !== 'object') return emptySquareSettings();
+    return {
+      access_token: sanitizeSquareAccessToken(parsed.access_token || parsed.square_access_token || parsed.SQUARE_ACCESS_TOKEN || ''),
+      application_id: String(parsed.application_id || parsed.square_application_id || parsed.SQUARE_APPLICATION_ID || parsed.SQUARE_APP_ID || '').trim(),
+      location_id: String(parsed.location_id || parsed.square_location_id || parsed.SQUARE_LOCATION_ID || '').trim(),
+      environment: normalizeSquareEnvironment(parsed.environment || parsed.SQUARE_ENVIRONMENT || parsed.SQUARE_ENV || 'production'),
+    };
+  } catch {
+    return emptySquareSettings();
+  }
+}
+
+export function squareAccessToken(env = {}) {
+  return sanitizeSquareAccessToken(env.SQUARE_ACCESS_TOKEN || '');
 }
 
 export function squareApplicationId(env = {}) {
@@ -1155,6 +1189,82 @@ export function squareCheckoutConfigured(env = {}) {
 
 export function squareWebPaymentsConfigured(env = {}) {
   return Boolean(squareAccessToken(env) && squareApplicationId(env));
+}
+
+export async function resolveSquareRuntimeEnv(env = {}) {
+  const envToken = squareAccessToken(env);
+  const envAppId = squareApplicationId(env);
+  const envLocation = String(env.SQUARE_LOCATION_ID || '').trim();
+  const envMode = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || '').trim();
+  let stored = emptySquareSettings();
+  if (env?.DB) {
+    try {
+      stored = parseSquareSettings(await getSiteContentValue(env, SQUARE_SETTINGS_KEY));
+    } catch {
+      stored = emptySquareSettings();
+    }
+  }
+  const token = envToken || stored.access_token;
+  const applicationId = envAppId || stored.application_id;
+  const locationId = envLocation || stored.location_id;
+  const environment = envMode ? normalizeSquareEnvironment(envMode) : stored.environment;
+  return {
+    env: {
+      ...env,
+      SQUARE_ACCESS_TOKEN: token,
+      SQUARE_APPLICATION_ID: applicationId,
+      SQUARE_LOCATION_ID: locationId,
+      SQUARE_ENVIRONMENT: environment,
+    },
+    source: envToken ? 'env' : (stored.access_token ? 'database' : ''),
+    has_database_settings: Boolean(stored.access_token || stored.application_id || stored.location_id),
+    configured: Boolean(token),
+  };
+}
+
+function squareConfigDetail({ configured, applicationId, location, includeManage = false } = {}) {
+  if (!configured) {
+    return includeManage
+      ? 'Square is not connected on this host. Super Admin can paste the access token and application ID below, or add SQUARE_ACCESS_TOKEN in Cloudflare settings.'
+      : 'Square payment is not connected yet.';
+  }
+  if (!applicationId) {
+    return includeManage
+      ? 'Square access token is connected. Add SQUARE_APPLICATION_ID below to enable card checkout.'
+      : 'Square access token is connected. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+  }
+  if (!location?.ok) return location?.detail || 'Square location could not be determined.';
+  return includeManage ? 'Square checkout is ready.' : 'Square card payments are ready in the signup popup.';
+}
+
+export async function buildSquareCheckoutConfig(env = {}, { includeManage = false, user = null } = {}) {
+  const resolved = await resolveSquareRuntimeEnv(env);
+  const applicationId = squareApplicationId(resolved.env);
+  const configured = resolved.configured;
+  const location = configured
+    ? await resolveSquareLocationId(resolved.env)
+    : { ok: false, location_id: '', detail: '' };
+  const payload = {
+    configured,
+    configured_source: resolved.source,
+    environment: normalizeSquareEnvironment(resolved.env.SQUARE_ENVIRONMENT),
+    application_id: applicationId,
+    location_ready: Boolean(location.ok && location.location_id),
+    location_id: location.ok ? location.location_id : '',
+    web_payments: Boolean(applicationId && location.ok && location.location_id),
+    mock_enabled: squareMockPayEnabled(resolved.env),
+    detail: squareConfigDetail({
+      configured,
+      applicationId,
+      location,
+      includeManage,
+    }),
+  };
+  if (includeManage) {
+    payload.can_manage = isSuperAdmin(user);
+    payload.database_saved = resolved.has_database_settings;
+  }
+  return { ...payload, runtime: resolved };
 }
 
 export async function createSquareCardPayment(env, {
@@ -1207,8 +1317,7 @@ export async function createSquareCardPayment(env, {
 }
 
 export function squareApiBase(env = {}) {
-  const mode = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase();
-  return mode === 'sandbox'
+  return normalizeSquareEnvironment(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV) === 'sandbox'
     ? 'https://connect.squareupsandbox.com'
     : 'https://connect.squareup.com';
 }
@@ -6075,38 +6184,9 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/sponsor-checkout/config' && request.method === 'GET') {
-    const configured = squareCheckoutConfigured(env);
-    const environment = String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox'
-      ? 'sandbox'
-      : 'production';
-    const applicationId = squareApplicationId(env);
-    if (!configured) {
-      return jsonResponse({
-        configured: false,
-        environment,
-        application_id: '',
-        location_ready: false,
-        location_id: '',
-        web_payments: false,
-        mock_enabled: squareMockPayEnabled(env),
-        detail: 'Add SQUARE_ACCESS_TOKEN in Cloudflare Pages settings.',
-      });
-    }
-    const location = await resolveSquareLocationId(env);
-    return jsonResponse({
-      configured: true,
-      environment,
-      application_id: applicationId,
-      location_ready: Boolean(location.ok && location.location_id),
-      location_id: location.ok ? location.location_id : '',
-      web_payments: Boolean(applicationId && location.ok && location.location_id),
-      mock_enabled: squareMockPayEnabled(env),
-      detail: location.ok
-        ? (applicationId
-          ? 'Square card payments are ready in the signup popup.'
-          : 'Square access token is connected. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.')
-        : (location.detail || 'Square location could not be determined'),
-    });
+    const { runtime, ...config } = await buildSquareCheckoutConfig(env);
+    void runtime;
+    return jsonResponse(config);
   }
   if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
     const contentType = String(request.headers.get('content-type') || '');
@@ -6189,13 +6269,14 @@ async function routeApi(request, env, url, ctx = null) {
     const origin = publicSiteOrigin(request, env);
     const completePath = `/sponsor-payment-complete?app=${encodeURIComponent(String(applicationId))}&token=${encodeURIComponent(completionToken)}`;
     const redirectUrl = `${origin}${completePath}`;
-    const mockCheckoutUrl = squareMockPayEnabled(env) ? `${completePath}&mock=1` : '';
+    const square = await resolveSquareRuntimeEnv(env);
+    const mockCheckoutUrl = squareMockPayEnabled(square.env) ? `${completePath}&mock=1` : '';
     let checkoutUrl = '';
     let paymentLinkId = '';
     let paymentReady = false;
     let paymentDetail = '';
-    if (squareCheckoutConfigured(env)) {
-      const link = await createSquarePaymentLink(env, {
+    if (squareCheckoutConfigured(square.env)) {
+      const link = await createSquarePaymentLink(square.env, {
         name: `EFHS Band ${tierLabel}`,
         amountCents,
         referenceId: `sponsor-app-${applicationId}`,
@@ -6236,7 +6317,7 @@ async function routeApi(request, env, url, ctx = null) {
       completion_token: completionToken,
       payment_ready: paymentReady,
       checkout_url: checkoutUrl,
-      mock_enabled: squareMockPayEnabled(env),
+      mock_enabled: squareMockPayEnabled(square.env),
       mock_checkout_url: mockCheckoutUrl,
       detail: paymentReady
         ? 'Application saved. Continue to Square to pay the package amount.'
@@ -6322,10 +6403,11 @@ async function routeApi(request, env, url, ctx = null) {
         detail: 'Sponsorship was already activated.',
       });
     }
-    if (!squareCheckoutConfigured(env)) {
+    const square = await resolveSquareRuntimeEnv(env);
+    if (!squareCheckoutConfigured(square.env)) {
       return jsonResponse({ detail: 'Square payment is not connected yet' }, 503);
     }
-    const payment = await createSquareCardPayment(env, {
+    const payment = await createSquareCardPayment(square.env, {
       sourceId,
       amountCents: application.amount_cents,
       referenceId: `sponsor-${applicationId}`,
@@ -6394,10 +6476,7 @@ async function routeApi(request, env, url, ctx = null) {
        VALUES (?, ?, ?, 'pending_payment', ?, ?, ?)`,
     ).bind(donorName, amountCents, display, completionToken, now, now).run();
     const donationId = insert.meta.last_row_id;
-    const configured = squareCheckoutConfigured(env);
-    const applicationId = squareApplicationId(env);
-    const location = configured ? await resolveSquareLocationId(env) : { ok: false, location_id: '' };
-    const webPayments = Boolean(configured && applicationId && location.ok && location.location_id);
+    const config = await buildSquareCheckoutConfig(env);
     return jsonResponse({
       ok: true,
       id: donationId,
@@ -6405,12 +6484,12 @@ async function routeApi(request, env, url, ctx = null) {
       amount_cents: amountCents,
       amount_display: display,
       completion_token: completionToken,
-      payment_ready: webPayments,
-      web_payments: webPayments,
-      mock_enabled: squareMockPayEnabled(env),
-      detail: webPayments
+      payment_ready: config.web_payments,
+      web_payments: config.web_payments,
+      mock_enabled: config.mock_enabled,
+      detail: config.web_payments
         ? 'Donation saved. Continue to Square to pay.'
-        : (configured
+        : (config.configured
           ? 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.'
           : 'Donation saved. Square payment is not connected yet.'),
     });
@@ -6467,10 +6546,11 @@ async function routeApi(request, env, url, ctx = null) {
       });
     }
     if (!sourceId) return jsonResponse({ detail: 'Payment card token is required' }, 422);
-    if (!squareCheckoutConfigured(env)) {
+    const square = await resolveSquareRuntimeEnv(env);
+    if (!squareCheckoutConfigured(square.env)) {
       return jsonResponse({ detail: 'Square payment is not connected yet' }, 503);
     }
-    const payment = await createSquareCardPayment(env, {
+    const payment = await createSquareCardPayment(square.env, {
       sourceId,
       amountCents: donation.amount_cents,
       referenceId: `donate-${donationId}`,
@@ -6534,10 +6614,7 @@ async function routeApi(request, env, url, ctx = null) {
        VALUES (?, ?, ?, ?, 'pending_payment', ?, ?, ?)`,
     ).bind(studentName, email, amountCents, display, completionToken, now, now).run();
     const duesId = insert.meta.last_row_id;
-    const configured = squareCheckoutConfigured(env);
-    const applicationId = squareApplicationId(env);
-    const location = configured ? await resolveSquareLocationId(env) : { ok: false, location_id: '' };
-    const webPayments = Boolean(configured && applicationId && location.ok && location.location_id);
+    const config = await buildSquareCheckoutConfig(env);
     return jsonResponse({
       ok: true,
       id: duesId,
@@ -6546,12 +6623,12 @@ async function routeApi(request, env, url, ctx = null) {
       amount_cents: amountCents,
       amount_display: display,
       completion_token: completionToken,
-      payment_ready: webPayments,
-      web_payments: webPayments,
-      mock_enabled: squareMockPayEnabled(env),
-      detail: webPayments
+      payment_ready: config.web_payments,
+      web_payments: config.web_payments,
+      mock_enabled: config.mock_enabled,
+      detail: config.web_payments
         ? 'Dues payment saved. Continue to Square to pay.'
-        : (configured
+        : (config.configured
           ? 'Dues payment saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.'
           : 'Dues payment saved. Square payment is not connected yet.'),
     });
@@ -6652,10 +6729,11 @@ async function routeApi(request, env, url, ctx = null) {
       });
     }
     if (!sourceId) return finalizeDuesFailure('Payment card token is required');
-    if (!squareCheckoutConfigured(env)) {
+    const square = await resolveSquareRuntimeEnv(env);
+    if (!squareCheckoutConfigured(square.env)) {
       return finalizeDuesFailure('Square payment is not connected yet');
     }
-    const payment = await createSquareCardPayment(env, {
+    const payment = await createSquareCardPayment(square.env, {
       sourceId,
       amountCents: dues.amount_cents,
       referenceId: `dues-${duesId}`,
@@ -7269,24 +7347,57 @@ async function routeApi(request, env, url, ctx = null) {
     if (!canAccessCheckout(auth.user)) {
       return jsonResponse({ detail: 'Permission required: treasurer, president, or vice-president' }, 403);
     }
-    const applicationId = squareApplicationId(env);
-    const location = await resolveSquareLocationId(env);
-    const configured = squareCheckoutConfigured(env);
-    const webPayments = Boolean(applicationId && location.ok && location.location_id);
+    const { runtime, ...config } = await buildSquareCheckoutConfig(env, { includeManage: true, user: auth.user });
+    void runtime;
+    return jsonResponse(config);
+  }
+  if (url.pathname === '/api/admin/checkout/settings' && request.method === 'POST') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    if (payload?.clear === true) {
+      await setSiteContentValue(env, SQUARE_SETTINGS_KEY, '');
+      const { runtime, ...config } = await buildSquareCheckoutConfig(env, { includeManage: true, user: auth.user });
+      void runtime;
+      return jsonResponse({ ok: true, cleared: true, ...config });
+    }
+    const next = parseSquareSettings({
+      access_token: payload.square_access_token || payload.access_token || payload.SQUARE_ACCESS_TOKEN,
+      application_id: payload.square_application_id || payload.application_id || payload.SQUARE_APPLICATION_ID || payload.SQUARE_APP_ID,
+      location_id: payload.square_location_id || payload.location_id || payload.SQUARE_LOCATION_ID,
+      environment: payload.square_environment || payload.environment || payload.SQUARE_ENVIRONMENT,
+    });
+    if (!next.access_token || next.access_token.length < 16 || next.access_token.length > 500) {
+      return jsonResponse({ detail: 'A valid Square access token is required' }, 422);
+    }
+    if (!next.application_id || next.application_id.length < 8 || next.application_id.length > 120) {
+      return jsonResponse({ detail: 'Square application ID is required for card checkout' }, 422);
+    }
+    if (next.location_id && next.location_id.length > 64) {
+      return jsonResponse({ detail: 'Square location ID is too long' }, 422);
+    }
+    const probeEnv = {
+      ...env,
+      SQUARE_ACCESS_TOKEN: next.access_token,
+      SQUARE_APPLICATION_ID: next.application_id,
+      SQUARE_LOCATION_ID: next.location_id,
+      SQUARE_ENVIRONMENT: next.environment,
+    };
+    const location = await resolveSquareLocationId(probeEnv);
+    if (!location.ok || !location.location_id) {
+      return jsonResponse({
+        detail: location.detail || 'Could not verify the Square access token. Check the token and environment (production vs sandbox).',
+      }, 422);
+    }
+    if (!next.location_id) next.location_id = location.location_id;
+    await setSiteContentValue(env, SQUARE_SETTINGS_KEY, JSON.stringify(next));
+    const { runtime, ...config } = await buildSquareCheckoutConfig(env, { includeManage: true, user: auth.user });
+    void runtime;
     return jsonResponse({
-      configured,
-      web_payments: webPayments,
-      environment: String(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
-      application_id: applicationId || '',
-      location_id: location.ok ? location.location_id : '',
-      mock_enabled: squareMockPayEnabled(env),
-      detail: !configured
-        ? 'Square access token is not connected.'
-        : (!applicationId
-          ? 'Square access token is connected. Add SQUARE_APPLICATION_ID to enable card checkout.'
-          : (!location.ok
-            ? (location.detail || 'Square location could not be determined.')
-            : 'Square checkout is ready.')),
+      ok: true,
+      saved: true,
+      ...config,
+      detail: config.web_payments ? 'Square checkout is connected.' : (config.detail || 'Square settings saved.'),
     });
   }
   if (url.pathname === '/api/admin/checkout/pay' && request.method === 'POST') {
@@ -7320,7 +7431,8 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: 'Payment card token is required' }, 422);
     }
     const amountDisplay = formatLedgerAmountDisplay(amountCents);
-    const payment = await createSquareCardPayment(env, {
+    const square = await resolveSquareRuntimeEnv(env);
+    const payment = await createSquareCardPayment(square.env, {
       sourceId,
       amountCents,
       referenceId: `admin-checkout-${Date.now().toString(36)}`.slice(0, 40),
@@ -8799,6 +8911,24 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-checkout" class="cms-panel checkout-panel" hidden><div class="panel-head"><div><p class="kicker">Payments</p><h1>Checkout</h1><p>Manually charge a card through Square for an item or amount. Available to Treasurer, President, and Vice President.</p></div></div>
+<form id="square-connect-form" class="admin-card stack square-connect-card" hidden>
+  <div class="utility-links-head">
+    <h2>Connect Square</h2>
+    <p class="muted">efhsband.org and the Pages preview can have different Cloudflare secrets. Paste the production Square access token and application ID here so checkout works on every host. Cloudflare secrets still take priority when present.</p>
+  </div>
+  <p class="notice" id="square-connect-source">Checking Square connection…</p>
+  <div class="form-grid">
+    <label class="full">Access token<input name="square_access_token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste from Square Developer → Credentials"></label>
+    <label class="full">Application ID<input name="square_application_id" autocomplete="off" spellcheck="false" placeholder="sq0idp-…"></label>
+    <label>Location ID <span class="muted">(optional)</span><input name="square_location_id" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect"></label>
+    <label>Environment<select name="square_environment"><option value="production" selected>Production</option><option value="sandbox">Sandbox</option></select></label>
+  </div>
+  <div class="page-settings-actions">
+    <button class="btn primary" type="submit">Save and verify Square</button>
+    <button class="btn outline" type="button" id="square-connect-clear" hidden>Clear saved credentials</button>
+  </div>
+  <p class="status" id="square-connect-status"></p>
+</form>
 <div class="checkout-layout">
   <form id="checkout-form" class="admin-card stack checkout-form-card" novalidate>
     <h2>Charge a card</h2>
@@ -8817,7 +8947,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <h2>How this works</h2>
     <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges are recorded in the Treasurer ledger as fundraiser income.</p>
     <ul class="checkout-help-list">
-      <li>Requires Square card checkout to be connected</li>
+      <li>Requires Square card checkout to be connected (Cloudflare secrets or Super Admin connect form)</li>
       <li>User name or entity and description of transaction are required</li>
       <li>Minimum charge is $1.00</li>
       <li>Card data stays with Square — it is never stored in the CMS</li>
