@@ -16,6 +16,8 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/connect',
   '/api/admin/zernio/facebook/disconnect',
   '/api/admin/zernio/facebook/pages',
+  '/api/admin/zernio/instagram',
+  '/api/admin/zernio/instagram/settings',
 ];
 
 let savedToastTimer = null;
@@ -319,7 +321,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -522,6 +524,10 @@ function formPayload(form) {
   if (active) payload.active = Boolean(active.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
   if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
+  const boostersDuesEnabled = formControl(form, 'boosters_dues_enabled');
+  if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
+  const notifyEmail = formControl(form, 'notify_email_subscribers');
+  if (notifyEmail) payload.notify_email_subscribers = Boolean(notifyEmail.checked);
   return payload;
 }
 
@@ -1208,7 +1214,16 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || 'Add a short welcome note for families here.', 'Page introduction')}</div><div class="directory cms-staff-placeholder" data-staff><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Staff directory</h3><p class="person-role">Managed in Directors &amp; Staff</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div>${callout}</div></section>`;
   }
   if (layout === 'boosters') {
-    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div><article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
+    const duesEnabled = !(
+      state.site
+      && (state.site.boosters_dues_enabled === 0
+        || state.site.boosters_dues_enabled === '0'
+        || state.site.boosters_dues_enabled === false)
+    );
+    const duesCard = duesEnabled
+      ? `<article class="card accent-card boosters-dues-card cms-boosters-dues-placeholder" data-boosters-dues><span class="tag">Band dues</span><h3>Pay band dues</h3><p>Pay student band dues securely online with a credit card. Enter the student&rsquo;s full name, the amount, and an email for the receipt.</p><div class="boosters-dues-actions"><button type="button" class="btn primary" data-dues-open disabled title="Pay dues opens on the public page">Pay dues</button></div></article>`
+      : '';
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
     return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
@@ -2378,16 +2393,14 @@ function renderZernioFacebookStatus(status) {
     siteStatusEl.classList.toggle('ok', Boolean(status?.connected));
   }
   if (connectBtn) {
-    connectBtn.hidden = !status?.configured;
+    connectBtn.hidden = !(status?.configured || status?.connected);
     connectBtn.textContent = status?.connected
       ? 'Reconnect Facebook'
       : (status?.needsPageSelection ? 'Restart Facebook connect' : 'Connect Facebook');
     // Always start OAuth from the custom domain so the callback keeps the CMS session.
-    if (status?.configured) {
-      connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
-    }
+    connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/facebook/connect');
   }
-  if (refreshBtn) refreshBtn.hidden = !status?.configured;
+  if (refreshBtn) refreshBtn.hidden = false;
   if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
   if (postForm) postForm.hidden = !status?.connected;
   const eventsCard = document.querySelector('#zernio-facebook-events-card');
@@ -2454,6 +2467,76 @@ async function loadZernioFacebookStatus({ sync = false } = {}) {
   }
 }
 
+function renderZernioInstagramStatus(status) {
+  state.zernioInstagram = status || null;
+  const statusEl = document.querySelector('#zernio-instagram-status');
+  const connectBtn = document.querySelector('#zernio-instagram-connect');
+  const refreshBtn = document.querySelector('#zernio-instagram-refresh');
+  const disconnectBtn = document.querySelector('#zernio-instagram-disconnect');
+  const autopostRow = document.querySelector('#zernio-instagram-autopost-row');
+  const autopost = document.querySelector('#zernio-instagram-autopost');
+  const detail = status?.detail || (status?.connected ? 'Instagram connected.' : 'Instagram not connected.');
+  // Share Facebook's Zernio setup — never block Refresh behind a separate API key form.
+  const ready = Boolean(status?.configured || status?.connected || state.zernioFacebook?.configured || state.zernioFacebook?.connected);
+  if (statusEl) {
+    statusEl.textContent = detail;
+    statusEl.classList.toggle('ok', Boolean(status?.connected));
+  }
+  if (connectBtn) {
+    connectBtn.hidden = !ready;
+    connectBtn.textContent = status?.connected ? 'Reconnect Instagram' : 'Connect Instagram';
+    connectBtn.setAttribute('href', 'https://efhsband.org/admin/zernio/instagram/connect');
+  }
+  if (refreshBtn) refreshBtn.hidden = false;
+  if (disconnectBtn) disconnectBtn.hidden = !status?.connected;
+  if (autopostRow) autopostRow.hidden = !status?.connected;
+  if (autopost) {
+    autopost.checked = status?.gallery_autopost !== false;
+    autopost.disabled = !status?.connected;
+  }
+}
+
+async function loadZernioInstagramStatus({ sync = false } = {}) {
+  if (!hasPermission('site')) return null;
+  const statusEl = document.querySelector('#zernio-instagram-status');
+  try {
+    const path = sync ? '/api/admin/zernio/instagram?sync=1' : '/api/admin/zernio/instagram';
+    const status = await jsonFetch(path);
+    renderZernioInstagramStatus(status);
+    return status;
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not check Instagram connection.';
+    renderZernioInstagramStatus({
+      configured: false,
+      connected: false,
+      gallery_autopost: true,
+      detail: error.message || 'Could not check Instagram connection.',
+    });
+    return null;
+  }
+}
+
+async function saveZernioInstagramAutopost(enabled) {
+  const messageEl = document.querySelector('#zernio-instagram-message');
+  if (messageEl) messageEl.textContent = 'Saving Instagram settings…';
+  try {
+    const status = await jsonFetch('/api/admin/zernio/instagram/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ gallery_autopost: Boolean(enabled) }),
+    });
+    renderZernioInstagramStatus(status);
+    if (messageEl) {
+      messageEl.textContent = status.gallery_autopost
+        ? 'Gallery auto-post is on. New Photos uploads will publish to Instagram.'
+        : 'Gallery auto-post is off.';
+    }
+    return status;
+  } catch (error) {
+    if (messageEl) messageEl.textContent = error.message || 'Could not save Instagram settings.';
+    return null;
+  }
+}
+
 function formatZernioPostWhen(post) {
   const raw = post?.publishedAt || post?.scheduledFor || post?.createdAt || post?.created_at || '';
   if (!raw) return '';
@@ -2503,16 +2586,19 @@ async function loadZernioPosts() {
 function renderZernioEventQueue() {
   const list = document.querySelector('#zernio-facebook-events-list');
   const summary = document.querySelector('#zernio-facebook-events-summary');
+  const publishBtn = document.querySelector('#zernio-facebook-events-publish');
   const ignoreAllBtn = document.querySelector('#zernio-facebook-events-ignore-all');
   const queue = state.zernioEventQueue;
   const events = Array.isArray(queue?.pending_events) ? queue.pending_events : [];
   if (summary) {
     if (!state.zernioFacebook?.connected) {
-      summary.textContent = 'Connect Facebook to see suggested calendar updates.';
+      summary.textContent = 'Connect Facebook to queue and post calendar updates.';
     } else if (!events.length) {
-      summary.textContent = 'No suggested calendar updates. New or changed events will appear here.';
+      summary.textContent = queue?.last_published_at
+        ? `No new calendar updates waiting. Last posted ${new Date(queue.last_published_at).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET.`
+        : 'No suggested calendar updates. New or changed events will appear here.';
     } else {
-      summary.textContent = `${events.length} suggested calendar update${events.length === 1 ? '' : 's'}. Ignore any you do not need — they are not posted to Facebook.`;
+      summary.textContent = `${events.length} calendar event${events.length === 1 ? '' : 's'} waiting to post to Facebook. Ignore any you do not need.`;
     }
   }
   if (list) {
@@ -2530,9 +2616,30 @@ function renderZernioEventQueue() {
       button.addEventListener('click', () => ignoreZernioFacebookEvent(button.dataset.ignoreFacebookEvent));
     });
   }
+  if (publishBtn) {
+    publishBtn.hidden = !state.zernioFacebook?.connected || !events.length;
+    publishBtn.disabled = !events.length;
+  }
   if (ignoreAllBtn) {
     ignoreAllBtn.hidden = !state.zernioFacebook?.connected || !events.length;
     ignoreAllBtn.disabled = !events.length;
+  }
+}
+
+async function publishZernioFacebookEvents() {
+  const statusEl = document.querySelector('#zernio-facebook-events-status');
+  const count = Number(state.zernioEventQueue?.pending_count || 0);
+  if (!count) return;
+  if (!confirm(`Post ${count} calendar event${count === 1 ? '' : 's'} to the Facebook Page now?`)) return;
+  if (statusEl) statusEl.textContent = 'Posting calendar updates…';
+  try {
+    const result = await jsonFetch('/api/admin/zernio/facebook/events/publish', { method: 'POST', body: '{}' });
+    state.zernioEventQueue = result;
+    renderZernioEventQueue();
+    if (statusEl) statusEl.textContent = `Posted ${result.published_count || count} event${(result.published_count || count) === 1 ? '' : 's'} to Facebook.`;
+    await loadZernioPosts();
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not post calendar updates.';
   }
 }
 
@@ -2592,8 +2699,10 @@ async function loadZernioEventQueue() {
 
 async function loadSocialPanel({ sync = false } = {}) {
   if (!hasPermission('site')) return;
-  // Sync from Zernio when opening Social so dashboard-connected Pages appear in CMS.
+  // Sync from Zernio when opening Social so dashboard-connected accounts appear in CMS.
   await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
+  // Always sync Instagram so the shared Facebook/Zernio key picks up the linked account.
+  await loadZernioInstagramStatus({ sync: true });
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   if (state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {
@@ -2609,17 +2718,18 @@ function applyZernioQueryFeedback() {
   if (tab) activateTab(tab);
   const zernio = String(params.get('zernio') || '').trim();
   if (!zernio) return;
-  const messageEl = document.querySelector('#zernio-facebook-message');
-  if (messageEl) {
+  const facebookMessageEl = document.querySelector('#zernio-facebook-message');
+  const instagramMessageEl = document.querySelector('#zernio-instagram-message');
+  if (facebookMessageEl) {
     if (zernio === 'facebook_connected') {
-      messageEl.textContent = 'Facebook Page connected successfully.';
+      facebookMessageEl.textContent = 'Facebook Page connected successfully.';
     } else if (zernio === 'facebook_select') {
-      messageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
+      facebookMessageEl.textContent = 'Facebook login finished. Choose the Page below to complete the connection.';
     } else if (zernio === 'facebook_pending') {
-      messageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
+      facebookMessageEl.textContent = params.get('detail') || 'Facebook OAuth finished, but no Page was attached yet. Click Connect Facebook again and select the Page in Meta.';
     } else if (zernio === 'facebook_error') {
       const detail = params.get('detail') || 'Facebook connect failed.';
-      messageEl.textContent = detail;
+      facebookMessageEl.textContent = detail;
       const statusEl = document.querySelector('#zernio-facebook-status');
       if (statusEl && /no_facebook_pages|did not share any Pages/i.test(detail)) {
         statusEl.textContent = detail;
@@ -2627,7 +2737,19 @@ function applyZernioQueryFeedback() {
       }
     }
   }
-  if (zernio === 'facebook_connected' || zernio === 'facebook_pending' || zernio === 'facebook_select') {
+  if (instagramMessageEl) {
+    if (zernio === 'instagram_connected') {
+      instagramMessageEl.textContent = 'Instagram connected successfully. Gallery auto-post is ready.';
+    } else if (zernio === 'instagram_error') {
+      instagramMessageEl.textContent = params.get('detail') || 'Instagram connect failed.';
+    }
+  }
+  if (
+    zernio === 'facebook_connected'
+    || zernio === 'facebook_pending'
+    || zernio === 'facebook_select'
+    || zernio === 'instagram_connected'
+  ) {
     loadSocialPanel({ sync: true }).catch(() => {});
   }
   params.delete('zernio');
@@ -2639,6 +2761,8 @@ function applyZernioQueryFeedback() {
 async function loadSite() {
   if (!hasPermission('site')) return;
   state.site = await jsonFetch('/api/site');
+  const duesSetting = document.querySelector('[data-boosters-dues-setting]');
+  if (duesSetting) duesSetting.hidden = !isSuperAdmin();
   fillForm(document.querySelector('#site-form'), state.site);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
@@ -2677,7 +2801,7 @@ function renderDashboard() {
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    hasPermission('site') && ['Social / Facebook', 'Connect the band Facebook Page and publish or schedule posts.', 'social', 'Publish', 'tab'],
+    hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
@@ -2742,6 +2866,12 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (galleryHint) galleryHint.hidden = page.slug !== 'gallery';
     const ensemblesHint = form.querySelector('[data-ensembles-hint]');
     if (ensemblesHint) ensemblesHint.hidden = page.slug !== 'ensembles';
+    const fundraisingNotify = form.querySelector('[data-fundraising-notify]');
+    if (fundraisingNotify) {
+      fundraisingNotify.hidden = page.slug !== 'fundraising';
+      const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
+      if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
+    }
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     syncPageSettingsAccess();
@@ -4405,6 +4535,8 @@ function renderEventsList() {
     formControl(form, 'event_year').value = String(event.event_year || defaultEventYear());
     setEventBoosterPlacement(form, event.show_on_boosters);
     setEventRepeatFields(form, event);
+    const notifyEmail = formControl(form, 'notify_email_subscribers');
+    if (notifyEmail) notifyEmail.checked = true;
     if (status) status.textContent = `Editing “${plainTextFromHtml(event.title) || 'event'}”. Save to update.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     form.querySelector('[data-rich-input="title"]')?.focus();
@@ -4499,9 +4631,18 @@ function syncPhotoFormMode(editing = false) {
   const fileInput = formControl(form, 'file');
   const hint = form.querySelector('[data-photo-file-hint]');
   const submit = form.querySelector('[data-photo-submit]');
-  if (fileInput) fileInput.required = !editing;
-  if (hint) hint.textContent = editing ? 'Leave empty to keep the current image' : 'Required for new uploads';
-  if (submit) submit.textContent = editing ? 'Save photo' : 'Upload photo';
+  if (fileInput) {
+    fileInput.required = !editing;
+    fileInput.multiple = !editing;
+    if (editing) fileInput.removeAttribute('multiple');
+    else fileInput.setAttribute('multiple', 'multiple');
+  }
+  if (hint) {
+    hint.textContent = editing
+      ? 'Leave empty to keep the current image'
+      : 'Select one or more images · oversized files auto-resize under 1.9 MB';
+  }
+  if (submit) submit.textContent = editing ? 'Save photo' : 'Upload photo(s)';
 }
 
 function resetPhotoForm() {
@@ -4512,7 +4653,122 @@ function resetPhotoForm() {
   formControl(form, 'photo_id').value = '';
   syncPhotoFormMode(false);
   const status = document.querySelector('#photo-status');
-  if (status) status.textContent = 'Upload a new gallery photo.';
+  if (status) status.textContent = 'Upload one or more gallery photos.';
+}
+
+const GALLERY_UPLOAD_MAX_BYTES = 1_850_000;
+const GALLERY_UPLOAD_MAX_EDGE = 2400;
+
+function galleryUploadBaseName(file) {
+  return String(file?.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+}
+
+function loadImageElementFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Could not read image “${file.name || 'photo'}”.`));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToJpegBlob(canvas, quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+  });
+}
+
+async function compressImageForGalleryUpload(file, {
+  maxBytes = GALLERY_UPLOAD_MAX_BYTES,
+  maxEdge = GALLERY_UPLOAD_MAX_EDGE,
+} = {}) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || 'photo');
+  if (type.includes('svg')) {
+    if (Number(file.size || 0) > maxBytes) {
+      throw new Error(`“${name}” is an SVG over the upload limit. Export it as JPG/PNG first.`);
+    }
+    return file;
+  }
+  if (!type.startsWith('image/')) {
+    throw new Error(`“${name}” is not a supported image file.`);
+  }
+
+  // Already small enough and not a huge pixel count — upload as-is when possible.
+  const image = await loadImageElementFromFile(file);
+  const needsShrink = Number(file.size || 0) > maxBytes
+    || Math.max(image.naturalWidth || 0, image.naturalHeight || 0) > maxEdge;
+  if (!needsShrink) return file;
+
+  let width = image.naturalWidth || image.width;
+  let height = image.naturalHeight || image.height;
+  if (!width || !height) throw new Error(`“${name}” could not be resized.`);
+
+  const scaleToEdge = Math.min(1, maxEdge / Math.max(width, height));
+  width = Math.max(1, Math.round(width * scaleToEdge));
+  height = Math.max(1, Math.round(height * scaleToEdge));
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('This browser cannot resize images for upload.');
+
+  let quality = 0.9;
+  let blob = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
+    blob = await canvasToJpegBlob(canvas, quality);
+    if (blob && blob.size <= maxBytes) break;
+    if (quality > 0.55) {
+      quality = Math.max(0.5, quality - 0.1);
+    } else {
+      width = Math.max(640, Math.round(width * 0.82));
+      height = Math.max(640, Math.round(height * 0.82));
+      quality = 0.82;
+    }
+  }
+
+  if (!blob) throw new Error(`Could not compress “${name}”.`);
+  if (blob.size > maxBytes) {
+    throw new Error(`“${name}” is still too large after resizing. Try a smaller crop.`);
+  }
+
+  const outName = `${galleryUploadBaseName(file)}.jpg`;
+  return new File([blob], outName, { type: 'image/jpeg', lastModified: Date.now() });
+}
+
+async function uploadPreparedGalleryPhoto({ file, altText, caption }) {
+  const body = new FormData();
+  body.append('file', file, file.name);
+  body.append('alt_text', altText);
+  body.append('caption', caption || '');
+  return jsonFetch('/api/admin/photos', { method: 'POST', body });
+}
+
+function summarizeGalleryUploadResults(results) {
+  const ok = results.filter((row) => row.ok);
+  const failed = results.filter((row) => !row.ok);
+  const igOk = ok.filter((row) => row.instagram?.ok).length;
+  const igFail = ok.filter((row) => row.instagram?.attempted && row.instagram?.error).length;
+  const parts = [];
+  if (ok.length) parts.push(`Uploaded ${ok.length} photo${ok.length === 1 ? '' : 's'}.`);
+  if (failed.length) {
+    const names = failed.slice(0, 3).map((row) => row.name).join(', ');
+    parts.push(`${failed.length} failed${names ? ` (${names}${failed.length > 3 ? ', …' : ''})` : ''}.`);
+  }
+  if (igOk) parts.push(`${igOk} posted to Instagram.`);
+  if (igFail) parts.push(`${igFail} Instagram post${igFail === 1 ? '' : 's'} failed.`);
+  return parts.join(' ') || 'Upload finished.';
 }
 
 function editPhoto(photo) {
@@ -5579,13 +5835,21 @@ function bindForms() {
     const status = document.querySelector('#site-status');
     const payload = formPayload(form);
     payload.maintenance_mode = Boolean(form.elements.maintenance_mode?.checked);
+    if (form.elements.boosters_dues_enabled) {
+      payload.boosters_dues_enabled = Boolean(form.elements.boosters_dues_enabled.checked);
+    }
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);
     if (status) {
+      const duesNote = form.elements.boosters_dues_enabled
+        ? (saved.boosters_dues_enabled
+          ? ' Band dues card is visible on Boosters.'
+          : ' Band dues card is hidden on Boosters.')
+        : '';
       status.textContent = saved.maintenance_mode
-        ? 'Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
-        : 'Saved. The public site is live again.';
+        ? `Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.${duesNote}`
+        : `Saved. The public site is live again.${duesNote}`;
     }
   });
 
@@ -5650,7 +5914,7 @@ function bindForms() {
       });
       state.socialLinks = saved.social_links || links;
       renderSocialLinksEditor();
-      if (status) status.textContent = 'Footer social links saved. Icons appear on every public page when a URL is set.';
+      if (status) status.textContent = 'Social links saved. Icons appear on every public page when a URL is set.';
     } catch (error) {
       if (status) status.textContent = `Could not save social links: ${error.message}`;
     }
@@ -5673,6 +5937,10 @@ function bindForms() {
     }
   });
 
+  document.querySelector('#zernio-facebook-events-publish')?.addEventListener('click', () => {
+    publishZernioFacebookEvents();
+  });
+
   document.querySelector('#zernio-facebook-events-ignore-all')?.addEventListener('click', () => {
     ignoreAllZernioFacebookEvents();
   });
@@ -5688,6 +5956,38 @@ function bindForms() {
     } catch (error) {
       if (messageEl) messageEl.textContent = error.message || 'Could not disconnect Facebook.';
     }
+  });
+
+  document.querySelector('#zernio-instagram-refresh')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-instagram-message');
+    if (messageEl) messageEl.textContent = 'Refreshing…';
+    try {
+      await loadZernioInstagramStatus({ sync: true });
+      if (messageEl) {
+        messageEl.textContent = state.zernioInstagram?.connected
+          ? 'Instagram connection refreshed from Zernio.'
+          : 'No Instagram account found yet. Connect Instagram here or in the Zernio dashboard, then refresh.';
+      }
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not refresh Instagram status.';
+    }
+  });
+
+  document.querySelector('#zernio-instagram-disconnect')?.addEventListener('click', async () => {
+    const messageEl = document.querySelector('#zernio-instagram-message');
+    if (!confirm('Disconnect Instagram from Zernio for this site?')) return;
+    if (messageEl) messageEl.textContent = 'Disconnecting…';
+    try {
+      await jsonFetch('/api/admin/zernio/instagram', { method: 'DELETE' });
+      await loadZernioInstagramStatus();
+      if (messageEl) messageEl.textContent = 'Instagram disconnected.';
+    } catch (error) {
+      if (messageEl) messageEl.textContent = error.message || 'Could not disconnect Instagram.';
+    }
+  });
+
+  document.querySelector('#zernio-instagram-autopost')?.addEventListener('change', async (event) => {
+    await saveZernioInstagramAutopost(Boolean(event.currentTarget.checked));
   });
 
   document.querySelectorAll('#zernio-post-form input[name="publish_mode"]').forEach((input) => {
@@ -6192,6 +6492,8 @@ function bindForms() {
       formControl(form, 'event_year').value = String(defaultEventYear());
       setEventBoosterPlacement(form, 0);
       resetEventRepeatFields(form);
+      const notifyEmail = formControl(form, 'notify_email_subscribers');
+      if (notifyEmail) notifyEmail.checked = true;
       await loadEvents();
     } catch (error) {
       if (status) status.textContent = `Could not save event: ${error.message}`;
@@ -6225,6 +6527,8 @@ function bindForms() {
     formControl(form, 'event_year').value = String(defaultEventYear());
     setEventBoosterPlacement(form, 0);
     resetEventRepeatFields(form);
+    const notifyEmail = formControl(form, 'notify_email_subscribers');
+    if (notifyEmail) notifyEmail.checked = true;
     const status = document.querySelector('#event-status');
     if (status) status.textContent = 'Creating a new event.';
     form.querySelector('[data-rich-input="title"]')?.focus();
@@ -6234,11 +6538,12 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const status = document.querySelector('#photo-status');
+    const submit = form.querySelector('[data-photo-submit]');
     syncFormRichEditors(form);
     const photoId = String(formControl(form, 'photo_id')?.value || '').trim();
     const altText = String(formControl(form, 'alt_text')?.value || '').trim();
     const caption = String(formControl(form, 'caption')?.value || '').trim();
-    const file = form.elements.file?.files?.[0];
+    const files = Array.from(form.elements.file?.files || []);
     if (!altText) {
       status.textContent = 'Alt text is required.';
       return;
@@ -6258,21 +6563,52 @@ function bindForms() {
       }
       return;
     }
-    if (!file) {
-      status.textContent = 'Choose a photo file first.';
+    if (!files.length) {
+      status.textContent = 'Choose one or more photo files first.';
       return;
     }
-    const sizeKb = Math.max(1, Math.round(Number(file.size || 0) / 1024));
-    status.textContent = `Uploading ${file.name || 'photo'} (${sizeKb} KB)…`;
+    if (submit) submit.disabled = true;
+    const results = [];
     try {
-      await jsonFetch('/api/admin/photos', { method: 'POST', body: new FormData(form) });
+      for (let index = 0; index < files.length; index += 1) {
+        const original = files[index];
+        const label = original.name || `photo ${index + 1}`;
+        status.textContent = `Preparing ${index + 1} of ${files.length}: ${label}…`;
+        try {
+          const prepared = await compressImageForGalleryUpload(original);
+          const preparedKb = Math.max(1, Math.round(Number(prepared.size || 0) / 1024));
+          const resizedNote = prepared.size !== original.size || prepared.name !== original.name
+            ? ` (resized to ${preparedKb} KB)`
+            : ` (${preparedKb} KB)`;
+          status.textContent = `Uploading ${index + 1} of ${files.length}: ${prepared.name || label}${resizedNote}…`;
+          const photoAlt = files.length === 1 ? altText : `${altText} (${index + 1})`;
+          const photoCaption = files.length === 1
+            ? caption
+            : (caption ? `${caption} (${index + 1})` : '');
+          const uploaded = await uploadPreparedGalleryPhoto({
+            file: prepared,
+            altText: photoAlt,
+            caption: photoCaption,
+          });
+          results.push({
+            ok: true,
+            name: label,
+            instagram: uploaded?.instagram || null,
+          });
+        } catch (error) {
+          results.push({
+            ok: false,
+            name: label,
+            error: String(error?.message || error || 'Upload failed'),
+          });
+          console.error('Gallery photo upload failed', { name: label, error });
+        }
+      }
       resetPhotoForm();
       await loadPhotos();
-      status.textContent = 'Photo uploaded.';
-    } catch (error) {
-      const detail = String(error?.message || '').trim() || 'Unknown error';
-      status.textContent = `Photo upload failed: ${detail}`;
-      console.error('Photo upload failed', { name: file.name, type: file.type, size: file.size, error });
+      status.textContent = summarizeGalleryUploadResults(results);
+    } finally {
+      if (submit) submit.disabled = false;
     }
   });
 

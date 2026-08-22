@@ -51,6 +51,7 @@ export const DEFAULT_SITE = {
   footer_note: 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.',
   logo_url: '/assets/efhs-logo.png',
   maintenance_mode: '0',
+  boosters_dues_enabled: '1',
   sponsor_ad_seconds: '6',
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
@@ -208,7 +209,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'square-connect-20260822';
+const ASSET_VERSION = 'sync-main-live-20260822';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -220,6 +221,8 @@ const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
 const ZERNIO_FACEBOOK_PENDING_KEY = 'zernio_facebook_pending';
 const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
 const ZERNIO_FACEBOOK_EVENTS_KEY = 'zernio_facebook_events';
+const ZERNIO_INSTAGRAM_KEY = 'zernio_instagram';
+const ZERNIO_INSTAGRAM_AUTOPOST_KEY = 'zernio_instagram_gallery_autopost';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
@@ -592,6 +595,612 @@ export function renderAddToHomeNavControl() {
   return `<button type="button" class="nav-add-home" data-add-home aria-label="Add East Forsyth Band to your home screen" title="Add to Home Screen"><span class="nav-add-home-icon" aria-hidden="true"><svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><img class="nav-add-home-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="" width="16" height="16" decoding="async"></span></button>`;
 }
 
+export const EMAIL_LIST_TOPICS = ['calendar', 'fundraising'];
+export const EMAIL_LIST_REPLY_TO = 'list@updates.efhsband.org';
+export const EMAIL_LIST_FROM_EMAIL = 'no-reply@efhsband.org';
+export const EMAIL_LIST_FROM_NAME = 'East Forsyth Band Boosters';
+
+export function normalizeEmailListTopics(value, { defaultAll = true } = {}) {
+  let raw = value;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw || '[]');
+    } catch {
+      raw = String(raw)
+        .split(/[,;\s]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    }
+  }
+  if (!Array.isArray(raw)) raw = [];
+  const topics = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const topic = String(item || '').trim().toLowerCase();
+    if (!EMAIL_LIST_TOPICS.includes(topic) || seen.has(topic)) continue;
+    seen.add(topic);
+    topics.push(topic);
+  }
+  if (!topics.length && defaultAll) return [...EMAIL_LIST_TOPICS];
+  return topics;
+}
+
+export function wantsEmailListNotify(payload = {}) {
+  if (payload.notify_email_subscribers === undefined && payload.notify_subscribers === undefined) {
+    return true;
+  }
+  const value = payload.notify_email_subscribers ?? payload.notify_subscribers;
+  return !(value === false || value === 0 || value === '0' || value === 'false' || value === 'off');
+}
+
+export function extractEmailAddress(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const angled = text.match(/<([^<>@\s]+@[^<>@\s]+)>/);
+  const candidate = (angled ? angled[1] : text).trim().toLowerCase();
+  return isValidEmail(candidate) ? candidate : '';
+}
+
+export function isEmailListStopRequest({ subject = '', text = '', html = '' } = {}) {
+  const subjectText = String(subject || '');
+  const bodyText = `${String(text || '')}\n${htmlToPlainText(html || '')}`;
+  const subjectHit = /\b(stop|unsubscribe|cancel|end|quit)\b/i.test(subjectText);
+  if (subjectHit) return true;
+  const lines = bodyText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!lines.length) return false;
+  return lines.some((line) => /^(stop|unsubscribe|cancel|end|quit)\b[.!]*$/i.test(line));
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < view.length; i += 1) binary += String.fromCharCode(view[i]);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value || ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function timingSafeEqualString(a, b) {
+  const left = String(a || '');
+  const right = String(b || '');
+  if (left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < left.length; i += 1) mismatch |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return mismatch === 0;
+}
+
+export async function verifyResendWebhookSignature(rawBody, headers, secret) {
+  const webhookSecret = String(secret || '').trim();
+  if (!webhookSecret) return { ok: false, detail: 'RESEND_WEBHOOK_SECRET is not configured' };
+  const getHeader = (name) => {
+    if (!headers) return '';
+    if (typeof headers.get === 'function') return String(headers.get(name) || '');
+    return String(headers[name] || headers[name.toLowerCase()] || '');
+  };
+  const id = getHeader('svix-id') || getHeader('webhook-id');
+  const timestamp = getHeader('svix-timestamp') || getHeader('webhook-timestamp');
+  const signatureHeader = getHeader('svix-signature') || getHeader('webhook-signature');
+  if (!id || !timestamp || !signatureHeader) {
+    return { ok: false, detail: 'Missing webhook signature headers' };
+  }
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts)) return { ok: false, detail: 'Invalid webhook timestamp' };
+  const skew = Math.abs(Math.floor(Date.now() / 1000) - ts);
+  if (skew > 60 * 5) return { ok: false, detail: 'Webhook timestamp is outside the allowed range' };
+  const secretPart = webhookSecret.startsWith('whsec_') ? webhookSecret.slice(6) : webhookSecret;
+  let secretBytes;
+  try {
+    secretBytes = base64ToBytes(secretPart);
+  } catch {
+    return { ok: false, detail: 'Invalid webhook signing secret' };
+  }
+  const signedContent = `${id}.${timestamp}.${String(rawBody || '')}`;
+  const key = await crypto.subtle.importKey('raw', secretBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const digest = await crypto.subtle.sign('HMAC', key, TEXT.encode(signedContent));
+  const expected = bytesToBase64(new Uint8Array(digest));
+  const candidates = String(signatureHeader)
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (part.includes(',') ? part.slice(part.indexOf(',') + 1) : part));
+  if (!candidates.some((candidate) => timingSafeEqualString(candidate, expected))) {
+    return { ok: false, detail: 'Invalid webhook signature' };
+  }
+  return { ok: true };
+}
+
+function randomEmailListToken(bytes = 24) {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  return [...arr].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'Get email updates', detail = 'Join the band email list. Reply STOP to any message to unsubscribe.', buttonLabel = 'Subscribe' } = {}) {
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: true }).join(',');
+  return `<section class="content email-list-signup" data-email-list-signup data-email-list-topics="${escapeAttr(topicList)}">
+  <div class="wrap email-list-signup-inner">
+    <div class="email-list-signup-copy">
+      <h2>${escapeHtml(heading)}</h2>
+      <p>${escapeHtml(detail)}</p>
+    </div>
+    <div class="email-list-signup-action">
+      <button type="button" class="btn primary" data-email-list-open>${escapeHtml(buttonLabel)}</button>
+    </div>
+  </div>
+</section>`;
+}
+
+export function ensureEmailListSignupSlot(html, options = {}) {
+  const source = String(html || '');
+  // Keep button-only signup blocks; rewrite older QR/form variants for print-only QR usage.
+  if (/data-email-list-open/i.test(source) && /data-email-list-signup/i.test(source) && !/email-list-signup-qr/i.test(source)) {
+    return source;
+  }
+  const stripped = source.replace(/<section\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/section>/gi, '');
+  return `${stripped}${renderEmailListSignup(options)}`;
+}
+
+export function formatEmailListTopicsLabel(topics = []) {
+  const list = normalizeEmailListTopics(topics, { defaultAll: false });
+  if (list.length >= 2) return 'Calendar and Fundraising';
+  if (list.includes('fundraising')) return 'Fundraising';
+  if (list.includes('calendar')) return 'Calendar';
+  return 'no topics';
+}
+
+export function emailListTopicsEqual(a, b) {
+  const left = normalizeEmailListTopics(a, { defaultAll: false }).slice().sort();
+  const right = normalizeEmailListTopics(b, { defaultAll: false }).slice().sort();
+  return left.length === right.length && left.every((topic, index) => topic === right[index]);
+}
+
+export async function getEmailSubscriber(env, email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) return null;
+  const row = await env.DB.prepare(
+    'SELECT email, topics, status, source, unsubscribe_token, created_at, updated_at, unsubscribed_at FROM email_subscribers WHERE email = ?',
+  ).bind(normalizedEmail).first();
+  if (!row) return null;
+  return {
+    email: row.email,
+    topics: normalizeEmailListTopics(row.topics, { defaultAll: true }),
+    status: String(row.status || 'active'),
+    source: row.source || '',
+    unsubscribe_token: row.unsubscribe_token || '',
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    unsubscribed_at: row.unsubscribed_at || null,
+  };
+}
+
+export async function upsertEmailSubscriber(env, { email, topics, source = 'website' } = {}) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) return { ok: false, detail: 'Enter a valid email address' };
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: true });
+  if (!topicList.length) return { ok: false, detail: 'Choose at least one topic' };
+  const existing = await getEmailSubscriber(env, normalizedEmail);
+  const token = existing?.unsubscribe_token || randomEmailListToken();
+  await env.DB.prepare(
+    `INSERT INTO email_subscribers (email, topics, status, source, unsubscribe_token, created_at, updated_at, unsubscribed_at)
+     VALUES (?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+     ON CONFLICT(email) DO UPDATE SET
+       topics=excluded.topics,
+       status='active',
+       source=excluded.source,
+       unsubscribe_token=excluded.unsubscribe_token,
+       updated_at=CURRENT_TIMESTAMP,
+       unsubscribed_at=NULL`,
+  ).bind(normalizedEmail, JSON.stringify(topicList), String(source || 'website').slice(0, 80), token).run();
+  return {
+    ok: true,
+    email: normalizedEmail,
+    topics: topicList,
+    previous_topics: existing?.topics || [],
+    created: !existing,
+    reactivated: Boolean(existing && existing.status !== 'active'),
+    unsubscribe_token: token,
+  };
+}
+
+export async function subscribeEmailList(env, {
+  email,
+  topics,
+  source = 'website',
+  update = false,
+} = {}) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) return { ok: false, detail: 'Enter a valid email address' };
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: false });
+  if (!topicList.length) return { ok: false, detail: 'Choose at least one topic' };
+
+  const existing = await getEmailSubscriber(env, normalizedEmail);
+  if (existing && existing.status === 'active' && !update) {
+    return {
+      ok: true,
+      already_subscribed: true,
+      email: existing.email,
+      topics: existing.topics,
+      topics_label: formatEmailListTopicsLabel(existing.topics),
+      detail: `You're already subscribed for ${formatEmailListTopicsLabel(existing.topics)}. Update your topics below if you want to change them.`,
+      send_welcome: false,
+    };
+  }
+
+  const saved = await upsertEmailSubscriber(env, {
+    email: normalizedEmail,
+    topics: topicList,
+    source,
+  });
+  if (!saved.ok) return saved;
+
+  if (existing && existing.status === 'active' && update) {
+    const unchanged = emailListTopicsEqual(existing.topics, saved.topics);
+    return {
+      ok: true,
+      updated: true,
+      unchanged,
+      email: saved.email,
+      topics: saved.topics,
+      previous_topics: existing.topics,
+      topics_label: formatEmailListTopicsLabel(saved.topics),
+      previous_topics_label: formatEmailListTopicsLabel(existing.topics),
+      unsubscribe_token: saved.unsubscribe_token,
+      detail: unchanged
+        ? `You're still subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`
+        : `Updated — you're now subscribed for ${formatEmailListTopicsLabel(saved.topics)}.`,
+      send_welcome: false,
+      send_topics_email: !unchanged,
+    };
+  }
+
+  return {
+    ok: true,
+    created: Boolean(saved.created),
+    reactivated: Boolean(saved.reactivated),
+    email: saved.email,
+    topics: saved.topics,
+    topics_label: formatEmailListTopicsLabel(saved.topics),
+    unsubscribe_token: saved.unsubscribe_token,
+    detail: saved.reactivated
+      ? 'Welcome back — your subscription is active again.'
+      : 'You are subscribed to band email updates.',
+    send_welcome: true,
+  };
+}
+
+export async function unsubscribeEmailSubscriber(env, { email = '', token = '', reason = 'stop' } = {}) {
+  const normalizedEmail = extractEmailAddress(email);
+  const unsubscribeToken = String(token || '').trim();
+  let row = null;
+  if (unsubscribeToken) {
+    row = await env.DB.prepare('SELECT email, status FROM email_subscribers WHERE unsubscribe_token = ?')
+      .bind(unsubscribeToken)
+      .first();
+  } else if (normalizedEmail) {
+    row = await env.DB.prepare('SELECT email, status FROM email_subscribers WHERE email = ?')
+      .bind(normalizedEmail)
+      .first();
+  }
+  if (!row) return { ok: true, found: false, detail: 'No matching subscriber' };
+  if (row.status === 'unsubscribed') return { ok: true, found: true, already: true, email: row.email };
+  await env.DB.prepare(
+    `UPDATE email_subscribers
+     SET status='unsubscribed', updated_at=CURRENT_TIMESTAMP, unsubscribed_at=CURRENT_TIMESTAMP
+     WHERE email = ?`,
+  ).bind(row.email).run();
+  return { ok: true, found: true, already: false, email: row.email, reason: String(reason || 'stop').slice(0, 40) };
+}
+
+async function listActiveEmailSubscribers(env, topic = '') {
+  const rows = await env.DB.prepare(
+    `SELECT email, topics, unsubscribe_token FROM email_subscribers WHERE status = 'active' ORDER BY email COLLATE NOCASE`,
+  ).all();
+  const wanted = String(topic || '').trim().toLowerCase();
+  return (rows.results || []).filter((row) => {
+    if (!wanted) return true;
+    return normalizeEmailListTopics(row.topics, { defaultAll: true }).includes(wanted);
+  });
+}
+
+export function buildEmailListWelcomeMessage({ topics = EMAIL_LIST_TOPICS, unsubscribeToken = '' } = {}) {
+  const siteUrl = 'https://efhsband.org';
+  const topicList = normalizeEmailListTopics(topics, { defaultAll: true });
+  const topicLabels = topicList.map((topic) => (topic === 'fundraising' ? 'fundraising' : 'calendar'));
+  const topicPhrase = topicLabels.length === 2
+    ? 'calendar and fundraising updates'
+    : `${topicLabels[0] || 'band'} updates`;
+  const unsubUrl = unsubscribeToken
+    ? `${siteUrl}/api/email-unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : `${siteUrl}/calendar.html`;
+  return {
+    subject: 'Welcome to East Forsyth Band email updates',
+    text: [
+      'You are subscribed to East Forsyth Band email updates.',
+      '',
+      `You will receive ${topicPhrase} from this list.`,
+      '',
+      'How to unsubscribe:',
+      `- Reply STOP to this email (or any list email), or`,
+      `- Open this link: ${unsubUrl}`,
+      '',
+      `Calendar: ${siteUrl}/calendar.html`,
+      `Fundraising: ${siteUrl}/fundraising.html`,
+      '',
+      'East Forsyth Band Boosters',
+    ].join('\n'),
+    html: [
+      '<p><strong>You are subscribed to East Forsyth Band email updates.</strong></p>',
+      `<p>You will receive ${escapeHtml(topicPhrase)} from this list.</p>`,
+      '<p><strong>How to unsubscribe</strong></p>',
+      '<ul>',
+      `<li>Reply <strong>STOP</strong> to this email (or any list email), or</li>`,
+      `<li><a href="${escapeAttr(unsubUrl)}">Unsubscribe with one click</a></li>`,
+      '</ul>',
+      `<p><a href="${siteUrl}/calendar.html">Calendar</a> · <a href="${siteUrl}/fundraising.html">Fundraising</a></p>`,
+      '<p>East Forsyth Band Boosters</p>',
+    ].join(''),
+  };
+}
+
+export async function sendEmailListWelcome(env, { email, topics, unsubscribeToken } = {}) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, skipped: true, detail: 'RESEND_API_KEY is not configured' };
+  }
+  const to = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(to)) return { ok: false, detail: 'Recipient email is invalid' };
+  const message = buildEmailListWelcomeMessage({ topics, unsubscribeToken });
+  try {
+    await sendViaResend(env, {
+      to,
+      replyTo: EMAIL_LIST_REPLY_TO,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Welcome email failed' };
+  }
+}
+
+export function buildEmailListTopicsChangedMessage({
+  previousTopics = [],
+  topics = EMAIL_LIST_TOPICS,
+  unsubscribeToken = '',
+} = {}) {
+  const siteUrl = 'https://efhsband.org';
+  const beforeLabel = formatEmailListTopicsLabel(previousTopics);
+  const afterLabel = formatEmailListTopicsLabel(topics);
+  const unsubUrl = unsubscribeToken
+    ? `${siteUrl}/api/email-unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : `${siteUrl}/calendar.html`;
+  return {
+    subject: 'Your East Forsyth Band email preferences were updated',
+    text: [
+      'You updated your East Forsyth Band email subscription.',
+      '',
+      `Before: ${beforeLabel}`,
+      `Now: ${afterLabel}`,
+      '',
+      `You will now receive ${afterLabel === 'Calendar and Fundraising' ? 'calendar and fundraising updates' : `${afterLabel.toLowerCase()} updates`} from this list.`,
+      '',
+      'How to unsubscribe:',
+      '- Reply STOP to this email (or any list email), or',
+      `- Open this link: ${unsubUrl}`,
+      '',
+      'East Forsyth Band Boosters',
+    ].join('\n'),
+    html: [
+      '<p><strong>You updated your East Forsyth Band email subscription.</strong></p>',
+      `<p>Before: <strong>${escapeHtml(beforeLabel)}</strong><br>Now: <strong>${escapeHtml(afterLabel)}</strong></p>`,
+      `<p>You will now receive ${escapeHtml(afterLabel === 'Calendar and Fundraising' ? 'calendar and fundraising updates' : `${afterLabel.toLowerCase()} updates`)} from this list.</p>`,
+      '<p><strong>How to unsubscribe</strong></p>',
+      '<ul>',
+      '<li>Reply <strong>STOP</strong> to this email (or any list email), or</li>',
+      `<li><a href="${escapeAttr(unsubUrl)}">Unsubscribe with one click</a></li>`,
+      '</ul>',
+      '<p>East Forsyth Band Boosters</p>',
+    ].join(''),
+  };
+}
+
+export async function sendEmailListTopicsChanged(env, {
+  email,
+  previousTopics,
+  topics,
+  unsubscribeToken,
+} = {}) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, skipped: true, detail: 'RESEND_API_KEY is not configured' };
+  }
+  const to = String(email || '').trim().toLowerCase();
+  if (!isValidEmail(to)) return { ok: false, detail: 'Recipient email is invalid' };
+  const message = buildEmailListTopicsChangedMessage({ previousTopics, topics, unsubscribeToken });
+  try {
+    await sendViaResend(env, {
+      to,
+      replyTo: EMAIL_LIST_REPLY_TO,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, detail: error?.message || 'Topics update email failed' };
+  }
+}
+
+export function buildEmailListUpdateMessage({ topic = 'calendar', action = 'updated', event = null, pageTitle = '' } = {}) {
+  const siteUrl = 'https://efhsband.org';
+  if (topic === 'fundraising') {
+    const title = htmlToPlainText(pageTitle || 'Fundraising').trim() || 'Fundraising';
+    return {
+      subject: `Fundraising update: ${title}`,
+      text: [
+        'East Forsyth Band fundraising was updated.',
+        '',
+        `View details: ${siteUrl}/fundraising.html`,
+        '',
+        'Reply STOP to unsubscribe from this email list.',
+      ].join('\n'),
+      html: `<p>East Forsyth Band fundraising was updated.</p><p><a href="${siteUrl}/fundraising.html">View fundraising</a></p><p style="color:#667">Reply <strong>STOP</strong> to unsubscribe.</p>`,
+    };
+  }
+  const normalizedAction = ['created', 'updated', 'deleted'].includes(action) ? action : 'updated';
+  const eventTitle = htmlToPlainText(event?.title || '').trim() || 'Calendar update';
+  const headlines = {
+    created: 'New calendar event',
+    updated: 'Calendar event updated',
+    deleted: 'Calendar event removed',
+  };
+  const dateBits = [event?.date_label, event?.date_detail, event?.event_year].filter(Boolean).join(' ');
+  return {
+    subject: `${headlines[normalizedAction]}: ${eventTitle}`,
+    text: [
+      headlines[normalizedAction],
+      eventTitle,
+      dateBits ? `When: ${dateBits}` : '',
+      '',
+      `View calendar: ${siteUrl}/calendar.html`,
+      '',
+      'Reply STOP to unsubscribe from this email list.',
+    ].filter(Boolean).join('\n'),
+    html: `<p><strong>${escapeHtml(headlines[normalizedAction])}</strong></p><p>${escapeHtml(eventTitle)}</p>${dateBits ? `<p>When: ${escapeHtml(dateBits)}</p>` : ''}<p><a href="${siteUrl}/calendar.html">View calendar</a></p><p style="color:#667">Reply <strong>STOP</strong> to unsubscribe.</p>`,
+  };
+}
+
+export async function notifyEmailSubscribers(env, {
+  topic = 'calendar',
+  action = 'updated',
+  event = null,
+  pageTitle = '',
+} = {}) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, skipped: true, sent: 0, failed: 0, detail: 'RESEND_API_KEY is not configured' };
+  }
+  const subscribers = await listActiveEmailSubscribers(env, topic);
+  if (!subscribers.length) {
+    return { ok: true, skipped: true, sent: 0, failed: 0, detail: 'No email subscribers' };
+  }
+  const message = buildEmailListUpdateMessage({ topic, action, event, pageTitle });
+  let sent = 0;
+  let failed = 0;
+  let detail = '';
+  for (const row of subscribers) {
+    try {
+      await sendViaResend(env, {
+        to: row.email,
+        replyTo: EMAIL_LIST_REPLY_TO,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+        fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+        fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+      });
+      sent += 1;
+    } catch (error) {
+      failed += 1;
+      if (!detail) detail = error?.message || 'Email send failed';
+    }
+  }
+  return {
+    ok: failed === 0 && sent > 0,
+    sent,
+    failed,
+    total: subscribers.length,
+    detail: detail || (sent ? '' : 'No emails were accepted'),
+  };
+}
+
+async function fetchReceivedEmail(env, emailId) {
+  const id = String(emailId || '').trim();
+  if (!id) return null;
+  const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(body || `Could not load received email (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function handleResendInboundWebhook(env, request) {
+  const rawBody = await request.text();
+  const verified = await verifyResendWebhookSignature(rawBody, request.headers, env.RESEND_WEBHOOK_SECRET);
+  if (!verified.ok) return jsonResponse({ detail: verified.detail }, 400);
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return jsonResponse({ detail: 'Invalid JSON payload' }, 400);
+  }
+  if (event?.type && event.type !== 'email.received') {
+    return jsonResponse({ ok: true, ignored: true, type: event.type });
+  }
+  const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  const emailId = String(data.email_id || data.id || '').trim();
+  const fromAddress = extractEmailAddress(data.from);
+  let subject = String(data.subject || '');
+  let text = '';
+  let html = '';
+  if (emailId && env.RESEND_API_KEY) {
+    try {
+      const received = await fetchReceivedEmail(env, emailId);
+      subject = String(received?.subject || subject || '');
+      text = String(received?.text || '');
+      html = String(received?.html || '');
+      if (!fromAddress) {
+        const receivedFrom = extractEmailAddress(received?.from || received?.headers?.from || '');
+        if (receivedFrom) data.from = receivedFrom;
+      }
+    } catch (error) {
+      return jsonResponse({ detail: error?.message || 'Could not load received email' }, 502);
+    }
+  }
+  const sender = extractEmailAddress(data.from) || fromAddress;
+  if (!sender) return jsonResponse({ ok: true, ignored: true, detail: 'No sender address' });
+  if (!isEmailListStopRequest({ subject, text, html })) {
+    return jsonResponse({ ok: true, ignored: true, detail: 'Not a STOP request', from: sender });
+  }
+  const result = await unsubscribeEmailSubscriber(env, { email: sender, reason: 'inbound_stop' });
+  if (result.found && !result.already && env.RESEND_API_KEY) {
+    try {
+      await sendViaResend(env, {
+        to: sender,
+        replyTo: EMAIL_LIST_REPLY_TO,
+        subject: 'You are unsubscribed from East Forsyth Band emails',
+        text: 'You have been removed from the East Forsyth Band email list. If this was a mistake, subscribe again at https://efhsband.org/calendar.html',
+        html: '<p>You have been removed from the East Forsyth Band email list.</p><p>If this was a mistake, subscribe again on the <a href="https://efhsband.org/calendar.html">calendar page</a>.</p>',
+        fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+        fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+      });
+    } catch {
+      // Confirmation mail is best-effort.
+    }
+  }
+  return jsonResponse({
+    ok: true,
+    unsubscribed: Boolean(result.found),
+    already: Boolean(result.already),
+    email: result.email || sender,
+    email_id: emailId || null,
+  });
+}
+
 export function canAccessCheckout(user) {
   return (
     hasPermission(user, 'treasurer')
@@ -676,6 +1285,18 @@ function publicSiteOrigin(request, env = {}) {
 
 function zernioFacebookCallbackUrl(request, env = {}) {
   return `${publicSiteOrigin(request, env)}/admin/zernio/facebook/callback`;
+}
+
+function zernioInstagramCallbackUrl(request, env = {}) {
+  return `${publicSiteOrigin(request, env)}/admin/zernio/instagram/callback`;
+}
+
+export function absolutePublicAssetUrl(request, env, pathOrUrl = '') {
+  const raw = String(pathOrUrl || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const origin = publicSiteOrigin(request, env);
+  return `${origin}${raw.startsWith('/') ? raw : `/${raw}`}`;
 }
 
 function getCookie(request, name) {
@@ -788,6 +1409,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS email_subscribers (email TEXT PRIMARY KEY, topics TEXT NOT NULL DEFAULT \'["calendar","fundraising"]\', status TEXT NOT NULL DEFAULT \'active\', source TEXT NOT NULL DEFAULT \'website\', unsubscribe_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, unsubscribed_at TEXT)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
@@ -977,10 +1599,30 @@ async function initDb(env) {
   }
   const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
   if (fundraisingPageRow?.body_html) {
-    const nextFundraisingHtml = ensureFundraisingDonateSlot(fundraisingPageRow.body_html);
+    const nextFundraisingHtml = ensureEmailListSignupSlot(
+      ensureFundraisingDonateSlot(fundraisingPageRow.body_html),
+      {
+        topics: ['fundraising', 'calendar'],
+        heading: 'Email fundraising updates',
+        detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
+      },
+    );
     if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextFundraisingHtml, fundraisingPageRow.id)
+        .run();
+    }
+  }
+  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
+  if (boostersPageRow?.body_html) {
+    const siteForDues = await getSite(env);
+    const nextBoostersHtml = applyBoostersDuesVisibility(
+      ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
+      isBoostersDuesEnabled(siteForDues),
+    );
+    if (nextBoostersHtml !== boostersPageRow.body_html) {
+      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(nextBoostersHtml, boostersPageRow.id)
         .run();
     }
   }
@@ -1012,7 +1654,14 @@ async function initDb(env) {
   }
   const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
   if (calendarPageRow?.body_html) {
-    const nextCalendarHtml = ensureCalendarMonthMount(calendarPageRow.body_html);
+    const nextCalendarHtml = ensureEmailListSignupSlot(
+      ensureCalendarMonthMount(calendarPageRow.body_html),
+      {
+        topics: ['calendar', 'fundraising'],
+        heading: 'Email calendar updates',
+        detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
+      },
+    );
     if (nextCalendarHtml !== calendarPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextCalendarHtml, calendarPageRow.id)
@@ -1030,6 +1679,13 @@ async function initDb(env) {
 
 export function isMaintenanceMode(site = {}) {
   const value = site?.maintenance_mode;
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+}
+
+/** Band dues card on Boosters — on by default unless explicitly disabled. */
+export function isBoostersDuesEnabled(site = {}) {
+  const value = site?.boosters_dues_enabled;
+  if (value === undefined || value === null || value === '') return true;
   return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 }
 
@@ -1690,6 +2346,7 @@ async function getSite(env) {
   const payload = { ...DEFAULT_SITE };
   for (const row of rows.results || []) payload[row.key] = row.value;
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
+  payload.boosters_dues_enabled = isBoostersDuesEnabled(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
@@ -1726,22 +2383,94 @@ export function parseZernioFacebookConnection(value) {
   }
 }
 
-function zernioConfigured(env) {
-  return Boolean(String(env.ZERNIO_API_KEY || '').trim());
+export function parseZernioInstagramConnection(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || 'null') : value;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const accountId = String(parsed.accountId || parsed._id || '').trim();
+    if (!accountId) return null;
+    return {
+      accountId,
+      profileId: String(parsed.profileId || '').trim(),
+      platform: 'instagram',
+      name: String(parsed.name || parsed.displayName || parsed.username || 'Instagram').trim(),
+      username: String(parsed.username || '').trim(),
+      connectedAt: String(parsed.connectedAt || '').trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function isInstagramGalleryAutopostEnabled(raw) {
+  const value = String(raw ?? '1').trim().toLowerCase();
+  if (!value) return true;
+  return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
+}
+
+export function galleryInstagramCaption(photo = {}) {
+  const caption = htmlToPlainText(photo.caption || '').trim();
+  if (caption) return caption.slice(0, 2200);
+  const alt = String(photo.alt_text || '').trim();
+  if (alt) return alt.slice(0, 2200);
+  return 'New photo from East Forsyth Band';
+}
+
+export function isInstagramPublishableImage(photo = {}) {
+  const filename = String(photo.filename || photo.original_name || photo.url || '').toLowerCase();
+  if (!filename) return false;
+  if (filename.endsWith('.svg') || filename.includes('.svg?')) return false;
+  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(filename) || !/\.[a-z0-9]+(\?|$)/i.test(filename);
+}
+
+export const ZERNIO_API_KEY_CONTENT_KEY = 'zernio_api_key';
+
+export async function resolveZernioApiKey(env) {
+  const fromEnv = String(env?.ZERNIO_API_KEY || '').trim();
+  if (fromEnv) return { key: fromEnv, source: 'env' };
+  try {
+    const fromDb = String(await getSiteContentValue(env, ZERNIO_API_KEY_CONTENT_KEY) || '').trim();
+    if (fromDb) return { key: fromDb, source: 'database' };
+  } catch {
+    // Database may be unavailable during early boot; treat as unset.
+  }
+  return { key: '', source: 'none' };
+}
+
+async function zernioConfigured(env) {
+  return Boolean((await resolveZernioApiKey(env)).key);
 }
 
 async function zernioApi(env, path, options = {}) {
-  const apiKey = String(env.ZERNIO_API_KEY || '').trim();
-  if (!apiKey) throw new Error('ZERNIO_API_KEY is not configured. Add it in Cloudflare Pages secrets.');
-  const response = await fetch(`${ZERNIO_API_BASE}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  const resolved = await resolveZernioApiKey(env);
+  const apiKey = resolved.key;
+  if (!apiKey) {
+    throw new Error('Zernio is not configured. The shared API key is missing from the database.');
+  }
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
+  const { timeoutMs: _ignoredTimeout, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${ZERNIO_API_BASE}${path}`, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(fetchOptions.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Zernio request timed out. Try again in a moment.');
+    }
+    throw new Error(error?.message || 'Could not reach Zernio');
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let data = null;
   try {
@@ -1899,11 +2628,13 @@ async function ensureZernioProfileId(env) {
 }
 
 async function getZernioFacebookStatus(env, { sync = false } = {}) {
-  const configured = zernioConfigured(env);
+  const resolvedKey = await resolveZernioApiKey(env);
   let stored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
   let pending = await getZernioFacebookPending(env);
+  const configured = Boolean(resolvedKey.key) || Boolean(stored?.accountId) || Boolean(pending);
   let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || pending?.profileId || '').trim();
-  if (configured && sync) {
+  const canCallZernio = Boolean(resolvedKey.key);
+  if (canCallZernio && sync) {
     try {
       profileId = await ensureZernioProfileId(env);
       const live = await syncZernioFacebookConnection(env, profileId);
@@ -1925,7 +2656,8 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
       }
     } catch (error) {
       return {
-        configured,
+        configured: true,
+        configured_source: resolvedKey.source === 'none' ? 'shared' : resolvedKey.source,
         connected: Boolean(stored?.accountId),
         needsPageSelection: Boolean(pending && !stored?.accountId),
         profileId,
@@ -1946,37 +2678,51 @@ async function getZernioFacebookStatus(env, { sync = false } = {}) {
   } catch {
     debug = null;
   }
+  const connected = Boolean(stored?.accountId);
+  let detail;
+  if (connected) {
+    detail = `Connected: ${stored.name || stored.accountId}`;
+  } else if (needsPageSelection) {
+    detail = 'Facebook login finished. Choose which Page to connect below.';
+  } else if (canCallZernio) {
+    detail = 'Ready to connect a Facebook Page. Use Connect Facebook.';
+  } else {
+    detail = 'Zernio key not found yet. Facebook/Instagram use the shared key already stored for this site — click Refresh status.';
+  }
   return {
     configured,
-    connected: Boolean(stored?.accountId),
+    configured_source: resolvedKey.source === 'none' && configured ? 'shared' : resolvedKey.source,
+    connected,
     needsPageSelection,
     profileId,
     account: stored,
     connectPath: '/admin/zernio/facebook/connect',
     debug,
-    detail: configured
-      ? (stored?.accountId
-        ? `Connected: ${stored.name || stored.accountId}`
-        : (needsPageSelection
-          ? 'Facebook login finished. Choose which Page to connect below.'
-          : 'Ready to connect a Facebook Page via OAuth. Use Connect Facebook from https://efhsband.org/admin.'))
-      : 'Add a Cloudflare Pages secret named ZERNIO_API_KEY, then redeploy.',
+    detail,
   };
 }
 
-export function normalizeZernioPostPayload(payload = {}, account = null) {
+export function normalizeZernioPostPayload(payload = {}, account = null, platform = 'facebook') {
   const content = String(payload.content || '').trim();
   const mediaUrl = String(payload.media_url || payload.image_url || '').trim();
   const publishNow = payload.publish_now !== false && !payload.scheduled_for;
   const scheduledFor = String(payload.scheduled_for || '').trim();
   const timezone = String(payload.timezone || 'America/New_York').trim() || 'America/New_York';
+  const targetPlatform = String(platform || account?.platform || 'facebook').trim().toLowerCase() || 'facebook';
   if (!content) throw new Error('Post content is required.');
   if (content.length > 5000) throw new Error('Post content is too long.');
-  if (!account?.accountId) throw new Error('Connect a Facebook Page before posting.');
+  if (!account?.accountId) {
+    throw new Error(targetPlatform === 'instagram'
+      ? 'Connect Instagram before posting.'
+      : 'Connect a Facebook Page before posting.');
+  }
+  if (targetPlatform === 'instagram' && !mediaUrl) {
+    throw new Error('Instagram posts require an image URL.');
+  }
   if (mediaUrl && !/^https?:\/\//i.test(mediaUrl)) throw new Error('Media URL must start with http:// or https://');
   const body = {
     content,
-    platforms: [{ platform: 'facebook', accountId: account.accountId }],
+    platforms: [{ platform: targetPlatform, accountId: account.accountId }],
   };
   if (mediaUrl) body.mediaItems = [{ type: 'image', url: mediaUrl }];
   if (publishNow) body.publishNow = true;
@@ -2016,6 +2762,212 @@ async function syncZernioFacebookConnection(env, profileId = '') {
   await setSiteContentValue(env, ZERNIO_FACEBOOK_KEY, JSON.stringify(connection));
   if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
   return connection;
+}
+
+async function syncZernioInstagramConnection(env, profileId = '') {
+  const preferredProfileId = String(profileId || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+  const data = await zernioApi(env, '/accounts');
+  const accounts = Array.isArray(data?.accounts) ? data.accounts : (Array.isArray(data) ? data : []);
+  const instagramAccounts = accounts.filter((account) => String(account?.platform || '').toLowerCase() === 'instagram');
+  const instagram = instagramAccounts.find((account) => zernioAccountProfileId(account) === preferredProfileId)
+    || instagramAccounts.find((account) => String(account?.profileId?.name || '').trim().toLowerCase() === 'east forsyth band')
+    || instagramAccounts[instagramAccounts.length - 1]
+    || null;
+  if (!instagram) return null;
+  const connection = {
+    accountId: String(instagram._id || instagram.accountId || instagram.id || '').trim(),
+    profileId: preferredProfileId || zernioAccountProfileId(instagram),
+    platform: 'instagram',
+    name: String(instagram.displayName || instagram.name || instagram.username || 'Instagram').trim(),
+    username: String(instagram.username || '').trim(),
+    connectedAt: new Date().toISOString(),
+  };
+  if (!connection.accountId) return null;
+  await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, JSON.stringify(connection));
+  if (connection.profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, connection.profileId);
+  return connection;
+}
+
+async function getInstagramGalleryAutopostEnabled(env) {
+  return isInstagramGalleryAutopostEnabled(await getSiteContentValue(env, ZERNIO_INSTAGRAM_AUTOPOST_KEY));
+}
+
+async function setInstagramGalleryAutopostEnabled(env, enabled) {
+  await setSiteContentValue(env, ZERNIO_INSTAGRAM_AUTOPOST_KEY, enabled ? '1' : '0');
+  return enabled;
+}
+
+async function getZernioInstagramStatus(env, { sync = false } = {}) {
+  const resolvedKey = await resolveZernioApiKey(env);
+  let stored = parseZernioInstagramConnection(await getSiteContentValue(env, ZERNIO_INSTAGRAM_KEY));
+  const facebookStored = parseZernioFacebookConnection(await getSiteContentValue(env, ZERNIO_FACEBOOK_KEY));
+  // Instagram shares Facebook's Zernio key — never require a separate key.
+  const configured = Boolean(resolvedKey.key) || Boolean(stored?.accountId) || Boolean(facebookStored?.accountId);
+  let profileId = String(await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || stored?.profileId || facebookStored?.profileId || '').trim();
+  let galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
+  const canCallZernio = Boolean(resolvedKey.key);
+  if (canCallZernio && sync) {
+    try {
+      profileId = await ensureZernioProfileId(env);
+      const live = await syncZernioInstagramConnection(env, profileId);
+      if (live) {
+        stored = live;
+      } else if (stored?.accountId) {
+        const data = await zernioApi(env, '/accounts');
+        const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+        const stillThere = accounts.some((account) => (
+          String(account?.platform || '').toLowerCase() === 'instagram'
+          && String(account?._id || account?.accountId || '') === stored.accountId
+        ));
+        if (!stillThere) {
+          await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, '');
+          stored = null;
+        }
+      }
+      galleryAutopost = await getInstagramGalleryAutopostEnabled(env);
+    } catch (error) {
+      return {
+        configured: true,
+        configured_source: resolvedKey.source === 'none' ? 'shared' : resolvedKey.source,
+        connected: Boolean(stored?.accountId),
+        profileId,
+        account: stored,
+        gallery_autopost: galleryAutopost,
+        connectPath: '/admin/zernio/instagram/connect',
+        detail: stored?.accountId
+          ? `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`
+          : `Could not refresh Instagram from Zernio: ${error.message}`,
+        error: error.message,
+      };
+    }
+  }
+  const connected = Boolean(stored?.accountId);
+  let detail;
+  if (connected) {
+    detail = `Connected: ${stored.name || stored.username || stored.accountId}${galleryAutopost ? ' · gallery auto-post on' : ' · gallery auto-post off'}`;
+  } else if (canCallZernio) {
+    detail = 'Instagram is not linked yet. Click Refresh status to pull the account already connected in Zernio (same key as Facebook).';
+  } else if (facebookStored?.accountId) {
+    detail = 'Facebook is connected. Click Refresh status to link Instagram with the same Zernio setup.';
+  } else {
+    detail = 'Connect Facebook first (or Refresh after linking Instagram in Zernio). Instagram uses the same Zernio key — no separate key to enter.';
+  }
+  return {
+    configured,
+    configured_source: resolvedKey.source === 'none' && configured ? 'shared' : resolvedKey.source,
+    connected,
+    profileId,
+    account: stored,
+    gallery_autopost: galleryAutopost,
+    connectPath: '/admin/zernio/instagram/connect',
+    detail,
+  };
+}
+
+export async function maybePublishGalleryPhotoToInstagram(env, request, photo = {}) {
+  if (!(await zernioConfigured(env))) {
+    return { attempted: false, ok: false, reason: 'not_configured' };
+  }
+  if (Number(photo.sort_order) < 0) {
+    return { attempted: false, ok: false, reason: 'utility_upload' };
+  }
+  if (!isInstagramPublishableImage(photo)) {
+    return { attempted: false, ok: false, reason: 'unsupported_format' };
+  }
+  const status = await getZernioInstagramStatus(env, { sync: true });
+  if (!status.connected || !status.account?.accountId) {
+    return { attempted: false, ok: false, reason: 'not_connected' };
+  }
+  if (!status.gallery_autopost) {
+    return { attempted: false, ok: false, reason: 'autopost_disabled' };
+  }
+  const mediaUrl = absolutePublicAssetUrl(request, env, photo.url);
+  if (!mediaUrl) {
+    return { attempted: false, ok: false, reason: 'missing_media_url' };
+  }
+  try {
+    const body = normalizeZernioPostPayload({
+      content: galleryInstagramCaption(photo),
+      media_url: mediaUrl,
+      publish_now: true,
+    }, status.account, 'instagram');
+    const created = await zernioApi(env, '/posts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const postId = String(created?.post?._id || created?.post?.id || created?._id || created?.id || '').trim();
+    return {
+      attempted: true,
+      ok: true,
+      reason: 'published',
+      post_id: postId,
+      media_url: mediaUrl,
+      account: status.account?.username || status.account?.name || '',
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      reason: 'publish_failed',
+      error: String(error?.message || error || 'Instagram publish failed'),
+      media_url: mediaUrl,
+    };
+  }
+}
+
+async function handleZernioInstagramConnect(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Instagram.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  if (!(await zernioConfigured(env))) {
+    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Zernio is not configured for this site yet.</p><p><a href="/admin?tab=social">Back to Social Media</a></p>', 503);
+  }
+  try {
+    const profileId = await ensureZernioProfileId(env);
+    const redirectUrl = zernioInstagramCallbackUrl(request, env);
+    const query = new URLSearchParams({
+      profileId,
+      redirect_url: redirectUrl,
+    });
+    const data = await zernioApi(env, `/connect/instagram?${query.toString()}`);
+    const authUrl = String(data?.authUrl || data?.url || '').trim();
+    if (!authUrl) throw new Error('Zernio did not return an Instagram OAuth URL.');
+    return redirect(authUrl);
+  } catch (error) {
+    const message = escapeHtml(error?.message || 'Could not start Instagram OAuth');
+    return htmlResponse(`<!doctype html><title>Instagram connect failed</title><p>${message}</p><p><a href="/admin">Back to CMS</a></p>`, 502);
+  }
+}
+
+async function handleZernioInstagramCallback(request, env) {
+  await initDb(env);
+  const url = new URL(request.url);
+  const error = String(url.searchParams.get('error') || url.searchParams.get('error_description') || '').trim();
+  if (error) {
+    return redirect(`/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent(error)}`);
+  }
+  let nextPath = '/admin?tab=social&zernio=instagram_connected';
+  try {
+    const profileId = String(url.searchParams.get('profileId') || await getSiteContentValue(env, ZERNIO_PROFILE_KEY) || '').trim();
+    if (profileId) await setSiteContentValue(env, ZERNIO_PROFILE_KEY, profileId);
+    const connection = await syncZernioInstagramConnection(env, profileId);
+    if (!connection) {
+      nextPath = `/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent('Instagram OAuth finished, but no Instagram account was found on the Zernio profile. Connect Instagram in Zernio, then click Refresh status.')}`;
+    }
+  } catch (callbackError) {
+    nextPath = `/admin?tab=social&zernio=instagram_error&detail=${encodeURIComponent(callbackError?.message || 'Instagram connect failed')}`;
+  }
+  const user = await currentUser(request, env);
+  if (!user) {
+    return redirect(`/admin/login?next=${encodeURIComponent(nextPath)}`);
+  }
+  if (!hasPermission(user, 'site')) {
+    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+  }
+  return redirect(nextPath);
 }
 
 function emptyFacebookEventSyncState() {
@@ -2370,8 +3322,8 @@ async function handleZernioFacebookConnect(request, env) {
   if (!hasPermission(user, 'site')) {
     return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
   }
-  if (!zernioConfigured(env)) {
-    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Add a Cloudflare Pages secret named <code>ZERNIO_API_KEY</code>, then redeploy.</p><p><a href="/admin">Back to CMS</a></p>', 503);
+  if (!(await zernioConfigured(env))) {
+    return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Zernio is not configured for this site yet.</p><p><a href="/admin?tab=social">Back to Social Media</a></p>', 503);
   }
   try {
     const profileId = await ensureZernioProfileId(env);
@@ -2947,6 +3899,70 @@ export function ensureFundraisingDonateSlot(html) {
   return `${source}<section class="content soft"><div class="wrap">${donate}</div></section>`;
 }
 
+export function renderBoostersDuesCard() {
+  return `<article class="card accent-card boosters-dues-card" data-boosters-dues>
+  <span class="tag">Band dues</span>
+  <h3>Pay band dues</h3>
+  <p>Pay student band dues securely online with a credit card. Enter the student&rsquo;s full name, the amount, and an email for the receipt.</p>
+  <div class="boosters-dues-actions">
+    <button type="button" class="btn primary" data-dues-open>Pay dues</button>
+  </div>
+</article>`;
+}
+
+export function ensureBoostersDuesSlot(html) {
+  const source = String(html || '');
+  if (/data-dues-open/i.test(source) || /data-boosters-dues/i.test(source)) return source;
+  const dues = renderBoostersDuesCard();
+  if (/data-cms-field=["']body_text["']/i.test(source)) {
+    const replaced = source.replace(
+      /(<div\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/div>)/i,
+      `$1${dues}`,
+    );
+    if (replaced !== source) return replaced;
+  }
+  if (/<span[^>]*class="[^"]*\btag\b[^"]*"[^>]*>\s*Meetings\s*<\/span>/i.test(source)) {
+    const replaced = source.replace(
+      /(<article\b[^>]*>\s*<span[^>]*class="[^"]*\btag\b[^"]*"[^>]*>\s*Meetings\s*<\/span>)/i,
+      `${dues}$1`,
+    );
+    if (replaced !== source) return replaced;
+  }
+  if (/class=["'][^"']*\bwrap\b[^"']*["']/i.test(source)) {
+    const replaced = source.replace(
+      /(<div\b[^>]*class=["'][^"']*\bwrap\b[^"']*["'][^>]*>)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${dues}$3`,
+    );
+    if (replaced !== source) return replaced;
+  }
+  return `${source}<section class="content soft"><div class="wrap">${dues}</div></section>`;
+}
+
+export function stripBoostersDuesSlot(html) {
+  return String(html || '').replace(
+    /<article\b[^>]*\bdata-boosters-dues\b[^>]*>[\s\S]*?<\/article>/gi,
+    '',
+  );
+}
+
+export function applyBoostersDuesVisibility(html, enabled = true) {
+  if (enabled) return ensureBoostersDuesSlot(html);
+  return stripBoostersDuesSlot(html);
+}
+
+async function syncBoostersDuesCmsBody(env, enabled) {
+  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
+  if (!boostersPageRow?.body_html) return;
+  const nextBoostersHtml = applyBoostersDuesVisibility(
+    ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
+    enabled,
+  );
+  if (nextBoostersHtml === boostersPageRow.body_html) return;
+  await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(nextBoostersHtml, boostersPageRow.id)
+    .run();
+}
+
 
 export const US_STATES = [
   ['AL', 'Alabama'],
@@ -3327,10 +4343,12 @@ export function renderSponsorMarqueeSection(sponsors = []) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
   const logos = items.map((sponsor) => {
+    const tier = normalizeSponsorTier(sponsor.tier || sponsor.level) || '';
+    const tierClass = tier ? ` tier-${tier}` : '';
     const visual = sponsor.logo_url
       ? `<img src="${escapeAttr(sponsor.logo_url)}" alt="${escapeAttr(sponsor.name || 'Sponsor')} logo">`
       : `<span class="sponsor-marquee-mark" aria-hidden="true">${escapeHtml(sponsor.mark_text || '★')}</span>`;
-    return `<a class="sponsor-marquee-item" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
+    return `<a class="sponsor-marquee-item${tierClass}" href="/sponsors.html" title="${escapeAttr(sponsor.name || '')}" data-sponsor-tier="${escapeAttr(tier)}">${visual}<span>${escapeHtml(sponsor.name || '')}</span></a>`;
   }).join('');
   return `<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee"><div class="wrap sponsor-marquee-bar"><span class="sponsor-marquee-label">Sponsors</span><div class="sponsor-marquee" data-marquee-track><div class="sponsor-marquee-track">${logos}${logos}</div></div></div></section>`;
 }
@@ -4377,9 +5395,10 @@ export function renderBoosterMembersDirectory(members = []) {
   }).join('');
 }
 
-function renderBoostersPageBody(page, boosterMembers = []) {
+function renderBoostersPageBody(page, boosterMembers = [], { duesEnabled = true } = {}) {
   let html = ensureBoosterMeetingsSlot(page.body_html || '');
   html = ensureBoosterMembersSlot(html);
+  html = applyBoostersDuesVisibility(html, duesEnabled);
   const directory = `<div class="directory" data-booster-members>${renderBoosterMembersDirectory(boosterMembers)}</div>`;
   return replaceMarkedDirectory(html, 'data-booster-members', directory) || `${html}${directory}`;
 }
@@ -4954,14 +5973,30 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = []) {
+function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
-  if (page.slug === 'boosters') return renderBoostersPageBody(page, boosterMembers);
-  if (page.slug === 'fundraising') return ensureFundraisingDonateSlot(page.body_html);
-  if (page.slug === 'calendar') return ensureCalendarMonthMount(page.body_html);
+  if (page.slug === 'boosters') {
+    return renderBoostersPageBody(page, boosterMembers, {
+      duesEnabled: isBoostersDuesEnabled(site || {}),
+    });
+  }
+  if (page.slug === 'fundraising') {
+    return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(page.body_html), {
+      topics: ['fundraising', 'calendar'],
+      heading: 'Email fundraising updates',
+      detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
+    });
+  }
+  if (page.slug === 'calendar') {
+    return ensureEmailListSignupSlot(ensureCalendarMonthMount(page.body_html), {
+      topics: ['calendar', 'fundraising'],
+      heading: 'Email calendar updates',
+      detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
+    });
+  }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
   if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
   return page.body_html;
@@ -6009,7 +7044,7 @@ export function generateStructuredPageHtml(payload = {}) {
   }
 
   if (layout === 'boosters') {
-    return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div><article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers who support the East Forsyth Band program.</p></div><div class="directory" data-booster-members></div></div></section>`;
+    return `${hero}<section class="content"><div class="wrap"><div class="card" data-cms-field="body_text">${body}</div>${renderBoostersDuesCard()}<article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers who support the East Forsyth Band program.</p></div><div class="directory" data-booster-members></div></div></section>`;
   }
 
   if (layout === 'sponsors') {
@@ -6152,6 +7187,83 @@ async function routeApi(request, env, url, ctx = null) {
     const endpoint = String(payload.endpoint || '').trim();
     if (!endpoint) return jsonResponse({ detail: 'endpoint is required' }, 422);
     return jsonResponse(await deleteWebPushSubscription(env, endpoint));
+  }
+  if (url.pathname === '/api/email-subscribe' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    const topics = Array.isArray(payload.topics)
+      ? payload.topics
+      : String(payload.topics || '')
+        .split(/[,;\s]+/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const result = await subscribeEmailList(env, {
+      email: payload.email,
+      topics,
+      source: payload.source || 'website',
+      update: Boolean(payload.update),
+    });
+    if (!result.ok) return jsonResponse({ detail: result.detail }, 422);
+    if (result.send_welcome) {
+      try {
+        await sendEmailListWelcome(env, {
+          email: result.email,
+          topics: result.topics,
+          unsubscribeToken: result.unsubscribe_token,
+        });
+      } catch {
+        // Welcome delivery is best-effort.
+      }
+    } else if (result.send_topics_email) {
+      try {
+        await sendEmailListTopicsChanged(env, {
+          email: result.email,
+          previousTopics: result.previous_topics,
+          topics: result.topics,
+          unsubscribeToken: result.unsubscribe_token,
+        });
+      } catch {
+        // Topics-change delivery is best-effort.
+      }
+    }
+    return jsonResponse({
+      ok: true,
+      email: result.email,
+      topics: result.topics,
+      topics_label: result.topics_label || formatEmailListTopicsLabel(result.topics),
+      previous_topics: result.previous_topics || [],
+      already_subscribed: Boolean(result.already_subscribed),
+      updated: Boolean(result.updated),
+      unchanged: Boolean(result.unchanged),
+      created: Boolean(result.created),
+      reactivated: Boolean(result.reactivated),
+      detail: result.detail,
+    });
+  }
+  if (url.pathname === '/api/email-unsubscribe' && (request.method === 'POST' || request.method === 'GET')) {
+    const payload = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+    const token = String(payload.token || url.searchParams.get('token') || '').trim();
+    const email = String(payload.email || url.searchParams.get('email') || '').trim();
+    const result = await unsubscribeEmailSubscriber(env, { token, email, reason: 'link' });
+    if (request.method === 'GET' && (url.searchParams.get('format') || '').toLowerCase() !== 'json') {
+      const message = result.found
+        ? (result.already ? 'You were already unsubscribed.' : 'You are unsubscribed from band email updates.')
+        : 'That unsubscribe link is invalid or expired.';
+      return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small"><h1>Email list</h1><p>${escapeHtml(message)}</p><p><a class="btn primary" href="/calendar.html">Back to calendar</a></p></main></body></html>`, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+    return jsonResponse({
+      ok: true,
+      found: Boolean(result.found),
+      already: Boolean(result.already),
+      detail: result.found
+        ? (result.already ? 'Already unsubscribed.' : 'Unsubscribed.')
+        : 'No matching subscriber.',
+    });
+  }
+  if (url.pathname === '/api/resend/inbound' && request.method === 'POST') {
+    return handleResendInboundWebhook(env, request);
   }
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env);
@@ -6985,6 +8097,14 @@ async function routeApi(request, env, url, ctx = null) {
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
+    if (payload.boosters_dues_enabled !== undefined) {
+      if (!isSuperAdmin(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admins can change the Band dues Boosters setting.' }, 403);
+      }
+      const duesEnabled = isBoostersDuesEnabled({ boosters_dues_enabled: payload.boosters_dues_enabled }) ? '1' : '0';
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('boosters_dues_enabled', duesEnabled).run();
+      await syncBoostersDuesCmsBody(env, duesEnabled === '1');
+    }
     return jsonResponse(await getSite(env));
   }
 
@@ -7035,7 +8155,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const status = await getZernioFacebookStatus(env);
-    if (status.account?.accountId && zernioConfigured(env)) {
+    if (status.account?.accountId && (await zernioConfigured(env))) {
       try {
         await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
       } catch {
@@ -7049,7 +8169,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/pages' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const pending = await getZernioFacebookPending(env);
     if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.', pages: [] }, 400);
     try {
@@ -7062,7 +8182,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/select-page' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const pending = await getZernioFacebookPending(env);
     if (!pending) return jsonResponse({ detail: 'No pending Facebook Page selection. Click Connect Facebook again.' }, 400);
     let pageId = '';
@@ -7115,14 +8235,17 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/facebook/events/publish' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    return jsonResponse({
-      detail: 'Calendar updates are no longer posted to Facebook. Ignore suggestions from the Social tab instead.',
-    }, 410);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    try {
+      return jsonResponse(await publishFacebookEventQueue(env), 201);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not publish calendar updates' }, 502);
+    }
   }
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'GET') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     try {
       const data = await zernioApi(env, '/posts?limit=20');
       const posts = Array.isArray(data?.posts) ? data.posts : (Array.isArray(data) ? data : []);
@@ -7134,7 +8257,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/zernio/posts' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
-    if (!zernioConfigured(env)) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
+    if (!(await zernioConfigured(env))) return jsonResponse({ detail: 'ZERNIO_API_KEY is not configured' }, 503);
     const status = await getZernioFacebookStatus(env, { sync: true });
     if (!status.connected) return jsonResponse({ detail: 'Connect a Facebook Page before posting.' }, 400);
     let body;
@@ -7149,6 +8272,35 @@ async function routeApi(request, env, url, ctx = null) {
     } catch (error) {
       return jsonResponse({ detail: error.message || 'Could not create post' }, 502);
     }
+  }
+
+  if (url.pathname === '/api/admin/zernio/instagram' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const sync = String(url.searchParams.get('sync') || '') === '1';
+    return jsonResponse(await getZernioInstagramStatus(env, { sync }));
+  }
+  if (url.pathname === '/api/admin/zernio/instagram' && request.method === 'DELETE') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const status = await getZernioInstagramStatus(env);
+    if (status.account?.accountId && (await zernioConfigured(env))) {
+      try {
+        await zernioApi(env, `/accounts/${encodeURIComponent(status.account.accountId)}`, { method: 'DELETE' });
+      } catch {
+        // Clear local link even if remote disconnect fails.
+      }
+    }
+    await setSiteContentValue(env, ZERNIO_INSTAGRAM_KEY, '');
+    return jsonResponse(await getZernioInstagramStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/instagram/settings' && request.method === 'PUT') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const enabled = payload.gallery_autopost !== false && payload.gallery_autopost !== 0 && payload.gallery_autopost !== '0';
+    await setInstagramGalleryAutopostEnabled(env, enabled);
+    return jsonResponse(await getZernioInstagramStatus(env));
   }
 
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
@@ -7273,11 +8425,25 @@ async function routeApi(request, env, url, ctx = null) {
     if (!canEditPage(auth.user, existing.slug) && !mayEditBoosters) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
-    const page = serializePagePayload(await request.json(), existing);
+    const rawPayload = await request.json().catch(() => ({}));
+    const page = serializePagePayload(rawPayload, existing);
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
     await env.DB.prepare('UPDATE cms_pages SET slug = ?, path = ?, title = ?, body_html = ?, nav_order = ?, is_home = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active, existing.id).run();
-    return jsonResponse(await getPageBySlug(env, page.slug, true));
+    const updated = await getPageBySlug(env, page.slug, true);
+    let email_list = null;
+    if (existing.slug === 'fundraising' && wantsEmailListNotify(rawPayload)) {
+      try {
+        email_list = await notifyEmailSubscribers(env, {
+          topic: 'fundraising',
+          action: 'updated',
+          pageTitle: updated?.title || 'Fundraising',
+        });
+      } catch (error) {
+        email_list = { ok: false, detail: error?.message || 'Email list notify failed' };
+      }
+    }
+    return jsonResponse({ ...updated, email_list });
   }
   if (pageMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'pages');
@@ -8081,6 +9247,24 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
 
+  if (url.pathname === '/api/admin/email-subscribers' && request.method === 'GET') {
+    const auth = await requireSuperAdmin(request, env);
+    if (auth.response) return auth.response;
+    const rows = await env.DB.prepare(
+      `SELECT email, topics, status, source, created_at, updated_at, unsubscribed_at
+       FROM email_subscribers
+       ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, email COLLATE NOCASE`,
+    ).all();
+    const subscribers = (rows.results || []).map((row) => ({
+      ...row,
+      topics: normalizeEmailListTopics(row.topics, { defaultAll: true }),
+    }));
+    return jsonResponse({
+      subscribers,
+      active_count: subscribers.filter((row) => row.status === 'active').length,
+      total: subscribers.length,
+    });
+  }
   if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -8294,7 +9478,8 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canCreateEvents(auth.user)) return jsonResponse({ detail: 'Permission required: events' }, 403);
-    const p = normalizeEventPayload(await request.json());
+    const rawPayload = await request.json().catch(() => ({}));
+    const p = normalizeEventPayload(rawPayload);
     if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
       return jsonResponse({ detail: 'Title and description are required' }, 422);
     }
@@ -8323,7 +9508,13 @@ async function routeApi(request, env, url, ctx = null) {
     try { await queueEventForFacebook(env, created, 'new'); } catch { /* queue is best-effort */ }
     let pushResult = null;
     try { pushResult = await recordCalendarPushChange(env, { action: 'created', event: created }); } catch { /* push is best-effort */ }
-    return jsonResponse({ ...created, web_push: pushResult?.web_push || null });
+    let email_list = null;
+    if (wantsEmailListNotify(rawPayload)) {
+      try { email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'created', event: created }); } catch (error) {
+        email_list = { ok: false, detail: error?.message || 'Email list notify failed' };
+      }
+    }
+    return jsonResponse({ ...created, web_push: pushResult?.web_push || null, email_list });
   }
   const eventMatch = url.pathname.match(/^\/api\/admin\/events\/(\d+)$/);
   if (eventMatch && ['PUT', 'DELETE'].includes(request.method)) {
@@ -8336,13 +9527,21 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: 'You can only edit or delete calendar events you created, unless an admin grants manage-all events access.' }, 403);
     }
     if (request.method === 'DELETE') {
+      const rawPayload = await request.json().catch(() => ({}));
       await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
       try { await unqueueEventForFacebook(env, id); } catch { /* ignore */ }
       let pushResult = null;
       try { pushResult = await recordCalendarPushChange(env, { action: 'deleted', event: existing, eventId: id }); } catch { /* push is best-effort */ }
-      return jsonResponse({ ok: true, web_push: pushResult?.web_push || null });
+      let email_list = null;
+      if (wantsEmailListNotify(rawPayload)) {
+        try { email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'deleted', event: existing }); } catch (error) {
+          email_list = { ok: false, detail: error?.message || 'Email list notify failed' };
+        }
+      }
+      return jsonResponse({ ok: true, web_push: pushResult?.web_push || null, email_list });
     }
-    const p = normalizeEventPayload(await request.json(), existing);
+    const rawPayload = await request.json().catch(() => ({}));
+    const p = normalizeEventPayload(rawPayload, existing);
     if (!htmlToPlainText(p.title) || !htmlToPlainText(p.description)) {
       return jsonResponse({ detail: 'Title and description are required' }, 422);
     }
@@ -8371,7 +9570,13 @@ async function routeApi(request, env, url, ctx = null) {
     try { await queueEventForFacebook(env, updated, 'updated'); } catch { /* queue is best-effort */ }
     let pushResult = null;
     try { pushResult = await recordCalendarPushChange(env, { action: 'updated', event: updated }); } catch { /* push is best-effort */ }
-    return jsonResponse({ ...updated, web_push: pushResult?.web_push || null });
+    let email_list = null;
+    if (wantsEmailListNotify(rawPayload)) {
+      try { email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'updated', event: updated }); } catch (error) {
+        email_list = { ok: false, detail: error?.message || 'Email list notify failed' };
+      }
+    }
+    return jsonResponse({ ...updated, web_push: pushResult?.web_push || null, email_list });
   }
 
   if (url.pathname === '/api/admin/photos' && request.method === 'POST') {
@@ -8389,13 +9594,25 @@ async function routeApi(request, env, url, ctx = null) {
       // Gallery uploads omit sort_order (auto-assigned). Negative values still hide staff/logo utility images.
       const rawSort = form.get('sort_order');
       const sortOrder = rawSort === null || rawSort === '' ? 0 : Number(rawSort);
-      return jsonResponse(await storeImageUpload(
+      const stored = await storeImageUpload(
         env,
         form.get('file'),
         String(form.get('alt_text') || ''),
         String(form.get('caption') || ''),
         sortOrder,
-      ));
+      );
+      let instagram = null;
+      try {
+        instagram = await maybePublishGalleryPhotoToInstagram(env, request, stored);
+      } catch (error) {
+        instagram = {
+          attempted: true,
+          ok: false,
+          reason: 'publish_failed',
+          error: String(error?.message || error || 'Instagram publish failed'),
+        };
+      }
+      return jsonResponse({ ...stored, instagram });
     } catch (error) {
       return jsonResponse({ detail: error.message }, 400);
     }
@@ -8609,7 +9826,7 @@ export function renderNav(pages, { loggedIn = false } = {}) {
 
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
@@ -8854,12 +10071,27 @@ export default {
       }
     }
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
+    if (url.pathname === '/subscribe' || url.pathname === '/subscribe/') {
+      const target = new URL('/calendar.html', url.origin);
+      target.searchParams.set('subscribe', '1');
+      return Response.redirect(target.toString(), 302);
+    }
+    if (url.pathname === '/sponsor' || url.pathname === '/sponsor/') {
+      return Response.redirect(new URL('/become-a-sponsor.html', url.origin).toString(), 302);
+    }
+    if (url.pathname === '/donate' || url.pathname === '/donate/') {
+      const target = new URL('/sponsors.html', url.origin);
+      target.searchParams.set('donate', '1');
+      return Response.redirect(target.toString(), 302);
+    }
     if (url.pathname === '/admin/login') return handleLogin(request, env);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
     if (url.pathname === '/admin/logout') return logout(request, env);
     if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
     if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
+    if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
+    if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
@@ -8867,7 +10099,7 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">
@@ -8879,12 +10111,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social / Facebook</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events">Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>The Gallery page text controls the header and intro. Photos are managed in the Photos tab. Visitors can click any photo to open a larger viewer.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Calendar Events tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Pay dues opens on the public page. Booster meetings come from Calendar Events, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>The Gallery page text controls the header and intro. Photos are managed in the Photos tab. Visitors can click any photo to open a larger viewer.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><label class="toggle-line" data-fundraising-notify hidden><input type="checkbox" name="notify_email_subscribers" value="1" checked><span><b>Notify email list</b><small>Email fundraising subscribers about this save (on by default). Turn off for grammar-only edits.</small></span></label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-sponsors-print-card">
@@ -8955,7 +10187,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   </div>
 </div>
 </section>
-<section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, social, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
+<section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
   <div class="utility-links-head"><h2>Top utility links</h2><p class="muted">Links in the dark bar at the top right of every public page.</p></div>
   <div id="utility-links-list" class="utility-links-list"></div>
   <div class="page-settings-actions utility-links-actions">
@@ -8963,28 +10195,46 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="submit">Save links</button>
   </div>
   <p class="status" id="utility-links-status"></p>
-</form><form id="social-links-form" class="admin-card stack utility-links-card social-links-card">
-  <div class="utility-links-head"><h2>Footer social links</h2><p class="muted">Icons appear above the footer brand on every public page. Leave a URL blank to show a faded placeholder until that network is ready.</p></div>
+</form>
+<div class="admin-card stack zernio-facebook-card">
+  <div class="utility-links-head">
+    <h2>Social media accounts</h2>
+    <p class="muted">Add Instagram, YouTube, Facebook, X, and TikTok links for the site footer, and connect Facebook publishing, on Social Media.</p>
+  </div>
+  <p class="notice" id="zernio-facebook-status-site">Open Social Media to manage account links or Facebook posts.</p>
+  <div class="panel-actions">
+    <button class="btn primary" type="button" data-open-social-tab>Open Social Media</button>
+  </div>
+</div>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<section id="tab-social" class="cms-panel social-panel">
+<div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
+<div class="editor-layout">
+<form id="social-links-form" class="admin-card stack utility-links-card social-links-card">
+  <div class="utility-links-head"><h2>Account links</h2><p class="muted">These URLs power the social icons above the footer brand on every public page. Leave a URL blank to show a faded placeholder until that network is ready.</p></div>
   <div id="social-links-list" class="social-links-list"></div>
   <div class="page-settings-actions utility-links-actions">
     <button class="btn primary" type="submit">Save social links</button>
   </div>
   <p class="status" id="social-links-status"></p>
 </form>
-<div class="admin-card stack zernio-facebook-card">
+<div class="admin-card stack zernio-instagram-card">
   <div class="utility-links-head">
-    <h2>Facebook Page (Zernio)</h2>
-    <p class="muted">Connect the Page, compose posts, and schedule publishes in Social / Facebook.</p>
+    <h2>Instagram connection</h2>
+    <p class="muted">Uses the same Zernio key as Facebook — nothing to paste. Click Refresh status to load the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically.</p>
   </div>
-  <p class="notice" id="zernio-facebook-status-site">Open Social / Facebook to connect or post.</p>
+  <p class="notice" id="zernio-instagram-status">Checking Instagram connection…</p>
+  <label class="toggle-line" id="zernio-instagram-autopost-row" hidden>
+    <span><b>Auto-post new gallery photos</b><small>Publishes each new gallery upload (not staff/logo utility images) to Instagram with the photo title/caption.</small></span>
+    <input id="zernio-instagram-autopost" name="instagram_gallery_autopost" type="checkbox" role="switch" aria-label="Auto-post new gallery photos to Instagram" checked>
+  </label>
   <div class="panel-actions">
-    <button class="btn primary" type="button" data-open-social-tab>Open Social / Facebook</button>
+    <a class="btn primary" id="zernio-instagram-connect" href="/admin/zernio/instagram/connect" hidden>Connect Instagram</a>
+    <button class="btn outline" type="button" id="zernio-instagram-refresh">Refresh status</button>
+    <button class="btn outline" type="button" id="zernio-instagram-disconnect" hidden>Disconnect</button>
   </div>
+  <p class="status" id="zernio-instagram-message"></p>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
-<section id="tab-social" class="cms-panel social-panel">
-<div class="panel-head"><div><p class="kicker">Publish</p><h1>Social / Facebook</h1><p>Connect the band Facebook Page through Zernio, then publish or schedule posts from the CMS.</p></div></div>
-<div class="editor-layout">
 <div class="admin-card stack zernio-facebook-card">
   <div class="utility-links-head">
     <h2>Facebook connection</h2>
@@ -9009,11 +10259,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack" id="zernio-facebook-events-card" hidden>
   <div class="utility-links-head">
     <h2>Suggested calendar updates</h2>
-    <p class="muted">New or changed calendar events appear here for awareness. They are not posted to Facebook. Ignore any suggestion you do not need.</p>
+    <p class="muted">New or changed calendar events appear here. Post them as one Facebook update, or ignore any you do not need.</p>
   </div>
   <p class="notice" id="zernio-facebook-events-summary">Checking calendar suggestions…</p>
   <div id="zernio-facebook-events-list" class="admin-list zernio-events-queue-list"></div>
   <div class="panel-actions">
+    <button class="btn primary" type="button" id="zernio-facebook-events-publish" hidden>Post calendar updates to Facebook</button>
     <button class="btn outline" type="button" id="zernio-facebook-events-ignore-all" hidden>Ignore all suggestions</button>
   </div>
   <p class="status" id="zernio-facebook-events-status"></p>
@@ -9316,8 +10567,8 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </div>
   </div>
 </fieldset>
-<fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="events-list-head"><div><h2>Events by month</h2><span class="status" id="events-count"></span></div><nav class="events-month-nav" aria-label="Calendar month"><button type="button" class="btn outline events-month-btn" id="events-month-prev" aria-label="Previous month">‹</button><div class="events-month-current"><b id="events-month-label">August 2026</b><button type="button" class="btn outline events-month-today" id="events-month-today">This month</button></div><button type="button" class="btn outline events-month-btn" id="events-month-next" aria-label="Next month">›</button></nav></div><div id="events-list" class="admin-list"></div></div></div></section>
-<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Upload JPG, PNG, WEBP, GIF, or SVG images up to 1.9 MB. Drag rows to reorder the public gallery. Edit a photo to change its title or alt text.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo <small data-photo-file-hint>Required for new uploads</small><input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
+<fieldset class="event-placement" data-event-placement><legend>Also show on</legend><label class="checkline"><input type="radio" name="show_on_boosters" value="0" checked> None (calendar only)</label><label class="checkline"><input type="radio" name="show_on_boosters" value="1" data-booster-placement> Boosters meetings card</label><p class="muted" data-repeat-booster-note hidden>Repeating events cannot be added to the Boosters meetings card.</p></fieldset><label class="toggle-line"><input type="checkbox" name="notify_email_subscribers" value="1" checked><span><b>Notify email list</b><small>Email subscribers about this calendar change (on by default). Turn off for grammar-only edits.</small></span></label><button class="btn primary">Save event</button></form><div class="admin-card stack events-list-card"><div class="events-list-head"><div><h2>Events by month</h2><span class="status" id="events-count"></span></div><nav class="events-month-nav" aria-label="Calendar month"><button type="button" class="btn outline events-month-btn" id="events-month-prev" aria-label="Previous month">‹</button><div class="events-month-current"><b id="events-month-label">August 2026</b><button type="button" class="btn outline events-month-today" id="events-month-today">This month</button></div><button type="button" class="btn outline events-month-btn" id="events-month-next" aria-label="Next month">›</button></nav></div><div id="events-list" class="admin-list"></div></div></div></section>
+<section id="tab-photos" class="cms-panel"><div class="panel-head"><div><p class="kicker">Media</p><h1>Photo gallery</h1><p>Select one or many JPG, PNG, WEBP, or GIF images. Oversized photos are auto-resized under 1.9 MB before upload. Drag rows to reorder the public gallery. When Instagram gallery auto-post is on, each new upload can publish to Instagram.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="new-photo">New photo</button></div></div><form id="photo-form" class="admin-card stack"><input type="hidden" name="photo_id" value=""><label>Photo(s) <small data-photo-file-hint>Select one or more images · oversized files auto-resize under 1.9 MB</small><input name="file" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" required></label><label>Alt text<input name="alt_text" required placeholder="Students performing on the field"></label><label class="full form-rich-label"><span>Title / caption</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="caption" data-rich-mode="inline" data-placeholder="Optional title shown under the photo" aria-label="Photo title"></div><input type="hidden" name="caption"></label><button class="btn primary" data-photo-submit>Upload photo</button><p class="status" id="photo-status"></p></form><div id="photos-list" class="admin-list"></div></section>
 </section></main>
 <dialog id="unsaved-page-dialog" class="unsaved-dialog">
   <form method="dialog" class="unsaved-dialog-card">

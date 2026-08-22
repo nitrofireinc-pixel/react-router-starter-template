@@ -5,7 +5,17 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioUserProfile, normalizeZernioPostPayload, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, renderBoosterMembersDirectory, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, parseSquareSettings, resolveSquareRuntimeEnv, SQUARE_SETTINGS_KEY, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, emptyCalendarPushState } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState } from '../worker/src/worker.mjs';
+
+
+test('wrangler worker assets config must stay on worker/public', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const toml = readFileSync(join(root, 'wrangler.toml'), 'utf8');
+  assert.match(toml, /directory\s*=\s*"\.\/worker\/public"/);
+  assert.match(toml, /run_worker_first\s*=\s*true/);
+  assert.match(toml, /efhsband\.org\/\*/);
+  assert.doesNotMatch(toml, /directory\s*=\s*"\.\/assets"/);
+});
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
   assert.equal(escapeHtml('<script>alert("x")</script>'), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
@@ -453,6 +463,49 @@ test('ensureBoosterMeetingsSlot injects meetings list hook into Boosters card', 
   assert.equal(ensureBoosterMeetingsSlot(html), html);
 });
 
+test('ensureBoostersDuesSlot injects Pay dues button without removing meetings or members hooks', () => {
+  const liveStyle = `<section class="page-hero" data-cms-layout="boosters"><div class="page-title"><h1>Band Boosters</h1></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Booster info</p></div><article class="card"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are listed below.</p><div class="timeline booster-meetings" data-booster-meetings></div></article></div></section><section class="content soft"><div class="wrap"><div class="directory" data-booster-members></div></div></section>`;
+  const html = ensureBoostersDuesSlot(liveStyle);
+  assert.match(html, /data-dues-open/);
+  assert.match(html, /data-boosters-dues/);
+  assert.match(html, />Pay dues</);
+  assert.match(html, /Booster info/);
+  assert.match(html, /data-booster-meetings/);
+  assert.match(html, /data-booster-members/);
+  assert.equal(ensureBoostersDuesSlot(html), html);
+  assert.match(renderBoostersDuesCard(), /data-dues-open/);
+  const structured = generateStructuredPageHtml({
+    layout: 'boosters',
+    kicker: 'Families',
+    heading: 'Band Boosters',
+    intro: 'Volunteer and support students.',
+    body_text: '<p>Booster body</p>',
+  });
+  assert.match(structured, /data-dues-open/);
+  assert.match(structured, /data-booster-meetings/);
+  assert.match(structured, /data-booster-members/);
+});
+
+test('boosters dues site setting can hide or restore the Pay dues card', () => {
+  assert.equal(isBoostersDuesEnabled({}), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: '1' }), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: 1 }), true);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: '0' }), false);
+  assert.equal(isBoostersDuesEnabled({ boosters_dues_enabled: 0 }), false);
+
+  const withDues = ensureBoostersDuesSlot('<div class="card" data-cms-field="body_text"><p>Info</p></div><article class="card"><span class="tag">Meetings</span></article>');
+  assert.match(withDues, /data-boosters-dues/);
+  const hidden = applyBoostersDuesVisibility(withDues, false);
+  assert.doesNotMatch(hidden, /data-boosters-dues/);
+  assert.doesNotMatch(hidden, /data-dues-open/);
+  assert.match(hidden, /data-cms-field="body_text"/);
+  assert.match(hidden, /Meetings/);
+  assert.equal(stripBoostersDuesSlot(withDues), hidden);
+  const restored = applyBoostersDuesVisibility(hidden, true);
+  assert.match(restored, /data-boosters-dues/);
+  assert.match(restored, /data-dues-open/);
+});
+
 test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraising body', () => {
   const liveStyle = `<section class="page-hero" data-cms-layout="standard"><div class="page-title"><h1>Fundraising</h1></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p>Buy a raffle ticket</p></div></div></section>`;
   const html = ensureFundraisingDonateSlot(liveStyle);
@@ -473,7 +526,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=square-connect-20260822/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=sync-main-live-20260822/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -908,6 +961,17 @@ test('sponsor tiers drive marquee, fly-in, and game-day benefits', () => {
   assert.equal(hydrated.show_game_announcement, true);
 });
 
+test('renderSponsorMarqueeSection applies tier color classes', () => {
+  const html = renderSponsorMarqueeSection([
+    { name: 'Gold Co', level: 'Gold Sponsor', active: 1 },
+    { name: 'Silver Co', tier: 'silver', active: 1 },
+    { name: 'Bronze Co', level: 'Bronze Sponsor', active: 1 },
+  ]);
+  assert.match(html, /class="sponsor-marquee-item tier-gold"[^>]*data-sponsor-tier="gold"/);
+  assert.match(html, /class="sponsor-marquee-item tier-silver"[^>]*data-sponsor-tier="silver"/);
+  assert.match(html, /class="sponsor-marquee-item tier-bronze"[^>]*data-sponsor-tier="bronze"/);
+});
+
 test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
   const gold = normalizeSponsorPayload({
     name: 'Eagle Financial Partners',
@@ -1311,6 +1375,65 @@ test('normalizeZernioPostPayload builds publish-now and scheduled Facebook posts
   assert.equal(scheduled.timezone, 'America/New_York');
 });
 
+test('resolveZernioApiKey prefers env then site_content fallback', async () => {
+  assert.equal(ZERNIO_API_KEY_CONTENT_KEY, 'zernio_api_key');
+  const fromEnv = await resolveZernioApiKey({ ZERNIO_API_KEY: ' env-key-123 ', DB: null });
+  assert.deepEqual(fromEnv, { key: 'env-key-123', source: 'env' });
+
+  const values = { zernio_api_key: ' db-key-456 ' };
+  const env = {
+    ZERNIO_API_KEY: '',
+    DB: {
+      prepare() {
+        return {
+          bind(key) {
+            return {
+              async first() {
+                return values[key] == null ? null : { value: values[key] };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+  assert.deepEqual(await resolveZernioApiKey(env), { key: 'db-key-456', source: 'database' });
+
+  values.zernio_api_key = '';
+  assert.deepEqual(await resolveZernioApiKey(env), { key: '', source: 'none' });
+});
+
+test('normalizeZernioPostPayload builds Instagram gallery posts with required media', () => {
+  const account = { accountId: 'ig_123', platform: 'instagram', username: 'efhsband' };
+  assert.throws(
+    () => normalizeZernioPostPayload({ content: 'Hello' }, account, 'instagram'),
+    /Instagram posts require an image URL/,
+  );
+  assert.throws(
+    () => normalizeZernioPostPayload({ content: 'Hello', media_url: 'https://efhsband.org/uploads/a.jpg' }, null, 'instagram'),
+    /Connect Instagram before posting/,
+  );
+  const body = normalizeZernioPostPayload({
+    content: 'New photo from East Forsyth Band',
+    media_url: 'https://efhsband.org/uploads/a.jpg',
+    publish_now: true,
+  }, account, 'instagram');
+  assert.deepEqual(body.platforms, [{ platform: 'instagram', accountId: 'ig_123' }]);
+  assert.deepEqual(body.mediaItems, [{ type: 'image', url: 'https://efhsband.org/uploads/a.jpg' }]);
+  assert.equal(body.publishNow, true);
+});
+
+test('gallery Instagram helpers pick captions and skip unsupported images', () => {
+  assert.equal(galleryInstagramCaption({ caption: '<b>Halftime</b>', alt_text: 'Alt' }), 'Halftime');
+  assert.equal(galleryInstagramCaption({ alt_text: 'Field show' }), 'Field show');
+  assert.equal(galleryInstagramCaption({}), 'New photo from East Forsyth Band');
+  assert.equal(isInstagramPublishableImage({ filename: 'a.jpg' }), true);
+  assert.equal(isInstagramPublishableImage({ filename: 'logo.svg' }), false);
+  assert.equal(isInstagramGalleryAutopostEnabled(''), true);
+  assert.equal(isInstagramGalleryAutopostEnabled('0'), false);
+  assert.equal(isInstagramGalleryAutopostEnabled('1'), true);
+});
+
 
 test('formatUserLastLoginDisplay formats Eastern timestamps and empty values', () => {
   assert.equal(formatUserLastLoginDisplay(''), 'Never logged in');
@@ -1438,7 +1561,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /square-connect-20260822/);
+  assert.match(workerSrc, /sync-main-live-20260822/);
   assert.match(workerSrc, /square-connect-form/);
   assert.match(workerSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(workerSrc, /\/api\/calendar-events/);
@@ -1513,7 +1636,9 @@ test('push service worker and web app manifest assets exist', () => {
 
   assert.match(workerSrc, /Suggested calendar updates/);
   assert.match(workerSrc, /zernio-facebook-events-ignore-all/);
-  assert.doesNotMatch(workerSrc, /zernio-facebook-events-publish/);
+  assert.match(workerSrc, /zernio-facebook-events-publish/);
+  assert.match(workerSrc, /Post calendar updates to Facebook/);
+  assert.doesNotMatch(workerSrc, /Calendar updates are no longer posted to Facebook/);
   assert.doesNotMatch(workerSrc, /gold-tier-benefits-card/);
   assert.doesNotMatch(workerSrc, /id="sponsor-preview"/);
 });
@@ -1548,27 +1673,44 @@ test('band dues receipt builder covers paid and failed outcomes', () => {
   assert.match(failed.html, /DU-13/);
 });
 
-test('dues payment helpers and preview assets are present', () => {
+test('dues payment helpers and Boosters Pay dues entry are present', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
   const styles = readFileSync(join(root, 'styles.css'), 'utf8');
   const duesDev = readFileSync(join(root, 'dues-dev.html'), 'utf8');
+  const boosters = readFileSync(join(root, 'boosters.html'), 'utf8');
   assert.match(workerSrc, /CREATE TABLE IF NOT EXISTS dues_payments/);
   assert.match(workerSrc, /\/api\/dues/);
   assert.match(workerSrc, /recordDuesPaymentLedger/);
   assert.match(workerSrc, /recordDuesFailedLedger/);
   assert.match(workerSrc, /sendDuesReceipt/);
-  assert.match(workerSrc, /square-connect-20260822/);
+  assert.match(workerSrc, /ensureBoostersDuesSlot/);
+  assert.match(workerSrc, /applyBoostersDuesVisibility/);
+  assert.match(workerSrc, /boosters_dues_enabled/);
+  assert.match(workerSrc, /site-settings-switches/);
+  assert.match(workerSrc, /data-password-toggle/);
+  assert.match(workerSrc, /admin-password-toggle/);
+  assert.match(workerSrc, /sync-main-live-20260822/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
   assert.match(siteContent, /data-dues-open/);
+  assert.match(siteContent, /boosters_dues_enabled/);
   assert.match(siteContent, /\/api\/dues/);
-  assert.match(styles, /\.dues-dev-section/);
+  assert.match(styles, /\.boosters-dues-card/);
+  assert.match(styles, /\.site-settings-switches/);
+  assert.match(styles, /\.admin-password-toggle/);
   assert.match(styles, /dues-toast\.is-failed/);
+  assert.match(boosters, /data-dues-open/);
+  assert.match(boosters, />Pay dues</);
+  assert.match(boosters, /data-booster-meetings/);
+  assert.match(boosters, /data-booster-members/);
   assert.match(duesDev, /data-dues-open/);
   assert.match(duesDev, /noindex/);
   assert.match(duesDev, /Preview only/);
+  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
+  assert.match(adminSrc, /boosters_dues_enabled/);
+  assert.match(adminSrc, /data-boosters-dues-setting/);
 });
 
 test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel export, and dues', () => {
@@ -1693,4 +1835,123 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(stylesSrc, /Treasurer ledger/);
   assert.match(stylesSrc, /\.ledger-summary-grid/);
   assert.match(stylesSrc, /\.ledger-table/);
+});
+
+test('email list topics normalize and default to both topics', () => {
+  assert.deepEqual(normalizeEmailListTopics(['calendar', 'calendar', 'nope']), ['calendar']);
+  assert.deepEqual(normalizeEmailListTopics([], { defaultAll: true }), ['calendar', 'fundraising']);
+  assert.deepEqual(normalizeEmailListTopics([], { defaultAll: false }), []);
+});
+
+test('wantsEmailListNotify defaults on and accepts explicit off', () => {
+  assert.equal(wantsEmailListNotify({}), true);
+  assert.equal(wantsEmailListNotify({ notify_email_subscribers: true }), true);
+  assert.equal(wantsEmailListNotify({ notify_email_subscribers: false }), false);
+  assert.equal(wantsEmailListNotify({ notify_email_subscribers: '0' }), false);
+});
+
+test('extractEmailAddress and STOP detection', () => {
+  assert.equal(extractEmailAddress('Parent Name <parent@example.com>'), 'parent@example.com');
+  assert.equal(isEmailListStopRequest({ subject: 'Re: update', text: 'STOP' }), true);
+  assert.equal(isEmailListStopRequest({ subject: 'Hello', text: 'Thanks for the note' }), false);
+  assert.equal(isEmailListStopRequest({ subject: 'Please unsubscribe me', text: '' }), true);
+});
+
+test('ensureEmailListSignupSlot injects once', () => {
+  const first = ensureEmailListSignupSlot('<section class="content soft"></section>');
+  assert.match(first, /data-email-list-signup/);
+  assert.match(first, /data-email-list-open/);
+  assert.doesNotMatch(first, /email-list-signup-qr/);
+  assert.doesNotMatch(first, /data-email-list-form/);
+  assert.equal(ensureEmailListSignupSlot(first), first);
+  assert.match(renderEmailListSignup(), /Subscribe/);
+  const upgraded = ensureEmailListSignupSlot('<section class="content email-list-signup" data-email-list-signup><form data-email-list-form></form></section>');
+  assert.match(upgraded, /data-email-list-open/);
+  assert.doesNotMatch(upgraded, /data-email-list-form/);
+});
+
+test('buildEmailListUpdateMessage includes reply-stop guidance', () => {
+  const calendar = buildEmailListUpdateMessage({ topic: 'calendar', action: 'created', event: { title: 'Band Concert', date_label: 'Sep', date_detail: '12', event_year: 2026 } });
+  assert.match(calendar.subject, /New calendar event/);
+  assert.match(calendar.text, /STOP/);
+  assert.equal(EMAIL_LIST_REPLY_TO, 'list@updates.efhsband.org');
+  const fundraising = buildEmailListUpdateMessage({ topic: 'fundraising', pageTitle: 'Spirit Night' });
+  assert.match(fundraising.subject, /Fundraising update/);
+});
+
+test('email list topic helpers label and compare subscriptions', () => {
+  assert.equal(formatEmailListTopicsLabel(['calendar']), 'Calendar');
+  assert.equal(formatEmailListTopicsLabel(['fundraising']), 'Fundraising');
+  assert.equal(formatEmailListTopicsLabel(['calendar', 'fundraising']), 'Calendar and Fundraising');
+  assert.equal(emailListTopicsEqual(['fundraising', 'calendar'], ['calendar', 'fundraising']), true);
+  assert.equal(emailListTopicsEqual(['calendar'], ['calendar', 'fundraising']), false);
+});
+
+test('buildEmailListTopicsChangedMessage explains before and after topics', () => {
+  const message = buildEmailListTopicsChangedMessage({
+    previousTopics: ['calendar'],
+    topics: ['calendar', 'fundraising'],
+    unsubscribeToken: 'tok123',
+  });
+  assert.match(message.subject, /preferences were updated/i);
+  assert.match(message.text, /Before: Calendar/);
+  assert.match(message.text, /Now: Calendar and Fundraising/);
+  assert.match(message.text, /STOP/);
+  assert.match(message.html, /tok123/);
+});
+
+test('buildEmailListWelcomeMessage confirms signup and explains unsubscribe', () => {
+  const welcome = buildEmailListWelcomeMessage({
+    topics: ['calendar'],
+    unsubscribeToken: 'abc123',
+  });
+  assert.match(welcome.subject, /Welcome/);
+  assert.match(welcome.text, /subscribed/i);
+  assert.match(welcome.text, /STOP/);
+  assert.match(welcome.text, /email-unsubscribe\?token=abc123/);
+  assert.match(welcome.html, /STOP/);
+  assert.match(welcome.html, /Unsubscribe with one click/);
+});
+
+test('verifyResendWebhookSignature accepts known Svix example', async () => {
+  const secret = 'whsec_plJ3nmyCDGBKInavdOK15jsl';
+  const payload = '{"event_type":"ping","data":{"success":true}}';
+  const id = 'msg_loFOjxBNrRLzqYUf';
+  // Use a fresh timestamp so skew checks pass; recompute signature like production.
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const { createHmac } = await import('node:crypto');
+  const secretBytes = Buffer.from(secret.split('_')[1], 'base64');
+  const signature = createHmac('sha256', secretBytes).update(`${id}.${timestamp}.${payload}`).digest('base64');
+  const ok = await verifyResendWebhookSignature(payload, {
+    'svix-id': id,
+    'svix-timestamp': timestamp,
+    'svix-signature': `v1,${signature}`,
+  }, secret);
+  assert.equal(ok.ok, true);
+  const bad = await verifyResendWebhookSignature(payload, {
+    'svix-id': id,
+    'svix-timestamp': timestamp,
+    'svix-signature': 'v1,not-a-real-signature====',
+  }, secret);
+  assert.equal(bad.ok, false);
+});
+
+test('subscribe deep link and print-only QR assets are wired', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /pathname === '\/subscribe'/);
+  assert.match(workerSrc, /pathname === '\/sponsor'/);
+  assert.match(workerSrc, /pathname === '\/donate'/);
+  assert.doesNotMatch(renderEmailListSignup(), /email-list-signup-qr|subscribe-qr\.png/);
+  assert.match(readFileSync(join(root, 'script.js'), 'utf8'), /shouldAutoOpenSubscribe|subscribe=1/);
+  assert.match(readFileSync(join(root, 'site-content.js'), 'utf8'), /maybeAutoOpenDonate|donate=1/);
+  assert.match(readFileSync(join(root, 'assets/email-list-subscribe-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
+  assert.match(readFileSync(join(root, 'assets/sponsor-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
+  assert.match(readFileSync(join(root, 'assets/donate-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
+  const qrPage = readFileSync(join(root, 'qr.html'), 'utf8');
+  assert.match(qrPage, /Sponsor!/);
+  assert.match(qrPage, /Donate!/);
+  assert.match(qrPage, /Subscribe!/);
+  assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
+  assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
 });
