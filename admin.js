@@ -4589,6 +4589,7 @@ function openCaldevForm(event = null) {
   form.elements.end_date.value = event?.end_date || '';
   form.elements.start_time.value = event?.start_time || '';
   form.elements.end_time.value = event?.end_time || '';
+  if (form.elements.who) form.elements.who.value = event?.who || '';
   form.elements.location.value = event?.location || '';
   form.elements.description.value = event?.description || '';
   form.elements.all_day.checked = event ? Boolean(Number(event.all_day)) : true;
@@ -4679,6 +4680,7 @@ function bindCaldevPanel() {
       end_date: form.elements.end_date.value,
       start_time: form.elements.start_time.value,
       end_time: form.elements.end_time.value,
+      who: form.elements.who?.value || '',
       location: form.elements.location.value,
       description: form.elements.description.value,
       all_day: form.elements.all_day.checked,
