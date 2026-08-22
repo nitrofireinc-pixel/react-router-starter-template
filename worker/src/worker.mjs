@@ -1847,6 +1847,40 @@ export function squareWebPaymentsConfigured(env = {}) {
   return Boolean(squareAccessToken(env) && squareApplicationId(env));
 }
 
+/** When host env has Square secrets (e.g. Pages), copy them into shared D1 for CMS + other hosts. */
+export async function syncSquareSettingsFromEnv(env = {}) {
+  const envToken = squareAccessToken(env);
+  if (!envToken || !env?.DB) return false;
+  const next = {
+    access_token: envToken,
+    application_id: squareApplicationId(env),
+    location_id: String(env.SQUARE_LOCATION_ID || '').trim(),
+    environment: normalizeSquareEnvironment(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production'),
+  };
+  let stored = emptySquareSettings();
+  try {
+    stored = parseSquareSettings(await getSiteContentValue(env, SQUARE_SETTINGS_KEY));
+  } catch {
+    stored = emptySquareSettings();
+  }
+  if (!next.application_id) next.application_id = stored.application_id;
+  if (!next.location_id) next.location_id = stored.location_id;
+  if (
+    stored.access_token === next.access_token
+    && stored.application_id === next.application_id
+    && stored.location_id === next.location_id
+    && stored.environment === next.environment
+  ) {
+    return false;
+  }
+  try {
+    await setSiteContentValue(env, SQUARE_SETTINGS_KEY, JSON.stringify(next));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveSquareRuntimeEnv(env = {}) {
   const envToken = squareAccessToken(env);
   const envAppId = squareApplicationId(env);
@@ -1855,6 +1889,7 @@ export async function resolveSquareRuntimeEnv(env = {}) {
   let stored = emptySquareSettings();
   if (env?.DB) {
     try {
+      if (envToken) await syncSquareSettingsFromEnv(env);
       stored = parseSquareSettings(await getSiteContentValue(env, SQUARE_SETTINGS_KEY));
     } catch {
       stored = emptySquareSettings();
