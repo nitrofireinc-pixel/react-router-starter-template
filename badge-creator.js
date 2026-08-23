@@ -66,6 +66,7 @@
   };
 
   const LINE = scalePx(18);
+  // Header logos + title stack enlargement (requested 25%).
   const HEADER_ENLARGE = 1.25;
 
   const TYPE = {
