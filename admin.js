@@ -738,16 +738,82 @@ function normalizeCssEmphasisMarkup(dirty) {
     });
 }
 
+
+function sanitizeRichHtmlClassList(attrs, allowedNames) {
+  const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  return String(classMatch?.[1] || classMatch?.[2] || '')
+    .split(/\s+/)
+    .filter((name) => allowedNames.includes(name))
+    .join(' ');
+}
+
+function sanitizeRichImageWidthPx(attrs = '') {
+  const widthAttr = String(attrs || '').match(/\bwidth\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const fromAttr = Number.parseFloat(String(widthAttr?.[1] || widthAttr?.[2] || widthAttr?.[3] || ''));
+  const dataMatch = String(attrs || '').match(/\bdata-photo-width\s*=\s*(?:"([^"]*)"|'([^']*)'|([0-9]+))/i);
+  const dataWidth = Number.parseFloat(String(dataMatch?.[1] || dataMatch?.[2] || dataMatch?.[3] || ''));
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  const fromStyle = Number.parseFloat((style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)\s*px\b/i) || [])[1] || '');
+  const width = Number.isFinite(fromStyle) && fromStyle > 0
+    ? fromStyle
+    : (Number.isFinite(dataWidth) && dataWidth > 0
+      ? dataWidth
+      : (Number.isFinite(fromAttr) && fromAttr > 0 ? fromAttr : 0));
+  if (!width) return 0;
+  return Math.max(80, Math.min(1600, Math.round(width)));
+}
+
+function sanitizeRichImageFloatClass(attrs = '') {
+  const className = String(attrs || '');
+  const styleMatch = String(attrs || '').match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const style = String(styleMatch?.[1] || styleMatch?.[2] || '');
+  if (/\bcms-body-photo-block\b/i.test(className) || /(?:^|;)\s*float\s*:\s*none\b/i.test(style)) return 'cms-body-photo-block';
+  if (/\bcms-body-photo-right\b/i.test(className) || /(?:^|;)\s*float\s*:\s*right\b/i.test(style)) return 'cms-body-photo-right';
+  if (/\bcms-body-photo-left\b/i.test(className) || /(?:^|;)\s*float\s*:\s*left\b/i.test(style)) return 'cms-body-photo-left';
+  if (sanitizeRichImageWidthPx(attrs) > 0) return 'cms-body-photo-left';
+  return 'cms-body-photo-block';
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
+  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+  try {
+    if (/^https?:\/\//i.test(src)) {
+      const parsed = new URL(src);
+      if (!parsed.pathname.startsWith('/uploads/')) return '';
+      src = parsed.pathname + (parsed.search || '');
+    }
+  } catch {
+    return '';
+  }
+  if (!src.startsWith('/uploads/')) return '';
+  if (/[<>"\s]/.test(src)) return '';
+  const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
+  const floatClass = sanitizeRichImageFloatClass(attrs);
+  const className = ['cms-body-photo', floatClass].filter(Boolean).join(' ');
+  const widthPx = sanitizeRichImageWidthPx(attrs);
+  const sizeStyle = widthPx ? ` style="width: ${widthPx}px; height: auto;"` : '';
+  const widthData = widthPx ? ` data-photo-width="${widthPx}"` : '';
+  return `<img src="${src.replace(/"/g, '&quot;')}" alt="${alt}" class="${className}"${sizeStyle}${widthData}>`;
+}
+
 function sanitizeRichHtml(dirty) {
   let html = normalizeCssEmphasisMarkup(dirty)
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a']);
+  const allowed = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'ul', 'ol', 'li', 'div', 'h2', 'h3', 'a', 'img']);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
+    if (tag === 'img') {
+      if (match.startsWith('</')) return '';
+      return sanitizeRichImageTag(attrs);
+    }
     if (match.startsWith('</')) return `</${tag}>`;
     if (tag === 'br') return '<br>';
     if (tag === 'a') {
@@ -762,22 +828,25 @@ function sanitizeRichHtml(dirty) {
       const style = sanitizeStyleAttribute(attrs);
       return style ? `<span style="${style}">` : '<span>';
     }
+    if (tag === 'p') {
+      const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']);
+      return className ? `<p class="${className}">` : '<p>';
+    }
     if (tag === 'div') {
-      const classMatch = String(attrs || '').match(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const className = String(classMatch?.[1] || classMatch?.[2] || '')
-        .split(/\s+/)
-        .filter((name) => ['kicker', 'tag', 'draft'].includes(name))
-        .join(' ');
+      const className = sanitizeRichHtmlClassList(attrs, ['kicker', 'tag', 'draft', 'minutes-docx', 'cms-body-photo']);
       return className ? `<div class="${className}">` : '<div>';
     }
     return `<${tag}>`;
   });
   html = html
+    .replace(/<span[^>]*\bdata-cms-caret-mark\b[^>]*>[\s\S]*?<\/span>/gi, '')
+    .replace(/<(p|div)\s+class="cms-body-photo">\s*(<img\b[^>]*>)\s*<\/\1>/gi, '$2')
     .replace(/<span(?:\s[^>]*)?>\s*(<br\s*\/?>)\s*<\/span>/gi, '$1')
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .trim();
   if (!html) return '';
-  if (!/<(?:p|div|h2|h3|ul|ol)[\s>]/i.test(html)) html = `<p>${html}</p>`;
+  // Keep a lone floated <img> unwrapped so it can sit mid-paragraph and wrap text.
+  if (!/<(?:p|div|h2|h3|ul|ol|img)[\s>]/i.test(html)) html = `<p>${html}</p>`;
   return html;
 }
 

@@ -150,6 +150,42 @@ test('sanitizeRichHtml keeps bold/color/size markup and strips unsafe tags', () 
   assert.doesNotMatch(html, /alert\(1\)/);
 });
 
+test('sanitizeRichHtml keeps safe upload images and strips unsafe image sources', () => {
+  const html = sanitizeRichHtml(
+    '<p>Campaign</p><p class="cms-body-photo"><img src="/uploads/fundraiser.jpg" alt="Cookie dough" class="cms-body-photo" onerror="alert(1)"></p><img src="javascript:alert(1)"><img src="https://evil.example/x.jpg">',
+  );
+  assert.match(html, /src="\/uploads\/fundraiser\.jpg"/);
+  assert.match(html, /alt="Cookie dough"/);
+  assert.match(html, /class="cms-body-photo cms-body-photo-block"/);
+  assert.doesNotMatch(html, /onerror/i);
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.doesNotMatch(html, /evil\.example/);
+});
+
+test('sanitizeRichHtml preserves body photo width and float for CMS editing', () => {
+  const html = sanitizeRichHtml(
+    '<p>Hello <img src="/uploads/a.jpg" alt="A" class="cms-body-photo cms-body-photo-left" style="width: 280px; height: auto;"> world</p>',
+  );
+  assert.match(html, /cms-body-photo-left/);
+  assert.match(html, /Hello/);
+  assert.match(html, /world/);
+  assert.match(html, /width: 280px/);
+});
+
+test('generateStructuredPageHtml preserves body photo inserts', () => {
+  const html = generateStructuredPageHtml({
+    layout: 'standard',
+    kicker: 'Support',
+    heading: 'Fundraising',
+    intro: 'Help the band',
+    body_text: '<p>Spring campaign</p><img src="/uploads/spring.jpg" alt="Spring fundraiser" class="cms-body-photo cms-body-photo-left" style="width: 228px; height: auto;" data-photo-width="228">',
+  });
+  assert.match(html, /data-cms-field="body_text"/);
+  assert.match(html, /src="\/uploads\/spring\.jpg"/);
+  assert.match(html, /alt="Spring fundraiser"/);
+  assert.match(html, /cms-body-photo-left/);
+});
+
 test('sanitizeRichHtml converts CSS bold/italic spans into semantic tags', () => {
   const html = sanitizeRichHtml('<p><span style="font-weight: bold">Our Sponsors</span> and <span style="font-style: italic">more</span></p>');
   assert.match(html, /<strong>Our Sponsors<\/strong>/);
