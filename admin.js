@@ -1223,7 +1223,7 @@ function buildEditablePagePreview(payload = {}) {
     const duesCard = duesEnabled
       ? `<article class="card accent-card boosters-dues-card cms-boosters-dues-placeholder" data-boosters-dues><span class="tag">Band dues</span><h3>Pay band dues</h3><p>Pay student band dues securely online with a credit card. Enter the student&rsquo;s full name, the amount, and an email for the receipt.</p><div class="boosters-dues-actions"><button type="button" class="btn primary" data-dues-open disabled title="Pay dues opens on the public page">Pay dues</button></div></article>`
       : '';
-    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings are managed from Calendar Events (Boosters meetings card).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
+    return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings come from Schedule Board Meetings (and legacy Calendar Events marked for Boosters).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
     return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
@@ -2813,7 +2813,7 @@ function renderDashboard() {
     canCreateEvents()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    isSuperAdmin() && ['Schedule Board', 'Edit the lab calendar here with drag-and-drop. Public /caldev is view-only.', 'caldev', 'Lab', 'tab', 'caldev'],
+    isSuperAdmin() && ['Schedule Board', 'Edit the public calendar here with drag-and-drop. Meetings also show on Boosters.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -4589,7 +4589,7 @@ function bindCaldevPanel() {
   window.__caldevPanelBound = true;
   document.querySelector('#caldev-seed')?.addEventListener('click', async () => {
     if (!isSuperAdmin()) return;
-    if (!confirm('Replace Schedule Board events with a fresh copy from the live calendar?')) return;
+    if (!confirm('Replace Schedule Board events with a fresh copy from Calendar Events? Meetings already synced from the board stay linked carefully — this clears the board first.')) return;
     try {
       const result = await jsonFetch('/api/admin/caldev/seed', {
         method: 'POST',

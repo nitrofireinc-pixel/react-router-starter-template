@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="caldev-body">
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap"><a href="calendar.html">Upcoming Events</a><a href="resources.html">Student Resources</a><a href="contact.html">Contact</a></div></div>
 <header class="site-header">
@@ -22,7 +22,8 @@
   <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a></nav>
 </header>
 <main id="main">
-<section class="page-hero" data-cms-layout="calendar"><div class="page-title"><div class="kicker">Schedule</div><h1>Calendar</h1><p>A clean calendar landing page for rehearsals, performances, booster meetings, and trip deadlines.</p></div></section><section class="content soft"><div class="wrap"><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div></div></section>
+<section class="page-hero" data-cms-layout="calendar"><div class="page-title"><div class="kicker">Schedule</div><h1>Calendar</h1><p>Rehearsals, performances, booster meetings, and trip deadlines on one schedule board.</p></div></section>
+<section class="content soft caldev-section"><div class="wrap caldev-wrap"><div id="caldev-app" class="caldev-app" aria-live="polite"></div></div></section>
 <section class="content email-list-signup" data-email-list-signup data-email-list-topics="calendar,fundraising">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
@@ -44,5 +45,6 @@
 </footer>
 <script src="script.js"></script>
 <script src="site-content.js"></script>
+<script src="caldev.js"></script>
 </body>
 </html>

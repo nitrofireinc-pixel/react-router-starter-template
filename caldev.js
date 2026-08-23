@@ -13,7 +13,7 @@
 
   const state = {
     events: [],
-    view: 'rundown',
+    view: 'month',
     cursor: startOfMonth(new Date()),
     selectedId: null,
     loading: true,
@@ -153,7 +153,7 @@
           </div>
         </div>
       </div>
-      <p class="caldev-hint">Public preview — view only. Super Admins edit this board in the CMS Schedule Board tab.</p>
+      <p class="caldev-hint">View only on the public site. Super Admins edit this board in the CMS Schedule Board tab. Meetings also appear on Boosters.</p>
     `;
   }
 

@@ -1,4 +1,4 @@
-/** Schedule Board (caldev) — isolated test calendar, separate from production events. */
+/** Schedule Board (caldev) — public calendar store. Meetings track syncs to Boosters via events.show_on_boosters. */
 
 export const CALDEV_TRACKS = [
   { id: 'game', label: 'Games', color: '#E71321' },
@@ -14,6 +14,7 @@ const MONTH_LABEL_TO_NUM = {
   Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
   Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
 };
+const MONTH_INDEX_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function normalizeCaldevTrack(value = '') {
   const track = String(value || '').trim().toLowerCase();
@@ -36,6 +37,18 @@ export function pad2(n) {
 
 export function isIsoDate(value = '') {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+}
+
+/** Map ISO YYYY-MM-DD → production events date fields. */
+export function isoToProductionDateParts(iso) {
+  if (!isIsoDate(iso)) return null;
+  const [year, month, day] = String(iso).split('-').map(Number);
+  if (!MONTH_INDEX_LABELS[month - 1] || day < 1 || day > 31) return null;
+  return {
+    event_year: year,
+    date_label: MONTH_INDEX_LABELS[month - 1],
+    date_detail: pad2(day),
+  };
 }
 
 export function productionEventToStartDate(event) {
@@ -136,6 +149,7 @@ export function hydrateCaldevRow(row) {
     track: normalizeCaldevTrack(row.track),
     all_day: Number(row.all_day) ? 1 : 0,
     source_event_id: row.source_event_id == null ? null : Number(row.source_event_id),
+    booster_event_id: row.booster_event_id == null ? null : Number(row.booster_event_id),
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || ''),
   };
@@ -168,21 +182,133 @@ export async function ensureCaldevSchema(env) {
       track TEXT NOT NULL DEFAULT 'other',
       all_day INTEGER NOT NULL DEFAULT 1,
       source_event_id INTEGER,
+      booster_event_id INTEGER,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
-  try {
-    await env.DB.prepare("ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''").run();
-  } catch {
-    // Column already exists.
+  for (const sql of [
+    "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
+    'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
+    'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
+  ]) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch {
+      // Column already exists.
+    }
   }
 }
 
 const CALDEV_SELECT = `
   id, title, description, location, who, start_date, end_date, start_time, end_time,
-  track, all_day, source_event_id, created_at, updated_at
+  track, all_day, source_event_id, booster_event_id, created_at, updated_at
 `;
+
+async function setCaldevBoosterEventId(env, caldevId, boosterEventId) {
+  await env.DB.prepare(`
+    UPDATE caldev_events SET booster_event_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).bind(boosterEventId, Number(caldevId)).run();
+}
+
+/**
+ * Remove or unlink the Boosters/events row tied to a Schedule Board event.
+ * Bridge-owned rows (events.caldev_event_id) are deleted; linked production
+ * booster meetings only lose show_on_boosters.
+ */
+export async function clearCaldevBoosterBridge(env, caldevEvent) {
+  const boosterId = Number(caldevEvent?.booster_event_id);
+  const caldevId = Number(caldevEvent?.id);
+  if (!Number.isFinite(boosterId) || boosterId <= 0) {
+    if (Number.isFinite(caldevId) && caldevId > 0) {
+      await setCaldevBoosterEventId(env, caldevId, null);
+    }
+    return;
+  }
+  const row = await env.DB.prepare(
+    'SELECT id, caldev_event_id, show_on_boosters FROM events WHERE id = ?',
+  ).bind(boosterId).first();
+  if (row) {
+    const owned = Number(row.caldev_event_id) === caldevId;
+    if (owned) {
+      await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(boosterId).run();
+    } else if (Number(row.show_on_boosters) === 1) {
+      await env.DB.prepare(
+        'UPDATE events SET show_on_boosters = 0 WHERE id = ?',
+      ).bind(boosterId).run();
+    }
+  }
+  if (Number.isFinite(caldevId) && caldevId > 0) {
+    await setCaldevBoosterEventId(env, caldevId, null);
+  }
+}
+
+/**
+ * Keep Boosters meetings in sync: Meetings track + date → events.show_on_boosters=1.
+ */
+export async function syncCaldevMeetingToBoosters(env, caldevEvent) {
+  if (!caldevEvent?.id) return caldevEvent;
+  const isMeeting = normalizeCaldevTrack(caldevEvent.track) === 'meeting';
+  const parts = isoToProductionDateParts(caldevEvent.start_date);
+  if (!isMeeting || !parts) {
+    await clearCaldevBoosterBridge(env, caldevEvent);
+    return getCaldevEventById(env, caldevEvent.id);
+  }
+
+  const title = String(caldevEvent.title || 'Booster Meeting').slice(0, 200) || 'Booster Meeting';
+  const description = String(caldevEvent.description || title).slice(0, 4000) || title;
+  let boosterId = Number(caldevEvent.booster_event_id);
+  if (!Number.isFinite(boosterId) || boosterId <= 0) {
+    boosterId = null;
+  }
+
+  if (boosterId) {
+    const existing = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(boosterId).first();
+    if (!existing) boosterId = null;
+  }
+
+  if (!boosterId && caldevEvent.source_event_id) {
+    const linked = await env.DB.prepare(
+      'SELECT id FROM events WHERE id = ?',
+    ).bind(Number(caldevEvent.source_event_id)).first();
+    if (linked) boosterId = Number(linked.id);
+  }
+
+  if (boosterId) {
+    await env.DB.prepare(`
+      UPDATE events SET
+        date_label = ?, date_detail = ?, event_year = ?, title = ?, description = ?,
+        show_on_boosters = 1, repeat_enabled = 0, caldev_event_id = ?
+      WHERE id = ?
+    `).bind(
+      parts.date_label,
+      parts.date_detail,
+      parts.event_year,
+      title,
+      description,
+      Number(caldevEvent.id),
+      boosterId,
+    ).run();
+  } else {
+    const result = await env.DB.prepare(`
+      INSERT INTO events (
+        date_label, date_detail, event_year, title, description, sort_order,
+        show_on_boosters, created_by, repeat_enabled, repeat_days, repeat_months, repeat_exceptions, caldev_event_id
+      ) VALUES (?, ?, ?, ?, ?, 0, 1, NULL, 0, '[]', '[]', '[]', ?)
+    `).bind(
+      parts.date_label,
+      parts.date_detail,
+      parts.event_year,
+      title,
+      description,
+      Number(caldevEvent.id),
+    ).run();
+    boosterId = Number(result.meta.last_row_id);
+  }
+
+  await setCaldevBoosterEventId(env, caldevEvent.id, boosterId);
+  return getCaldevEventById(env, caldevEvent.id);
+}
 
 export async function listCaldevEvents(env) {
   const rows = await env.DB.prepare(`
@@ -201,13 +327,14 @@ export async function getCaldevEventById(env, id) {
   return hydrateCaldevRow(row);
 }
 
-export async function insertCaldevEvent(env, payload) {
+export async function insertCaldevEvent(env, payload, options = {}) {
+  const syncBoosters = options.syncBoosters !== false;
   const p = normalizeCaldevPayload(payload);
   const result = await env.DB.prepare(`
     INSERT INTO caldev_events (
       title, description, location, who, start_date, end_date, start_time, end_time,
-      track, all_day, source_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      track, all_day, source_event_id, booster_event_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     p.title,
     p.description,
@@ -220,11 +347,19 @@ export async function insertCaldevEvent(env, payload) {
     p.track,
     p.all_day,
     p.source_event_id,
+    payload?.booster_event_id != null && Number.isFinite(Number(payload.booster_event_id))
+      ? Number(payload.booster_event_id)
+      : null,
   ).run();
-  return getCaldevEventById(env, result.meta.last_row_id);
+  let created = await getCaldevEventById(env, result.meta.last_row_id);
+  if (syncBoosters) {
+    created = await syncCaldevMeetingToBoosters(env, created);
+  }
+  return created;
 }
 
-export async function updateCaldevEvent(env, id, payload, existing) {
+export async function updateCaldevEvent(env, id, payload, existing, options = {}) {
+  const syncBoosters = options.syncBoosters !== false;
   const p = normalizeCaldevPayload(payload, existing);
   await env.DB.prepare(`
     UPDATE caldev_events SET
@@ -246,14 +381,24 @@ export async function updateCaldevEvent(env, id, payload, existing) {
     p.source_event_id,
     Number(id),
   ).run();
-  return getCaldevEventById(env, id);
+  let updated = await getCaldevEventById(env, id);
+  if (syncBoosters) {
+    updated = await syncCaldevMeetingToBoosters(env, updated);
+  }
+  return updated;
 }
 
 export async function deleteCaldevEvent(env, id) {
+  const existing = await getCaldevEventById(env, id);
+  if (existing) await clearCaldevBoosterBridge(env, existing);
   await env.DB.prepare('DELETE FROM caldev_events WHERE id = ?').bind(Number(id)).run();
 }
 
 export async function clearCaldevEvents(env) {
+  const rows = await listCaldevEvents(env);
+  for (const event of rows) {
+    await clearCaldevBoosterBridge(env, event);
+  }
   await env.DB.prepare('DELETE FROM caldev_events').run();
 }
 
@@ -261,6 +406,7 @@ export function productionEventToCaldevPayload(event) {
   const title = stripSimpleHtml(event?.title || 'Untitled');
   const description = stripSimpleHtml(event?.description || '');
   const start_date = productionEventToStartDate(event);
+  const showOnBoosters = Number(event?.show_on_boosters) === 1;
   return {
     title,
     description,
@@ -270,9 +416,10 @@ export function productionEventToCaldevPayload(event) {
     end_date: '',
     start_time: '',
     end_time: '',
-    track: inferCaldevTrack(title, description),
+    track: showOnBoosters ? 'meeting' : inferCaldevTrack(title, description),
     all_day: 1,
     source_event_id: event?.series_id ?? event?.id ?? null,
+    booster_event_id: showOnBoosters ? (event?.series_id ?? event?.id ?? null) : null,
   };
 }
 
@@ -286,7 +433,7 @@ export async function seedCaldevFromProduction(env, { getEvents, expandRecurring
   for (const event of production || []) {
     const payload = productionEventToCaldevPayload(event);
     if (!payload.title) continue;
-    await insertCaldevEvent(env, payload);
+    await insertCaldevEvent(env, payload, { syncBoosters: false });
     inserted += 1;
   }
   return { inserted, source_count: (production || []).length };

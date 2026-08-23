@@ -496,7 +496,7 @@
     const panel = root.querySelector("[data-cms-caldev-editor]");
     const id = panel?.dataset.eventId;
     if (!id) return;
-    if (!window.confirm("Delete this Schedule Board event? The live calendar is not affected.")) return;
+    if (!window.confirm("Delete this Schedule Board event? Meetings will also be removed from Boosters.")) return;
     try {
       await deleteEvent(id);
       events = events.filter((e) => String(e.id) !== String(id));
@@ -668,8 +668,8 @@
     if (!el) return;
     el.hidden = false;
     el.textContent = isCompact()
-      ? "Tap once to select. Double-tap to edit. Press and hold, then drag to reschedule. Use + to add."
-      : "Click once to select. Double-click to edit. Drag to reschedule. Use + to add an event.";
+      ? "Tap once to select. Double-tap to edit. Press and hold, then drag to reschedule. Meetings also show on Boosters."
+      : "Click once to select. Double-click to edit. Drag to reschedule. Who → Meetings also appears on the Boosters page.";
   }
 
   function renderUndated() {

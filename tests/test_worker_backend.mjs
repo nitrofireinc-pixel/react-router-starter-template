@@ -299,16 +299,16 @@ test('serializePagePayload turns structured CMS fields into generated HTML', () 
 
   assert.equal(page.slug, 'calendar');
   assert.equal(page.path, '/calendar.html');
-  assert.match(page.body_html, /data-month-calendar/);
+  assert.match(page.body_html, /id=["']caldev-app["']/);
   assert.doesNotMatch(page.body_html, /data-events/);
   assert.match(page.body_html, /Use the Calendar tab/);
   assert.doesNotMatch(page.body_html, /<textarea/);
 });
 
-test('ensureCalendarMonthMount replaces nested event timelines with a month grid mount', () => {
+test('ensureCalendarMonthMount replaces nested event timelines with the Schedule Board mount', () => {
   const html = '<section class="content soft"><div class="wrap"><div class="timeline" data-events data-limit="5"><article class="event"><div class="datebox">Aug <span>01</span></div><div><h3>Band Camp</h3><p>Details</p></div></article></div></div></section>';
   const next = ensureCalendarMonthMount(html);
-  assert.match(next, /data-month-calendar/);
+  assert.match(next, /id=["']caldev-app["']/);
   assert.doesNotMatch(next, /data-events/);
   assert.doesNotMatch(next, /Band Camp/);
   assert.equal(ensureCalendarMonthMount(next), next);
@@ -527,7 +527,7 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
   const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=caldev-dnd-20260822/);
+  assert.match(next, /efhs-blue-regiment-mark\.png\?v=[^"']+/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
 });
@@ -1606,7 +1606,7 @@ test('push service worker and web app manifest assets exist', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /mobile-nav-tray/);
   assert.match(workerSrc, /menu-button-icon/);
-  assert.match(workerSrc, /caldev-dnd-20260822/);
+  assert.match(workerSrc, /ASSET_VERSION/);
   assert.match(workerSrc, /square-connect-form/);
   assert.match(workerSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(workerSrc, /\/api\/calendar-events/);
@@ -1736,7 +1736,7 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /site-settings-switches/);
   assert.match(workerSrc, /data-password-toggle/);
   assert.match(workerSrc, /admin-password-toggle/);
-  assert.match(workerSrc, /caldev-dnd-20260822/);
+  assert.match(workerSrc, /ASSET_VERSION/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
   assert.match(siteContent, /data-dues-open/);

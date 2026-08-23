@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   compareCaldevEvents,
   inferCaldevTrack,
+  isoToProductionDateParts,
   normalizeCaldevPayload,
   normalizeCaldevTrack,
   productionEventToCaldevPayload,
@@ -79,4 +80,28 @@ test('shiftCaldevEventToDate preserves multi-day span', () => {
   }, '2026-09-10');
   assert.equal(shifted.start_date, '2026-09-10');
   assert.equal(shifted.end_date, '2026-09-12');
+});
+
+test('iso dates map to production event date parts for Boosters bridge', () => {
+  assert.deepEqual(isoToProductionDateParts('2026-10-09'), {
+    event_year: 2026,
+    date_label: 'Oct',
+    date_detail: '09',
+  });
+  assert.equal(isoToProductionDateParts('TBD'), null);
+});
+
+test('production booster meetings seed as Meetings track', () => {
+  const payload = productionEventToCaldevPayload({
+    id: 88,
+    title: 'October Booster Meeting',
+    description: 'Monthly meeting',
+    date_label: 'Oct',
+    date_detail: '14',
+    event_year: 2026,
+    show_on_boosters: 1,
+  });
+  assert.equal(payload.track, 'meeting');
+  assert.equal(payload.booster_event_id, 88);
+  assert.equal(payload.source_event_id, 88);
 });

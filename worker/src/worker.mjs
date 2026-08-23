@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-caldev-years-2026-20260823';
+const ASSET_VERSION = 'caldev-calendar-bridge-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -3762,11 +3762,16 @@ async function getEventById(env, id) {
   return row ? hydrateEventRow(row) : null;
 }
 
-/** Replace the old upcoming-events timeline with a month-calendar mount on the Calendar page. */
+/** Replace legacy event timelines / month grids with the Schedule Board mount on the Calendar page. */
 export function ensureCalendarMonthMount(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
-  const mount = '<div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>';
+  const mount = '<div id="caldev-app" class="caldev-app" aria-live="polite"></div>';
+  if (/id=["']caldev-app["']/i.test(source) || /\bcaldev-app\b/i.test(source)) {
+    return source
+      .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
+      .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, '');
+  }
   const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
   const ranges = [];
   let match;
@@ -3794,12 +3799,16 @@ export function ensureCalendarMonthMount(html) {
     next = `${next.slice(0, start)}${mount}${next.slice(end)}`;
   }
   if (/data-month-calendar/i.test(next)) {
-    // Collapse duplicate mounts if a page was migrated more than once.
+    next = next.replace(
+      /<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi,
+      mount,
+    );
     return next.replace(
-      /(?:<div class="month-calendar" data-month-calendar aria-label="Program calendar"><\/div>\s*){2,}/gi,
+      /(?:<div id="caldev-app" class="caldev-app" aria-live="polite"><\/div>\s*){2,}/gi,
       `${mount}\n`,
     );
   }
+  if (/id=["']caldev-app["']/i.test(next)) return next;
   if (/<div class="wrap">/i.test(next)) {
     return next.replace(
       /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
@@ -7098,7 +7107,7 @@ export function generateStructuredPageHtml(payload = {}) {
   const hero = `<section class="page-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section>`;
 
   if (layout === 'calendar') {
-    return `${hero}<section class="content soft"><div class="wrap"><div data-cms-field="body_text">${body}</div><div class="month-calendar" data-month-calendar aria-label="Program calendar"></div>${callout}</div></section>`;
+    return `${hero}<section class="content soft caldev-section"><div class="wrap caldev-wrap"><div data-cms-field="body_text">${body}</div><div id="caldev-app" class="caldev-app" aria-live="polite"></div>${callout}</div></section>`;
   }
 
   if (layout === 'gallery') {
@@ -9567,7 +9576,7 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({
       events: await listCaldevEvents(env),
       tracks: CALDEV_TRACKS,
-      preview_url: '/caldev',
+      preview_url: '/calendar.html',
     });
   }
   if (url.pathname === '/api/admin/caldev/events' && request.method === 'POST') {
@@ -10003,7 +10012,7 @@ ${previewBanner}
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
-<script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>
+<script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
 
@@ -10219,6 +10228,12 @@ export default {
       const target = new URL('/calendar.html', url.origin);
       target.searchParams.set('subscribe', '1');
       return Response.redirect(target.toString(), 302);
+    }
+    if (url.pathname === '/caldev' || url.pathname === '/caldev/' || url.pathname === '/caldev.html') {
+      return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
+    }
+    if (url.pathname === '/calendar' || url.pathname === '/calendar/') {
+      return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
     }
     if (url.pathname === '/sponsor' || url.pathname === '/sponsor/') {
       return Response.redirect(new URL('/become-a-sponsor.html', url.origin).toString(), 302);
@@ -10649,7 +10664,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Lab</p><h1>Schedule Board</h1><p>Super Admin editing only. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Public <code>/caldev</code> stays view-only. Edits here never change the live Calendar Events list.</p></div><div class="panel-actions"><a class="btn outline" href="/caldev" target="_blank" rel="noopener">Open public view</a><button class="btn outline" type="button" id="caldev-seed">Seed from live calendar</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with Who set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><a class="btn outline" href="/calendar.html" target="_blank" rel="noopener">Open public calendar</a><button class="btn outline" type="button" id="caldev-seed">Seed from Calendar Events</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>

@@ -12,7 +12,7 @@ export const DEFAULT_CMS_PAGES = [
     "slug": "calendar",
     "path": "/calendar.html",
     "title": "Calendar",
-    "body_html": "<section class=\"page-hero\" data-cms-layout=\"calendar\"><div class=\"page-title\"><div class=\"kicker\" data-cms-field=\"kicker\">Schedule</div><h1 data-cms-field=\"heading\">Calendar</h1><p data-cms-field=\"intro\">A clean calendar landing page for rehearsals, performances, booster meetings, and trip deadlines.</p></div></section><section class=\"content soft\"><div class=\"wrap\"><div class=\"month-calendar\" data-month-calendar aria-label=\"Program calendar\"></div></div></section>",
+    "body_html": "<section class=\"page-hero\" data-cms-layout=\"calendar\"><div class=\"page-title\"><div class=\"kicker\" data-cms-field=\"kicker\">Schedule</div><h1 data-cms-field=\"heading\">Calendar</h1><p data-cms-field=\"intro\">Rehearsals, performances, booster meetings, and trip deadlines on one schedule board.</p></div></section><section class=\"content soft\"><div class=\"wrap\"><div id=\"caldev-app\" class=\"caldev-app\" aria-live=\"polite\"></div></div></section>",
     "nav_order": 1,
     "is_home": 0,
     "active": 1
