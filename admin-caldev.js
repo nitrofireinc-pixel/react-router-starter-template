@@ -555,6 +555,9 @@
           <div class="cms-caldev-main" data-cms-caldev-main></div>
         </div>
         <div class="cms-caldev-undated" data-cms-caldev-undated></div>
+        <div class="cms-caldev-finished-bar">
+          <button type="button" class="btn primary" data-cms-caldev-finished>Finished</button>
+        </div>
 
         <div class="cms-caldev-editor-overlay" data-cms-caldev-editor-overlay hidden>
           <button type="button" class="cms-caldev-editor-backdrop" data-cms-caldev-close aria-label="Close editor"></button>

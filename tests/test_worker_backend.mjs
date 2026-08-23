@@ -1925,6 +1925,11 @@ test('buildEmailListUpdateMessage includes reply-stop guidance', () => {
   assert.equal(EMAIL_LIST_REPLY_TO, 'list@updates.efhsband.org');
   const fundraising = buildEmailListUpdateMessage({ topic: 'fundraising', pageTitle: 'Spirit Night' });
   assert.match(fundraising.subject, /Fundraising update/);
+  const finished = buildEmailListUpdateMessage({ topic: 'calendar', action: 'finished' });
+  assert.match(finished.subject, /Band calendar updated/);
+  assert.match(finished.text, /calendar\.html/);
+  assert.match(finished.html, /STOP/);
+  assert.doesNotMatch(finished.html, /fundraising/);
 });
 
 test('email list topic helpers label and compare subscriptions', () => {

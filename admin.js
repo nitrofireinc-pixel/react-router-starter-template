@@ -2229,7 +2229,10 @@ function showAllowedPanels() {
   };
   let manageVisible = false;
   document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
-    const allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab];
+    let allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab];
+    // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
+    if (button.dataset.tab === 'events') allowed = false;
+    if (button.dataset.tab === 'caldev') allowed = isSuperAdmin();
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
@@ -2272,6 +2275,11 @@ function showAllowedPanels() {
   if (editCalendarPage) {
     editCalendarPage.hidden = !canEditPage('calendar');
     editCalendarPage.onclick = () => editPage('calendar');
+  }
+  const editCalendarPageCaldev = document.querySelector('#edit-calendar-page-caldev');
+  if (editCalendarPageCaldev) {
+    editCalendarPageCaldev.hidden = !isSuperAdmin() || !canEditPage('calendar');
+    editCalendarPageCaldev.onclick = () => editPage('calendar');
   }
   const editDirectorsPage = document.querySelector('#edit-directors-page');
   if (editDirectorsPage) {
@@ -2810,10 +2818,10 @@ function renderDashboard() {
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canCreateEvents()
+    canCreateEvents() && !isSuperAdmin()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
-      : ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    isSuperAdmin() && ['Schedule Board', 'Edit the public calendar here with drag-and-drop. Meetings also show on Boosters.', 'caldev', 'Program', 'tab', 'caldev'],
+      : !isSuperAdmin() && canViewEvents() && ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
+    isSuperAdmin() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -4587,6 +4595,38 @@ async function loadCaldevEvents() {
 function bindCaldevPanel() {
   if (window.__caldevPanelBound) return;
   window.__caldevPanelBound = true;
+
+  async function notifyCalendarFinished() {
+    if (!isSuperAdmin()) return;
+    if (!confirm('Email calendar subscribers that the schedule board is finished/updated? Fundraising subscribers are not included.')) return;
+    try {
+      const result = await jsonFetch('/api/admin/caldev/notify-finished', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      const email = result?.email_list || {};
+      if (email.skipped) {
+        alert(email.detail || 'No calendar subscribers to email (or email sending is not configured).');
+        return;
+      }
+      if (email.ok) {
+        alert(`Finished — emailed ${email.sent || 0} calendar subscriber${email.sent === 1 ? '' : 's'}.`);
+        return;
+      }
+      alert(email.detail || 'Could not email calendar subscribers.');
+    } catch (error) {
+      alert(error.message || 'Could not email calendar subscribers.');
+    }
+  }
+
+  document.querySelector('#caldev-finished-top')?.addEventListener('click', notifyCalendarFinished);
+  document.querySelector('#cms-caldev-board')?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-cms-caldev-finished]')) {
+      event.preventDefault();
+      notifyCalendarFinished();
+    }
+  });
+
   document.querySelector('#caldev-seed')?.addEventListener('click', async () => {
     if (!isSuperAdmin()) return;
     if (!confirm('Replace Schedule Board events with a fresh copy from Calendar Events? Meetings already synced from the board stay linked carefully — this clears the board first.')) return;
