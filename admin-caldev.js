@@ -130,10 +130,8 @@
     return filteredEvents().filter((ev) => !eventDayKey(ev));
   }
   function yearOptions() {
-    const nowY = new Date().getFullYear();
-    const cursorY = cursor.getFullYear();
-    const start = Math.min(nowY - 3, cursorY);
-    const end = Math.max(nowY + 2, cursorY);
+    const start = 2026;
+    const end = start + 10;
     const years = [];
     for (let y = start; y <= end; y += 1) years.push(y);
     return years;
