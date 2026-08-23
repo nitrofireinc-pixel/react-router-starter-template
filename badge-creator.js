@@ -462,11 +462,12 @@
     ctx.fillStyle = COLORS.navy;
     const roleLines = wrapText(ctx, role, textMax);
     const roleLineGap = Math.round(TYPE.role * 1.12);
-    roleLines.forEach((line) => {
+    roleLines.forEach((line, index) => {
       ctx.fillText(line, centerX, textY);
-      textY += roleLineGap;
+      if (index < roleLines.length - 1) textY += roleLineGap;
     });
-    textY += scalePx(2);
+    // Keep the red separator snug under the role (textBaseline is middle).
+    textY += Math.round(TYPE.role * 0.55) + scalePx(4);
     ctx.fillStyle = COLORS.red;
     ctx.fillRect(centerX - scalePx(56), textY, scalePx(112), scalePx(5));
     textY += labelGap;
