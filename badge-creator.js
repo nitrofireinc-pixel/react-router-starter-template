@@ -71,12 +71,13 @@
     titleTop: typePx(28),
     titleBottom: typePx(22),
     official: typePx(13),
-    label: typePx(11),
-    role: typePx(30),
-    name: typePx(24),
-    years: typePx(18),
-    org: typePx(15),
-    footer: typePx(12),
+    // Identity block below the portrait — kept larger for print readability.
+    label: typePx(15),
+    role: typePx(38),
+    name: typePx(32),
+    years: typePx(24),
+    org: typePx(20),
+    footer: typePx(16),
   };
 
   const BADGE_ROLES = [
@@ -427,60 +428,64 @@
     }
 
     // Identity block
-    let textY = profileCy + profileSize / 2 + scalePx(42);
-    const textMax = cardW - scalePx(48);
+    let textY = profileCy + profileSize / 2 + scalePx(34);
+    const textMax = cardW - scalePx(40);
+    const labelGap = Math.round(TYPE.label * 1.45);
 
     ctx.textAlign = 'center';
     ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ROLE', centerX, textY);
-    textY += scalePx(26);
+    textY += labelGap;
 
     ctx.font = typeFont('bold', TYPE.role);
     ctx.fillStyle = COLORS.navy;
     const roleLines = wrapText(ctx, role, textMax);
-    const roleLineGap = Math.round(TYPE.role * 1.15);
+    const roleLineGap = Math.round(TYPE.role * 1.12);
     roleLines.forEach((line) => {
       ctx.fillText(line, centerX, textY);
       textY += roleLineGap;
     });
-    textY += scalePx(4);
+    textY += scalePx(2);
     ctx.fillStyle = COLORS.red;
-    ctx.fillRect(centerX - scalePx(48), textY, scalePx(96), scalePx(4));
-    textY += scalePx(26);
+    ctx.fillRect(centerX - scalePx(56), textY, scalePx(112), scalePx(5));
+    textY += labelGap;
 
     ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('NAME', centerX, textY);
-    textY += scalePx(26);
+    textY += labelGap;
     ctx.font = typeFont('bold', TYPE.name);
     ctx.fillStyle = COLORS.ink;
-    const nameLineGap = Math.round(TYPE.name * 1.18);
+    const nameLineGap = Math.round(TYPE.name * 1.14);
     wrapText(ctx, name, textMax).forEach((line) => {
       ctx.fillText(line, centerX, textY);
       textY += nameLineGap;
     });
-    textY += scalePx(10);
+    textY += scalePx(8);
 
     ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ACTIVE YEARS', centerX, textY);
-    textY += scalePx(24);
+    textY += Math.round(TYPE.label * 1.35);
     ctx.font = typeFont('bold', TYPE.years);
     ctx.fillStyle = COLORS.navy;
     ctx.fillText(schoolYear, centerX, textY);
-    textY += scalePx(32);
+    textY += Math.round(TYPE.years * 1.25);
 
     ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ORGANIZATION', centerX, textY);
-    textY += scalePx(22);
+    textY += Math.round(TYPE.label * 1.3);
     ctx.font = typeFont('bold', TYPE.org);
     ctx.fillStyle = COLORS.muted;
-    ctx.fillText('East Forsyth Band Boosters', centerX, textY);
+    wrapText(ctx, 'East Forsyth Band Boosters', textMax).forEach((line) => {
+      ctx.fillText(line, centerX, textY);
+      textY += Math.round(TYPE.org * 1.12);
+    });
 
     // Footer bar
-    const footerH = scalePx(56);
+    const footerH = scalePx(62);
     const footerY = cardY + cardH - footerH;
     ctx.save();
     roundedRectPath(ctx, cardX, footerY, cardW, footerH + BADGE.cornerRadius, BADGE.cornerRadius);
