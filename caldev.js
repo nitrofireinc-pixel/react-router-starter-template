@@ -74,16 +74,6 @@
     return isoDate(new Date());
   }
 
-  function eventEndIso(event) {
-    if (event.end_date && event.end_date >= event.start_date) return event.end_date;
-    return event.start_date || '';
-  }
-
-  function isPastEvent(event) {
-    const end = eventEndIso(event);
-    return Boolean(end) && end < todayIso();
-  }
-
   function eventsOnDate(iso) {
     return visibleEvents().filter((event) => {
       if (!event.start_date) return false;
