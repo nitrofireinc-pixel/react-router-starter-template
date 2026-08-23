@@ -1195,7 +1195,7 @@ function buildEditablePagePreview(payload = {}) {
   const heroClass = (layout === 'sponsors' || layout === 'become-sponsor') ? 'page-hero sponsor-hero' : 'page-hero';
   const hero = `<section class="${heroClass}" data-cms-layout="${escapeAttr(layout)}"><div class="page-title">${editableField('kicker', 'div', kicker, 'Small label', 'kicker')}${editableField('heading', 'h1', heading, 'Page heading')}${editableField('intro', 'p', intro, 'Short intro sentence')}</div></section>`;
   const eventsPlaceholder = layout === 'calendar'
-    ? '<div class="month-calendar cms-events-placeholder" data-month-calendar aria-label="Program calendar"><div class="month-calendar-toolbar"><span class="month-calendar-title">Month view</span></div><p class="draft">Public visitors see a month grid here. Manage real calendar items in the Calendar Events tab.</p></div>'
+    ? '<div id="caldev-app" class="caldev-app cms-events-placeholder" aria-live="polite"><p class="draft">Public visitors see the Schedule Board here. Manage events in the Schedule Board tab. Meetings also appear on Boosters.</p></div>'
     : '';
   const sponsorsCallout = showCallout
     ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
