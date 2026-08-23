@@ -370,13 +370,13 @@
 
     const schoolSize = fitImage(
       schoolLogo,
-      Math.round(scalePx(132) * HEADER_ENLARGE * 0.8),
-      Math.round(scalePx(96) * HEADER_ENLARGE * 0.8),
+      Math.round(scalePx(132) * HEADER_ENLARGE * 0.72),
+      Math.round(scalePx(96) * HEADER_ENLARGE * 0.72),
     );
     const markSize = fitImage(
       regimentMark,
-      Math.round(scalePx(108) * HEADER_ENLARGE),
-      Math.round(scalePx(108) * HEADER_ENLARGE),
+      Math.round(scalePx(108) * HEADER_ENLARGE * 0.9),
+      Math.round(scalePx(108) * HEADER_ENLARGE * 0.9),
     );
     const titleGap = Math.round(scalePx(4) * HEADER_ENLARGE);
 
