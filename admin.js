@@ -2100,6 +2100,7 @@ function pageShortcutLabel(page) {
 }
 
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
+const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'calendar']);
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -2119,7 +2120,7 @@ function syncPageSettingsAccess() {
 function editablePages() {
   return (state.pages || [])
     .filter((page) => {
-      if (SPONSOR_PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
+      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
       if (page.slug === 'boosters') return canEditBoostersPage();
       return canManageSitePages() && canEditPage(page);
     })
@@ -2273,13 +2274,12 @@ function showAllowedPanels() {
   syncPageSettingsAccess();
   const editCalendarPage = document.querySelector('#edit-calendar-page');
   if (editCalendarPage) {
-    editCalendarPage.hidden = !canEditPage('calendar');
-    editCalendarPage.onclick = () => editPage('calendar');
+    editCalendarPage.hidden = true;
+    editCalendarPage.onclick = null;
   }
   const editCalendarPageCaldev = document.querySelector('#edit-calendar-page-caldev');
   if (editCalendarPageCaldev) {
-    editCalendarPageCaldev.hidden = !isSuperAdmin() || !canEditPage('calendar');
-    editCalendarPageCaldev.onclick = () => editPage('calendar');
+    editCalendarPageCaldev.remove();
   }
   const editDirectorsPage = document.querySelector('#edit-directors-page');
   if (editDirectorsPage) {
@@ -4624,23 +4624,6 @@ function bindCaldevPanel() {
     if (event.target.closest('[data-cms-caldev-finished]')) {
       event.preventDefault();
       notifyCalendarFinished();
-    }
-  });
-
-  document.querySelector('#caldev-seed')?.addEventListener('click', async () => {
-    if (!isSuperAdmin()) return;
-    if (!confirm('Replace Schedule Board events with a fresh copy from Calendar Events? Meetings already synced from the board stay linked carefully — this clears the board first.')) return;
-    try {
-      const result = await jsonFetch('/api/admin/caldev/seed', {
-        method: 'POST',
-        body: JSON.stringify({ clear: true }),
-      });
-      state.caldevEvents = Array.isArray(result?.events) ? result.events : [];
-      if (window.CaldevCmsBoard?.reload) await window.CaldevCmsBoard.reload();
-      else await mountCaldevCmsBoard();
-      alert(`Seeded ${result?.inserted ?? 0} board event(s) from the live calendar.`);
-    } catch (error) {
-      alert(error.message || 'Could not seed Schedule Board.');
     }
   });
 }
