@@ -1614,6 +1614,9 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(workerSrc, /menu-button-icon/);
   assert.match(workerSrc, /ASSET_VERSION/);
   assert.match(workerSrc, /square-connect-form/);
+  assert.match(workerSrc, /tab-site[\s\S]*square-connect-form/);
+  assert.doesNotMatch(workerSrc, /How this works/);
+  assert.doesNotMatch(workerSrc, /checkout-help-card/);
   assert.match(workerSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(workerSrc, /\/api\/calendar-events/);
   assert.match(workerSrc, /ensureCalendarMonthMount/);

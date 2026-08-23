@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-caldev-president-vp-20260823';
+const ASSET_VERSION = 'checkout-square-site-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -10347,24 +10347,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-checkout" class="cms-panel checkout-panel" hidden><div class="panel-head"><div><p class="kicker">Payments</p><h1>Checkout</h1><p>Manually charge a card through Square for an item or amount. Available to Treasurer, President, and Vice President.</p></div></div>
-<form id="square-connect-form" class="admin-card stack square-connect-card" hidden>
-  <div class="utility-links-head">
-    <h2>Connect Square</h2>
-    <p class="muted">efhsband.org and the Pages preview can have different Cloudflare secrets. Paste the production Square access token and application ID here so checkout works on every host. Cloudflare secrets still take priority when present.</p>
-  </div>
-  <p class="notice" id="square-connect-source">Checking Square connection…</p>
-  <div class="form-grid">
-    <label class="full">Access token<input name="square_access_token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste from Square Developer → Credentials"></label>
-    <label class="full">Application ID<input name="square_application_id" autocomplete="off" spellcheck="false" placeholder="sq0idp-…"></label>
-    <label>Location ID <span class="muted">(optional)</span><input name="square_location_id" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect"></label>
-    <label>Environment<select name="square_environment"><option value="production" selected>Production</option><option value="sandbox">Sandbox</option></select></label>
-  </div>
-  <div class="page-settings-actions">
-    <button class="btn primary" type="submit">Save and verify Square</button>
-    <button class="btn outline" type="button" id="square-connect-clear" hidden>Clear saved credentials</button>
-  </div>
-  <p class="status" id="square-connect-status"></p>
-</form>
 <div class="checkout-layout">
   <form id="checkout-form" class="admin-card stack checkout-form-card" novalidate>
     <h2>Charge a card</h2>
@@ -10379,16 +10361,6 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <p class="status" id="checkout-status" aria-live="polite">Loading Square…</p>
     <button class="btn primary checkout-charge-btn" type="submit" id="checkout-submit" disabled>Charge card</button>
   </form>
-  <div class="admin-card stack checkout-help-card">
-    <h2>How this works</h2>
-    <p class="muted">Use this when you need to take a payment in person or by phone. Successful charges are recorded in the Treasurer ledger as fundraiser income.</p>
-    <ul class="checkout-help-list">
-      <li>Requires Square card checkout to be connected (Cloudflare secrets or Super Admin connect form)</li>
-      <li>User name or entity and description of transaction are required</li>
-      <li>Minimum charge is $1.00</li>
-      <li>Card data stays with Square — it is never stored in the CMS</li>
-    </ul>
-  </div>
 </div>
 </section>
 <section id="tab-site" class="cms-panel"><div class="panel-head"><div><p class="kicker">Site Settings</p><h1>Home, title, logo, footer, and top links</h1></div></div><div class="editor-layout"><form id="utility-links-form" class="admin-card stack utility-links-card">
@@ -10410,6 +10382,24 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <button class="btn primary" type="button" data-open-social-tab>Open Social Media</button>
   </div>
 </div>
+<form id="square-connect-form" class="admin-card stack square-connect-card" hidden>
+  <div class="utility-links-head">
+    <h2>Connect Square</h2>
+    <p class="muted">Super Admin only. Paste the production Square access token and application ID so Checkout, sponsor signup, and dues payments work on every host. Cloudflare secrets still take priority when present.</p>
+  </div>
+  <p class="notice" id="square-connect-source">Checking Square connection…</p>
+  <div class="form-grid">
+    <label class="full">Access token<input name="square_access_token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste from Square Developer → Credentials"></label>
+    <label class="full">Application ID<input name="square_application_id" autocomplete="off" spellcheck="false" placeholder="sq0idp-…"></label>
+    <label>Location ID <span class="muted">(optional)</span><input name="square_location_id" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect"></label>
+    <label>Environment<select name="square_environment"><option value="production" selected>Production</option><option value="sandbox">Sandbox</option></select></label>
+  </div>
+  <div class="page-settings-actions">
+    <button class="btn primary" type="submit">Save and verify Square</button>
+    <button class="btn outline" type="button" id="square-connect-clear" hidden>Clear saved credentials</button>
+  </div>
+  <p class="status" id="square-connect-status"></p>
+</form>
 <form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>

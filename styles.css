@@ -3873,9 +3873,10 @@ body.minutes-frame-open{overflow:hidden}
 }
 .checkout-layout{
   display:grid;
-  grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);
+  grid-template-columns:minmax(0,1fr);
   gap:18px;
   align-items:start;
+  max-width:640px;
 }
 .checkout-form-card .checkout-charge-btn{
   background:linear-gradient(160deg,#0f7a45,#14945a);
@@ -3888,14 +3889,7 @@ body.minutes-frame-open{overflow:hidden}
   background:#f7fafc;
 }
 .checkout-card-host{min-height:90px}
-.checkout-help-list{
-  margin:0;
-  padding-left:1.2rem;
-  color:#5b6f86;
-  display:grid;
-  gap:8px;
-}
-.square-connect-card{margin-bottom:18px}
+.square-connect-card{margin-bottom:0}
 .square-connect-card .notice.ok{
   background:#e8f7ee;
   border-color:#9ad4b2;
