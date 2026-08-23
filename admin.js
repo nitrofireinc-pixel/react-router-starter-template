@@ -379,6 +379,10 @@ function canAccessLedger() {
   return hasPermission('treasurer') || hasPermission('president');
 }
 
+function canAccessScheduleBoard() {
+  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canManageAllEvents() {
   return isSuperAdmin() || hasPermission('events:manage');
 }
@@ -2014,7 +2018,7 @@ function activateTab(name) {
     if (name === 'security-log' && !isSuperAdmin()) {
     return Promise.resolve(false);
   }
-  if (name === 'caldev' && !isSuperAdmin()) {
+  if (name === 'caldev' && !canAccessScheduleBoard()) {
     return Promise.resolve(false);
   }
   const pagesPanel = document.querySelector('#tab-pages');
@@ -2224,7 +2228,7 @@ function showAllowedPanels() {
     social: hasPermission('site'),
     users: hasPermission('users'),
     'security-log': isSuperAdmin(),
-    caldev: isSuperAdmin(),
+    caldev: canAccessScheduleBoard(),
     events: canViewEvents(),
     photos: hasPermission('photos'),
   };
@@ -2233,7 +2237,7 @@ function showAllowedPanels() {
     let allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab];
     // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
     if (button.dataset.tab === 'events') allowed = false;
-    if (button.dataset.tab === 'caldev') allowed = isSuperAdmin();
+    if (button.dataset.tab === 'caldev') allowed = canAccessScheduleBoard();
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
@@ -2821,7 +2825,7 @@ function renderDashboard() {
     canCreateEvents() && !isSuperAdmin()
       ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
       : !isSuperAdmin() && canViewEvents() && ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    isSuperAdmin() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab'],
+    canAccessScheduleBoard() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -4579,7 +4583,7 @@ async function loadEvents() {
 
 async function mountCaldevCmsBoard() {
   const mountEl = document.querySelector('#cms-caldev-board');
-  if (!mountEl || !isSuperAdmin()) return;
+  if (!mountEl || !canAccessScheduleBoard()) return;
   if (window.CaldevCmsBoard?.mount) {
     await window.CaldevCmsBoard.mount(mountEl);
     return;
@@ -4588,7 +4592,7 @@ async function mountCaldevCmsBoard() {
 }
 
 async function loadCaldevEvents() {
-  if (!isSuperAdmin()) return;
+  if (!canAccessScheduleBoard()) return;
   await mountCaldevCmsBoard();
 }
 
@@ -4597,7 +4601,7 @@ function bindCaldevPanel() {
   window.__caldevPanelBound = true;
 
   async function notifyCalendarFinished() {
-    if (!isSuperAdmin()) return;
+    if (!canAccessScheduleBoard()) return;
     if (!confirm('Email calendar subscribers that the schedule board is finished/updated? Fundraising subscribers are not included.')) return;
     try {
       const result = await jsonFetch('/api/admin/caldev/notify-finished', {

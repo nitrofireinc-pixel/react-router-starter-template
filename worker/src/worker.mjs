@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-caldev-cleanup-relics-20260823';
+const ASSET_VERSION = 'cms-caldev-president-vp-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1243,6 +1243,15 @@ export function canAccessCheckout(user) {
 /** Treasurer ledger is limited to treasurer/president (not vice-president). */
 export function canAccessTreasurerLedger(user) {
   return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
+}
+
+/** Schedule Board: Super Admin, President, or Vice President. */
+export function canAccessScheduleBoard(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
 }
 
 export function canManageAllEvents(user) {
@@ -6806,6 +6815,18 @@ export async function requireSuperAdmin(request, env) {
   return auth;
 }
 
+export async function requireScheduleBoardAccess(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  if (!canAccessScheduleBoard(auth.user)) {
+    return {
+      response: jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403),
+      user: auth.user,
+    };
+  }
+  return auth;
+}
+
 export async function requireSecurityLogAccess(request, env) {
   const auth = await requireLogin(request, env);
   if (auth.response) return auth;
@@ -9583,7 +9604,7 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(await getEvents(env, { upcomingOnly: false, includeCreators: true, expandRepeats: false }));
   }
   if (url.pathname === '/api/admin/caldev/events' && request.method === 'GET') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
     await ensureCaldevSchema(env);
     return jsonResponse({
@@ -9593,7 +9614,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/caldev/events' && request.method === 'POST') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
     await ensureCaldevSchema(env);
     const payload = await request.json().catch(() => ({}));
@@ -9603,7 +9624,7 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(created, 201);
   }
   if (url.pathname === '/api/admin/caldev/seed' && request.method === 'POST') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
     await ensureCaldevSchema(env);
     const payload = await request.json().catch(() => ({}));
@@ -9618,7 +9639,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/caldev/notify-finished' && request.method === 'POST') {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
     let email_list = null;
     try {
@@ -9630,7 +9651,7 @@ async function routeApi(request, env, url, ctx = null) {
   }
   const caldevMatch = url.pathname.match(/^\/api\/admin\/caldev\/events\/(\d+)$/);
   if (caldevMatch && ['PUT', 'DELETE'].includes(request.method)) {
-    const auth = await requireSuperAdmin(request, env);
+    const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
     await ensureCaldevSchema(env);
     const id = Number(caldevMatch[1]);
@@ -10688,7 +10709,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with Who set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>President, Vice President, and Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with Who set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
