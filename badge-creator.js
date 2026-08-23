@@ -93,6 +93,19 @@
     'Committee Member',
   ];
 
+  const DIRECTOR_ROLES = ['Director', 'Assistant Director'];
+  const OFFICER_ROLES = ['President', 'Vice-President', 'Secretary', 'Treasurer'];
+
+  function roleBorderColor(role) {
+    if (role === 'Committee Member') return COLORS.red;
+    if (OFFICER_ROLES.includes(role)) return COLORS.silver;
+    return COLORS.gold;
+  }
+
+  function showsOrganization(role) {
+    return !DIRECTOR_ROLES.includes(role);
+  }
+
   const imageCache = new Map();
 
   function schoolYearOptions(count = 10, now = new Date()) {
@@ -213,6 +226,8 @@
 
   function getProfileLayout(role = 'Committee Member') {
     const isCommitteeMember = role === 'Committee Member';
+    const isOfficer = OFFICER_ROLES.includes(role);
+    const isDirector = DIRECTOR_ROLES.includes(role);
     const margin = BADGE.safeMargin;
     const inset = BADGE.outerBorder;
     const contentX = margin;
@@ -227,7 +242,10 @@
     const profileCy = cardY + headerH + scalePx(50) + profileSize / 2;
     return {
       isCommitteeMember,
-      borderColor: isCommitteeMember ? COLORS.red : COLORS.gold,
+      isOfficer,
+      isDirector,
+      showOrganization: showsOrganization(role),
+      borderColor: roleBorderColor(role),
       margin,
       contentX,
       contentY,
@@ -494,16 +512,18 @@
     ctx.fillText(schoolYear, centerX, textY);
     textY += Math.round(TYPE.years * 1.25);
 
-    ctx.font = typeFont('bold', TYPE.label);
-    ctx.fillStyle = COLORS.muted;
-    ctx.fillText('ORGANIZATION', centerX, textY);
-    textY += Math.round(TYPE.label * 1.3);
-    ctx.font = typeFont('bold', TYPE.org);
-    ctx.fillStyle = COLORS.muted;
-    wrapText(ctx, 'East Forsyth Band Boosters', textMax).forEach((line) => {
-      ctx.fillText(line, centerX, textY);
-      textY += Math.round(TYPE.org * 1.12);
-    });
+    if (layout.showOrganization) {
+      ctx.font = typeFont('bold', TYPE.label);
+      ctx.fillStyle = COLORS.muted;
+      ctx.fillText('ORGANIZATION', centerX, textY);
+      textY += Math.round(TYPE.label * 1.3);
+      ctx.font = typeFont('bold', TYPE.org);
+      ctx.fillStyle = COLORS.muted;
+      wrapText(ctx, 'East Forsyth Band Boosters', textMax).forEach((line) => {
+        ctx.fillText(line, centerX, textY);
+        textY += Math.round(TYPE.org * 1.12);
+      });
+    }
 
     // Footer bar
     const footerH = scalePx(62);
@@ -613,6 +633,10 @@
     COLORS,
     TYPE,
     BADGE_ROLES,
+    DIRECTOR_ROLES,
+    OFFICER_ROLES,
+    roleBorderColor,
+    showsOrganization,
     schoolYearOptions,
     loadImage,
     preloadBrandAssets,

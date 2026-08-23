@@ -5171,6 +5171,10 @@ body.cms-caldev-editor-open{overflow:hidden}
   background:linear-gradient(160deg,#fff8db,#f8fafc 55%,#f7f3e4);
   border-color:#ead889;
 }
+.badge-creator-preview-wrap.is-officer-border{
+  background:linear-gradient(160deg,#eceef1,#f8fafc 55%,#e8eaed);
+  border-color:#c0bfc4;
+}
 .badge-creator-list-card h2{margin:0}
 .badge-creator-row{
   display:grid;

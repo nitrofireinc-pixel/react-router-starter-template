@@ -183,9 +183,10 @@
       }
       const wrap = canvas.closest('.badge-creator-preview-wrap');
       if (wrap) {
-        const isCommittee = values.role === 'Committee Member';
-        wrap.classList.toggle('is-committee-member', isCommittee);
-        wrap.classList.toggle('is-gold-border', !isCommittee);
+        const role = values.role;
+        wrap.classList.toggle('is-committee-member', role === 'Committee Member');
+        wrap.classList.toggle('is-officer-border', BadgeCreator.OFFICER_ROLES.includes(role));
+        wrap.classList.toggle('is-gold-border', BadgeCreator.DIRECTOR_ROLES.includes(role));
         wrap.classList.toggle('has-photo', hasAdjustablePhoto());
       }
       syncPhotoHandle();
