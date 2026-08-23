@@ -4627,15 +4627,21 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   background:#102b4a;color:#fff;text-align:left;font:inherit;cursor:pointer;
 }
 .caldev-week-event small{opacity:.85;font-weight:700}
-.caldev-rundown{display:grid;gap:10px}
-.caldev-rundown-day h3{margin:0 0 4px;color:var(--navy);font-size:1.05rem}
-.caldev-rundown-day ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.caldev-rundown{display:grid;gap:6px}
+.caldev-rundown-day{
+  margin:0;
+  padding:0;
+}
+.caldev-rundown-day h3{margin:0 0 2px;color:var(--navy);font-size:1.05rem;line-height:1.25}
+.caldev-rundown-day ul{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.caldev-rundown-day li{margin:0;padding:0}
 .caldev-rundown-item{
-  width:100%;display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border:1px solid #e1e8f1;
-  border-radius:12px;background:#fff;text-align:left;font:inherit;cursor:pointer;
+  width:100%;display:flex;gap:8px;align-items:flex-start;padding:6px 10px;border:1px solid #e1e8f1;
+  border-radius:10px;background:#fff;text-align:left;font:inherit;cursor:pointer;
 }
 .caldev-rundown-item:hover{border-color:#b7c8dc}
-.caldev-rundown-copy{display:grid;gap:3px}
+.caldev-rundown-copy{display:grid;gap:1px;line-height:1.3}
+.caldev-rundown-copy strong{line-height:1.25}
 .caldev-rundown-copy small,.caldev-rundown-copy span{color:#5b6472}
 .caldev-track-pill{
   display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:var(--caldev-track);
