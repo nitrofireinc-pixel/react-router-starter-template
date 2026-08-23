@@ -10,6 +10,8 @@
   const BADGE_SCALE = 1.25;
   // Type grows a bit more than the card so titles/names stay readable in print.
   const TYPE_SCALE = BADGE_SCALE * 1.2;
+  // Blank outer margin so edge-cropping printers do not clip badge artwork.
+  const SAFE_MARGIN_IN = 0.25;
 
   function scalePx(value) {
     return Math.round(value * BADGE_SCALE);
@@ -19,13 +21,26 @@
     return Math.round(value * TYPE_SCALE);
   }
 
+  const contentWidthIn = 2.125 * BADGE_SCALE;
+  const contentHeightIn = 3.375 * BADGE_SCALE;
+  const contentWidth = Math.round(contentWidthIn * INCH);
+  const contentHeight = Math.round(contentHeightIn * INCH);
+  const safeMargin = Math.round(SAFE_MARGIN_IN * INCH);
+
   const BADGE = {
     scale: BADGE_SCALE,
     typeScale: TYPE_SCALE,
-    widthIn: 2.125 * BADGE_SCALE,
-    heightIn: 3.375 * BADGE_SCALE,
-    width: Math.round(2.125 * BADGE_SCALE * INCH), // ~797
-    height: Math.round(3.375 * BADGE_SCALE * INCH), // ~1264
+    safeMarginIn: SAFE_MARGIN_IN,
+    safeMargin,
+    contentWidthIn,
+    contentHeightIn,
+    contentWidth,
+    contentHeight,
+    // Full printable canvas includes the safe margin on every side.
+    widthIn: contentWidthIn + (SAFE_MARGIN_IN * 2),
+    heightIn: contentHeightIn + (SAFE_MARGIN_IN * 2),
+    width: contentWidth + (safeMargin * 2),
+    height: contentHeight + (safeMargin * 2),
     cornerRadius: Math.round(3 * MM * BADGE_SCALE),
     slot: {
       width: Math.round(14 * MM * BADGE_SCALE),
@@ -194,17 +209,23 @@
 
   function getProfileLayout(role = 'Committee Member') {
     const isCommitteeMember = role === 'Committee Member';
+    const margin = BADGE.safeMargin;
     const inset = isCommitteeMember ? BADGE.committeeBorder : 0;
-    const cardX = inset;
-    const cardY = inset;
-    const cardW = BADGE.width - inset * 2;
-    const cardH = BADGE.height - inset * 2;
+    const contentX = margin;
+    const contentY = margin;
+    const cardX = contentX + inset;
+    const cardY = contentY + inset;
+    const cardW = BADGE.contentWidth - inset * 2;
+    const cardH = BADGE.contentHeight - inset * 2;
     const headerH = Math.round(cardH * 0.34) - LINE * 2;
     const profileSize = Math.round(cardW * 0.42);
     const profileCx = cardX + cardW / 2;
     const profileCy = cardY + headerH + scalePx(50) + profileSize / 2;
     return {
       isCommitteeMember,
+      margin,
+      contentX,
+      contentY,
       inset,
       cardX,
       cardY,
@@ -218,7 +239,7 @@
     };
   }
 
-  function drawSlotHole(ctx, cardX = 0, cardY = 0, cardW = BADGE.width) {
+  function drawSlotHole(ctx, cardX = 0, cardY = 0, cardW = BADGE.contentWidth) {
     const { width, height, top } = BADGE.slot;
     const x = cardX + (cardW - width) / 2;
     const y = cardY + top;
@@ -286,7 +307,7 @@
     const schoolYear = String(options.schoolYear || schoolYearOptions()[0]).trim();
     const photoCrop = normalizePhotoCrop(options.photoCrop || options);
     const layout = getProfileLayout(role);
-    const { isCommitteeMember, cardX, cardY, cardW, cardH } = layout;
+    const { isCommitteeMember, margin, contentX, contentY, cardX, cardY, cardW, cardH } = layout;
 
     const [schoolLogo, regimentMark, photo] = await Promise.all([
       options.schoolLogo ? Promise.resolve(options.schoolLogo) : loadImage('/assets/efhs-logo.png'),
@@ -296,10 +317,21 @@
 
     ctx.clearRect(0, 0, width, height);
 
-    // Committee Member outer red border
+    // Full-canvas white safe margin (prevents edge-cropping printers from clipping artwork).
+    ctx.fillStyle = COLORS.paper;
+    ctx.fillRect(0, 0, width, height);
+
+    // Committee Member outer red border (inside the safe margin).
     if (isCommitteeMember) {
       ctx.fillStyle = COLORS.red;
-      roundedRectPath(ctx, 0, 0, width, height, BADGE.cornerRadius + scalePx(4));
+      roundedRectPath(
+        ctx,
+        contentX,
+        contentY,
+        BADGE.contentWidth,
+        BADGE.contentHeight,
+        BADGE.cornerRadius + scalePx(4),
+      );
       ctx.fill();
     }
 

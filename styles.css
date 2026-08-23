@@ -5068,7 +5068,7 @@ body.cms-caldev-editor-open{overflow:hidden}
   width:75%;
   max-width:75%;
   margin:0 auto;
-  aspect-ratio:2.125 / 3.375;
+  aspect-ratio:3.15625 / 4.71875;
   box-sizing:border-box;
   overflow:hidden;
   line-height:0;
@@ -5078,7 +5078,7 @@ body.cms-caldev-editor-open{overflow:hidden}
   width:100% !important;
   max-width:100% !important;
   height:auto !important;
-  aspect-ratio:2.125 / 3.375;
+  aspect-ratio:3.15625 / 4.71875;
   box-sizing:border-box;
   border-radius:10px;
   box-shadow:0 8px 20px rgba(0,33,66,.16);
@@ -5196,13 +5196,13 @@ body.cms-caldev-editor-open{overflow:hidden}
   .badge-creator-photo-stage{
     width:75%;
     max-width:75%;
-    aspect-ratio:2.125 / 3.375;
+    aspect-ratio:3.15625 / 4.71875;
   }
   .badge-creator-preview-wrap canvas{
     width:100% !important;
     max-width:100% !important;
     height:auto !important;
-    aspect-ratio:2.125 / 3.375;
+    aspect-ratio:3.15625 / 4.71875;
   }
   .badge-creator-row{
     grid-template-columns:48px minmax(0,1fr);
