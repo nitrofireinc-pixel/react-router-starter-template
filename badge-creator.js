@@ -66,11 +66,12 @@
   };
 
   const LINE = scalePx(18);
+  const HEADER_ENLARGE = 1.25;
 
   const TYPE = {
-    titleTop: typePx(28),
-    titleBottom: typePx(22),
-    official: typePx(13),
+    titleTop: typePx(Math.round(28 * HEADER_ENLARGE)),
+    titleBottom: typePx(Math.round(22 * HEADER_ENLARGE)),
+    official: typePx(Math.round(13 * HEADER_ENLARGE)),
     // Identity block below the portrait — kept larger for print readability.
     label: typePx(15),
     role: typePx(38),
