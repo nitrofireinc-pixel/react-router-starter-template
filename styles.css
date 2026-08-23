@@ -4742,12 +4742,22 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 }
 .cms-caldev-toast.is-error{background:#9f1239}
 .cms-caldev-toolbar{
-  display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center;
+  display:grid;justify-items:center;gap:12px;
   padding:12px 14px;border:1px solid #e1e8f1;border-radius:16px;background:#fff;
+  text-align:center;
 }
+.cms-caldev-range{
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;
+}
+.cms-caldev-range-field{display:grid;gap:0;margin:0}
+.cms-caldev-range-field select{
+  min-width:9.5rem;padding:10px 12px;border:1px solid #d5deea;border-radius:12px;
+  background:#fff;color:var(--navy);font:inherit;font-weight:800;text-align:center;
+}
+.cms-caldev-range-field select[data-cms-caldev-year]{min-width:6.5rem}
 .cms-caldev-nav{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .cms-caldev-title{margin:0;color:var(--navy);font-size:1.2rem;font-weight:900;letter-spacing:-.02em}
-.cms-caldev-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cms-caldev-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px}
 .cms-caldev-icon-btn{min-width:42px;padding-inline:0}
 .cms-caldev-seg{display:inline-flex;padding:4px;border-radius:999px;background:#eef3fa;gap:4px}
 .cms-caldev-seg button{
@@ -4909,9 +4919,9 @@ body.cms-caldev-editor-open{overflow:hidden}
   .cms-caldev-cell.is-out{display:none}
   .cms-caldev-cell{min-height:84px}
   .cms-caldev-chip,.cms-caldev-list-item,.cms-caldev-undated-item{min-height:44px}
-  .cms-caldev-actions{width:100%}
-  .cms-caldev-seg{width:100%;justify-content:stretch}
-  .cms-caldev-seg button{flex:1}
+  .cms-caldev-actions{width:100%;justify-content:center}
+  .cms-caldev-range{width:100%}
+  .cms-caldev-range-field select{width:100%;min-width:0}
   .cms-caldev-editor-toast{
     width:100%;max-height:86vh;border-radius:18px 18px 0 0;align-self:end;
   }

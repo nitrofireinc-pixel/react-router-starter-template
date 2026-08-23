@@ -129,19 +129,14 @@
   function undatedEvents() {
     return filteredEvents().filter((ev) => !eventDayKey(ev));
   }
-  function monthTitle() {
-    return `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`;
-  }
-  function weekTitle() {
-    const start = startOfWeek(cursor);
-    const end = addDays(start, 6);
-    if (start.getMonth() === end.getMonth()) {
-      return `${MONTHS[start.getMonth()]} ${start.getDate()}–${end.getDate()}, ${start.getFullYear()}`;
-    }
-    return `${MONTHS[start.getMonth()].slice(0, 3)} ${start.getDate()} – ${MONTHS[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
-  }
-  function titleForView() {
-    return view === "week" ? weekTitle() : monthTitle();
+  function yearOptions() {
+    const nowY = new Date().getFullYear();
+    const cursorY = cursor.getFullYear();
+    const start = Math.min(nowY - 3, cursorY);
+    const end = Math.max(nowY + 2, cursorY);
+    const years = [];
+    for (let y = start; y <= end; y += 1) years.push(y);
+    return years;
   }
   function isCompact() {
     return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 820px)").matches;
@@ -540,18 +535,19 @@
       <div class="cms-caldev" data-cms-caldev-app>
         <div class="cms-caldev-toast" data-cms-caldev-toast hidden></div>
         <div class="cms-caldev-toolbar">
-          <div class="cms-caldev-nav">
-            <button type="button" class="btn outline cms-caldev-icon-btn" data-cms-caldev-prev aria-label="Previous">‹</button>
-            <button type="button" class="btn outline" data-cms-caldev-today>Today</button>
-            <button type="button" class="btn outline cms-caldev-icon-btn" data-cms-caldev-next aria-label="Next">›</button>
-            <h3 class="cms-caldev-title" data-cms-caldev-title></h3>
+          <div class="cms-caldev-range" role="group" aria-label="Month and year">
+            <label class="cms-caldev-range-field">
+              <span class="sr-only">Month</span>
+              <select data-cms-caldev-month aria-label="Month">
+                ${MONTHS.map((label, idx) => `<option value="${idx}">${label}</option>`).join("")}
+              </select>
+            </label>
+            <label class="cms-caldev-range-field">
+              <span class="sr-only">Year</span>
+              <select data-cms-caldev-year aria-label="Year"></select>
+            </label>
           </div>
           <div class="cms-caldev-actions">
-            <div class="cms-caldev-seg" role="group" aria-label="View">
-              <button type="button" data-cms-caldev-view="month">Month</button>
-              <button type="button" data-cms-caldev-view="week">Week</button>
-              <button type="button" data-cms-caldev-view="list">Rundown</button>
-            </div>
             <button type="button" class="btn primary" data-cms-caldev-new>+ New event</button>
           </div>
         </div>
@@ -854,20 +850,27 @@
     </div>`;
   }
 
+  function syncRangeSelects() {
+    const monthSel = root.querySelector("[data-cms-caldev-month]");
+    const yearSel = root.querySelector("[data-cms-caldev-year]");
+    if (monthSel) monthSel.value = String(cursor.getMonth());
+    if (yearSel) {
+      const years = yearOptions();
+      const current = String(cursor.getFullYear());
+      yearSel.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
+      yearSel.value = current;
+    }
+  }
+
   function renderBoardOnly() {
-    const title = root.querySelector("[data-cms-caldev-title]");
-    if (title) title.textContent = titleForView();
-    root.querySelectorAll("[data-cms-caldev-view]").forEach((btn) => {
-      btn.classList.toggle("is-active", btn.getAttribute("data-cms-caldev-view") === view);
-    });
+    view = "month";
+    syncRangeSelects();
     renderTracks();
     renderHint();
     renderUndated();
     const main = root.querySelector("[data-cms-caldev-main]");
     if (!main) return;
-    if (view === "week") main.innerHTML = renderWeek();
-    else if (view === "list") main.innerHTML = renderList();
-    else main.innerHTML = renderMonth();
+    main.innerHTML = renderMonth();
 
     main.querySelectorAll("[data-cms-caldev-day]").forEach((el) => {
       bindDropTarget(el, el.getAttribute("data-cms-caldev-day"));
@@ -932,29 +935,6 @@
         if (activeTracks.has(id)) {
           if (activeTracks.size > 1) activeTracks.delete(id);
         } else activeTracks.add(id);
-        render();
-        return;
-      }
-
-      if (e.target.closest("[data-cms-caldev-prev]")) {
-        cursor = view === "week" ? addDays(cursor, -7) : addMonths(cursor, -1);
-        render();
-        return;
-      }
-      if (e.target.closest("[data-cms-caldev-next]")) {
-        cursor = view === "week" ? addDays(cursor, 7) : addMonths(cursor, 1);
-        render();
-        return;
-      }
-      if (e.target.closest("[data-cms-caldev-today]")) {
-        cursor = view === "week" ? new Date() : startOfMonth(new Date());
-        render();
-        return;
-      }
-
-      const viewBtn = e.target.closest("[data-cms-caldev-view]");
-      if (viewBtn && root.contains(viewBtn)) {
-        view = viewBtn.getAttribute("data-cms-caldev-view");
         render();
         return;
       }
@@ -1026,6 +1006,17 @@
     });
 
     root.addEventListener("change", (e) => {
+      if (e.target.matches("[data-cms-caldev-month]") || e.target.matches("[data-cms-caldev-year]")) {
+        const monthSel = root.querySelector("[data-cms-caldev-month]");
+        const yearSel = root.querySelector("[data-cms-caldev-year]");
+        const month = Number(monthSel?.value);
+        const year = Number(yearSel?.value);
+        if (Number.isFinite(month) && Number.isFinite(year)) {
+          cursor = new Date(year, month, 1);
+          render();
+        }
+        return;
+      }
       if (e.target.matches('[name="all_day"]')) toggleTimeFields();
       if (e.target.matches("[data-cms-caldev-repeat-yes]")) {
         root.querySelector('[name="repeat_yes"]').checked = true;
