@@ -13,12 +13,15 @@
 
   const state = {
     events: [],
-    view: 'month',
+    view: 'rundown',
     cursor: startOfMonth(new Date()),
     selectedId: null,
     loading: true,
     error: '',
+    dayToastOpened: false,
   };
+
+  let dayToastLeaveTimer = null;
 
   function startOfMonth(date) {
     return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -107,6 +110,114 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
+  /** Today if it has events; otherwise the soonest later day with events. */
+  function findCurrentOrNextDayWithEvents() {
+    const from = todayIso();
+    const todayEvents = eventsOnDate(from);
+    if (todayEvents.length) {
+      return { iso: from, events: todayEvents, isToday: true };
+    }
+
+    const dates = new Set();
+    for (const event of visibleEvents()) {
+      if (!event.start_date) continue;
+      if (event.end_date && event.end_date >= event.start_date) {
+        let cursor = event.start_date;
+        const end = event.end_date;
+        while (cursor <= end) {
+          if (cursor > from) dates.add(cursor);
+          const next = parseIso(cursor);
+          if (!next) break;
+          cursor = isoDate(addDays(next, 1));
+        }
+      } else if (event.start_date > from) {
+        dates.add(event.start_date);
+      }
+    }
+    const nextIso = [...dates].sort()[0];
+    if (!nextIso) return null;
+    return { iso: nextIso, events: eventsOnDate(nextIso), isToday: false };
+  }
+
+  function ensureDayToast() {
+    let root = document.querySelector('#caldev-day-toast');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'caldev-day-toast';
+    root.className = 'calendar-day-toast';
+    root.hidden = true;
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.setAttribute('aria-labelledby', 'caldev-day-toast-title');
+    root.innerHTML = `
+      <div class="calendar-day-toast-backdrop" aria-hidden="true"></div>
+      <div class="calendar-day-toast-panel">
+        <button type="button" class="sponsor-flyin-close calendar-day-toast-close" data-caldev-day-close aria-label="Close">×</button>
+        <div class="calendar-day-toast-card">
+          <h3 id="caldev-day-toast-title"></h3>
+          <div class="calendar-day-toast-list" data-caldev-day-list></div>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+    root.querySelector('[data-caldev-day-close]')?.addEventListener('click', () => hideDayToast());
+    return root;
+  }
+
+  function hideDayToast() {
+    const root = document.querySelector('#caldev-day-toast');
+    if (!root || root.hidden) return;
+    root.classList.add('is-leaving');
+    root.classList.remove('is-visible');
+    window.clearTimeout(dayToastLeaveTimer);
+    dayToastLeaveTimer = window.setTimeout(() => {
+      root.hidden = true;
+      root.classList.remove('is-leaving');
+    }, 280);
+  }
+
+  function showDayToast(title, dayEvents) {
+    const root = ensureDayToast();
+    const titleEl = root.querySelector('#caldev-day-toast-title');
+    const list = root.querySelector('[data-caldev-day-list]');
+    if (titleEl) titleEl.textContent = title;
+    if (list) {
+      if (!dayEvents.length) {
+        list.innerHTML = '<p class="draft">No events on this day.</p>';
+      } else {
+        list.innerHTML = dayEvents.map((event) => {
+          const meta = [
+            eventTimeLabel(event),
+            event.who || '',
+            event.location || '',
+          ].filter(Boolean).join(' · ');
+          return `
+            <article class="calendar-day-toast-event">
+              <h4>${escapeHtml(event.title)}</h4>
+              <p class="event-description">${escapeHtml(meta)}${event.description ? `<br>${escapeHtml(event.description)}` : ''}</p>
+            </article>
+          `;
+        }).join('');
+      }
+    }
+    window.clearTimeout(dayToastLeaveTimer);
+    root.hidden = false;
+    root.classList.remove('is-leaving');
+    root.classList.remove('is-visible');
+    void root.offsetWidth;
+    root.classList.add('is-visible');
+    window.setTimeout(() => root.querySelector('[data-caldev-day-close]')?.focus(), 40);
+  }
+
+  function maybeOpenDayToast() {
+    if (state.dayToastOpened || state.error) return;
+    const target = findCurrentOrNextDayWithEvents();
+    if (!target?.events?.length) return;
+    state.dayToastOpened = true;
+    const dateLabel = formatLongDate(target.iso);
+    const title = target.isToday ? `Today — ${dateLabel}` : `Next up — ${dateLabel}`;
+    window.setTimeout(() => showDayToast(title, target.events), 80);
+  }
+
   async function loadEvents() {
     state.loading = true;
     state.error = '';
@@ -121,6 +232,7 @@
     } finally {
       state.loading = false;
       render();
+      maybeOpenDayToast();
     }
   }
 
