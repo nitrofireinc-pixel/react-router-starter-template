@@ -4276,131 +4276,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .contact-recipient-option small{color:#64748b;font-weight:600}
 
 
-/* Public month calendar */
-.month-calendar{
-  margin-top:8px;
-}
-.month-calendar-shell{
-  padding:18px;
-  border:1px solid #d5deea;
-  border-radius:22px;
-  background:
-    radial-gradient(circle at 12% 0, rgba(253,215,3,.14), transparent 34%),
-    linear-gradient(180deg, #f7f9fc 0%, #fff 62%);
-  box-shadow:0 16px 40px rgba(0,33,66,.07);
-}
-.month-calendar-toolbar{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  margin-bottom:16px;
-}
-.month-calendar-title{
-  margin:0;
-  color:var(--navy);
-  font-size:clamp(1.35rem, 2.6vw, 1.8rem);
-  font-weight:900;
-  letter-spacing:-.03em;
-  text-align:center;
-}
-.month-calendar-nav{
-  width:44px;
-  height:44px;
-  border:1px solid #d5deea;
-  border-radius:14px;
-  background:#fff;
-  color:var(--navy);
-  font-size:1.55rem;
-  line-height:1;
-  font-weight:700;
-  cursor:pointer;
-}
-.month-calendar-nav:hover,
-.month-calendar-nav:focus-visible{
-  background:#eef3fa;
-  outline:none;
-}
-.month-calendar-weekdays,
-.month-calendar-grid{
-  display:grid;
-  grid-template-columns:repeat(7, minmax(0, 1fr));
-  gap:8px;
-}
-.month-calendar-weekdays{
-  margin-bottom:8px;
-}
-.month-calendar-weekdays span{
-  text-align:center;
-  color:#5b6f88;
-  font-size:.72rem;
-  font-weight:900;
-  letter-spacing:.08em;
-  text-transform:uppercase;
-}
-.month-calendar-cell{
-  position:relative;
-  min-height:64px;
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  justify-content:flex-start;
-  gap:8px;
-  padding:10px;
-  border:1px solid transparent;
-  border-radius:14px;
-  background:rgba(255,255,255,.72);
-  color:var(--navy);
-  font:inherit;
-  text-align:left;
-}
-.month-calendar-cell.is-empty{
-  background:transparent;
-  min-height:64px;
-}
-.month-calendar-cell.is-today{
-  border-color:rgba(0,33,66,.22);
-  box-shadow:inset 0 0 0 1px rgba(0,33,66,.08);
-}
-.month-calendar-cell.has-events{
-  background:linear-gradient(160deg, #102b4a 0%, #014990 100%);
-  color:#fff;
-  border-color:rgba(253,215,3,.35);
-  cursor:pointer;
-  transition:transform .18s ease, box-shadow .18s ease;
-}
-.month-calendar-cell.has-events:hover,
-.month-calendar-cell.has-events:focus-visible{
-  transform:translateY(-2px);
-  box-shadow:0 12px 24px rgba(0,33,66,.2);
-  outline:none;
-}
-.month-calendar-daynum{
-  font-weight:900;
-  font-size:1rem;
-  line-height:1;
-}
-.month-calendar-dot{
-  width:8px;
-  height:8px;
-  border-radius:999px;
-  background:var(--gold);
-  box-shadow:0 0 0 3px rgba(253,215,3,.18);
-}
-.month-calendar-undated{
-  margin-top:22px;
-  padding-top:18px;
-  border-top:1px solid #d5deea;
-}
-.month-calendar-undated h3{
-  margin:0 0 12px;
-  color:var(--navy);
-  font-size:1.05rem;
-}
-.month-calendar-undated-list{
-  display:grid;
-  gap:12px;
-}
+/* Calendar day toast (shared modal shell) */
 .calendar-day-toast{
   position:fixed;
   inset:0;
@@ -4475,21 +4351,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 .calendar-day-toast-event .event-description p:first-child,
 .calendar-day-toast-event .event-description div:first-child{margin-top:6px}
 .calendar-day-toast .draft{color:rgba(255,255,255,.75)}
-@media(max-width:700px){
-  .month-calendar-shell{padding:14px}
-  .month-calendar-weekdays,
-  .month-calendar-grid{gap:6px}
-  .month-calendar-cell{
-    min-height:52px;
-    padding:8px;
-    border-radius:12px;
-  }
-  .month-calendar-cell.is-empty{min-height:52px}
-  .month-calendar-daynum{font-size:.92rem}
-  .month-calendar-weekdays span{font-size:.64rem;letter-spacing:.04em}
-}
 @media(prefers-reduced-motion:reduce){
-  .month-calendar-cell.has-events,
   .calendar-day-toast-backdrop,
   .calendar-day-toast-panel{transition:none}
 }
@@ -4526,12 +4388,8 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   .dues-modal .sponsor-signup-actions-end .btn{flex:1 1 auto}
 }
 
-/* Schedule Board (caldev) — isolated test calendar */
+/* Schedule Board (caldev) — public calendar */
 .caldev-body{background:linear-gradient(180deg,#eef3fa 0%,#f7f9fc 38%,#fff 100%)}
-.caldev-test-badge{
-  display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:.82rem;color:#57470a;
-}
-.caldev-hero .page-title p{max-width:42rem}
 .caldev-section{padding-top:8px}
 .caldev-wrap{max-width:1180px}
 .caldev-app{display:grid;gap:16px}

@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-caldev-president-vp-20260823';
+const ASSET_VERSION = 'cms-code-cleanup-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -7388,10 +7388,6 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/events' && request.method === 'GET') {
     return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
   }
-  if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
-    // Full month view needs past and future months, not only upcoming rows.
-    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
-  }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
     let events = await listCaldevEvents(env);
@@ -7400,7 +7396,7 @@ async function routeApi(request, env, url, ctx = null) {
         await seedCaldevFromProduction(env, { getEvents, clear: true });
         events = await listCaldevEvents(env);
       } catch {
-        // Seeding is best-effort for the lab page.
+        // Seeding is best-effort when the Schedule Board is empty.
       }
     }
     return jsonResponse(events);
