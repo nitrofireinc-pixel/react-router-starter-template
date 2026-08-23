@@ -219,23 +219,33 @@ async function setCaldevBoosterEventId(env, caldevId, boosterEventId) {
 export async function clearCaldevBoosterBridge(env, caldevEvent) {
   const boosterId = Number(caldevEvent?.booster_event_id);
   const caldevId = Number(caldevEvent?.id);
-  if (!Number.isFinite(boosterId) || boosterId <= 0) {
-    if (Number.isFinite(caldevId) && caldevId > 0) {
-      await setCaldevBoosterEventId(env, caldevId, null);
+  const candidates = [];
+  if (Number.isFinite(boosterId) && boosterId > 0) candidates.push(boosterId);
+  if (Number.isFinite(caldevId) && caldevId > 0) {
+    try {
+      const byCaldev = await env.DB.prepare(
+        'SELECT id FROM events WHERE caldev_event_id = ?',
+      ).bind(caldevId).first();
+      if (byCaldev?.id) candidates.push(Number(byCaldev.id));
+    } catch {
+      // caldev_event_id column may not exist yet on older DBs mid-migrate.
     }
-    return;
   }
-  const row = await env.DB.prepare(
-    'SELECT id, caldev_event_id, show_on_boosters FROM events WHERE id = ?',
-  ).bind(boosterId).first();
-  if (row) {
+  const seen = new Set();
+  for (const id of candidates) {
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    const row = await env.DB.prepare(
+      'SELECT id, caldev_event_id, show_on_boosters FROM events WHERE id = ?',
+    ).bind(id).first();
+    if (!row) continue;
     const owned = Number(row.caldev_event_id) === caldevId;
     if (owned) {
-      await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(boosterId).run();
+      await env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
     } else if (Number(row.show_on_boosters) === 1) {
       await env.DB.prepare(
         'UPDATE events SET show_on_boosters = 0 WHERE id = ?',
-      ).bind(boosterId).run();
+      ).bind(id).run();
     }
   }
   if (Number.isFinite(caldevId) && caldevId > 0) {
