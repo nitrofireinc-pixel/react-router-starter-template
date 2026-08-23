@@ -367,9 +367,17 @@
     // Slot, logos, and title in navy header
     drawSlotHole(ctx, cardX, cardY, cardW);
 
-    const schoolSize = fitImage(schoolLogo, scalePx(132), scalePx(96));
-    const markSize = fitImage(regimentMark, scalePx(108), scalePx(108));
-    const titleGap = scalePx(4);
+    const schoolSize = fitImage(
+      schoolLogo,
+      Math.round(scalePx(132) * HEADER_ENLARGE),
+      Math.round(scalePx(96) * HEADER_ENLARGE),
+    );
+    const markSize = fitImage(
+      regimentMark,
+      Math.round(scalePx(108) * HEADER_ENLARGE),
+      Math.round(scalePx(108) * HEADER_ENLARGE),
+    );
+    const titleGap = Math.round(scalePx(4) * HEADER_ENLARGE);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -377,7 +385,9 @@
 
     // Title stack offsets relative to titleCenterY (used to keep the block centered as a group).
     const titleStackTop = -TYPE.titleTop;
-    const titleStackBottom = scalePx(42);
+    const titleMidOffset = Math.round(scalePx(2) * HEADER_ENLARGE);
+    const titleLineOffset = Math.round(scalePx(22) * HEADER_ENLARGE);
+    const titleStackBottom = Math.round(scalePx(42) * HEADER_ENLARGE);
     const titleCenterY = headerCenterY - ((titleStackTop + titleStackBottom) / 2);
 
     const schoolX = centerX - titleTopWidth / 2 - titleGap - schoolSize.width;
@@ -393,9 +403,14 @@
     ctx.fillText('EAST FORSYTH', centerX, titleCenterY + titleStackTop);
     ctx.font = typeFont('bold', TYPE.titleBottom);
     ctx.fillStyle = COLORS.paper;
-    ctx.fillText('BLUE REGIMENT', centerX, titleCenterY + scalePx(2));
+    ctx.fillText('BLUE REGIMENT', centerX, titleCenterY + titleMidOffset);
     ctx.fillStyle = COLORS.red;
-    ctx.fillRect(centerX - scalePx(64), titleCenterY + scalePx(22), scalePx(128), scalePx(4));
+    ctx.fillRect(
+      centerX - Math.round(scalePx(64) * HEADER_ENLARGE),
+      titleCenterY + titleLineOffset,
+      Math.round(scalePx(128) * HEADER_ENLARGE),
+      Math.max(3, Math.round(scalePx(4) * HEADER_ENLARGE)),
+    );
     ctx.font = typeFont('bold', TYPE.official);
     ctx.fillStyle = COLORS.silver;
     ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + titleStackBottom);
