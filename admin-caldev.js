@@ -1,4 +1,4 @@
-/* Schedule Board CMS editor — Super Admin only. Public /caldev stays view-only. */
+/* Schedule Board CMS editor — Super Admin / officers. Public calendar is view-only. */
 (function () {
   "use strict";
 
