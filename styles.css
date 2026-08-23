@@ -4627,12 +4627,12 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   background:#102b4a;color:#fff;text-align:left;font:inherit;cursor:pointer;
 }
 .caldev-week-event small{opacity:.85;font-weight:700}
-.caldev-rundown{display:grid;gap:16px}
-.caldev-rundown-day h3{margin:0 0 8px;color:var(--navy);font-size:1.05rem}
-.caldev-rundown-day ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.caldev-rundown{display:grid;gap:10px}
+.caldev-rundown-day h3{margin:0 0 4px;color:var(--navy);font-size:1.05rem}
+.caldev-rundown-day ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 .caldev-rundown-item{
-  width:100%;display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid #e1e8f1;
-  border-radius:14px;background:#fff;text-align:left;font:inherit;cursor:pointer;
+  width:100%;display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border:1px solid #e1e8f1;
+  border-radius:12px;background:#fff;text-align:left;font:inherit;cursor:pointer;
 }
 .caldev-rundown-item:hover{border-color:#b7c8dc}
 .caldev-rundown-copy{display:grid;gap:3px}
