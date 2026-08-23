@@ -5029,7 +5029,7 @@ body.cms-caldev-editor-open{overflow:hidden}
 /* Badge Creator (Band Boosters) */
 .badge-creator-layout{
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(180px,220px);
+  grid-template-columns:minmax(0,1fr) minmax(160px,200px);
   gap:18px;
   align-items:start;
 }
@@ -5042,6 +5042,9 @@ body.cms-caldev-editor-open{overflow:hidden}
 .badge-creator-preview-card{
   position:sticky;
   top:12px;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
 }
 .badge-creator-preview-card h2{
   margin:0;
@@ -5055,19 +5058,28 @@ body.cms-caldev-editor-open{overflow:hidden}
   border:1px solid #d7e0ea;
   display:grid;
   place-items:center;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  overflow:hidden;
 }
 .badge-creator-photo-stage{
   position:relative;
   width:75%;
   max-width:75%;
+  margin:0 auto;
   aspect-ratio:2.125 / 3.375;
+  box-sizing:border-box;
+  overflow:hidden;
+  line-height:0;
 }
 .badge-creator-preview-wrap canvas{
-  width:100%;
-  max-width:100%;
-  height:100%;
-  aspect-ratio:2.125 / 3.375;
   display:block;
+  width:100% !important;
+  max-width:100% !important;
+  height:auto !important;
+  aspect-ratio:2.125 / 3.375;
+  box-sizing:border-box;
   border-radius:10px;
   box-shadow:0 8px 20px rgba(0,33,66,.16);
   background:#fff;
@@ -5180,15 +5192,17 @@ body.cms-caldev-editor-open{overflow:hidden}
 }
 @media(max-width:980px){
   .badge-creator-layout{grid-template-columns:minmax(0,1fr)}
-  .badge-creator-preview-card{position:static}
+  .badge-creator-preview-card{position:static;max-width:100%}
   .badge-creator-photo-stage{
     width:75%;
     max-width:75%;
+    aspect-ratio:2.125 / 3.375;
   }
   .badge-creator-preview-wrap canvas{
-    width:100%;
-    max-width:100%;
-    height:auto;
+    width:100% !important;
+    max-width:100% !important;
+    height:auto !important;
+    aspect-ratio:2.125 / 3.375;
   }
   .badge-creator-row{
     grid-template-columns:48px minmax(0,1fr);

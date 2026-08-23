@@ -173,6 +173,10 @@
     };
     try {
       const result = await BadgeCreator.renderBadge(canvas, options);
+      // Re-assert CSS display size: assigning canvas.width/height can reset layout sizing.
+      canvas.style.width = '100%';
+      canvas.style.maxWidth = '100%';
+      canvas.style.height = 'auto';
       state.layout = result?.layout || BadgeCreator.getProfileLayout(values.role);
       if (result?.layout?.photoCrop) {
         writePhotoCropToForm(result.layout.photoCrop);
