@@ -5052,13 +5052,90 @@ body.cms-caldev-editor-open{overflow:hidden}
   display:grid;
   place-items:center;
 }
-.badge-creator-preview-wrap canvas{
+.badge-creator-photo-stage{
+  position:relative;
   width:min(100%,220px);
+}
+.badge-creator-preview-wrap canvas{
+  width:100%;
   height:auto;
   display:block;
   border-radius:12px;
   box-shadow:0 12px 28px rgba(0,33,66,.18);
   background:#fff;
+  touch-action:none;
+}
+.badge-creator-preview-wrap.has-photo canvas{
+  cursor:grab;
+}
+.badge-creator-preview-wrap.has-photo .badge-creator-photo-handle.is-dragging,
+.badge-creator-preview-wrap.has-photo canvas:active{
+  cursor:grabbing;
+}
+.badge-creator-photo-handle{
+  position:absolute;
+  border:2px dashed rgba(1,73,144,.7);
+  border-radius:50%;
+  box-sizing:border-box;
+  pointer-events:auto;
+  cursor:grab;
+  touch-action:none;
+}
+.badge-creator-photo-handle.is-dragging,
+.badge-creator-photo-handle.is-resizing{
+  border-color:#e71321;
+  background:rgba(231,19,33,.06);
+}
+.badge-creator-photo-hint{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  padding:4px 8px;
+  border-radius:999px;
+  background:rgba(0,33,66,.72);
+  color:#fff;
+  font-size:.68rem;
+  font-weight:700;
+  letter-spacing:.02em;
+  white-space:nowrap;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .15s ease;
+}
+.badge-creator-photo-handle:hover .badge-creator-photo-hint,
+.badge-creator-photo-handle.is-dragging .badge-creator-photo-hint{
+  opacity:1;
+}
+.badge-creator-photo-resize{
+  position:absolute;
+  right:-7px;
+  bottom:-7px;
+  width:16px;
+  height:16px;
+  padding:0;
+  border:2px solid #fff;
+  border-radius:50%;
+  background:#014990;
+  box-shadow:0 2px 8px rgba(0,33,66,.35);
+  cursor:nwse-resize;
+  touch-action:none;
+}
+.badge-creator-photo-controls{
+  display:grid;
+  gap:10px;
+  margin-top:4px;
+}
+.badge-creator-zoom-label{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  font-weight:800;
+  color:var(--navy);
+}
+.badge-creator-zoom-label input[type="range"]{
+  width:100%;
 }
 .badge-creator-preview-wrap.is-committee-member{
   background:linear-gradient(160deg,#fde8ea,#f8fafc 55%,#f6edee);

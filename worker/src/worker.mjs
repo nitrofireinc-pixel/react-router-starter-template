@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'badge-creator-cms-20260823';
+const ASSET_VERSION = 'badge-creator-photo-crop-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1279,19 +1279,33 @@ export function normalizeCommitteeBadgePayload(payload = {}, existing = {}) {
   const role = COMMITTEE_BADGE_ROLES.includes(roleRaw) ? roleRaw : 'Committee Member';
   const schoolYear = String(payload.school_year ?? existing.school_year ?? '').trim();
   const photoUrl = String(payload.photo_url ?? existing.photo_url ?? '').trim();
+  const photoZoomRaw = Number(payload.photo_zoom ?? existing.photo_zoom ?? 1);
+  const photoOffsetXRaw = Number(payload.photo_offset_x ?? existing.photo_offset_x ?? 0);
+  const photoOffsetYRaw = Number(payload.photo_offset_y ?? existing.photo_offset_y ?? 0);
+  const clamp = (value, min, max, fallback) => (
+    Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+  );
   return {
     member_name: memberName,
     role,
     school_year: schoolYear,
     photo_url: photoUrl,
+    photo_zoom: clamp(photoZoomRaw, 1, 4, 1),
+    photo_offset_x: clamp(photoOffsetXRaw, -2, 2, 0),
+    photo_offset_y: clamp(photoOffsetYRaw, -2, 2, 0),
   };
 }
 
 async function getCommitteeBadges(env) {
   const { results } = await env.DB.prepare(
-    'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
+    'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
   ).all();
-  return results || [];
+  return (results || []).map((row) => ({
+    ...row,
+    photo_zoom: Number(row.photo_zoom ?? 1) || 1,
+    photo_offset_x: Number(row.photo_offset_x ?? 0) || 0,
+    photo_offset_y: Number(row.photo_offset_y ?? 0) || 0,
+  }));
 }
 
 export function canManageAllEvents(user) {
@@ -1486,7 +1500,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS committee_badges (id INTEGER PRIMARY KEY AUTOINCREMENT, member_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'Committee Member\', school_year TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS committee_badges (id INTEGER PRIMARY KEY AUTOINCREMENT, member_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'Committee Member\', school_year TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', photo_zoom REAL NOT NULL DEFAULT 1, photo_offset_x REAL NOT NULL DEFAULT 0, photo_offset_y REAL NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -1512,6 +1526,21 @@ async function initDb(env) {
     )`),
   ]);
   await ensureCaldevSchema(env);
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_zoom REAL NOT NULL DEFAULT 1').run();
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_offset_x REAL NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_offset_y REAL NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists.
+  }
   try {
     await env.DB.prepare("ALTER TABLE admin_audit_log ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''").run();
   } catch {
@@ -9271,10 +9300,19 @@ async function routeApi(request, env, url, ctx = null) {
     if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
     if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
     const result = await env.DB.prepare(
-      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, created_by) VALUES (?, ?, ?, ?, ?)',
-    ).bind(badge.member_name, badge.role, badge.school_year, badge.photo_url, auth.user.id || null).run();
+      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      auth.user.id || null,
+    ).run();
     return jsonResponse(await env.DB.prepare(
-      'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
     ).bind(result.meta.last_row_id).first());
   }
   const badgeMatch = url.pathname.match(/^\/api\/admin\/badges\/(\d+)$/);
@@ -9295,10 +9333,19 @@ async function routeApi(request, env, url, ctx = null) {
     if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
     if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
     await env.DB.prepare(
-      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ).bind(badge.member_name, badge.role, badge.school_year, badge.photo_url, id).run();
+      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, photo_zoom = ?, photo_offset_x = ?, photo_offset_y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      id,
+    ).run();
     return jsonResponse(await env.DB.prepare(
-      'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
     ).bind(id).first());
   }
 
@@ -10831,7 +10878,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </form>
   </div>
 </div>
-</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create CR80 portrait badges for directors, officers, and committee members. Save records to reprint or replace a lost badge. Download a PNG or use Print for card stock.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><canvas id="badge-creator-preview" width="638" height="1011" aria-label="Badge preview"></canvas></div><p class="muted">Preview is CR80 (2.125 × 3.375 in) at 300 DPI. Committee Member badges use a red outer border.</p></aside></div><div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><p class="muted">Open a saved badge to edit, download, or print again.</p><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
+</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create CR80 portrait badges for directors, officers, and committee members. Drag the photo in the live preview to center it, resize with the corner handle or size slider, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="638" height="1011" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">The photo stays clipped inside the badge circle. Drag to reposition, use the corner handle or slider to resize.</p></div></aside></div><div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><p class="muted">Open a saved badge to edit, download, or print again.</p><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">

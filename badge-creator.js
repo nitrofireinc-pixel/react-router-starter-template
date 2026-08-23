@@ -108,16 +108,87 @@
     ctx.restore();
   }
 
-  function drawProfilePhoto(ctx, img, cx, cy, size) {
+  function clampNumber(value, min, max, fallback = min) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.min(max, Math.max(min, num));
+  }
+
+  function normalizePhotoCrop(crop = {}) {
+    return {
+      zoom: clampNumber(crop.zoom ?? crop.photo_zoom, 1, 4, 1),
+      offsetX: clampNumber(crop.offsetX ?? crop.photo_offset_x, -2, 2, 0),
+      offsetY: clampNumber(crop.offsetY ?? crop.photo_offset_y, -2, 2, 0),
+    };
+  }
+
+  function profilePhotoDrawMetrics(img, size, crop = {}) {
+    const normalized = normalizePhotoCrop(crop);
+    const cover = Math.max(size / img.width, size / img.height);
+    const scale = cover * normalized.zoom;
+    const drawW = img.width * scale;
+    const drawH = img.height * scale;
+    const maxOffsetX = Math.max(0, (drawW - size) / 2);
+    const maxOffsetY = Math.max(0, (drawH - size) / 2);
+    const offsetPxX = clampNumber(normalized.offsetX * (size / 2), -maxOffsetX, maxOffsetX, 0);
+    const offsetPxY = clampNumber(normalized.offsetY * (size / 2), -maxOffsetY, maxOffsetY, 0);
+    return {
+      ...normalized,
+      cover,
+      scale,
+      drawW,
+      drawH,
+      offsetPxX,
+      offsetPxY,
+      maxOffsetX,
+      maxOffsetY,
+      // Re-normalize offsets after clamping so saved values stay in range.
+      offsetX: size ? (offsetPxX / (size / 2)) : 0,
+      offsetY: size ? (offsetPxY / (size / 2)) : 0,
+    };
+  }
+
+  function drawProfilePhoto(ctx, img, cx, cy, size, crop = {}) {
+    const metrics = profilePhotoDrawMetrics(img, size, crop);
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, size / 2, 0, Math.PI * 2);
     ctx.clip();
-    const scale = Math.max(size / img.width, size / img.height);
-    const drawW = img.width * scale;
-    const drawH = img.height * scale;
-    ctx.drawImage(img, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+    ctx.drawImage(
+      img,
+      cx - metrics.drawW / 2 + metrics.offsetPxX,
+      cy - metrics.drawH / 2 + metrics.offsetPxY,
+      metrics.drawW,
+      metrics.drawH,
+    );
     ctx.restore();
+    return metrics;
+  }
+
+  function getProfileLayout(role = 'Committee Member') {
+    const isCommitteeMember = role === 'Committee Member';
+    const inset = isCommitteeMember ? BADGE.committeeBorder : 0;
+    const cardX = inset;
+    const cardY = inset;
+    const cardW = BADGE.width - inset * 2;
+    const cardH = BADGE.height - inset * 2;
+    const headerH = Math.round(cardH * 0.34) - LINE * 2;
+    const profileSize = Math.round(cardW * 0.42);
+    const profileCx = cardX + cardW / 2;
+    const profileCy = cardY + headerH + 50 + profileSize / 2;
+    return {
+      isCommitteeMember,
+      inset,
+      cardX,
+      cardY,
+      cardW,
+      cardH,
+      headerH,
+      profileSize,
+      profileCx,
+      profileCy,
+      profileRadius: profileSize / 2,
+    };
   }
 
   function drawSlotHole(ctx, cardX = 0, cardY = 0, cardW = BADGE.width) {
@@ -182,7 +253,9 @@
     const name = String(options.name || 'Member Name').trim() || 'Member Name';
     const role = BADGE_ROLES.includes(options.role) ? options.role : 'Committee Member';
     const schoolYear = String(options.schoolYear || schoolYearOptions()[0]).trim();
-    const isCommitteeMember = role === 'Committee Member';
+    const photoCrop = normalizePhotoCrop(options.photoCrop || options);
+    const layout = getProfileLayout(role);
+    const { isCommitteeMember, inset, cardX, cardY, cardW, cardH } = layout;
 
     const [schoolLogo, regimentMark, photo] = await Promise.all([
       options.schoolLogo ? Promise.resolve(options.schoolLogo) : loadImage('/assets/efhs-logo.png'),
@@ -199,19 +272,13 @@
       ctx.fill();
     }
 
-    const inset = isCommitteeMember ? BADGE.committeeBorder : 0;
-    const cardX = inset;
-    const cardY = inset;
-    const cardW = width - inset * 2;
-    const cardH = height - inset * 2;
-
     // Card base
     ctx.fillStyle = COLORS.paper;
     roundedRectPath(ctx, cardX, cardY, cardW, cardH, BADGE.cornerRadius);
     ctx.fill();
 
     // Header band
-    const headerH = Math.round(cardH * 0.34) - LINE * 2;
+    const { headerH, profileSize, profileCx, profileCy } = layout;
     ctx.save();
     roundedRectPath(ctx, cardX, cardY, cardW, headerH + BADGE.cornerRadius, BADGE.cornerRadius);
     ctx.clip();
@@ -226,7 +293,7 @@
     ctx.fill();
     ctx.restore();
 
-    const centerX = cardX + cardW / 2;
+    const centerX = profileCx;
     const brandContentTop = cardY + BADGE.slot.top + BADGE.slot.height + 8;
     const titleCenterY = brandContentTop + 44 + LINE;
 
@@ -273,10 +340,6 @@
     ctx.fillRect(cardX, stripeY + 10, cardW, cardH - headerH - 10);
 
     // Profile
-    const profileSize = Math.round(cardW * 0.42);
-    const profileCx = centerX;
-    const profileCy = cardY + headerH + 50 + profileSize / 2;
-
     ctx.save();
     ctx.beginPath();
     ctx.arc(profileCx, profileCy, profileSize / 2 + 10, 0, Math.PI * 2);
@@ -290,8 +353,9 @@
     ctx.stroke();
     ctx.restore();
 
+    let appliedCrop = photoCrop;
     if (photo) {
-      drawProfilePhoto(ctx, photo, profileCx, profileCy, profileSize);
+      appliedCrop = drawProfilePhoto(ctx, photo, profileCx, profileCy, profileSize, photoCrop);
     } else {
       drawProfilePlaceholder(ctx, profileCx, profileCy, profileSize);
     }
@@ -360,7 +424,14 @@
     ctx.fillStyle = COLORS.silver;
     ctx.fillText('East Forsyth Blue Regiment', centerX, footerY + footerH / 2);
 
-    return canvas;
+    return {
+      canvas,
+      layout: {
+        ...layout,
+        photoCrop: appliedCrop,
+        hasPhoto: Boolean(photo),
+      },
+    };
   }
 
   function exportBadgePng(canvas) {
@@ -448,6 +519,9 @@
     schoolYearOptions,
     loadImage,
     preloadBrandAssets,
+    normalizePhotoCrop,
+    profilePhotoDrawMetrics,
+    getProfileLayout,
     renderBadge,
     exportBadgePng,
     downloadBlob,
