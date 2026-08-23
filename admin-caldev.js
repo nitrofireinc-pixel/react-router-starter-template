@@ -338,7 +338,7 @@
       title: panel.querySelector('[name="title"]').value.trim(),
       description: desc,
       location: panel.querySelector('[name="location"]').value.trim(),
-      who: panel.querySelector('[name="who"]').value.trim(),
+      who: panel.dataset.who || "",
       start_date: panel.querySelector('[name="start_date"]').value,
       end_date: panel.querySelector('[name="end_date"]').value,
       start_time: allDay ? "" : panel.querySelector('[name="start_time"]').value,
@@ -396,7 +396,7 @@
     panel.querySelector('[name="end_time"]').value = form.end_time || "18:00";
     panel.querySelector('[name="all_day"]').checked = !!form.all_day;
     panel.querySelector('[name="track"]').value = form.track || "other";
-    panel.querySelector('[name="who"]').value = form.who || "";
+    panel.dataset.who = form.who || "";
     panel.querySelector('[name="location"]').value = form.location || "";
     panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
     panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
@@ -615,19 +615,17 @@
               </div>
             </fieldset>
 
-            <label>Event type
-              <select name="track">
-                ${TRACKS.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
-              </select>
-            </label>
-
             <label class="cms-caldev-check"><input name="all_day" type="checkbox" checked> All day</label>
             <div class="cms-caldev-time-row" data-cms-caldev-time-field hidden>
               <label>Start<input name="start_time" type="time" /></label>
               <label>End<input name="end_time" type="time" /></label>
             </div>
 
-            <label>Who<input name="who" maxlength="200" placeholder="Marching Band, Guard…" /></label>
+            <label>Who
+              <select name="track">
+                ${TRACKS.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
+              </select>
+            </label>
             <label>Location<input name="location" maxlength="200" /></label>
 
             <label class="cms-caldev-desc-label">Description
