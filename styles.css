@@ -5058,14 +5058,15 @@ body.cms-caldev-editor-open{overflow:hidden}
 }
 .badge-creator-photo-stage{
   position:relative;
-  width:min(100%,148px);
-  max-height:min(42vh,240px);
+  width:75%;
+  max-width:75%;
+  aspect-ratio:2.125 / 3.375;
 }
 .badge-creator-preview-wrap canvas{
   width:100%;
-  max-width:148px;
-  height:auto;
-  max-height:min(42vh,240px);
+  max-width:100%;
+  height:100%;
+  aspect-ratio:2.125 / 3.375;
   display:block;
   border-radius:10px;
   box-shadow:0 8px 20px rgba(0,33,66,.16);
@@ -5181,12 +5182,13 @@ body.cms-caldev-editor-open{overflow:hidden}
   .badge-creator-layout{grid-template-columns:minmax(0,1fr)}
   .badge-creator-preview-card{position:static}
   .badge-creator-photo-stage{
-    width:min(100%,132px);
-    max-height:min(36vh,210px);
+    width:75%;
+    max-width:75%;
   }
   .badge-creator-preview-wrap canvas{
-    max-width:132px;
-    max-height:min(36vh,210px);
+    width:100%;
+    max-width:100%;
+    height:auto;
   }
   .badge-creator-row{
     grid-template-columns:48px minmax(0,1fr);
