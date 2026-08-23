@@ -135,22 +135,18 @@
 
     return `
       <div class="caldev-toolbar">
-        <div class="caldev-toolbar-start">
-          <h2 class="caldev-range-title">${escapeHtml(label)}</h2>
-          <div class="caldev-toolbar-nav">
-            <button type="button" class="caldev-icon-btn" data-caldev-shift="-1" aria-label="Previous">‹</button>
-            <button type="button" class="btn outline caldev-today-btn" data-caldev-today>Today</button>
-            <button type="button" class="caldev-icon-btn" data-caldev-shift="1" aria-label="Next">›</button>
-          </div>
+        <h2 class="caldev-range-title">${escapeHtml(label)}</h2>
+        <div class="caldev-toolbar-nav">
+          <button type="button" class="caldev-icon-btn" data-caldev-shift="-1" aria-label="Previous">‹</button>
+          <button type="button" class="btn outline caldev-today-btn" data-caldev-today>Today</button>
+          <button type="button" class="caldev-icon-btn" data-caldev-shift="1" aria-label="Next">›</button>
         </div>
-        <div class="caldev-toolbar-end">
-          <div class="caldev-view-switch" role="group" aria-label="Schedule views">
-            ${['month', 'week', 'rundown'].map((view) => `
-              <button type="button" class="caldev-view-btn${state.view === view ? ' is-active' : ''}" data-caldev-view="${view}">
-                ${view === 'rundown' ? 'Rundown' : view[0].toUpperCase() + view.slice(1)}
-              </button>
-            `).join('')}
-          </div>
+        <div class="caldev-view-switch" role="group" aria-label="Schedule views">
+          ${['month', 'week', 'rundown'].map((view) => `
+            <button type="button" class="caldev-view-btn${state.view === view ? ' is-active' : ''}" data-caldev-view="${view}">
+              ${view === 'rundown' ? 'Rundown' : view[0].toUpperCase() + view.slice(1)}
+            </button>
+          `).join('')}
         </div>
       </div>
       <p class="caldev-hint">View only on the public site. Super Admins edit this board in the CMS Schedule Board tab. Meetings also appear on Boosters.</p>
