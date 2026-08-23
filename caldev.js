@@ -70,6 +70,20 @@
     return state.events;
   }
 
+  function todayIso() {
+    return isoDate(new Date());
+  }
+
+  function eventEndIso(event) {
+    if (event.end_date && event.end_date >= event.start_date) return event.end_date;
+    return event.start_date || '';
+  }
+
+  function isPastEvent(event) {
+    const end = eventEndIso(event);
+    return Boolean(end) && end < todayIso();
+  }
+
   function eventsOnDate(iso) {
     return visibleEvents().filter((event) => {
       if (!event.start_date) return false;
@@ -213,15 +227,15 @@
 
   function renderWeek() {
     const start = startOfWeek(state.cursor);
-    const todayIso = isoDate(new Date());
+    const today = todayIso();
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     return `
       <div class="caldev-week">
         ${days.map((date) => {
           const iso = isoDate(date);
-          const dayEvents = eventsOnDate(iso);
+          const dayEvents = iso < today ? [] : eventsOnDate(iso);
           return `
-            <section class="caldev-week-col${iso === todayIso ? ' is-today' : ''}">
+            <section class="caldev-week-col${iso === today ? ' is-today' : ''}">
               <header>
                 <span>${WEEKDAYS[date.getDay()]}</span>
                 <strong>${date.getDate()}</strong>
@@ -237,7 +251,7 @@
                       </button>
                     `;
                   }).join('')
-                  : '<p class="draft">Open</p>'}
+                  : '<p class="draft">No Event Today!</p>'}
               </div>
             </section>
           `;
@@ -253,6 +267,7 @@
     const endIso = isoDate(end);
     const dated = visibleEvents()
       .filter((event) => event.start_date && event.start_date >= startIso && event.start_date <= endIso)
+      .filter((event) => event.start_date >= todayIso())
       .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date))
         || String(a.start_time || '').localeCompare(String(b.start_time || '')));
 
@@ -263,7 +278,7 @@
     }
 
     if (!groups.size) {
-      return '<div class="caldev-rundown"><p class="draft">No dated events in this month.</p></div>';
+      return '<div class="caldev-rundown"><p class="draft">No upcoming events in this month.</p></div>';
     }
 
     return `
