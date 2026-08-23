@@ -183,7 +183,9 @@
       }
       const wrap = canvas.closest('.badge-creator-preview-wrap');
       if (wrap) {
-        wrap.classList.toggle('is-committee-member', values.role === 'Committee Member');
+        const isCommittee = values.role === 'Committee Member';
+        wrap.classList.toggle('is-committee-member', isCommittee);
+        wrap.classList.toggle('is-gold-border', !isCommittee);
         wrap.classList.toggle('has-photo', hasAdjustablePhoto());
       }
       syncPhotoHandle();

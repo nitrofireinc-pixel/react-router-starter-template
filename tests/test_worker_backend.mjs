@@ -1946,6 +1946,9 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(badgeJs, /normalizePhotoCrop/);
   assert.match(badgeJs, /profilePhotoDrawMetrics/);
   assert.match(badgeJs, /getProfileLayout/);
+  assert.match(badgeJs, /borderColor:\s*isCommitteeMember\s*\?\s*COLORS\.red\s*:\s*COLORS\.gold/);
+  assert.match(badgeJs, /outerBorder:/);
+  assert.match(badgeAdmin, /is-gold-border/);
   assert.match(badgeAdmin, /badge-creator-photo-resize/);
   assert.match(badgeAdmin, /photo_zoom/);
   assert.match(badgeAdmin, /applyPhotoPan/);
@@ -1955,6 +1958,7 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
 
   const stylesSrc = readFileSync(join(root, 'styles.css'), 'utf8');
   assert.match(stylesSrc, /\.badge-creator-preview-wrap/);
+  assert.match(stylesSrc, /\.badge-creator-preview-wrap\.is-gold-border/);
   assert.match(stylesSrc, /\.badge-creator-layout/);
   assert.match(stylesSrc, /\.badge-creator-photo-handle/);
   assert.match(stylesSrc, /Treasurer ledger/);

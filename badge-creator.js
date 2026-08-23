@@ -47,7 +47,8 @@
       height: Math.round(3 * MM * BADGE_SCALE),
       top: scalePx(12),
     },
-    committeeBorder: Math.round(2.5 * MM * BADGE_SCALE),
+    // Outer role border thickness (red for Committee Member, gold for officers/directors).
+    outerBorder: Math.round(2.5 * MM * BADGE_SCALE),
     dpi: DPI,
   };
 
@@ -213,7 +214,7 @@
   function getProfileLayout(role = 'Committee Member') {
     const isCommitteeMember = role === 'Committee Member';
     const margin = BADGE.safeMargin;
-    const inset = isCommitteeMember ? BADGE.committeeBorder : 0;
+    const inset = BADGE.outerBorder;
     const contentX = margin;
     const contentY = margin;
     const cardX = contentX + inset;
@@ -226,6 +227,7 @@
     const profileCy = cardY + headerH + scalePx(50) + profileSize / 2;
     return {
       isCommitteeMember,
+      borderColor: isCommitteeMember ? COLORS.red : COLORS.gold,
       margin,
       contentX,
       contentY,
@@ -310,7 +312,7 @@
     const schoolYear = String(options.schoolYear || schoolYearOptions()[0]).trim();
     const photoCrop = normalizePhotoCrop(options.photoCrop || options);
     const layout = getProfileLayout(role);
-    const { isCommitteeMember, margin, contentX, contentY, cardX, cardY, cardW, cardH } = layout;
+    const { margin, contentX, contentY, cardX, cardY, cardW, cardH } = layout;
 
     const [schoolLogo, regimentMark, photo] = await Promise.all([
       options.schoolLogo ? Promise.resolve(options.schoolLogo) : loadImage('/assets/efhs-logo.png'),
@@ -324,19 +326,17 @@
     ctx.fillStyle = COLORS.paper;
     ctx.fillRect(0, 0, width, height);
 
-    // Committee Member outer red border (inside the safe margin).
-    if (isCommitteeMember) {
-      ctx.fillStyle = COLORS.red;
-      roundedRectPath(
-        ctx,
-        contentX,
-        contentY,
-        BADGE.contentWidth,
-        BADGE.contentHeight,
-        BADGE.cornerRadius + scalePx(4),
-      );
-      ctx.fill();
-    }
+    // Outer role border inside the safe margin: red for Committee Member, gold for all other roles.
+    ctx.fillStyle = layout.borderColor;
+    roundedRectPath(
+      ctx,
+      contentX,
+      contentY,
+      BADGE.contentWidth,
+      BADGE.contentHeight,
+      BADGE.cornerRadius + scalePx(4),
+    );
+    ctx.fill();
 
     // Card base
     ctx.fillStyle = COLORS.paper;
