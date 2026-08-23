@@ -13,7 +13,7 @@
 
   const state = {
     events: [],
-    view: 'month',
+    view: 'rundown',
     cursor: startOfMonth(new Date()),
     selectedId: null,
     loading: true,
@@ -274,7 +274,7 @@
     return `
       <div class="caldev-rundown">
         ${[...groups.entries()].map(([date, events]) => `
-          <section class="caldev-rundown-day">
+          <div class="caldev-rundown-day">
             <h3>${escapeHtml(formatLongDate(date))}</h3>
             <ul>
               ${events.map((event) => `
@@ -290,7 +290,7 @@
                 </li>
               `).join('')}
             </ul>
-          </section>
+          </div>
         `).join('')}
       </div>
     `;
