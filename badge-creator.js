@@ -357,7 +357,9 @@
     ctx.restore();
 
     const centerX = profileCx;
-    const brandContentTop = cardY + BADGE.slot.top + BADGE.slot.height + scalePx(8);
+    const slotBottom = cardY + BADGE.slot.top + BADGE.slot.height;
+    const stripeY = cardY + headerH;
+    const brandContentTop = slotBottom + scalePx(8);
     const titleCenterY = brandContentTop + scalePx(44) + LINE;
 
     // Slot, logos closer to title, and larger centered title in navy header
@@ -374,7 +376,9 @@
     const schoolX = centerX - titleTopWidth / 2 - titleGap - schoolSize.width;
     const schoolY = titleCenterY - schoolSize.height / 2;
     const markX = centerX + titleTopWidth / 2 + titleGap;
-    const markY = titleCenterY - markSize.height / 2;
+    // Vertically center the Blue Regiment mark between the slot and the red/gold stripe.
+    const markCenterY = (slotBottom + stripeY) / 2;
+    const markY = markCenterY - markSize.height / 2;
 
     ctx.drawImage(schoolLogo, schoolX, schoolY, schoolSize.width, schoolSize.height);
     ctx.drawImage(regimentMark, markX, markY, markSize.width, markSize.height);
@@ -392,7 +396,6 @@
     ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + scalePx(42));
 
     // Accent stripes
-    const stripeY = cardY + headerH;
     ctx.fillStyle = COLORS.red;
     ctx.fillRect(cardX, stripeY, cardW, scalePx(6));
     ctx.fillStyle = COLORS.gold;
