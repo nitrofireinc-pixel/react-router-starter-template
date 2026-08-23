@@ -5025,3 +5025,76 @@ body.cms-caldev-editor-open{overflow:hidden}
   .cms-caldev-editor-overlay{align-items:end;padding:0}
   .cms-caldev-repeat-grid{grid-template-columns:1fr}
 }
+
+/* Badge Creator (Band Boosters) */
+.badge-creator-layout{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(260px,340px);
+  gap:22px;
+  align-items:start;
+}
+.badge-creator-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+}
+.badge-creator-preview-card{
+  position:sticky;
+  top:18px;
+}
+.badge-creator-preview-wrap{
+  margin:0;
+  padding:18px;
+  border-radius:18px;
+  background:linear-gradient(160deg,#eef3f8,#f8fafc 55%,#e8eef5);
+  border:1px solid #d7e0ea;
+  display:grid;
+  place-items:center;
+}
+.badge-creator-preview-wrap canvas{
+  width:min(100%,220px);
+  height:auto;
+  display:block;
+  border-radius:12px;
+  box-shadow:0 12px 28px rgba(0,33,66,.18);
+  background:#fff;
+}
+.badge-creator-preview-wrap.is-committee-member{
+  background:linear-gradient(160deg,#fde8ea,#f8fafc 55%,#f6edee);
+  border-color:#f0c4c8;
+}
+.badge-creator-list-card h2{margin:0}
+.badge-creator-row{
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+}
+.badge-creator-row > div:nth-child(2){
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.badge-creator-row > div:nth-child(2) span,
+.badge-creator-row > div:nth-child(2) small{
+  color:#64748b;
+  font-size:.86rem;
+}
+.badge-creator-row .row-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:flex-end;
+}
+@media(max-width:980px){
+  .badge-creator-layout{grid-template-columns:minmax(0,1fr)}
+  .badge-creator-preview-card{position:static}
+  .badge-creator-row{
+    grid-template-columns:48px minmax(0,1fr);
+  }
+  .badge-creator-row .row-actions{
+    grid-column:1/-1;
+    justify-content:flex-start;
+  }
+}

@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'badge-creator-cms-20260823';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1254,6 +1254,46 @@ export function canAccessScheduleBoard(user) {
   );
 }
 
+/** Badge Creator: Super Admin, President, or Vice President. */
+export function canAccessBadgeCreator(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
+}
+
+const COMMITTEE_BADGE_ROLES = [
+  'Director',
+  'Assistant Director',
+  'President',
+  'Vice-President',
+  'Secretary',
+  'Treasurer',
+  'Committee Member',
+];
+
+export function normalizeCommitteeBadgePayload(payload = {}, existing = {}) {
+  const memberName = String(payload.member_name ?? existing.member_name ?? '').trim();
+  const roleRaw = String(payload.role ?? existing.role ?? 'Committee Member').trim();
+  const role = COMMITTEE_BADGE_ROLES.includes(roleRaw) ? roleRaw : 'Committee Member';
+  const schoolYear = String(payload.school_year ?? existing.school_year ?? '').trim();
+  const photoUrl = String(payload.photo_url ?? existing.photo_url ?? '').trim();
+  return {
+    member_name: memberName,
+    role,
+    school_year: schoolYear,
+    photo_url: photoUrl,
+  };
+}
+
+async function getCommitteeBadges(env) {
+  const { results } = await env.DB.prepare(
+    'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
+  ).all();
+  return results || [];
+}
+
 export function canManageAllEvents(user) {
   return isSuperAdmin(user) || hasPermission(user, 'events:manage');
 }
@@ -1446,6 +1486,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS committee_badges (id INTEGER PRIMARY KEY AUTOINCREMENT, member_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'Committee Member\', school_year TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -9212,6 +9253,55 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE id = ?').bind(id).first());
   }
 
+  if (url.pathname === '/api/admin/badges' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    return jsonResponse(await getCommitteeBadges(env));
+  }
+  if (url.pathname === '/api/admin/badges' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    const badge = normalizeCommitteeBadgePayload(await request.json());
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    const result = await env.DB.prepare(
+      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, created_by) VALUES (?, ?, ?, ?, ?)',
+    ).bind(badge.member_name, badge.role, badge.school_year, badge.photo_url, auth.user.id || null).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(result.meta.last_row_id).first());
+  }
+  const badgeMatch = url.pathname.match(/^\/api\/admin\/badges\/(\d+)$/);
+  if (badgeMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    const id = Number(badgeMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM committee_badges WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM committee_badges WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Badge not found' }, 404);
+    const badge = normalizeCommitteeBadgePayload(await request.json(), existing);
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    await env.DB.prepare(
+      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(badge.member_name, badge.role, badge.school_year, badge.photo_url, id).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(id).first());
+  }
+
   if (url.pathname === '/api/admin/contact/topics' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -10382,7 +10472,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -10741,7 +10831,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </form>
   </div>
 </div>
-</section><section id="tab-mail" class="cms-panel mail-panel">
+</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create CR80 portrait badges for directors, officers, and committee members. Save records to reprint or replace a lost badge. Download a PNG or use Print for card stock.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><canvas id="badge-creator-preview" width="638" height="1011" aria-label="Badge preview"></canvas></div><p class="muted">Preview is CR80 (2.125 × 3.375 in) at 300 DPI. Committee Member badges use a red outer border.</p></aside></div><div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><p class="muted">Open a saved badge to edit, download, or print again.</p><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
@@ -10852,4 +10942,4 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </div>
   </form>
 </dialog>
-<script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
+<script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ASSET_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
