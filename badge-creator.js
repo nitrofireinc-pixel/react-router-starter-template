@@ -1,23 +1,38 @@
 /* global document, Image, Blob, URL */
 /**
- * East Forsyth Blue Regiment badge renderer (CR80 portrait @ 300 DPI).
- * Shared by the CMS Badge Creator live preview and PNG export.
+ * East Forsyth Blue Regiment badge renderer.
+ * 125% of CR80 portrait @ 300 DPI, with enlarged type for print readability.
  */
 (function badgeCreatorModule(global) {
   const DPI = 300;
   const INCH = DPI;
   const MM = DPI / 25.4;
+  const BADGE_SCALE = 1.25;
+  // Type grows a bit more than the card so titles/names stay readable in print.
+  const TYPE_SCALE = BADGE_SCALE * 1.2;
+
+  function scalePx(value) {
+    return Math.round(value * BADGE_SCALE);
+  }
+
+  function typePx(value) {
+    return Math.round(value * TYPE_SCALE);
+  }
 
   const BADGE = {
-    width: Math.round(2.125 * INCH), // 638
-    height: Math.round(3.375 * INCH), // 1011
-    cornerRadius: Math.round(3 * MM), // ~35
+    scale: BADGE_SCALE,
+    typeScale: TYPE_SCALE,
+    widthIn: 2.125 * BADGE_SCALE,
+    heightIn: 3.375 * BADGE_SCALE,
+    width: Math.round(2.125 * BADGE_SCALE * INCH), // ~797
+    height: Math.round(3.375 * BADGE_SCALE * INCH), // ~1264
+    cornerRadius: Math.round(3 * MM * BADGE_SCALE),
     slot: {
-      width: Math.round(14 * MM), // horizontal slot ~165px
-      height: Math.round(3 * MM), // ~35px
-      top: 12, // near top edge inside card
+      width: Math.round(14 * MM * BADGE_SCALE),
+      height: Math.round(3 * MM * BADGE_SCALE),
+      top: scalePx(12),
     },
-    committeeBorder: Math.round(2.5 * MM), // ~30
+    committeeBorder: Math.round(2.5 * MM * BADGE_SCALE),
     dpi: DPI,
   };
 
@@ -35,7 +50,19 @@
     profileGreyDark: '#6B7280',
   };
 
-  const LINE = 18;
+  const LINE = scalePx(18);
+
+  const TYPE = {
+    titleTop: typePx(28),
+    titleBottom: typePx(22),
+    official: typePx(13),
+    label: typePx(11),
+    role: typePx(30),
+    name: typePx(24),
+    years: typePx(18),
+    org: typePx(15),
+    footer: typePx(12),
+  };
 
   const BADGE_ROLES = [
     'Director',
@@ -175,7 +202,7 @@
     const headerH = Math.round(cardH * 0.34) - LINE * 2;
     const profileSize = Math.round(cardW * 0.42);
     const profileCx = cardX + cardW / 2;
-    const profileCy = cardY + headerH + 50 + profileSize / 2;
+    const profileCy = cardY + headerH + scalePx(50) + profileSize / 2;
     return {
       isCommitteeMember,
       inset,
@@ -200,10 +227,10 @@
     ctx.fillStyle = COLORS.paper;
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = scalePx(2);
     ctx.stroke();
     ctx.strokeStyle = 'rgba(0,33,66,0.18)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = Math.max(1, scalePx(1));
     ctx.stroke();
     ctx.restore();
   }
@@ -217,10 +244,14 @@
     };
   }
 
+  function typeFont(weight, sizePx) {
+    return `${weight} ${sizePx}px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif`;
+  }
+
   function measureTitleWidth(ctx) {
-    ctx.font = 'bold 28px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.titleTop);
     const top = ctx.measureText('EAST FORSYTH').width;
-    ctx.font = 'bold 22px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.titleBottom);
     const bottom = ctx.measureText('BLUE REGIMENT').width;
     return Math.max(top, bottom);
   }
@@ -255,7 +286,7 @@
     const schoolYear = String(options.schoolYear || schoolYearOptions()[0]).trim();
     const photoCrop = normalizePhotoCrop(options.photoCrop || options);
     const layout = getProfileLayout(role);
-    const { isCommitteeMember, inset, cardX, cardY, cardW, cardH } = layout;
+    const { isCommitteeMember, cardX, cardY, cardW, cardH } = layout;
 
     const [schoolLogo, regimentMark, photo] = await Promise.all([
       options.schoolLogo ? Promise.resolve(options.schoolLogo) : loadImage('/assets/efhs-logo.png'),
@@ -268,7 +299,7 @@
     // Committee Member outer red border
     if (isCommitteeMember) {
       ctx.fillStyle = COLORS.red;
-      roundedRectPath(ctx, 0, 0, width, height, BADGE.cornerRadius + 4);
+      roundedRectPath(ctx, 0, 0, width, height, BADGE.cornerRadius + scalePx(4));
       ctx.fill();
     }
 
@@ -294,15 +325,15 @@
     ctx.restore();
 
     const centerX = profileCx;
-    const brandContentTop = cardY + BADGE.slot.top + BADGE.slot.height + 8;
-    const titleCenterY = brandContentTop + 44 + LINE;
+    const brandContentTop = cardY + BADGE.slot.top + BADGE.slot.height + scalePx(8);
+    const titleCenterY = brandContentTop + scalePx(44) + LINE;
 
     // Slot, logos closer to title, and larger centered title in navy header
     drawSlotHole(ctx, cardX, cardY, cardW);
 
-    const schoolSize = fitImage(schoolLogo, 132, 96);
-    const markSize = fitImage(regimentMark, 108, 108);
-    const titleGap = 4;
+    const schoolSize = fitImage(schoolLogo, scalePx(132), scalePx(96));
+    const markSize = fitImage(regimentMark, scalePx(108), scalePx(108));
+    const titleGap = scalePx(4);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -316,40 +347,40 @@
     ctx.drawImage(schoolLogo, schoolX, schoolY, schoolSize.width, schoolSize.height);
     ctx.drawImage(regimentMark, markX, markY, markSize.width, markSize.height);
 
-    ctx.font = 'bold 28px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.titleTop);
     ctx.fillStyle = COLORS.gold;
-    ctx.fillText('EAST FORSYTH', centerX, titleCenterY - 28);
-    ctx.font = 'bold 22px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.fillText('EAST FORSYTH', centerX, titleCenterY - TYPE.titleTop);
+    ctx.font = typeFont('bold', TYPE.titleBottom);
     ctx.fillStyle = COLORS.paper;
-    ctx.fillText('BLUE REGIMENT', centerX, titleCenterY + 2);
+    ctx.fillText('BLUE REGIMENT', centerX, titleCenterY + scalePx(2));
     ctx.fillStyle = COLORS.red;
-    ctx.fillRect(centerX - 56, titleCenterY + 20, 112, 3);
-    ctx.font = 'bold 13px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.fillRect(centerX - scalePx(64), titleCenterY + scalePx(22), scalePx(128), scalePx(4));
+    ctx.font = typeFont('bold', TYPE.official);
     ctx.fillStyle = COLORS.silver;
-    ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + 38);
+    ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + scalePx(42));
 
     // Accent stripes
     const stripeY = cardY + headerH;
     ctx.fillStyle = COLORS.red;
-    ctx.fillRect(cardX, stripeY, cardW, 6);
+    ctx.fillRect(cardX, stripeY, cardW, scalePx(6));
     ctx.fillStyle = COLORS.gold;
-    ctx.fillRect(cardX, stripeY + 6, cardW, 4);
+    ctx.fillRect(cardX, stripeY + scalePx(6), cardW, scalePx(4));
 
     // Body wash
     ctx.fillStyle = COLORS.soft;
-    ctx.fillRect(cardX, stripeY + 10, cardW, cardH - headerH - 10);
+    ctx.fillRect(cardX, stripeY + scalePx(10), cardW, cardH - headerH - scalePx(10));
 
     // Profile
     ctx.save();
     ctx.beginPath();
-    ctx.arc(profileCx, profileCy, profileSize / 2 + 10, 0, Math.PI * 2);
+    ctx.arc(profileCx, profileCy, profileSize / 2 + scalePx(10), 0, Math.PI * 2);
     ctx.strokeStyle = COLORS.navy;
-    ctx.lineWidth = 6;
+    ctx.lineWidth = scalePx(6);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(profileCx, profileCy, profileSize / 2 + 4, 0, Math.PI * 2);
+    ctx.arc(profileCx, profileCy, profileSize / 2 + scalePx(4), 0, Math.PI * 2);
     ctx.strokeStyle = COLORS.gold;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = scalePx(3);
     ctx.stroke();
     ctx.restore();
 
@@ -361,58 +392,60 @@
     }
 
     // Identity block
-    let textY = profileCy + profileSize / 2 + 42;
-    const textMax = cardW - 56;
+    let textY = profileCy + profileSize / 2 + scalePx(42);
+    const textMax = cardW - scalePx(48);
 
     ctx.textAlign = 'center';
-    ctx.font = 'bold 11px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ROLE', centerX, textY);
-    textY += 24;
+    textY += scalePx(26);
 
-    ctx.font = 'bold 30px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.role);
     ctx.fillStyle = COLORS.navy;
     const roleLines = wrapText(ctx, role, textMax);
+    const roleLineGap = Math.round(TYPE.role * 1.15);
     roleLines.forEach((line) => {
       ctx.fillText(line, centerX, textY);
-      textY += 34;
+      textY += roleLineGap;
     });
-    textY += 4;
+    textY += scalePx(4);
     ctx.fillStyle = COLORS.red;
-    ctx.fillRect(centerX - 42, textY, 84, 3);
-    textY += 24;
+    ctx.fillRect(centerX - scalePx(48), textY, scalePx(96), scalePx(4));
+    textY += scalePx(26);
 
-    ctx.font = 'bold 11px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('NAME', centerX, textY);
-    textY += 24;
-    ctx.font = 'bold 24px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    textY += scalePx(26);
+    ctx.font = typeFont('bold', TYPE.name);
     ctx.fillStyle = COLORS.ink;
+    const nameLineGap = Math.round(TYPE.name * 1.18);
     wrapText(ctx, name, textMax).forEach((line) => {
       ctx.fillText(line, centerX, textY);
-      textY += 28;
+      textY += nameLineGap;
     });
-    textY += 8;
+    textY += scalePx(10);
 
-    ctx.font = 'bold 11px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ACTIVE YEARS', centerX, textY);
-    textY += 22;
-    ctx.font = '18px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    textY += scalePx(24);
+    ctx.font = typeFont('bold', TYPE.years);
     ctx.fillStyle = COLORS.navy;
     ctx.fillText(schoolYear, centerX, textY);
-    textY += 30;
+    textY += scalePx(32);
 
-    ctx.font = 'bold 11px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.label);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('ORGANIZATION', centerX, textY);
-    textY += 20;
-    ctx.font = '15px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    textY += scalePx(22);
+    ctx.font = typeFont('bold', TYPE.org);
     ctx.fillStyle = COLORS.muted;
     ctx.fillText('East Forsyth Band Boosters', centerX, textY);
 
     // Footer bar
-    const footerH = 56;
+    const footerH = scalePx(56);
     const footerY = cardY + cardH - footerH;
     ctx.save();
     roundedRectPath(ctx, cardX, footerY, cardW, footerH + BADGE.cornerRadius, BADGE.cornerRadius);
@@ -420,7 +453,7 @@
     ctx.fillStyle = COLORS.navy;
     ctx.fillRect(cardX, footerY, cardW, footerH);
     ctx.restore();
-    ctx.font = '12px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif';
+    ctx.font = typeFont('bold', TYPE.footer);
     ctx.fillStyle = COLORS.silver;
     ctx.fillText('East Forsyth Blue Regiment', centerX, footerY + footerH / 2);
 
@@ -453,6 +486,8 @@
     if (!canvas) return Promise.reject(new Error('Badge preview is not ready.'));
     const dataUrl = canvas.toDataURL('image/png');
     const safeTitle = String(title || 'Badge').replace(/[<>&"]/g, '');
+    const widthIn = BADGE.widthIn;
+    const heightIn = BADGE.heightIn;
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -460,16 +495,16 @@
   <title>${safeTitle}</title>
   <style>
     html, body { margin: 0; padding: 0; background: #fff; }
-    @page { size: 2.125in 3.375in; margin: 0; }
+    @page { size: ${widthIn}in ${heightIn}in; margin: 0; }
     img {
       display: block;
-      width: 2.125in;
-      height: 3.375in;
+      width: ${widthIn}in;
+      height: ${heightIn}in;
       max-width: 100%;
     }
     @media print {
       html, body { margin: 0; padding: 0; }
-      img { width: 2.125in; height: 3.375in; }
+      img { width: ${widthIn}in; height: ${heightIn}in; }
     }
   </style>
 </head>
@@ -515,6 +550,7 @@
   global.BadgeCreator = {
     BADGE,
     COLORS,
+    TYPE,
     BADGE_ROLES,
     schoolYearOptions,
     loadImage,

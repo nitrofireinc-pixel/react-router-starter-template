@@ -1937,7 +1937,9 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(badgeAdmin, /sortOrder:\s*-600/);
   const badgeJs = readFileSync(join(root, 'badge-creator.js'), 'utf8');
   assert.match(badgeJs, /function printBadge/);
-  assert.match(badgeJs, /2\.125in 3\.375in/);
+  assert.match(badgeJs, /BADGE_SCALE\s*=\s*1\.25/);
+  assert.match(badgeJs, /TYPE_SCALE/);
+  assert.match(badgeJs, /widthIn:\s*2\.125\s*\*\s*BADGE_SCALE/);
   assert.match(badgeJs, /normalizePhotoCrop/);
   assert.match(badgeJs, /profilePhotoDrawMetrics/);
   assert.match(badgeJs, /getProfileLayout/);
