@@ -360,10 +360,10 @@
     const centerX = profileCx;
     const slotBottom = cardY + BADGE.slot.top + BADGE.slot.height;
     const stripeY = cardY + headerH;
-    const brandContentTop = slotBottom + scalePx(8);
-    const titleCenterY = brandContentTop + scalePx(44) + LINE;
+    // Vertically center logos + title between the lanyard slot and the red/gold stripe.
+    const headerCenterY = (slotBottom + stripeY) / 2;
 
-    // Slot, logos closer to title, and larger centered title in navy header
+    // Slot, logos, and title in navy header
     drawSlotHole(ctx, cardX, cardY, cardW);
 
     const schoolSize = fitImage(schoolLogo, scalePx(132), scalePx(96));
@@ -374,19 +374,22 @@
     ctx.textBaseline = 'middle';
     const titleTopWidth = measureTitleWidth(ctx);
 
+    // Title stack offsets relative to titleCenterY (used to keep the block centered as a group).
+    const titleStackTop = -TYPE.titleTop;
+    const titleStackBottom = scalePx(42);
+    const titleCenterY = headerCenterY - ((titleStackTop + titleStackBottom) / 2);
+
     const schoolX = centerX - titleTopWidth / 2 - titleGap - schoolSize.width;
-    const schoolY = titleCenterY - schoolSize.height / 2;
+    const schoolY = headerCenterY - schoolSize.height / 2;
     const markX = centerX + titleTopWidth / 2 + titleGap;
-    // Vertically center the Blue Regiment mark between the slot and the red/gold stripe.
-    const markCenterY = (slotBottom + stripeY) / 2;
-    const markY = markCenterY - markSize.height / 2;
+    const markY = headerCenterY - markSize.height / 2;
 
     ctx.drawImage(schoolLogo, schoolX, schoolY, schoolSize.width, schoolSize.height);
     ctx.drawImage(regimentMark, markX, markY, markSize.width, markSize.height);
 
     ctx.font = typeFont('bold', TYPE.titleTop);
     ctx.fillStyle = COLORS.gold;
-    ctx.fillText('EAST FORSYTH', centerX, titleCenterY - TYPE.titleTop);
+    ctx.fillText('EAST FORSYTH', centerX, titleCenterY + titleStackTop);
     ctx.font = typeFont('bold', TYPE.titleBottom);
     ctx.fillStyle = COLORS.paper;
     ctx.fillText('BLUE REGIMENT', centerX, titleCenterY + scalePx(2));
@@ -394,7 +397,7 @@
     ctx.fillRect(centerX - scalePx(64), titleCenterY + scalePx(22), scalePx(128), scalePx(4));
     ctx.font = typeFont('bold', TYPE.official);
     ctx.fillStyle = COLORS.silver;
-    ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + scalePx(42));
+    ctx.fillText('OFFICIAL BADGE', centerX, titleCenterY + titleStackBottom);
 
     // Accent stripes
     ctx.fillStyle = COLORS.red;
