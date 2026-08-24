@@ -565,10 +565,38 @@
 
   function printBadge(canvas, title = 'Badge') {
     if (!canvas) return Promise.reject(new Error('Badge preview is not ready.'));
-    const dataUrl = canvas.toDataURL('image/png');
-    const safeTitle = String(title || 'Badge').replace(/[<>&"]/g, '');
-    const widthIn = BADGE.widthIn;
-    const heightIn = BADGE.heightIn;
+    return printBadges([canvas], title);
+  }
+
+  function canvasToDataUrl(source) {
+    if (!source) return '';
+    if (typeof source === 'string') return source;
+    if (source instanceof HTMLCanvasElement) return source.toDataURL('image/png');
+    if (source.dataUrl) return source.dataUrl;
+    if (source.canvas instanceof HTMLCanvasElement) return source.canvas.toDataURL('image/png');
+    return '';
+  }
+
+  function printBadges(sources, title = 'Badges') {
+    const items = (Array.isArray(sources) ? sources : [sources])
+      .map((source) => canvasToDataUrl(source))
+      .filter(Boolean);
+    if (!items.length) return Promise.reject(new Error('No badges ready to print.'));
+    if (items.length > 3) return Promise.reject(new Error('Print at most three badges on one page.'));
+
+    const safeTitle = String(title || 'Badges').replace(/[<>&"]/g, '');
+    const badgeW = BADGE.widthIn;
+    const badgeH = BADGE.heightIn;
+    const count = items.length;
+    const landscape = count === 3;
+    // Letter: portrait for 1–2, landscape for 3 so a row of badges fits.
+    const pageW = count === 1 ? badgeW : (landscape ? 11 : 8.5);
+    const pageH = count === 1 ? badgeH : (landscape ? 8.5 : 11);
+    const gapIn = count === 1 ? 0 : (count === 3 ? 0.2 : 0.3);
+    const imgs = items.map((src, index) => (
+      `<img src="${src}" alt="Badge ${index + 1}" width="${Math.round(badgeW * DPI)}" height="${Math.round(badgeH * DPI)}">`
+    )).join('');
+
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -576,20 +604,34 @@
   <title>${safeTitle}</title>
   <style>
     html, body { margin: 0; padding: 0; background: #fff; }
-    @page { size: ${widthIn}in ${heightIn}in; margin: 0; }
-    img {
+    @page { size: ${pageW}in ${pageH}in; margin: 0; }
+    .sheet {
+      box-sizing: border-box;
+      width: ${pageW}in;
+      height: ${pageH}in;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: ${gapIn}in;
+      background: #fff;
+    }
+    .sheet img {
       display: block;
-      width: ${widthIn}in;
-      height: ${heightIn}in;
-      max-width: 100%;
+      width: ${badgeW}in;
+      height: ${badgeH}in;
+      max-width: none;
+      flex: 0 0 auto;
     }
     @media print {
       html, body { margin: 0; padding: 0; }
-      img { width: ${widthIn}in; height: ${heightIn}in; }
+      .sheet { page-break-inside: avoid; }
     }
   </style>
 </head>
-<body><img src="${dataUrl}" alt="${safeTitle}"></body>
+<body><div class="sheet">${imgs}</div></body>
 </html>`;
 
     return new Promise((resolve, reject) => {
@@ -647,5 +689,6 @@
     exportBadgePng,
     downloadBlob,
     printBadge,
+    printBadges,
   };
 }(typeof window !== 'undefined' ? window : globalThis));

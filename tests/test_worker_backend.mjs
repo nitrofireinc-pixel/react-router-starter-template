@@ -1933,10 +1933,17 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(adminJs, /'Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses/);
   const badgeAdmin = readFileSync(join(root, 'badge-creator-admin.js'), 'utf8');
   assert.match(badgeAdmin, /badge-creator-print/);
+  assert.match(badgeAdmin, /badge-creator-print-selected/);
+  assert.match(badgeAdmin, /MAX_PRINT_SELECTION\s*=\s*3/);
+  assert.match(badgeAdmin, /printSelectedBadges/);
+  assert.match(badgeAdmin, /data-select-badge/);
   assert.match(badgeAdmin, /printBadge/);
   assert.match(badgeAdmin, /sortOrder:\s*-600/);
   const badgeJs = readFileSync(join(root, 'badge-creator.js'), 'utf8');
   assert.match(badgeJs, /function printBadge/);
+  assert.match(badgeJs, /function printBadges/);
+  assert.match(badgeJs, /Print at most three badges/);
+  assert.match(badgeJs, /count === 3/);
   assert.match(badgeJs, /BADGE_SCALE\s*=\s*1\.25/);
   assert.match(badgeJs, /SAFE_MARGIN_IN\s*=\s*0\.25/);
   assert.match(badgeJs, /safeMarginIn:\s*SAFE_MARGIN_IN/);
@@ -1959,11 +1966,15 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(workerSrc, /photo_zoom/);
   assert.match(workerSrc, /photo_offset_x/);
   assert.match(workerSrc, /badge-creator-photo-handle/);
+  assert.match(workerSrc, /badge-creator-print-selected/);
+  assert.match(workerSrc, /Select up to 3 badges/);
 
   const stylesSrc = readFileSync(join(root, 'styles.css'), 'utf8');
   assert.match(stylesSrc, /\.badge-creator-preview-wrap/);
   assert.match(stylesSrc, /\.badge-creator-preview-wrap\.is-gold-border/);
   assert.match(stylesSrc, /\.badge-creator-preview-wrap\.is-officer-border/);
+  assert.match(stylesSrc, /\.badge-creator-list-toolbar/);
+  assert.match(stylesSrc, /\.badge-creator-select/);
   assert.match(stylesSrc, /\.badge-creator-layout/);
   assert.match(stylesSrc, /\.badge-creator-photo-handle/);
   assert.match(stylesSrc, /Treasurer ledger/);

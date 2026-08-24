@@ -2,6 +2,7 @@
 (function badgeCreatorAdmin(global) {
   const state = {
     badges: [],
+    selectedIds: [],
     photoObjectUrl: '',
     photoImage: null,
     renderTimer: null,
@@ -10,6 +11,8 @@
     drag: null,
     resize: null,
   };
+
+  const MAX_PRINT_SELECTION = 3;
 
   function $(selector) {
     return document.querySelector(selector);
@@ -298,15 +301,107 @@
     }
   }
 
+  async function renderBadgeCanvas(badge) {
+    const canvas = document.createElement('canvas');
+    await BadgeCreator.renderBadge(canvas, {
+      name: badge.member_name,
+      role: badge.role,
+      schoolYear: badge.school_year,
+      photoUrl: badge.photo_url,
+      photoCrop: {
+        zoom: badge.photo_zoom,
+        offsetX: badge.photo_offset_x,
+        offsetY: badge.photo_offset_y,
+      },
+    });
+    return canvas;
+  }
+
+  function selectedBadges() {
+    const ids = new Set(state.selectedIds.map(Number));
+    return state.badges.filter((badge) => ids.has(Number(badge.id)));
+  }
+
+  function syncPrintSelectedButton() {
+    const button = $('#badge-creator-print-selected');
+    const countLabel = $('#badge-creator-print-selected-count');
+    const count = state.selectedIds.length;
+    if (countLabel) countLabel.textContent = count ? `(${count})` : '';
+    if (button) {
+      button.disabled = count < 1;
+      button.title = count === 3
+        ? 'Print 3 badges on one landscape letter page'
+        : count === 2
+          ? 'Print 2 badges on one letter page'
+          : count === 1
+            ? 'Print 1 selected badge'
+            : 'Select up to 3 badges to print on one page';
+    }
+  }
+
+  function toggleBadgeSelection(badgeId, checked) {
+    const id = Number(badgeId);
+    if (!Number.isFinite(id)) return;
+    const already = state.selectedIds.includes(id);
+    if (checked && !already) {
+      if (state.selectedIds.length >= MAX_PRINT_SELECTION) {
+        setStatus(`Select at most ${MAX_PRINT_SELECTION} badges to print on one page.`);
+        const box = document.querySelector(`[data-select-badge="${id}"]`);
+        if (box) box.checked = false;
+        return;
+      }
+      state.selectedIds.push(id);
+    } else if (!checked && already) {
+      state.selectedIds = state.selectedIds.filter((value) => value !== id);
+    }
+    syncPrintSelectedButton();
+  }
+
+  async function printSelectedBadges() {
+    const badges = selectedBadges();
+    if (!badges.length) {
+      setStatus('Select 1–3 saved badges to print.');
+      return;
+    }
+    if (badges.length > MAX_PRINT_SELECTION) {
+      setStatus(`Select at most ${MAX_PRINT_SELECTION} badges to print on one page.`);
+      return;
+    }
+    setStatus(`Preparing ${badges.length} badge${badges.length === 1 ? '' : 's'} for print…`);
+    try {
+      const canvases = [];
+      for (const badge of badges) {
+        canvases.push(await renderBadgeCanvas(badge));
+      }
+      const title = badges.length === 1
+        ? `${badges[0].member_name || 'Badge'} · ${badges[0].school_year || ''}`.trim()
+        : `Badges (${badges.length})`;
+      await BadgeCreator.printBadges(canvases, title);
+      const orient = badges.length === 3 ? ' landscape letter' : badges.length === 1 ? '' : ' letter';
+      setStatus(`Print dialog opened for ${badges.length} badge${badges.length === 1 ? '' : 's'} on one${orient} page.`);
+    } catch (error) {
+      setStatus(`Could not print selected badges: ${error.message}`);
+    }
+  }
+
   function renderSavedBadges() {
     const list = $('#badge-creator-list');
     if (!list) return;
+    const validIds = new Set(state.badges.map((badge) => Number(badge.id)));
+    state.selectedIds = state.selectedIds.filter((id) => validIds.has(id));
     if (!state.badges.length) {
       list.innerHTML = '<p class="draft">No saved badges yet.</p>';
+      syncPrintSelectedButton();
       return;
     }
-    list.innerHTML = state.badges.map((badge) => `
+    list.innerHTML = state.badges.map((badge) => {
+      const id = Number(badge.id);
+      const checked = state.selectedIds.includes(id) ? ' checked' : '';
+      return `
       <article class="admin-row badge-creator-row">
+        <label class="badge-creator-select">
+          <input type="checkbox" data-select-badge="${id}"${checked} aria-label="Select ${escapeHtml(badge.member_name)} for print">
+        </label>
         <div class="mini-logo staff-mini-photo">${badge.photo_url ? `<img src="${escapeHtml(badge.photo_url)}" alt="">` : escapeHtml(badgeInitials(badge.member_name))}</div>
         <div>
           <b>${escapeHtml(badge.member_name)}</b>
@@ -314,13 +409,20 @@
           <small>Updated ${escapeHtml((badge.updated_at || '').slice(0, 10) || 'recently')}</small>
         </div>
         <div class="row-actions">
-          <button type="button" data-edit-badge="${badge.id}">Edit</button>
-          <button type="button" data-download-badge="${badge.id}">Download</button>
-          <button type="button" data-print-badge="${badge.id}">Print</button>
-          <button type="button" data-delete-badge="${badge.id}">Delete</button>
+          <button type="button" data-edit-badge="${id}">Edit</button>
+          <button type="button" data-download-badge="${id}">Download</button>
+          <button type="button" data-print-badge="${id}">Print</button>
+          <button type="button" data-delete-badge="${id}">Delete</button>
         </div>
       </article>
-    `).join('');
+    `;
+    }).join('');
+
+    list.querySelectorAll('[data-select-badge]').forEach((input) => {
+      input.addEventListener('change', () => {
+        toggleBadgeSelection(input.dataset.selectBadge, input.checked);
+      });
+    });
 
     list.querySelectorAll('[data-edit-badge]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -332,7 +434,9 @@
     list.querySelectorAll('[data-delete-badge]').forEach((button) => {
       button.addEventListener('click', async () => {
         if (!confirm('Delete this saved badge?')) return;
+        const deletedId = Number(button.dataset.deleteBadge);
         await global.jsonFetch(`/api/admin/badges/${button.dataset.deleteBadge}`, { method: 'DELETE' });
+        state.selectedIds = state.selectedIds.filter((id) => id !== deletedId);
         await loadBadges();
         setStatus('Badge deleted.');
       });
@@ -355,6 +459,8 @@
         await printCurrentBadge(`${badge.member_name || 'Badge'} · ${badge.school_year || ''}`);
       });
     });
+
+    syncPrintSelectedButton();
   }
 
   async function loadBadges() {
@@ -556,6 +662,9 @@
     });
     $('#badge-creator-print')?.addEventListener('click', async () => {
       await printCurrentBadge();
+    });
+    $('#badge-creator-print-selected')?.addEventListener('click', async () => {
+      await printSelectedBadges();
     });
   }
 
