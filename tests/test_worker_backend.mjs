@@ -5,7 +5,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, DB_SCHEMA_VERSION, initDb, resetDbInitCache } from '../worker/src/worker.mjs';
+import {
+  ensureCaldevSchema,
+  resetCaldevSchemaCache,
+} from '../worker/src/caldev.mjs';
 
 
 test('wrangler worker assets config must stay on worker/public', () => {
@@ -2107,4 +2111,111 @@ test('subscribe deep link and print-only QR assets are wired', () => {
   assert.match(qrPage, /Subscribe!/);
   assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
   assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
+});
+
+test('initDb skips heavy migrate work when schema_version matches', async () => {
+  resetDbInitCache();
+  const calls = [];
+  const store = new Map([['schema_version', DB_SCHEMA_VERSION]]);
+  const env = {
+    DB: {
+      prepare(sql) {
+        const statement = {
+          sql,
+          binds: [],
+          bind(...args) {
+            this.binds = args;
+            return this;
+          },
+          async first() {
+            calls.push({ type: 'first', sql });
+            if (String(sql).includes('FROM site_content WHERE key')) {
+              const key = this.binds[0];
+              if (!store.has(key)) return null;
+              return { value: store.get(key) };
+            }
+            throw new Error(`unexpected first(): ${sql}`);
+          },
+          async run() {
+            calls.push({ type: 'run', sql });
+            throw new Error(`unexpected run(): ${sql}`);
+          },
+          async all() {
+            calls.push({ type: 'all', sql });
+            throw new Error(`unexpected all(): ${sql}`);
+          },
+        };
+        return statement;
+      },
+      async batch() {
+        calls.push({ type: 'batch' });
+        throw new Error('unexpected batch()');
+      },
+    },
+  };
+  await initDb(env);
+  await initDb(env);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].type, 'first');
+  assert.match(calls[0].sql, /site_content/);
+});
+
+test('initDb memoizes after first successful schema check in-isolate', async () => {
+  resetDbInitCache();
+  let reads = 0;
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            reads += 1;
+            return { value: DB_SCHEMA_VERSION };
+          },
+          async run() { throw new Error('unexpected run'); },
+          async all() { throw new Error('unexpected all'); },
+        };
+      },
+      async batch() { throw new Error('unexpected batch'); },
+    },
+  };
+  await initDb(env);
+  await initDb(env);
+  await initDb(env);
+  assert.equal(reads, 1);
+});
+
+test('ensureCaldevSchema only migrates once per isolate', async () => {
+  resetCaldevSchemaCache();
+  let runs = 0;
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          async run() {
+            runs += 1;
+            // Simulate "column already exists" for ALTER attempts.
+            if (String(sql).includes('ALTER TABLE')) {
+              throw new Error('duplicate column name');
+            }
+          },
+        };
+      },
+    },
+  };
+  await ensureCaldevSchema(env);
+  await ensureCaldevSchema(env);
+  assert.equal(runs, 4); // 1 CREATE + 3 ALTER attempts
+});
+
+test('worker source gates initDb behind schema_version', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /export const DB_SCHEMA_VERSION/);
+  assert.match(workerSrc, /async function migrateAndSeedDb/);
+  assert.match(workerSrc, /export async function initDb/);
+  assert.match(workerSrc, /resetDbInitCache/);
+  const caldevSrc = readFileSync(join(root, 'worker/src/caldev.mjs'), 'utf8');
+  assert.match(caldevSrc, /resetCaldevSchemaCache/);
+  assert.match(caldevSrc, /caldevSchemaReady/);
 });
