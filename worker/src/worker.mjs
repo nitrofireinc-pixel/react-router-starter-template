@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'calendar-css-brace-20260825';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1432,7 +1432,67 @@ async function verifyPassword(password, stored) {
   }
 }
 
-async function initDb(env) {
+/** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
+export const DB_SCHEMA_VERSION = '2026-08-24.1';
+const DB_SCHEMA_VERSION_KEY = 'schema_version';
+
+let dbInitVersion = null;
+let dbInitPromise = null;
+
+/** Test helper — clears the in-isolate initDb memo. */
+export function resetDbInitCache() {
+  dbInitVersion = null;
+  dbInitPromise = null;
+}
+
+async function readDbSchemaVersion(env) {
+  try {
+    const row = await env.DB.prepare(
+      'SELECT value FROM site_content WHERE key = ?',
+    ).bind(DB_SCHEMA_VERSION_KEY).first();
+    return row?.value == null ? null : String(row.value);
+  } catch {
+    // site_content may not exist yet on a fresh database.
+    return null;
+  }
+}
+
+async function writeDbSchemaVersion(env) {
+  await env.DB.prepare(
+    "INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).bind(DB_SCHEMA_VERSION_KEY, DB_SCHEMA_VERSION).run();
+}
+
+/**
+ * Ensure schema/seed are applied. Heavy migrate/seed work runs only when
+ * site_content.schema_version differs from DB_SCHEMA_VERSION (or is missing).
+ * Warm Worker isolates skip D1 entirely after the first successful check.
+ */
+export async function initDb(env) {
+  if (dbInitVersion === DB_SCHEMA_VERSION) return;
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      const current = await readDbSchemaVersion(env);
+      if (current === DB_SCHEMA_VERSION) {
+        dbInitVersion = DB_SCHEMA_VERSION;
+        return;
+      }
+      await migrateAndSeedDb(env);
+      await writeDbSchemaVersion(env);
+      dbInitVersion = DB_SCHEMA_VERSION;
+    })()
+      .catch((error) => {
+        dbInitVersion = null;
+        throw error;
+      })
+      .finally(() => {
+        dbInitPromise = null;
+      });
+  }
+  await dbInitPromise;
+}
+
+async function migrateAndSeedDb(env) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
