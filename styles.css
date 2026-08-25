@@ -4581,7 +4581,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   border:1px dashed #9db4d0;
   border-radius:16px;
   background:#f5f9ff;
-
+}
 
 /* Band dues payment preview + modal */
 .dues-dev-section{padding-top:42px}
