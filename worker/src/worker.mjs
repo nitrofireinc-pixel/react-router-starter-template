@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'restore-badge-resources-20260828';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -314,10 +314,10 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
-export function jsonResponse(payload, status = 200) {
+export function jsonResponse(payload, status = 200, headers = {}) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers },
   });
 }
 
@@ -1254,6 +1254,60 @@ export function canAccessScheduleBoard(user) {
   );
 }
 
+/** Badge Creator: Super Admin, President, or Vice President. */
+export function canAccessBadgeCreator(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
+}
+
+const COMMITTEE_BADGE_ROLES = [
+  'Director',
+  'Assistant Director',
+  'President',
+  'Vice-President',
+  'Secretary',
+  'Treasurer',
+  'Committee Member',
+];
+
+export function normalizeCommitteeBadgePayload(payload = {}, existing = {}) {
+  const memberName = String(payload.member_name ?? existing.member_name ?? '').trim();
+  const roleRaw = String(payload.role ?? existing.role ?? 'Committee Member').trim();
+  const role = COMMITTEE_BADGE_ROLES.includes(roleRaw) ? roleRaw : 'Committee Member';
+  const schoolYear = String(payload.school_year ?? existing.school_year ?? '').trim();
+  const photoUrl = String(payload.photo_url ?? existing.photo_url ?? '').trim();
+  const photoZoomRaw = Number(payload.photo_zoom ?? existing.photo_zoom ?? 1);
+  const photoOffsetXRaw = Number(payload.photo_offset_x ?? existing.photo_offset_x ?? 0);
+  const photoOffsetYRaw = Number(payload.photo_offset_y ?? existing.photo_offset_y ?? 0);
+  const clamp = (value, min, max, fallback) => (
+    Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+  );
+  return {
+    member_name: memberName,
+    role,
+    school_year: schoolYear,
+    photo_url: photoUrl,
+    photo_zoom: clamp(photoZoomRaw, 1, 4, 1),
+    photo_offset_x: clamp(photoOffsetXRaw, -2, 2, 0),
+    photo_offset_y: clamp(photoOffsetYRaw, -2, 2, 0),
+  };
+}
+
+async function getCommitteeBadges(env) {
+  const { results } = await env.DB.prepare(
+    'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
+  ).all();
+  return (results || []).map((row) => ({
+    ...row,
+    photo_zoom: Number(row.photo_zoom ?? 1) || 1,
+    photo_offset_x: Number(row.photo_offset_x ?? 0) || 0,
+    photo_offset_y: Number(row.photo_offset_y ?? 0) || 0,
+  }));
+}
+
 export function canManageAllEvents(user) {
   return isSuperAdmin(user) || hasPermission(user, 'events:manage');
 }
@@ -1432,7 +1486,67 @@ async function verifyPassword(password, stored) {
   }
 }
 
-async function initDb(env) {
+/** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
+export const DB_SCHEMA_VERSION = '2026-08-24.1';
+const DB_SCHEMA_VERSION_KEY = 'schema_version';
+
+let dbInitVersion = null;
+let dbInitPromise = null;
+
+/** Test helper — clears the in-isolate initDb memo. */
+export function resetDbInitCache() {
+  dbInitVersion = null;
+  dbInitPromise = null;
+}
+
+async function readDbSchemaVersion(env) {
+  try {
+    const row = await env.DB.prepare(
+      'SELECT value FROM site_content WHERE key = ?',
+    ).bind(DB_SCHEMA_VERSION_KEY).first();
+    return row?.value == null ? null : String(row.value);
+  } catch {
+    // site_content may not exist yet on a fresh database.
+    return null;
+  }
+}
+
+async function writeDbSchemaVersion(env) {
+  await env.DB.prepare(
+    "INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).bind(DB_SCHEMA_VERSION_KEY, DB_SCHEMA_VERSION).run();
+}
+
+/**
+ * Ensure schema/seed are applied. Heavy migrate/seed work runs only when
+ * site_content.schema_version differs from DB_SCHEMA_VERSION (or is missing).
+ * Warm Worker isolates skip D1 entirely after the first successful check.
+ */
+export async function initDb(env) {
+  if (dbInitVersion === DB_SCHEMA_VERSION) return;
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      const current = await readDbSchemaVersion(env);
+      if (current === DB_SCHEMA_VERSION) {
+        dbInitVersion = DB_SCHEMA_VERSION;
+        return;
+      }
+      await migrateAndSeedDb(env);
+      await writeDbSchemaVersion(env);
+      dbInitVersion = DB_SCHEMA_VERSION;
+    })()
+      .catch((error) => {
+        dbInitVersion = null;
+        throw error;
+      })
+      .finally(() => {
+        dbInitPromise = null;
+      });
+  }
+  await dbInitPromise;
+}
+
+async function migrateAndSeedDb(env) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -1446,6 +1560,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS committee_badges (id INTEGER PRIMARY KEY AUTOINCREMENT, member_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'Committee Member\', school_year TEXT NOT NULL DEFAULT \'\', photo_url TEXT NOT NULL DEFAULT \'\', photo_zoom REAL NOT NULL DEFAULT 1, photo_offset_x REAL NOT NULL DEFAULT 0, photo_offset_y REAL NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -1471,6 +1586,21 @@ async function initDb(env) {
     )`),
   ]);
   await ensureCaldevSchema(env);
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_zoom REAL NOT NULL DEFAULT 1').run();
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_offset_x REAL NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await env.DB.prepare('ALTER TABLE committee_badges ADD COLUMN photo_offset_y REAL NOT NULL DEFAULT 0').run();
+  } catch {
+    // Column already exists.
+  }
   try {
     await env.DB.prepare("ALTER TABLE admin_audit_log ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''").run();
   } catch {
@@ -9212,6 +9342,73 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE id = ?').bind(id).first());
   }
 
+  if (url.pathname === '/api/admin/badges' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    return jsonResponse(await getCommitteeBadges(env));
+  }
+  if (url.pathname === '/api/admin/badges' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    const badge = normalizeCommitteeBadgePayload(await request.json());
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    const result = await env.DB.prepare(
+      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      auth.user.id || null,
+    ).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(result.meta.last_row_id).first());
+  }
+  const badgeMatch = url.pathname.match(/^\/api\/admin\/badges\/(\d+)$/);
+  if (badgeMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    const id = Number(badgeMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM committee_badges WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM committee_badges WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Badge not found' }, 404);
+    const badge = normalizeCommitteeBadgePayload(await request.json(), existing);
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    await env.DB.prepare(
+      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, photo_zoom = ?, photo_offset_x = ?, photo_offset_y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      id,
+    ).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(id).first());
+  }
+
   if (url.pathname === '/api/admin/contact/topics' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -9957,24 +10154,65 @@ function clearSessionCookie() {
 function renderLoginHtml(nextPath = '/admin') {
   const safeNext = sanitizeAdminReturnPath(nextPath);
   return LOGIN_HTML.replace(
-    '<form class="admin-card" method="post" action="/admin/login">',
-    `<form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="next" value="${escapeAttr(safeNext)}">`,
+    '<form id="admin-login-form" class="admin-card" method="post" action="/admin/login" data-admin-login-form>',
+    `<form id="admin-login-form" class="admin-card" method="post" action="/admin/login" data-admin-login-form><input type="hidden" name="next" value="${escapeAttr(safeNext)}">`,
   );
+}
+
+function wantsJsonLogin(request) {
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  const requestedWith = String(request.headers.get('x-requested-with') || '').toLowerCase();
+  // Only treat explicit JSON/fetch clients as JSON — never infer from Accept,
+  // so classic HTML form posts still get an HTML login response.
+  return contentType.includes('application/json') || requestedWith === 'fetch';
+}
+
+async function readLoginCredentials(request, requestUrl) {
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({}));
+    return {
+      username: String(body?.username || '').trim(),
+      password: String(body?.password || ''),
+      nextPath: sanitizeAdminReturnPath(body?.next || requestUrl.searchParams.get('next') || '/admin'),
+    };
+  }
+  const form = await request.formData();
+  return {
+    username: String(form.get('username') || '').trim(),
+    password: String(form.get('password') || ''),
+    nextPath: sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin'),
+  };
 }
 
 async function handleLogin(request, env) {
   await initDb(env);
   const requestUrl = new URL(request.url);
-  if (request.method === 'GET') {
+  const asJson = wantsJsonLogin(request);
+
+  if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     // Already authenticated users should not stay on the login form with a live session.
-    if (await currentUser(request, env)) return redirect(nextPath);
+    if (await currentUser(request, env)) {
+      if (asJson) return jsonResponse({ ok: true, next: nextPath });
+      return redirect(nextPath);
+    }
+    if (request.method === 'HEAD') {
+      return new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
     return htmlResponse(renderLoginHtml(nextPath));
   }
-  const form = await request.formData();
-  const username = String(form.get('username') || '').trim();
-  const password = String(form.get('password') || '');
-  const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
+
+  if (!['POST', 'PUT'].includes(request.method)) {
+    return asJson
+      ? jsonResponse({ ok: false, detail: 'Method not allowed.' }, 405)
+      : new Response('Method not allowed', { status: 405 });
+  }
+
+  const { username, password, nextPath } = await readLoginCredentials(request, requestUrl);
   const user = await getUserByUsername(env, username);
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     // Always clear any existing session on failed login so a stale cookie cannot
@@ -9982,7 +10220,7 @@ async function handleLogin(request, env) {
     await writeAdminAuditLog(env, {
       action: 'login.failed',
       category: 'auth',
-      method: 'POST',
+      method: request.method,
       path: '/admin/login',
       status: 401,
       actor_username: username,
@@ -9990,16 +10228,23 @@ async function handleLogin(request, env) {
       user_agent: request.headers.get('user-agent') || '',
       summary: buildAuditSummary({
         action: 'login.failed',
-        method: 'POST',
+        method: request.method,
         path: '/admin/login',
         status: 401,
         actorUsername: username || 'unknown',
         detail: 'invalid credentials',
       }),
-      meta: { username, next: nextPath },
+      meta: { username, next: nextPath, via: asJson ? 'fetch' : 'form' },
     });
+    if (asJson) {
+      return jsonResponse(
+        { ok: false, detail: 'Invalid username or password.' },
+        401,
+        { 'set-cookie': clearSessionCookie() },
+      );
+    }
     return htmlResponse(
-      renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
+      renderLoginHtml(nextPath).replace('</form>', "<p class='error' id='admin-login-error'>Invalid username or password.</p></form>"),
       401,
       { 'set-cookie': clearSessionCookie() },
     );
@@ -10014,18 +10259,18 @@ async function handleLogin(request, env) {
   await writeAdminAuditLog(env, {
     action: 'login',
     category: 'auth',
-    method: 'POST',
+    method: request.method,
     path: '/admin/login',
-    status: 302,
+    status: asJson ? 200 : 302,
     actor_user_id: user.id,
     actor_username: user.username,
     ip: requestClientIp(request),
     user_agent: request.headers.get('user-agent') || '',
     summary: buildAuditSummary({
       action: 'login',
-      method: 'POST',
+      method: request.method,
       path: '/admin/login',
-      status: 302,
+      status: asJson ? 200 : 302,
       actorUsername: user.username,
       detail: 'session started',
     }),
@@ -10033,10 +10278,15 @@ async function handleLogin(request, env) {
       user_id: user.id,
       role: user.role,
       next: nextPath,
+      via: asJson ? 'fetch' : 'form',
     },
   });
+  const cookie = sessionCookieHeader(await makeSession(user, env));
+  if (asJson) {
+    return jsonResponse({ ok: true, next: nextPath }, 200, { 'set-cookie': cookie });
+  }
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
+  response.headers.set('set-cookie', cookie);
   return response;
 }
 
@@ -10370,7 +10620,7 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form id="admin-login-form" class="admin-card" method="post" action="/admin/login" data-admin-login-form><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button><p class="status" id="admin-login-status" aria-live="polite"></p></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var form=document.querySelector("[data-admin-login-form]")||document.querySelector("form.admin-card");var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");var status=document.getElementById("admin-login-status");function setError(msg){var err=document.getElementById("admin-login-error");if(!err){err=document.createElement("p");err.className="error";err.id="admin-login-error";form.appendChild(err);}err.textContent=msg||"";err.hidden=!msg;}if(btn&&input){btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});}if(!form||!window.fetch)return;form.addEventListener("submit",function(event){event.preventDefault();setError("");if(status)status.textContent="Signing in…";var body={username:(form.username&&form.username.value||"").trim(),password:form.password&&form.password.value||"",next:form.next&&form.next.value||"/admin"};var submit=form.querySelector("button[type=submit]");if(submit)submit.disabled=true;fetch("/admin/login",{method:"POST",headers:{"content-type":"application/json","accept":"application/json","x-requested-with":"fetch"},body:JSON.stringify(body),credentials:"same-origin"}).then(function(res){return res.json().then(function(data){return{res:res,data:data};});}).then(function(result){if(!result.data||!result.data.ok){setError((result.data&&result.data.detail)||"Invalid username or password.");if(status)status.textContent="";if(submit)submit.disabled=false;return;}if(status)status.textContent="Signed in…";window.location.assign(result.data.next||"/admin");}).catch(function(){setError("Could not sign in. Check your connection and try again.");if(status)status.textContent="";if(submit)submit.disabled=false;});});})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">
@@ -10382,7 +10632,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><div class="admin-menu-group" data-resources-menu><button type="button" class="admin-menu-parent" data-resources-toggle aria-expanded="false">Resources</button><div class="admin-menu-sub" data-resources-sub hidden><button type="button" data-resource-nav="business-cards">Business Cards</button><button type="button" data-resource-nav="qr-codes">QR Codes</button></div></div><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -10741,7 +10991,8 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </form>
   </div>
 </div>
-</section><section id="tab-mail" class="cms-panel mail-panel">
+</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create enlarged portrait badges (125% of CR80) for directors, officers, and committee members. Titles and names print larger for readability. Drag the photo in the live preview to center it, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form></div><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="947" height="1416" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">Print includes a 0.25 in white margin around the badge to avoid edge cropping. Drag the photo to center, then resize with the handle or slider.</p></div></aside>
+<div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><div class="badge-creator-list-toolbar"><p class="muted">Select up to 3 badges to print on one page (3 print in landscape). Or open one to edit, download, or print alone.</p><button class="btn primary" type="button" id="badge-creator-print-selected" disabled>Print selected <span id="badge-creator-print-selected-count"></span></button></div><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
@@ -10852,4 +11103,4 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </div>
   </form>
 </dialog>
-<script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
+<script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ASSET_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;

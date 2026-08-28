@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Business cards | East Forsyth Band</title>
+  <link rel="icon" href="assets/efhs-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@600;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --navy:#002142;
+      --gold:#FDD703;
+      --red:#E71321;
+      --soft:#c7dbf2;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:"Work Sans",system-ui,sans-serif;
+      color:var(--navy);
+      background:#eef2f7;
+    }
+    .screen-only{
+      max-width:720px;
+      margin:0 auto;
+      padding:28px 20px 8px;
+    }
+    .screen-only h1{margin:0 0 8px;font-size:1.8rem;letter-spacing:-.03em}
+    .screen-only p{margin:0 0 12px;line-height:1.5;color:#445064}
+    .screen-only a{color:var(--navy);font-weight:700}
+    .screen-only .actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 8px}
+    .screen-only button,.screen-only .btn{
+      appearance:none;border:0;cursor:pointer;font:inherit;font-weight:800;
+      background:var(--navy);color:#fff;padding:12px 16px;border-radius:999px;text-decoration:none;
+    }
+    .screen-only .btn.secondary{background:#fff;color:var(--navy);border:2px solid var(--navy)}
+    .sheet{
+      width:8.5in;
+      height:11in;
+      margin:18px auto;
+      background:#fff;
+      box-shadow:0 18px 50px rgba(0,33,66,.16);
+      position:relative;
+      page-break-after:always;
+    }
+    .sheet-label{
+      position:absolute;top:8px;left:50%;transform:translateX(-50%);
+      font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#8a93a3;
+    }
+    .grid{
+      position:absolute;
+      top:0.5in;left:0.75in;
+      width:7in;height:10in;
+      display:grid;
+      grid-template-columns:repeat(2,3.5in);
+      grid-template-rows:repeat(5,2in);
+    }
+    .card{
+      width:3.5in;height:2in;
+      overflow:hidden;
+      position:relative;
+    }
+    .card.front{
+      background:var(--navy);
+      color:#fff;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:0;
+      padding:0.18in 0.18in 0.14in;
+    }
+    .card.front:before{
+      content:"";position:absolute;left:0;right:0;top:0;height:0.075in;background:var(--gold);
+    }
+    .card.front:after{
+      content:"";position:absolute;left:0;right:0;top:0.075in;height:0.028in;background:var(--red);
+    }
+    .logos{display:flex;align-items:center;gap:12px;margin-top:0.08in;margin-bottom:0.08in}
+    .logos img.eagle{height:0.55in;width:auto}
+    .logos img.mark{height:0.58in;width:0.58in;border-radius:50%}
+    .card.front h2{
+      margin:0;font-size:15px;font-weight:900;letter-spacing:-.02em;line-height:1.05;text-align:center;
+    }
+    .card.front .rule{
+      width:1.35in;height:1.5px;background:var(--gold);margin:0.08in 0 0.1in;
+    }
+    .card.front .url{color:var(--gold);font-weight:800;font-size:12px}
+    .card.front .tag{
+      margin-top:0.1in;font-size:8px;font-weight:700;letter-spacing:.14em;color:var(--soft);
+    }
+    .card.back{
+      background:#fff;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      box-shadow:inset 0 0 0 1.15px var(--navy);
+      padding:0.12in;
+    }
+    .card.back img{width:1.15in;height:1.15in}
+    .card.back figcaption{
+      margin:0.08in 0 0;font-weight:900;font-size:13px;color:var(--navy);letter-spacing:-.02em;
+    }
+    @media print{
+      body{background:#fff}
+      .screen-only{display:none!important}
+      .sheet{margin:0;box-shadow:none;page-break-after:always}
+      .sheet-label{display:none}
+      @page{size:letter;margin:0}
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-only">
+    <h1>Business cards</h1>
+    <p>Print on <strong>8.5×11 card stock</strong>. Page 1 is the front; page 2 is the back with the home QR and “Check Us Out!” Use duplex / two-sided printing with <strong>flip on long edge</strong>, then cut on the light guides (10 cards per sheet, Avery 8371-style).</p>
+    <div class="actions">
+      <button type="button" onclick="window.print()">Print</button>
+      <a class="btn secondary" href="assets/downloads/efhsband-business-cards.pdf">Download PDF</a>
+      <a class="btn secondary" href="/qr">QR page</a>
+    </div>
+  </div>
+
+  <section class="sheet" aria-label="Front side">
+    <div class="sheet-label">Front — print this side first</div>
+    <div class="grid">
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+      <article class="card front">
+        <div class="logos">
+          <img class="eagle" src="assets/efhs-logo.png" alt="">
+          <img class="mark" src="assets/efhs-blue-regiment-mark.png" alt="">
+        </div>
+        <h2>East Forsyth Band</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <div class="url">efhsband.org</div>
+        <div class="tag">BLUE REGIMENT</div>
+      </article>
+    </div>
+  </section>
+
+  <section class="sheet" aria-label="Back side">
+    <div class="sheet-label">Back — duplex flip on long edge</div>
+    <div class="grid">
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+      <figure class="card back">
+        <img src="assets/site-home-qr.png" width="240" height="240" alt="QR code to efhsband.org">
+        <figcaption>Check Us Out!</figcaption>
+      </figure>
+    </div>
+  </section>
+</body>
+</html>

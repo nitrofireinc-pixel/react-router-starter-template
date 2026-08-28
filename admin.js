@@ -383,6 +383,10 @@ function canAccessScheduleBoard() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
 }
 
+function canAccessBadgeCreator() {
+  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canManageAllEvents() {
   return isSuperAdmin() || hasPermission('events:manage');
 }
@@ -1988,6 +1992,7 @@ function renderMobileAdminMenu() {
     && !button.closest('[hidden]')
     && !button.hasAttribute('data-sponsors-toggle')
     && !button.hasAttribute('data-boosters-toggle')
+    && !button.hasAttribute('data-resources-toggle')
   );
 
   const pushButton = (button) => {
@@ -1999,7 +2004,8 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    const resourceNav = button.dataset.resourceNav || '';
+    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}" data-resource-nav="${escapeHtml(resourceNav)}">${escapeHtml(label)}</button>`);
   };
 
   const pushLabel = (text) => {
@@ -2090,6 +2096,9 @@ function activateTab(name) {
   if (name === 'caldev' && !canAccessScheduleBoard()) {
     return Promise.resolve(false);
   }
+  if (name === 'badge-creator' && !canAccessBadgeCreator()) {
+    return Promise.resolve(false);
+  }
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
@@ -2104,11 +2113,16 @@ function activateTab(name) {
     if (name === 'ledger') {
       loadLedger().catch(() => {});
     }
-    if (name === 'booster-members' || name === 'minutes') {
+    if (name === 'booster-members' || name === 'minutes' || name === 'badge-creator') {
       setBoostersMenuOpen(true);
     }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
+    }
+    if (name === 'badge-creator') {
+      if (typeof window.initBadgeCreatorPanel === 'function') {
+        window.initBadgeCreatorPanel().catch(() => {});
+      }
     }
     if (name === 'ensembles') {
       loadEnsemblesBody()
@@ -2211,7 +2225,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canViewMinutes();
+  return canEditBoosterMembers() || canViewMinutes() || canAccessBadgeCreator();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -2230,6 +2244,26 @@ function setBoostersMenuOpen(open) {
     if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
     if (sub) sub.hidden = !open;
   });
+}
+
+function setResourcesMenuOpen(open) {
+  document.querySelectorAll('[data-resources-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-resources-toggle]');
+    const sub = menu.querySelector('[data-resources-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+const RESOURCE_NAV_HREFS = {
+  'business-cards': '/business-cards.html',
+  'qr-codes': '/qr',
+};
+
+function openResourceNav(key) {
+  const href = RESOURCE_NAV_HREFS[key];
+  if (!href) return;
+  window.open(href, '_blank', 'noopener,noreferrer');
 }
 
 function bindSponsorsMenu() {
@@ -2259,6 +2293,25 @@ function bindBoostersMenu() {
   toggle.addEventListener('click', () => {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     setBoostersMenuOpen(open);
+  });
+}
+
+function bindResourcesMenu() {
+  const menu = document.querySelector('[data-resources-menu]');
+  const toggle = menu?.querySelector('[data-resources-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setResourcesMenuOpen(open);
+  });
+  menu.querySelectorAll('[data-resource-nav]').forEach((button) => {
+    if (button.dataset.bound === '1') return;
+    button.dataset.bound = '1';
+    button.addEventListener('click', () => {
+      setResourcesMenuOpen(true);
+      openResourceNav(button.dataset.resourceNav);
+    });
   });
 }
 
@@ -2292,6 +2345,7 @@ function showAllowedPanels() {
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
+    'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
     social: hasPermission('site'),
@@ -2322,6 +2376,8 @@ function showAllowedPanels() {
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+    const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
+    if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
   }
   bindBoostersMenu();
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
@@ -2339,6 +2395,12 @@ function showAllowedPanels() {
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
   }
   bindSponsorsMenu();
+  const resourcesMenu = document.querySelector('[data-resources-menu]');
+  if (resourcesMenu) {
+    resourcesMenu.hidden = false;
+    manageVisible = true;
+  }
+  bindResourcesMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
@@ -2888,6 +2950,7 @@ function renderDashboard() {
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
+    canAccessBadgeCreator() && ['Badge Creator', 'Build, save, download, and print CR80 committee and officer badges.', 'badge-creator', 'Boosters', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
@@ -4917,6 +4980,11 @@ async function uploadPreparedGalleryPhoto({ file, altText, caption, sortOrder = 
   if (sortOrder != null && sortOrder !== '') body.append('sort_order', String(sortOrder));
   return jsonFetch('/api/admin/photos', { method: 'POST', body });
 }
+
+window.jsonFetch = jsonFetch;
+window.prepareImageFileForUpload = prepareImageFileForUpload;
+window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
+window.canAccessBadgeCreator = canAccessBadgeCreator;
 
 function summarizeGalleryUploadResults(results) {
   const ok = results.filter((row) => row.ok);

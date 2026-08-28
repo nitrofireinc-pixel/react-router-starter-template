@@ -2133,7 +2133,7 @@ body.sponsor-map-open{overflow:hidden}
 }
 .qr-code-grid{
   display:grid;
-  grid-template-columns:repeat(3, minmax(0, 1fr));
+  grid-template-columns:repeat(4, minmax(0, 1fr));
   gap:36px 28px;
   align-items:start;
   justify-items:center;
@@ -2165,7 +2165,10 @@ body.sponsor-map-open{overflow:hidden}
   letter-spacing:-.03em;
   line-height:1.1;
 }
-@media (max-width:760px){
+@media (max-width:980px){
+  .qr-code-grid{grid-template-columns:repeat(2, minmax(0, 1fr)); gap:32px 24px}
+}
+@media (max-width:560px){
   .qr-code-grid{grid-template-columns:1fr; gap:28px}
 }
 @media print{
@@ -4581,7 +4584,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   border:1px dashed #9db4d0;
   border-radius:16px;
   background:#f5f9ff;
-
+}
 
 /* Band dues payment preview + modal */
 .dues-dev-section{padding-top:42px}
@@ -5024,4 +5027,218 @@ body.cms-caldev-editor-open{overflow:hidden}
   }
   .cms-caldev-editor-overlay{align-items:end;padding:0}
   .cms-caldev-repeat-grid{grid-template-columns:1fr}
+}
+
+/* Badge Creator (Band Boosters) */
+.badge-creator-layout{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:18px;
+  align-items:start;
+}
+.badge-creator-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+}
+.badge-creator-preview-card{
+  position:static;
+  min-width:0;
+  max-width:336px;
+  width:100%;
+  margin:0 auto 18px;
+  overflow:hidden;
+}
+.badge-creator-preview-card h2{
+  margin:0;
+  font-size:1.05rem;
+}
+.badge-creator-preview-wrap{
+  margin:0;
+  padding:10px;
+  border-radius:14px;
+  background:linear-gradient(160deg,#eef3f8,#f8fafc 55%,#e8eef5);
+  border:1px solid #d7e0ea;
+  display:grid;
+  place-items:center;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  overflow:hidden;
+}
+.badge-creator-photo-stage{
+  position:relative;
+  width:75%;
+  max-width:75%;
+  margin:0 auto;
+  aspect-ratio:3.15625 / 4.71875;
+  box-sizing:border-box;
+  overflow:hidden;
+  line-height:0;
+}
+.badge-creator-preview-wrap canvas{
+  display:block;
+  width:100% !important;
+  max-width:100% !important;
+  height:auto !important;
+  aspect-ratio:3.15625 / 4.71875;
+  box-sizing:border-box;
+  border-radius:10px;
+  box-shadow:0 8px 20px rgba(0,33,66,.16);
+  background:#fff;
+  touch-action:none;
+}
+.badge-creator-preview-wrap.has-photo canvas{
+  cursor:grab;
+}
+.badge-creator-preview-wrap.has-photo .badge-creator-photo-handle.is-dragging,
+.badge-creator-preview-wrap.has-photo canvas:active{
+  cursor:grabbing;
+}
+.badge-creator-photo-handle{
+  position:absolute;
+  border:2px dashed rgba(1,73,144,.7);
+  border-radius:50%;
+  box-sizing:border-box;
+  pointer-events:auto;
+  cursor:grab;
+  touch-action:none;
+}
+.badge-creator-photo-handle.is-dragging,
+.badge-creator-photo-handle.is-resizing{
+  border-color:#e71321;
+  background:rgba(231,19,33,.06);
+}
+.badge-creator-photo-hint{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  padding:4px 8px;
+  border-radius:999px;
+  background:rgba(0,33,66,.72);
+  color:#fff;
+  font-size:.68rem;
+  font-weight:700;
+  letter-spacing:.02em;
+  white-space:nowrap;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .15s ease;
+}
+.badge-creator-photo-handle:hover .badge-creator-photo-hint,
+.badge-creator-photo-handle.is-dragging .badge-creator-photo-hint{
+  opacity:1;
+}
+.badge-creator-photo-resize{
+  position:absolute;
+  right:-7px;
+  bottom:-7px;
+  width:16px;
+  height:16px;
+  padding:0;
+  border:2px solid #fff;
+  border-radius:50%;
+  background:#014990;
+  box-shadow:0 2px 8px rgba(0,33,66,.35);
+  cursor:nwse-resize;
+  touch-action:none;
+}
+.badge-creator-photo-controls{
+  display:grid;
+  gap:8px;
+  margin-top:2px;
+}
+.badge-creator-photo-controls .muted{
+  font-size:.78rem;
+  line-height:1.35;
+  margin:0;
+}
+.badge-creator-zoom-label{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:8px;
+  align-items:center;
+  font-size:.84rem;
+  font-weight:800;
+  color:var(--navy);
+}
+.badge-creator-zoom-label input[type="range"]{
+  width:100%;
+}
+.badge-creator-preview-wrap.is-committee-member{
+  background:linear-gradient(160deg,#fde8ea,#f8fafc 55%,#f6edee);
+  border-color:#f0c4c8;
+}
+.badge-creator-preview-wrap.is-gold-border{
+  background:linear-gradient(160deg,#fff8db,#f8fafc 55%,#f7f3e4);
+  border-color:#ead889;
+}
+.badge-creator-preview-wrap.is-officer-border{
+  background:linear-gradient(160deg,#eceef1,#f8fafc 55%,#e8eaed);
+  border-color:#c0bfc4;
+}
+.badge-creator-list-card h2{margin:0}
+.badge-creator-list-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px 14px;
+  align-items:center;
+  justify-content:space-between;
+}
+.badge-creator-list-toolbar .muted{margin:0;flex:1 1 220px}
+.badge-creator-row{
+  display:grid;
+  grid-template-columns:auto 48px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+}
+.badge-creator-select{
+  display:grid;
+  place-items:center;
+  margin:0;
+}
+.badge-creator-select input{
+  width:18px;
+  height:18px;
+  accent-color:var(--navy,#014990);
+}
+.badge-creator-row > div:nth-child(3){
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.badge-creator-row > div:nth-child(3) span,
+.badge-creator-row > div:nth-child(3) small{
+  color:#64748b;
+  font-size:.86rem;
+}
+.badge-creator-row .row-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:flex-end;
+}
+@media(max-width:980px){
+  .badge-creator-layout{grid-template-columns:minmax(0,1fr)}
+  .badge-creator-preview-card{position:static;max-width:min(336px,100%);margin-left:auto;margin-right:auto}
+  .badge-creator-photo-stage{
+    width:75%;
+    max-width:75%;
+    aspect-ratio:3.15625 / 4.71875;
+  }
+  .badge-creator-preview-wrap canvas{
+    width:100% !important;
+    max-width:100% !important;
+    height:auto !important;
+    aspect-ratio:3.15625 / 4.71875;
+  }
+  .badge-creator-row{
+    grid-template-columns:auto 48px minmax(0,1fr);
+  }
+  .badge-creator-row .row-actions{
+    grid-column:1/-1;
+    justify-content:flex-start;
+  }
 }
