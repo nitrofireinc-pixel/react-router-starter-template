@@ -383,6 +383,10 @@ function canAccessScheduleBoard() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
 }
 
+function canAccessBadgeCreator() {
+  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canManageAllEvents() {
   return isSuperAdmin() || hasPermission('events:manage');
 }
@@ -2090,6 +2094,9 @@ function activateTab(name) {
   if (name === 'caldev' && !canAccessScheduleBoard()) {
     return Promise.resolve(false);
   }
+  if (name === 'badge-creator' && !canAccessBadgeCreator()) {
+    return Promise.resolve(false);
+  }
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
@@ -2104,11 +2111,16 @@ function activateTab(name) {
     if (name === 'ledger') {
       loadLedger().catch(() => {});
     }
-    if (name === 'booster-members' || name === 'minutes') {
+    if (name === 'booster-members' || name === 'minutes' || name === 'badge-creator') {
       setBoostersMenuOpen(true);
     }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
+    }
+    if (name === 'badge-creator') {
+      if (typeof window.initBadgeCreatorPanel === 'function') {
+        window.initBadgeCreatorPanel().catch(() => {});
+      }
     }
     if (name === 'ensembles') {
       loadEnsemblesBody()
@@ -2211,7 +2223,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canViewMinutes();
+  return canEditBoosterMembers() || canViewMinutes() || canAccessBadgeCreator();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -2292,6 +2304,7 @@ function showAllowedPanels() {
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
+    'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
     social: hasPermission('site'),
@@ -2322,6 +2335,8 @@ function showAllowedPanels() {
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+    const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
+    if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
   }
   bindBoostersMenu();
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
@@ -2888,6 +2903,7 @@ function renderDashboard() {
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
+    canAccessBadgeCreator() && ['Badge Creator', 'Build, save, download, and print CR80 committee and officer badges.', 'badge-creator', 'Boosters', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
@@ -4917,6 +4933,11 @@ async function uploadPreparedGalleryPhoto({ file, altText, caption, sortOrder = 
   if (sortOrder != null && sortOrder !== '') body.append('sort_order', String(sortOrder));
   return jsonFetch('/api/admin/photos', { method: 'POST', body });
 }
+
+window.jsonFetch = jsonFetch;
+window.prepareImageFileForUpload = prepareImageFileForUpload;
+window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
+window.canAccessBadgeCreator = canAccessBadgeCreator;
 
 function summarizeGalleryUploadResults(results) {
   const ok = results.filter((row) => row.ok);
