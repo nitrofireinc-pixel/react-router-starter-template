@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'calendar-css-brace-20260825';
+const ASSET_VERSION = 'admin-login-fetch-20260828';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -314,10 +314,10 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
-export function jsonResponse(payload, status = 200) {
+export function jsonResponse(payload, status = 200, headers = {}) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers },
   });
 }
 
@@ -10159,19 +10159,60 @@ function renderLoginHtml(nextPath = '/admin') {
   );
 }
 
+async function wantsJsonLogin(request) {
+  const accept = String(request.headers.get('accept') || '').toLowerCase();
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  return contentType.includes('application/json')
+    || accept.includes('application/json')
+    || String(request.headers.get('x-requested-with') || '').toLowerCase() === 'fetch';
+}
+
+async function readLoginCredentials(request, requestUrl) {
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({}));
+    return {
+      username: String(body?.username || '').trim(),
+      password: String(body?.password || ''),
+      nextPath: sanitizeAdminReturnPath(body?.next || requestUrl.searchParams.get('next') || '/admin'),
+    };
+  }
+  const form = await request.formData();
+  return {
+    username: String(form.get('username') || '').trim(),
+    password: String(form.get('password') || ''),
+    nextPath: sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin'),
+  };
+}
+
 async function handleLogin(request, env) {
   await initDb(env);
   const requestUrl = new URL(request.url);
-  if (request.method === 'GET') {
+  const asJson = wantsJsonLogin(request);
+
+  if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     // Already authenticated users should not stay on the login form with a live session.
-    if (await currentUser(request, env)) return redirect(nextPath);
+    if (await currentUser(request, env)) {
+      if (asJson) return jsonResponse({ ok: true, next: nextPath });
+      return redirect(nextPath);
+    }
+    if (request.method === 'HEAD') {
+      return new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
     return htmlResponse(renderLoginHtml(nextPath));
   }
-  const form = await request.formData();
-  const username = String(form.get('username') || '').trim();
-  const password = String(form.get('password') || '');
-  const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
+
+  if (!['POST', 'PUT'].includes(request.method)) {
+    return asJson
+      ? jsonResponse({ ok: false, detail: 'Method not allowed.' }, 405)
+      : new Response('Method not allowed', { status: 405 });
+  }
+
+  const { username, password, nextPath } = await readLoginCredentials(request, requestUrl);
   const user = await getUserByUsername(env, username);
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     // Always clear any existing session on failed login so a stale cookie cannot
@@ -10179,7 +10220,7 @@ async function handleLogin(request, env) {
     await writeAdminAuditLog(env, {
       action: 'login.failed',
       category: 'auth',
-      method: 'POST',
+      method: request.method,
       path: '/admin/login',
       status: 401,
       actor_username: username,
@@ -10187,16 +10228,23 @@ async function handleLogin(request, env) {
       user_agent: request.headers.get('user-agent') || '',
       summary: buildAuditSummary({
         action: 'login.failed',
-        method: 'POST',
+        method: request.method,
         path: '/admin/login',
         status: 401,
         actorUsername: username || 'unknown',
         detail: 'invalid credentials',
       }),
-      meta: { username, next: nextPath },
+      meta: { username, next: nextPath, via: asJson ? 'fetch' : 'form' },
     });
+    if (asJson) {
+      return jsonResponse(
+        { ok: false, detail: 'Invalid username or password.' },
+        401,
+        { 'set-cookie': clearSessionCookie() },
+      );
+    }
     return htmlResponse(
-      renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
+      renderLoginHtml(nextPath).replace('</form>', "<p class='error' id='admin-login-error'>Invalid username or password.</p></form>"),
       401,
       { 'set-cookie': clearSessionCookie() },
     );
@@ -10211,18 +10259,18 @@ async function handleLogin(request, env) {
   await writeAdminAuditLog(env, {
     action: 'login',
     category: 'auth',
-    method: 'POST',
+    method: request.method,
     path: '/admin/login',
-    status: 302,
+    status: asJson ? 200 : 302,
     actor_user_id: user.id,
     actor_username: user.username,
     ip: requestClientIp(request),
     user_agent: request.headers.get('user-agent') || '',
     summary: buildAuditSummary({
       action: 'login',
-      method: 'POST',
+      method: request.method,
       path: '/admin/login',
-      status: 302,
+      status: asJson ? 200 : 302,
       actorUsername: user.username,
       detail: 'session started',
     }),
@@ -10230,10 +10278,15 @@ async function handleLogin(request, env) {
       user_id: user.id,
       role: user.role,
       next: nextPath,
+      via: asJson ? 'fetch' : 'form',
     },
   });
+  const cookie = sessionCookieHeader(await makeSession(user, env));
+  if (asJson) {
+    return jsonResponse({ ok: true, next: nextPath }, 200, { 'set-cookie': cookie });
+  }
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
+  response.headers.set('set-cookie', cookie);
   return response;
 }
 
@@ -10567,7 +10620,7 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button><p class="status" id="admin-login-status" aria-live="polite"></p></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var form=document.querySelector("form.admin-card");var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");var status=document.getElementById("admin-login-status");function setError(msg){var err=document.getElementById("admin-login-error");if(!err){err=document.createElement("p");err.className="error";err.id="admin-login-error";form.appendChild(err);}err.textContent=msg||"";err.hidden=!msg;}if(btn&&input){btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});}if(!form||!window.fetch)return;form.addEventListener("submit",function(event){event.preventDefault();setError("");if(status)status.textContent="Signing in…";var body={username:(form.username&&form.username.value||"").trim(),password:form.password&&form.password.value||"",next:form.next&&form.next.value||"/admin"};var submit=form.querySelector("button[type=submit]");if(submit)submit.disabled=true;fetch("/admin/login",{method:"PUT",headers:{"content-type":"application/json","accept":"application/json","x-requested-with":"fetch"},body:JSON.stringify(body),credentials:"same-origin"}).then(function(res){return res.json().then(function(data){return{res:res,data:data};});}).then(function(result){if(!result.data||!result.data.ok){setError((result.data&&result.data.detail)||"Invalid username or password.");if(status)status.textContent="";if(submit)submit.disabled=false;return;}if(status)status.textContent="Signed in…";window.location.assign(result.data.next||"/admin");}).catch(function(){setError("Could not sign in. Check your connection and try again.");if(status)status.textContent="";if(submit)submit.disabled=false;});});})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">

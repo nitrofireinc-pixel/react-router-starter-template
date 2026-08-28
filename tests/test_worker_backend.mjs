@@ -2219,3 +2219,14 @@ test('worker source gates initDb behind schema_version', () => {
   assert.match(caldevSrc, /resetCaldevSchemaCache/);
   assert.match(caldevSrc, /caldevSchemaReady/);
 });
+
+test('admin login uses fetch JSON instead of classic form navigation', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /function wantsJsonLogin/);
+  assert.match(workerSrc, /function readLoginCredentials/);
+  assert.match(workerSrc, /method:"PUT"/);
+  assert.match(workerSrc, /application\/json/);
+  assert.match(workerSrc, /event\.preventDefault\(\)/);
+  assert.match(workerSrc, /x-requested-with":"fetch"/);
+});
