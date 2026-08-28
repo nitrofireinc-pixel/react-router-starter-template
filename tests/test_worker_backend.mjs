@@ -2105,12 +2105,15 @@ test('subscribe deep link and print-only QR assets are wired', () => {
   assert.match(readFileSync(join(root, 'assets/email-list-subscribe-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
   assert.match(readFileSync(join(root, 'assets/sponsor-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
   assert.match(readFileSync(join(root, 'assets/donate-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
+  assert.match(readFileSync(join(root, 'assets/site-home-qr.png')).slice(0, 8).toString('hex'), /^89504e47/);
   const qrPage = readFileSync(join(root, 'qr.html'), 'utf8');
+  assert.match(qrPage, /site-home-qr\.png/);
+  assert.match(qrPage, /Check Us Out!/);
   assert.match(qrPage, /Sponsor!/);
   assert.match(qrPage, /Donate!/);
   assert.match(qrPage, /Subscribe!/);
-  assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
-  assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
+  assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png|site-home-qr\.png/);
+  assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png|site-home-qr\.png/);
 });
 
 test('initDb skips heavy migrate work when schema_version matches', async () => {
