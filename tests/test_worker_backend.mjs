@@ -2225,8 +2225,10 @@ test('admin login uses fetch JSON instead of classic form navigation', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /function wantsJsonLogin/);
   assert.match(workerSrc, /function readLoginCredentials/);
-  assert.match(workerSrc, /method:"PUT"/);
+  assert.match(workerSrc, /method:"POST"/);
+  assert.match(workerSrc, /data-admin-login-form/);
   assert.match(workerSrc, /application\/json/);
   assert.match(workerSrc, /event\.preventDefault\(\)/);
   assert.match(workerSrc, /x-requested-with":"fetch"/);
+  assert.doesNotMatch(workerSrc, /accept\.includes\('application\/json'\)/);
 });
