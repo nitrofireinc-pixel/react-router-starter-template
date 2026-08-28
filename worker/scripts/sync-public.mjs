@@ -32,6 +32,8 @@ for (const name of [
   'caldev.js',
   'admin-caldev.js',
   'admin.js',
+  'badge-creator.js',
+  'badge-creator-admin.js',
   'push-sw.js',
   'manifest.webmanifest',
 ]) {
