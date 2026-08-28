@@ -2060,3 +2060,17 @@ test('subscribe deep link and print-only QR assets are wired', () => {
   assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png|site-home-qr\.png/);
   assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png|site-home-qr\.png/);
 });
+
+test('admin Manage menu includes Resources parent for Business Cards and QR Codes', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /data-resources-menu/);
+  assert.match(workerSrc, /data-resources-toggle[^>]*>Resources</);
+  assert.match(workerSrc, /data-resource-nav="business-cards">Business Cards</);
+  assert.match(workerSrc, /data-resource-nav="qr-codes">QR Codes</);
+  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
+  assert.match(adminJs, /function bindResourcesMenu/);
+  assert.match(adminJs, /'business-cards': '\/business-cards\.html'/);
+  assert.match(adminJs, /'qr-codes': '\/qr'/);
+  assert.match(adminJs, /data-resources-toggle/);
+});

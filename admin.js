@@ -1988,6 +1988,7 @@ function renderMobileAdminMenu() {
     && !button.closest('[hidden]')
     && !button.hasAttribute('data-sponsors-toggle')
     && !button.hasAttribute('data-boosters-toggle')
+    && !button.hasAttribute('data-resources-toggle')
   );
 
   const pushButton = (button) => {
@@ -1999,7 +2000,8 @@ function renderMobileAdminMenu() {
     const shortcut = button.dataset.editShortcut || '';
     const sponsorNav = button.dataset.sponsorNav || '';
     const pageNav = button.dataset.pageNav || '';
-    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}">${escapeHtml(label)}</button>`);
+    const resourceNav = button.dataset.resourceNav || '';
+    parts.push(`<button type="button" data-mobile-index="${index}" data-tab="${escapeHtml(tab)}" data-edit-shortcut="${escapeHtml(shortcut)}" data-sponsor-nav="${escapeHtml(sponsorNav)}" data-page-nav="${escapeHtml(pageNav)}" data-resource-nav="${escapeHtml(resourceNav)}">${escapeHtml(label)}</button>`);
   };
 
   const pushLabel = (text) => {
@@ -2232,6 +2234,26 @@ function setBoostersMenuOpen(open) {
   });
 }
 
+function setResourcesMenuOpen(open) {
+  document.querySelectorAll('[data-resources-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-resources-toggle]');
+    const sub = menu.querySelector('[data-resources-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+const RESOURCE_NAV_HREFS = {
+  'business-cards': '/business-cards.html',
+  'qr-codes': '/qr',
+};
+
+function openResourceNav(key) {
+  const href = RESOURCE_NAV_HREFS[key];
+  if (!href) return;
+  window.open(href, '_blank', 'noopener,noreferrer');
+}
+
 function bindSponsorsMenu() {
   const menu = document.querySelector('[data-sponsors-menu]');
   const toggle = menu?.querySelector('[data-sponsors-toggle]');
@@ -2259,6 +2281,25 @@ function bindBoostersMenu() {
   toggle.addEventListener('click', () => {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     setBoostersMenuOpen(open);
+  });
+}
+
+function bindResourcesMenu() {
+  const menu = document.querySelector('[data-resources-menu]');
+  const toggle = menu?.querySelector('[data-resources-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setResourcesMenuOpen(open);
+  });
+  menu.querySelectorAll('[data-resource-nav]').forEach((button) => {
+    if (button.dataset.bound === '1') return;
+    button.dataset.bound = '1';
+    button.addEventListener('click', () => {
+      setResourcesMenuOpen(true);
+      openResourceNav(button.dataset.resourceNav);
+    });
   });
 }
 
@@ -2339,6 +2380,12 @@ function showAllowedPanels() {
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
   }
   bindSponsorsMenu();
+  const resourcesMenu = document.querySelector('[data-resources-menu]');
+  if (resourcesMenu) {
+    resourcesMenu.hidden = false;
+    manageVisible = true;
+  }
+  bindResourcesMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
