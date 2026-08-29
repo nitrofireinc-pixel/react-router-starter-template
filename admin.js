@@ -4683,7 +4683,8 @@ function bindCaldevPanel() {
         return;
       }
       if (email.ok) {
-        alert(`Finished — emailed ${email.sent || 0} calendar subscriber${email.sent === 1 ? '' : 's'}.`);
+        const from = email.from || 'no-reply@efhsband.org';
+        alert(`Finished — emailed ${email.sent || 0} calendar subscriber${email.sent === 1 ? '' : 's'} from ${from}.`);
         return;
       }
       alert(email.detail || 'Could not email calendar subscribers.');

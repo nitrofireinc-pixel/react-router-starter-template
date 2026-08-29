@@ -228,7 +228,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'calendar-ical-hide-fix-20260829';
+const ASSET_VERSION = 'caldev-finished-subscribers-20260829';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -660,6 +660,36 @@ export function extractEmailAddress(value = '') {
   return isValidEmail(candidate) ? candidate : '';
 }
 
+/** Skip reserved/test domains so Finished never tries to mail example.com harness rows. */
+export function isDeliverableEmailListAddress(email = '') {
+  const value = extractEmailAddress(email) || String(email || '').trim().toLowerCase();
+  if (!isValidEmail(value)) return false;
+  const domain = value.split('@')[1] || '';
+  if (!domain) return false;
+  if (
+    domain === 'example.com'
+    || domain === 'example.org'
+    || domain === 'example.net'
+    || domain === 'example.edu'
+    || domain === 'invalid'
+    || domain === 'localhost'
+    || domain.endsWith('.example')
+    || domain.endsWith('.test')
+    || domain.endsWith('.invalid')
+    || domain.endsWith('.localhost')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function emailListFromAddress(env = {}) {
+  const configured = String(env.CONTACT_FROM_EMAIL || '').trim().toLowerCase();
+  // Prefer the verified list sender; never fall back to empty/wrong host values.
+  if (configured && configured.endsWith('@efhsband.org')) return configured;
+  return EMAIL_LIST_FROM_EMAIL;
+}
+
 export function isEmailListStopRequest({ subject = '', text = '', html = '' } = {}) {
   const subjectText = String(subject || '');
   const bodyText = `${String(text || '')}\n${htmlToPlainText(html || '')}`;
@@ -1005,6 +1035,7 @@ async function listActiveEmailSubscribers(env, topic = '') {
   ).all();
   const wanted = String(topic || '').trim().toLowerCase();
   return (rows.results || []).filter((row) => {
+    if (!isDeliverableEmailListAddress(row?.email)) return false;
     if (!wanted) return true;
     return normalizeEmailListTopics(row.topics, { defaultAll: true }).includes(wanted);
   });
@@ -1064,7 +1095,7 @@ export async function sendEmailListWelcome(env, { email, topics, unsubscribeToke
       subject: message.subject,
       text: message.text,
       html: message.html,
-      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromEmail: emailListFromAddress(env),
       fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
     });
     return { ok: true };
@@ -1133,7 +1164,7 @@ export async function sendEmailListTopicsChanged(env, {
       subject: message.subject,
       text: message.text,
       html: message.html,
-      fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+      fromEmail: emailListFromAddress(env),
       fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
     });
     return { ok: true };
@@ -1208,6 +1239,8 @@ export async function notifyEmailSubscribers(env, {
     return { ok: true, skipped: true, sent: 0, failed: 0, detail: 'No email subscribers' };
   }
   const message = buildEmailListUpdateMessage({ topic, action, event, pageTitle });
+  const fromEmail = emailListFromAddress(env);
+  const fromName = String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME;
   let sent = 0;
   let failed = 0;
   let detail = '';
@@ -1219,8 +1252,8 @@ export async function notifyEmailSubscribers(env, {
         subject: message.subject,
         text: message.text,
         html: message.html,
-        fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
-        fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
+        fromEmail,
+        fromName,
       });
       sent += 1;
     } catch (error) {
@@ -1233,6 +1266,8 @@ export async function notifyEmailSubscribers(env, {
     sent,
     failed,
     total: subscribers.length,
+    from: fromEmail,
+    topic,
     detail: detail || (sent ? '' : 'No emails were accepted'),
   };
 }
@@ -1297,7 +1332,7 @@ export async function handleResendInboundWebhook(env, request) {
         subject: 'You are unsubscribed from East Forsyth Band emails',
         text: 'You have been removed from the East Forsyth Band email list. If this was a mistake, subscribe again at https://efhsband.org/calendar.html',
         html: '<p>You have been removed from the East Forsyth Band email list.</p><p>If this was a mistake, subscribe again on the <a href="https://efhsband.org/calendar.html">calendar page</a>.</p>',
-        fromEmail: String(env.CONTACT_FROM_EMAIL || EMAIL_LIST_FROM_EMAIL).trim() || EMAIL_LIST_FROM_EMAIL,
+        fromEmail: emailListFromAddress(env),
         fromName: String(env.CONTACT_FROM_NAME || EMAIL_LIST_FROM_NAME).trim() || EMAIL_LIST_FROM_NAME,
       });
     } catch {
@@ -9828,7 +9863,14 @@ async function routeApi(request, env, url, ctx = null) {
     } catch (error) {
       email_list = { ok: false, detail: error?.message || 'Email list notify failed' };
     }
-    return jsonResponse({ ok: Boolean(email_list?.ok || email_list?.skipped), email_list });
+    return jsonResponse({
+      ok: Boolean(email_list?.ok || email_list?.skipped),
+      email_list: {
+        ...email_list,
+        from: email_list?.from || emailListFromAddress(env),
+        topic: 'calendar',
+      },
+    });
   }
   const caldevMatch = url.pathname.match(/^\/api\/admin\/caldev\/events\/(\d+)$/);
   if (caldevMatch && ['PUT', 'DELETE'].includes(request.method)) {
