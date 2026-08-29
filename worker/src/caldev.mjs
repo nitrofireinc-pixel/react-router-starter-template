@@ -448,3 +448,163 @@ export async function seedCaldevFromProduction(env, { getEvents, expandRecurring
   }
   return { inserted, source_count: (production || []).length };
 }
+
+/** Escape text for iCalendar property values. */
+export function escapeIcsText(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\n|\r/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+}
+
+/** Fold ICS content lines to ≤75 octets (RFC 5545). */
+export function foldIcsLine(line) {
+  const raw = String(line ?? '');
+  if (raw.length <= 75) return raw;
+  const parts = [];
+  let remaining = raw;
+  parts.push(remaining.slice(0, 75));
+  remaining = remaining.slice(75);
+  while (remaining.length) {
+    parts.push(` ${remaining.slice(0, 74)}`);
+    remaining = remaining.slice(74);
+  }
+  return parts.join('\r\n');
+}
+
+function icsDateStamp(value = new Date()) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return icsDateStamp(new Date());
+  }
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}T${hh}${mi}${ss}Z`;
+}
+
+function icsCompactDate(dateStr) {
+  const match = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}${match[2]}${match[3]}` : '';
+}
+
+function icsCompactDateTime(dateStr, timeStr) {
+  const day = icsCompactDate(dateStr);
+  if (!day) return '';
+  const match = String(timeStr || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  const hh = String(Math.min(23, Math.max(0, Number(match[1])))).padStart(2, '0');
+  const mi = String(Math.min(59, Math.max(0, Number(match[2])))).padStart(2, '0');
+  return `${day}T${hh}${mi}00`;
+}
+
+function addDaysYmd(dateStr, days) {
+  const match = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  d.setUTCDate(d.getUTCDate() + Number(days || 0));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function addHoursHm(timeStr, hours) {
+  const match = String(timeStr || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '01:00';
+  const total = (Number(match[1]) * 60 + Number(match[2])) + (Number(hours || 0) * 60);
+  const wrapped = ((total % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const hh = String(Math.floor(wrapped / 60)).padStart(2, '0');
+  const mi = String(wrapped % 60).padStart(2, '0');
+  return `${hh}:${mi}`;
+}
+
+const AMERICA_NY_VTIMEZONE = [
+  'BEGIN:VTIMEZONE',
+  'TZID:America/New_York',
+  'X-LIC-LOCATION:America/New_York',
+  'BEGIN:DAYLIGHT',
+  'TZOFFSETFROM:-0500',
+  'TZOFFSETTO:-0400',
+  'TZNAME:EDT',
+  'DTSTART:19700308T020000',
+  'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU',
+  'END:DAYLIGHT',
+  'BEGIN:STANDARD',
+  'TZOFFSETFROM:-0400',
+  'TZOFFSETTO:-0500',
+  'TZNAME:EST',
+  'DTSTART:19701101T020000',
+  'RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU',
+  'END:STANDARD',
+  'END:VTIMEZONE',
+];
+
+/**
+ * Build a VCALENDAR feed from Schedule Board (caldev) events for Apple Calendar / iCal.
+ */
+export function buildCaldevIcsFeed(events = [], options = {}) {
+  const calendarName = String(options.calendarName || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const siteUrl = String(options.siteUrl || 'https://efhsband.org').replace(/\/$/, '');
+  const now = icsDateStamp(options.now || new Date());
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//East Forsyth Band//Schedule Board//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    `X-WR-CALNAME:${escapeIcsText(calendarName)}`,
+    'X-WR-TIMEZONE:America/New_York',
+    ...AMERICA_NY_VTIMEZONE,
+  ];
+
+  for (const event of events || []) {
+    const startDate = String(event?.start_date || '').trim();
+    const title = String(event?.title || '').trim();
+    if (!startDate || !title || !icsCompactDate(startDate)) continue;
+
+    const id = event?.id == null ? `tmp-${startDate}-${title}` : event.id;
+    const uid = `caldev-${id}@efhsband.org`;
+    const endDate = String(event?.end_date || startDate).trim() || startDate;
+    const allDay = Number(event?.all_day) === 1 || !String(event?.start_time || '').trim();
+    const descriptionParts = [
+      String(event?.description || '').trim(),
+      String(event?.who || '').trim() ? `Who: ${String(event.who).trim()}` : '',
+    ].filter(Boolean);
+    const description = descriptionParts.join('\n');
+    const location = String(event?.location || '').trim();
+    const updated = event?.updated_at ? icsDateStamp(event.updated_at) : now;
+
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:${uid}`);
+    lines.push(`DTSTAMP:${now}`);
+    lines.push(`LAST-MODIFIED:${updated}`);
+    lines.push(`SUMMARY:${escapeIcsText(title)}`);
+    if (description) lines.push(`DESCRIPTION:${escapeIcsText(description)}`);
+    if (location) lines.push(`LOCATION:${escapeIcsText(location)}`);
+    lines.push(`URL:${siteUrl}/calendar.html`);
+    lines.push('CATEGORIES:East Forsyth Band');
+
+    if (allDay) {
+      const exclusiveEnd = addDaysYmd(endDate, 1) || addDaysYmd(startDate, 1);
+      lines.push(`DTSTART;VALUE=DATE:${icsCompactDate(startDate)}`);
+      lines.push(`DTEND;VALUE=DATE:${icsCompactDate(exclusiveEnd)}`);
+    } else {
+      const startTime = String(event.start_time || '').trim();
+      const endTime = String(event.end_time || '').trim() || addHoursHm(startTime, 1);
+      const dtStart = icsCompactDateTime(startDate, startTime);
+      let dtEnd = icsCompactDateTime(endDate, endTime);
+      if (!dtEnd || dtEnd < dtStart) {
+        dtEnd = icsCompactDateTime(startDate, addHoursHm(startTime, 1));
+      }
+      lines.push(`DTSTART;TZID=America/New_York:${dtStart}`);
+      lines.push(`DTEND;TZID=America/New_York:${dtEnd}`);
+    }
+
+    lines.push('END:VEVENT');
+  }
+
+  lines.push('END:VCALENDAR');
+  return `${lines.map(foldIcsLine).join('\r\n')}\r\n`;
+}
