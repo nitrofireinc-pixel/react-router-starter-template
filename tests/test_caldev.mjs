@@ -82,6 +82,51 @@ test('shiftCaldevEventToDate preserves multi-day span', () => {
   assert.equal(shifted.end_date, '2026-09-12');
 });
 
+test('buildCaldevIcsFeed creates Apple Calendar compatible VEVENT rows', async () => {
+  const { buildCaldevIcsFeed, escapeIcsText, foldIcsLine } = await import('../worker/src/caldev.mjs');
+  assert.equal(escapeIcsText('Band; "Go Eagles"\nLine'), 'Band\\; "Go Eagles"\\nLine');
+  assert.match(foldIcsLine(`SUMMARY:${'A'.repeat(90)}`), /\r\n /);
+
+  const ics = buildCaldevIcsFeed([
+    {
+      id: 12,
+      title: 'Home Game vs West',
+      description: 'Kickoff at stadium',
+      location: 'EFHS Stadium',
+      who: 'Marching Band',
+      start_date: '2026-10-09',
+      end_date: '2026-10-09',
+      start_time: '19:00',
+      end_time: '22:00',
+      all_day: 0,
+      updated_at: '2026-08-29T12:00:00.000Z',
+    },
+    {
+      id: 13,
+      title: 'Band Camp',
+      description: 'All day camp',
+      location: '',
+      who: '',
+      start_date: '2026-08-03',
+      end_date: '2026-08-05',
+      start_time: '',
+      end_time: '',
+      all_day: 1,
+    },
+  ], { now: new Date('2026-08-29T15:00:00.000Z') });
+
+  assert.match(ics, /BEGIN:VCALENDAR/);
+  assert.match(ics, /X-WR-CALNAME:East Forsyth Band/);
+  assert.match(ics, /UID:caldev-12@efhsband\.org/);
+  assert.match(ics, /DTSTART;TZID=America\/New_York:20261009T190000/);
+  assert.match(ics, /DTEND;TZID=America\/New_York:20261009T220000/);
+  assert.match(ics, /LOCATION:EFHS Stadium/);
+  assert.match(ics, /DESCRIPTION:Kickoff at stadium\\nWho: Marching Band/);
+  assert.match(ics, /DTSTART;VALUE=DATE:20260803/);
+  assert.match(ics, /DTEND;VALUE=DATE:20260806/);
+  assert.match(ics, /END:VCALENDAR/);
+});
+
 test('iso dates map to production event date parts for Boosters bridge', () => {
   assert.deepEqual(isoToProductionDateParts('2026-10-09'), {
     event_year: 2026,
