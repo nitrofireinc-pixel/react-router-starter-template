@@ -228,7 +228,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'calendar-ical-css-fix-20260829';
+const ASSET_VERSION = 'calendar-ical-platform-20260829';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -743,6 +743,21 @@ function randomEmailListToken(bytes = 24) {
   return [...arr].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
+export const ICAL_APPLE_HREF = 'webcal://efhsband.org/calendar.ics';
+export const ICAL_ANDROID_HREF = 'https://www.google.com/calendar/render?cid=https%3A%2F%2Fefhsband.org%2Fcalendar.ics';
+
+export function renderIcalSubscribeButtons({
+  appleHref = ICAL_APPLE_HREF,
+  androidHref = ICAL_ANDROID_HREF,
+  appleLabel = 'Add to Apple Calendar',
+  androidLabel = 'Add to Android Calendar',
+} = {}) {
+  return [
+    `<a class="btn outline" data-ical-subscribe data-ical-platform="ios" href="${escapeAttr(appleHref)}" hidden>${escapeHtml(appleLabel)}</a>`,
+    `<a class="btn outline" data-ical-subscribe data-ical-platform="android" href="${escapeAttr(androidHref)}" hidden target="_blank" rel="noopener noreferrer">${escapeHtml(androidLabel)}</a>`,
+  ].join('\n      ');
+}
+
 export function renderEmailListSignup({
   topics = EMAIL_LIST_TOPICS,
   heading = 'Get email updates',
@@ -750,11 +765,18 @@ export function renderEmailListSignup({
   buttonLabel = 'Subscribe',
   icalSubscribe = false,
   icalLabel = 'Add to Apple Calendar',
-  icalHref = 'webcal://efhsband.org/calendar.ics',
+  icalHref = ICAL_APPLE_HREF,
+  androidHref = ICAL_ANDROID_HREF,
+  androidLabel = 'Add to Android Calendar',
 } = {}) {
   const topicList = normalizeEmailListTopics(topics, { defaultAll: true }).join(',');
-  const icalButton = icalSubscribe
-    ? `<a class="btn outline" data-ical-subscribe href="${escapeAttr(icalHref)}">${escapeHtml(icalLabel)}</a>`
+  const icalButtons = icalSubscribe
+    ? renderIcalSubscribeButtons({
+      appleHref: icalHref,
+      androidHref,
+      appleLabel: icalLabel,
+      androidLabel,
+    })
     : '';
   return `<section class="content email-list-signup" data-email-list-signup data-email-list-topics="${escapeAttr(topicList)}">
   <div class="wrap email-list-signup-inner">
@@ -764,7 +786,7 @@ export function renderEmailListSignup({
     </div>
     <div class="email-list-signup-action">
       <button type="button" class="btn primary" data-email-list-open>${escapeHtml(buttonLabel)}</button>
-      ${icalButton}
+      ${icalButtons}
     </div>
   </div>
 </section>`;
@@ -780,31 +802,49 @@ export function ensureEmailListSignupSlot(html, options = {}) {
   return `${stripped}${renderEmailListSignup(options)}`;
 }
 
-/** Ensure the calendar page email strip also offers Apple Calendar / iCal subscribe. */
+/** Ensure the calendar page email strip offers platform-specific calendar subscribe buttons. */
 export function ensureCalendarIcalSubscribe(html, options = {}) {
   const source = String(html || '');
-  const icalHref = String(options.icalHref || 'webcal://efhsband.org/calendar.ics');
-  const icalLabel = String(options.icalLabel || 'Add to Apple Calendar');
-  const icalButton = `<a class="btn outline" data-ical-subscribe href="${escapeAttr(icalHref)}">${escapeHtml(icalLabel)}</a>`;
-  if (/data-ical-subscribe/i.test(source)) {
-    return source.replace(
-      /(<a\b[^>]*data-ical-subscribe[^>]*href=")([^"]*)(")/i,
-      `$1${escapeAttr(icalHref)}$3`,
-    );
+  const appleHref = String(options.icalHref || ICAL_APPLE_HREF);
+  const androidHref = String(options.androidHref || ICAL_ANDROID_HREF);
+  const appleLabel = String(options.icalLabel || 'Add to Apple Calendar');
+  const androidLabel = String(options.androidLabel || 'Add to Android Calendar');
+  const icalButtons = renderIcalSubscribeButtons({
+    appleHref,
+    androidHref,
+    appleLabel,
+    androidLabel,
+  });
+  const hasIos = /data-ical-platform=["']ios["']/i.test(source);
+  const hasAndroid = /data-ical-platform=["']android["']/i.test(source);
+  if (hasIos && hasAndroid) {
+    return source
+      .replace(
+        /(<a\b[^>]*data-ical-platform=["']ios["'][^>]*href=")([^"]*)(")/i,
+        `$1${escapeAttr(appleHref)}$3`,
+      )
+      .replace(
+        /(<a\b[^>]*data-ical-platform=["']android["'][^>]*href=")([^"]*)(")/i,
+        `$1${escapeAttr(androidHref)}$3`,
+      );
   }
   if (/email-list-signup-action/i.test(source)) {
-    return source.replace(
+    // Replace any legacy single iCal button, then ensure both platform buttons exist.
+    const withoutLegacy = source.replace(/\s*<a\b[^>]*data-ical-subscribe[^>]*>[\s\S]*?<\/a>/gi, '');
+    return withoutLegacy.replace(
       /(<div class="email-list-signup-action">)([\s\S]*?)(<\/div>)/i,
-      (_, open, inner, close) => `${open}${inner.trim() ? `${inner.trim()}\n      ` : ''}${icalButton}${close}`,
+      (_, open, inner, close) => `${open}${inner.trim() ? `${inner.trim()}\n      ` : ''}${icalButtons}${close}`,
     );
   }
   return ensureEmailListSignupSlot(source, {
     topics: ['calendar', 'fundraising'],
     heading: 'Email calendar updates',
-    detail: 'Get calendar changes by email, or add the schedule to Apple Calendar on your iPhone. Reply STOP to any message to unsubscribe.',
+    detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
     icalSubscribe: true,
-    icalHref,
-    icalLabel,
+    icalHref: appleHref,
+    icalLabel: appleLabel,
+    androidHref,
+    androidLabel,
   });
 }
 
@@ -1758,7 +1798,7 @@ async function initDb(env) {
         {
           topics: ['calendar', 'fundraising'],
           heading: 'Email calendar updates',
-          detail: 'Get calendar changes by email, or add the schedule to Apple Calendar on your iPhone. Reply STOP to any message to unsubscribe.',
+          detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
           icalSubscribe: true,
         },
       ),
@@ -6139,7 +6179,7 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     return ensureCalendarIcalSubscribe(ensureEmailListSignupSlot(ensureCalendarMonthMount(page.body_html), {
       topics: ['calendar', 'fundraising'],
       heading: 'Email calendar updates',
-      detail: 'Get calendar changes by email, or add the schedule to Apple Calendar on your iPhone. Reply STOP to any message to unsubscribe.',
+      detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
       icalSubscribe: true,
     }));
   }

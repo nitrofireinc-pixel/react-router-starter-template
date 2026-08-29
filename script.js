@@ -935,3 +935,33 @@ function syncAddToHomeButtonState(button) {
     }
   }
 })();
+
+(function initIcalPlatformButtons() {
+  function detectCalendarPlatform() {
+    const ua = String(navigator.userAgent || '');
+    const platform = String(navigator.platform || '');
+    const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+    // iPadOS 13+ can report as MacIntel with touch.
+    const isIOS = /iPad|iPhone|iPod/i.test(ua)
+      || (platform === 'MacIntel' && maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+    if (isIOS) return 'ios';
+    if (isAndroid) return 'android';
+    return 'other';
+  }
+
+  function syncIcalButtons() {
+    const buttons = [...document.querySelectorAll('[data-ical-subscribe][data-ical-platform]')];
+    if (!buttons.length) return;
+    const platform = detectCalendarPlatform();
+    document.documentElement.dataset.calendarPlatform = platform;
+    buttons.forEach((button) => {
+      const target = String(button.getAttribute('data-ical-platform') || '').toLowerCase();
+      // Phone OS: only the matching button. Desktop/other: show neither phone-specific CTA.
+      button.hidden = platform === 'other' ? true : target !== platform;
+    });
+  }
+
+  syncIcalButtons();
+  document.addEventListener('DOMContentLoaded', syncIcalButtons);
+})();

@@ -1971,16 +1971,33 @@ test('ensureCalendarIcalSubscribe adds Apple Calendar button for iPhone iCal', (
 </section>`;
   const upgraded = ensureCalendarIcalSubscribe(withEmail);
   assert.match(upgraded, /data-ical-subscribe/);
+  assert.match(upgraded, /data-ical-platform="ios"/);
+  assert.match(upgraded, /data-ical-platform="android"/);
   assert.match(upgraded, /webcal:\/\/efhsband\.org\/calendar\.ics/);
+  assert.match(upgraded, /google\.com\/calendar\/render\?cid=/);
   assert.match(upgraded, /Add to Apple Calendar/);
+  assert.match(upgraded, /Add to Android Calendar/);
+  assert.match(upgraded, /hidden/);
   assert.equal(ensureCalendarIcalSubscribe(upgraded), upgraded);
-  assert.match(renderEmailListSignup({ icalSubscribe: true }), /data-ical-subscribe/);
+  const fromLegacy = ensureCalendarIcalSubscribe(`${withEmail.replace(
+    '</div>\n  </div>\n</section>',
+    '<a class="btn outline" data-ical-subscribe href="webcal://efhsband.org/calendar.ics">Add to Apple Calendar</a></div></div></section>',
+  )}`);
+  assert.match(fromLegacy, /data-ical-platform="ios"/);
+  assert.match(fromLegacy, /data-ical-platform="android"/);
+  assert.equal((fromLegacy.match(/data-ical-subscribe/g) || []).length, 2);
+  assert.match(renderEmailListSignup({ icalSubscribe: true }), /data-ical-platform="android"/);
   const calendarHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'calendar.html'), 'utf8');
-  assert.match(calendarHtml, /data-ical-subscribe/);
+  assert.match(calendarHtml, /data-ical-platform="ios"/);
+  assert.match(calendarHtml, /data-ical-platform="android"/);
   const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /pathname === '\/calendar\.ics'/);
   assert.match(workerSrc, /handleCalendarIcs/);
   assert.match(workerSrc, /buildCaldevIcsFeed/);
+  const scriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'script.js'), 'utf8');
+  assert.match(scriptSrc, /initIcalPlatformButtons/);
+  assert.match(scriptSrc, /data-ical-platform/);
+  assert.match(scriptSrc, /Android/i);
   const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'styles.css'), 'utf8');
   assert.equal(styles.split('{').length, styles.split('}').length);
   assert.match(styles, /\.cms-managed-body-note\{[\s\S]*?\}\s*\/\* Band dues/);
