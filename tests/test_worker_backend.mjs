@@ -2002,6 +2002,7 @@ test('ensureCalendarIcalSubscribe adds Apple Calendar button for iPhone iCal', (
   assert.equal(styles.split('{').length, styles.split('}').length);
   assert.match(styles, /\.cms-managed-body-note\{[\s\S]*?\}\s*\/\* Band dues/);
   assert.match(styles, /\.email-list-signup-action a\.btn/);
+  assert.match(styles, /\[data-ical-subscribe\]\[hidden\]/);
 });
 
 test('buildEmailListUpdateMessage includes reply-stop guidance', () => {

@@ -958,7 +958,10 @@ function syncAddToHomeButtonState(button) {
     buttons.forEach((button) => {
       const target = String(button.getAttribute('data-ical-platform') || '').toLowerCase();
       // Phone OS: only the matching button. Desktop/other: show neither phone-specific CTA.
-      button.hidden = platform === 'other' ? true : target !== platform;
+      const show = platform !== 'other' && target === platform;
+      button.hidden = !show;
+      button.style.display = show ? '' : 'none';
+      button.setAttribute('aria-hidden', show ? 'false' : 'true');
     });
   }
 

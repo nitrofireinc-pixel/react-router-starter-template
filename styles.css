@@ -2138,6 +2138,9 @@ body.sponsor-map-open{overflow:hidden}
 .email-list-signup-action a.btn{
   text-decoration:none;
 }
+.email-list-signup-action [data-ical-subscribe][hidden]{
+  display:none!important;
+}
 .qr-code-grid{
   display:grid;
   grid-template-columns:repeat(3, minmax(0, 1fr));
