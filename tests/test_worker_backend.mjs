@@ -1981,6 +1981,10 @@ test('ensureCalendarIcalSubscribe adds Apple Calendar button for iPhone iCal', (
   assert.match(workerSrc, /pathname === '\/calendar\.ics'/);
   assert.match(workerSrc, /handleCalendarIcs/);
   assert.match(workerSrc, /buildCaldevIcsFeed/);
+  const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'styles.css'), 'utf8');
+  assert.equal(styles.split('{').length, styles.split('}').length);
+  assert.match(styles, /\.cms-managed-body-note\{[\s\S]*?\}\s*\/\* Band dues/);
+  assert.match(styles, /\.email-list-signup-action a\.btn/);
 });
 
 test('buildEmailListUpdateMessage includes reply-stop guidance', () => {
