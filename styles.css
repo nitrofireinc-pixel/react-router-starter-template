@@ -2129,7 +2129,17 @@ body.sponsor-map-open{overflow:hidden}
   display:flex;
   flex-wrap:wrap;
   align-items:center;
-  gap:16px 20px;
+  gap:12px;
+}
+.email-list-signup-action .btn{
+  min-height:46px;
+  margin:0;
+}
+.email-list-signup-action a.btn{
+  text-decoration:none;
+}
+.email-list-signup-action [data-ical-subscribe][hidden]{
+  display:none!important;
 }
 .qr-code-grid{
   display:grid;
@@ -4581,7 +4591,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   border:1px dashed #9db4d0;
   border-radius:16px;
   background:#f5f9ff;
-
+}
 
 /* Band dues payment preview + modal */
 .dues-dev-section{padding-top:42px}

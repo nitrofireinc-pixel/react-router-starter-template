@@ -28,10 +28,12 @@
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
       <h2>Email calendar updates</h2>
-      <p>Get calendar changes by email. Reply STOP to any message to unsubscribe.</p>
+      <p>Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.</p>
     </div>
     <div class="email-list-signup-action">
       <button type="button" class="btn primary" data-email-list-open>Subscribe</button>
+      <a class="btn outline" data-ical-subscribe data-ical-platform="ios" href="webcal://efhsband.org/calendar.ics" hidden>Add to Apple Calendar</a>
+      <a class="btn outline" data-ical-subscribe data-ical-platform="android" href="https://www.google.com/calendar/render?cid=https%3A%2F%2Fefhsband.org%2Fcalendar.ics" hidden target="_blank" rel="noopener noreferrer">Add to Android Calendar</a>
     </div>
   </div>
 </section></main>
