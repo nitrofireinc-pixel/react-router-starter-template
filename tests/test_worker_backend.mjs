@@ -328,6 +328,12 @@ test('event helpers decode contenteditable entities instead of showing &amp; / &
   assert.match(footerHtml, /class="footer-note"/);
   assert.doesNotMatch(footerHtml, /<p[^>]*data-site-field="footer_note"/);
   assert.match(footerHtml, /<div class="footer-note"[^>]*>\s*<p>This site has been donated by Nitrofire Computing\.<\/p>\s*<\/div>/);
+  const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /<div class="footer-note" data-site-field="footer_note">\$\{formatRichText\(site\.footer_note\)\}<\/div>/);
+  assert.doesNotMatch(workerSrc, /<p data-site-field="footer_note">/);
+  const indexHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
+  assert.match(indexHtml, /<div class="footer-note" data-site-field="footer_note">/);
+  assert.doesNotMatch(indexHtml, /<p data-site-field="footer_note">/);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {
