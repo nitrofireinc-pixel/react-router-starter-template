@@ -960,7 +960,6 @@ function syncAddToHomeButtonState(button) {
       // Phone OS: only the matching button. Desktop/other: show neither phone-specific CTA.
       const show = platform !== 'other' && target === platform;
       button.hidden = !show;
-      button.style.display = show ? '' : 'none';
       button.setAttribute('aria-hidden', show ? 'false' : 'true');
     });
   }

@@ -2138,8 +2138,14 @@ body.sponsor-map-open{overflow:hidden}
 .email-list-signup-action a.btn{
   text-decoration:none;
 }
-.email-list-signup-action [data-ical-subscribe][hidden]{
+/* Always hide phone calendar CTAs until JS sets html[data-calendar-platform].
+   `.btn { display:inline-flex }` otherwise overrides the HTML `hidden` attribute. */
+.email-list-signup-action [data-ical-subscribe]{
   display:none!important;
+}
+html[data-calendar-platform="ios"] .email-list-signup-action [data-ical-subscribe][data-ical-platform="ios"],
+html[data-calendar-platform="android"] .email-list-signup-action [data-ical-subscribe][data-ical-platform="android"]{
+  display:inline-flex!important;
 }
 .qr-code-grid{
   display:grid;
