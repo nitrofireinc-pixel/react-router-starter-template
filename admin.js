@@ -2877,6 +2877,7 @@ function renderDashboard() {
   const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260816`;
   const cards = [
     isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
+    hasPermission('photos') && ['Photos', 'Upload, caption, reorder, or delete gallery photos for Home and Gallery.', 'photos', 'Media', 'tab'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
     ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
