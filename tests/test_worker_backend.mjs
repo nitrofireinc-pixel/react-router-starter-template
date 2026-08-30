@@ -2050,3 +2050,14 @@ test('subscribe deep link and print-only QR assets are wired', () => {
   assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
   assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
 });
+
+test('styles.css brace balance stays closed so Schedule Board toast CSS applies', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  const open = (css.match(/\{/g) || []).length;
+  const close = (css.match(/\}/g) || []).length;
+  assert.equal(open - close, 0, `styles.css brace delta should be 0, got ${open - close}`);
+  assert.match(css, /\.cms-managed-body-note\{[\s\S]*?background:#f5f9ff;\s*\}/);
+  assert.match(css, /\.cms-caldev-editor-overlay\{/);
+  assert.match(css, /\.cms-caldev-editor-toast\[hidden\]\{display:none!important\}/);
+});
