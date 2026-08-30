@@ -1002,6 +1002,11 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 #zernio-schedule-fields[hidden]{display:none!important}
 .zernio-pages-list,
 .zernio-events-queue-list{margin-top:0}
+.zernio-instagram-gallery-queue{margin-top:14px;padding-top:14px;border-top:1px solid #e1e8f1}
+.zernio-instagram-gallery-queue h3{margin:0 0 8px;color:#10233c;font-size:1.05rem}
+.zernio-instagram-gallery-queue .photo-row-main{display:flex;align-items:center;gap:12px;min-width:0}
+.zernio-instagram-gallery-queue .photo-row-main img{width:56px;height:42px;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#edf2f8}
+
 .zernio-publish-mode{
   margin:0;
 }

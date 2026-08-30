@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'instagram-gallery-retry-20260830';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -241,6 +241,7 @@ const ZERNIO_FACEBOOK_DEBUG_KEY = 'zernio_facebook_debug';
 const ZERNIO_FACEBOOK_EVENTS_KEY = 'zernio_facebook_events';
 const ZERNIO_INSTAGRAM_KEY = 'zernio_instagram';
 const ZERNIO_INSTAGRAM_AUTOPOST_KEY = 'zernio_instagram_gallery_autopost';
+const ZERNIO_INSTAGRAM_GALLERY_KEY = 'zernio_instagram_gallery';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
@@ -2500,6 +2501,22 @@ export function isInstagramGalleryAutopostEnabled(raw) {
   return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
 }
 
+export function parseInstagramGallerySyncState(raw) {
+  const empty = { pending: {}, posted: {}, dismissed: {} };
+  if (!raw) return { ...empty };
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') return { ...empty };
+    return {
+      pending: parsed.pending && typeof parsed.pending === 'object' ? { ...parsed.pending } : {},
+      posted: parsed.posted && typeof parsed.posted === 'object' ? { ...parsed.posted } : {},
+      dismissed: parsed.dismissed && typeof parsed.dismissed === 'object' ? { ...parsed.dismissed } : {},
+    };
+  } catch {
+    return { ...empty };
+  }
+}
+
 export function galleryInstagramCaption(photo = {}) {
   const caption = htmlToPlainText(photo.caption || '').trim();
   if (caption) return caption.slice(0, 2200);
@@ -2956,7 +2973,8 @@ async function getZernioInstagramStatus(env, { sync = false } = {}) {
   };
 }
 
-export async function maybePublishGalleryPhotoToInstagram(env, request, photo = {}) {
+export async function maybePublishGalleryPhotoToInstagram(env, request, photo = {}, options = {}) {
+  const force = Boolean(options.force);
   if (!(await zernioConfigured(env))) {
     return { attempted: false, ok: false, reason: 'not_configured' };
   }
@@ -2970,7 +2988,7 @@ export async function maybePublishGalleryPhotoToInstagram(env, request, photo = 
   if (!status.connected || !status.account?.accountId) {
     return { attempted: false, ok: false, reason: 'not_connected' };
   }
-  if (!status.gallery_autopost) {
+  if (!force && !status.gallery_autopost) {
     return { attempted: false, ok: false, reason: 'autopost_disabled' };
   }
   const mediaUrl = absolutePublicAssetUrl(request, env, photo.url);
@@ -3005,6 +3023,212 @@ export async function maybePublishGalleryPhotoToInstagram(env, request, photo = 
       media_url: mediaUrl,
     };
   }
+}
+
+const INSTAGRAM_GALLERY_RETRYABLE_REASONS = new Set([
+  'publish_failed',
+  'not_connected',
+  'not_configured',
+  'missing_media_url',
+]);
+
+async function getInstagramGallerySyncState(env) {
+  return parseInstagramGallerySyncState(await getSiteContentValue(env, ZERNIO_INSTAGRAM_GALLERY_KEY));
+}
+
+async function saveInstagramGallerySyncState(env, state) {
+  const next = parseInstagramGallerySyncState(state);
+  await setSiteContentValue(env, ZERNIO_INSTAGRAM_GALLERY_KEY, JSON.stringify(next));
+  return next;
+}
+
+async function pruneInstagramGallerySyncState(env, state) {
+  const next = parseInstagramGallerySyncState(state);
+  const rows = await env.DB.prepare('SELECT id FROM photos WHERE sort_order >= 0').all();
+  const liveIds = new Set((rows.results || []).map((row) => String(row.id)));
+  for (const bucket of ['pending', 'posted', 'dismissed']) {
+    for (const key of Object.keys(next[bucket] || {})) {
+      if (!liveIds.has(String(key))) delete next[bucket][key];
+    }
+  }
+  return next;
+}
+
+function photoSnapshotForInstagramQueue(photo = {}) {
+  return {
+    photo_id: Number(photo.id) || 0,
+    filename: String(photo.filename || '').trim(),
+    original_name: String(photo.original_name || '').trim(),
+    alt_text: String(photo.alt_text || '').trim(),
+    caption: String(photo.caption || '').trim(),
+    url: String(photo.url || (photo.filename ? `/uploads/${encodeURIComponent(photo.filename)}` : '')).trim(),
+    created_at: String(photo.created_at || '').trim(),
+  };
+}
+
+export async function recordInstagramGalleryPublishResult(env, photo = {}, result = {}) {
+  const id = String(photo?.id || '').trim();
+  if (!id || Number(photo?.sort_order) < 0) return null;
+  let state = await pruneInstagramGallerySyncState(env, await getInstagramGallerySyncState(env));
+  const snapshot = photoSnapshotForInstagramQueue(photo);
+  const reason = String(result?.reason || '').trim();
+  const now = new Date().toISOString();
+  if (result?.ok && reason === 'published') {
+    state.posted[id] = {
+      ...snapshot,
+      post_id: String(result.post_id || '').trim(),
+      media_url: String(result.media_url || '').trim(),
+      posted_at: now,
+      account: String(result.account || '').trim(),
+    };
+    delete state.pending[id];
+    delete state.dismissed[id];
+    return saveInstagramGallerySyncState(env, state);
+  }
+  if (INSTAGRAM_GALLERY_RETRYABLE_REASONS.has(reason) || (result?.attempted && !result?.ok)) {
+    if (state.dismissed[id]) return state;
+    state.pending[id] = {
+      ...snapshot,
+      reason: reason || 'publish_failed',
+      error: String(result?.error || '').trim(),
+      media_url: String(result?.media_url || '').trim(),
+      attempted_at: now,
+      attempted: Boolean(result?.attempted),
+    };
+    return saveInstagramGallerySyncState(env, state);
+  }
+  return state;
+}
+
+async function getGalleryPhotoById(env, id) {
+  const photoId = Number(id);
+  if (!Number.isFinite(photoId) || photoId <= 0) return null;
+  const photo = await env.DB.prepare(
+    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE id = ? AND sort_order >= 0',
+  ).bind(photoId).first();
+  if (!photo) return null;
+  return { ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` };
+}
+
+export async function getInstagramGalleryQueueStatus(env) {
+  const state = await saveInstagramGallerySyncState(
+    env,
+    await pruneInstagramGallerySyncState(env, await getInstagramGallerySyncState(env)),
+  );
+  const pending = [];
+  for (const [id, entry] of Object.entries(state.pending || {})) {
+    const live = await getGalleryPhotoById(env, id);
+    if (!live) continue;
+    pending.push({
+      ...photoSnapshotForInstagramQueue(live),
+      reason: entry?.reason || 'publish_failed',
+      error: entry?.error || '',
+      media_url: entry?.media_url || '',
+      attempted_at: entry?.attempted_at || '',
+      attempted: Boolean(entry?.attempted),
+    });
+  }
+  pending.sort((a, b) => String(b.attempted_at || b.created_at || '').localeCompare(String(a.attempted_at || a.created_at || '')));
+  return {
+    pending_count: pending.length,
+    pending_photos: pending,
+    posted_count: Object.keys(state.posted || {}).length,
+  };
+}
+
+export async function dismissInstagramGalleryPending(env, photoId) {
+  const id = String(photoId || '').trim();
+  if (!id) throw new Error('Photo id is required');
+  let state = await pruneInstagramGallerySyncState(env, await getInstagramGallerySyncState(env));
+  const pending = state.pending[id];
+  if (pending) {
+    state.dismissed[id] = {
+      ...pending,
+      dismissed_at: new Date().toISOString(),
+      reason: 'dismissed',
+    };
+    delete state.pending[id];
+  }
+  await saveInstagramGallerySyncState(env, state);
+  return getInstagramGalleryQueueStatus(env);
+}
+
+export async function dismissAllInstagramGalleryPending(env) {
+  let state = await pruneInstagramGallerySyncState(env, await getInstagramGallerySyncState(env));
+  const now = new Date().toISOString();
+  for (const [id, entry] of Object.entries(state.pending || {})) {
+    state.dismissed[id] = {
+      ...entry,
+      dismissed_at: now,
+      reason: 'dismissed',
+    };
+  }
+  state.pending = {};
+  await saveInstagramGallerySyncState(env, state);
+  return getInstagramGalleryQueueStatus(env);
+}
+
+export async function queueGalleryPhotosForInstagramRetry(env, photoIds = []) {
+  const ids = [...new Set((Array.isArray(photoIds) ? photoIds : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0))];
+  if (!ids.length) throw new Error('At least one photo id is required');
+  let state = await pruneInstagramGallerySyncState(env, await getInstagramGallerySyncState(env));
+  const now = new Date().toISOString();
+  const queued = [];
+  for (const id of ids) {
+    const photo = await getGalleryPhotoById(env, id);
+    if (!photo) continue;
+    const key = String(photo.id);
+    delete state.dismissed[key];
+    if (state.posted[key]) delete state.posted[key];
+    state.pending[key] = {
+      ...photoSnapshotForInstagramQueue(photo),
+      reason: 'manual_retry',
+      error: 'Queued for Instagram retry',
+      media_url: '',
+      attempted_at: now,
+      attempted: false,
+    };
+    queued.push(photo.id);
+  }
+  await saveInstagramGallerySyncState(env, state);
+  return { queued_ids: queued, ...(await getInstagramGalleryQueueStatus(env)) };
+}
+
+export async function retryInstagramGalleryPhotos(env, request, {
+  photoIds = null,
+  retryAllFailed = false,
+} = {}) {
+  const queue = await getInstagramGalleryQueueStatus(env);
+  let ids = [];
+  if (retryAllFailed) {
+    ids = queue.pending_photos.map((photo) => Number(photo.photo_id));
+  } else if (Array.isArray(photoIds) && photoIds.length) {
+    ids = photoIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0);
+  } else {
+    throw new Error('Choose photos to retry, or retry all failed.');
+  }
+  ids = [...new Set(ids)];
+  if (!ids.length) throw new Error('No photos available to retry.');
+
+  const results = [];
+  for (const id of ids) {
+    const photo = await getGalleryPhotoById(env, id);
+    if (!photo) {
+      results.push({ photo_id: id, ok: false, reason: 'not_found', error: 'Photo not found' });
+      continue;
+    }
+    const instagram = await maybePublishGalleryPhotoToInstagram(env, request, photo, { force: true });
+    await recordInstagramGalleryPublishResult(env, photo, instagram);
+    results.push({ photo_id: id, ...instagram });
+  }
+  return {
+    results,
+    published_count: results.filter((row) => row.ok).length,
+    failed_count: results.filter((row) => !row.ok).length,
+    ...(await getInstagramGalleryQueueStatus(env)),
+  };
 }
 
 async function handleZernioInstagramConnect(request, env) {
@@ -8498,6 +8722,55 @@ async function routeApi(request, env, url, ctx = null) {
     await setInstagramGalleryAutopostEnabled(env, enabled);
     return jsonResponse(await getZernioInstagramStatus(env));
   }
+  if (url.pathname === '/api/admin/zernio/instagram/gallery' && request.method === 'GET') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    return jsonResponse(await getInstagramGalleryQueueStatus(env));
+  }
+  if (url.pathname === '/api/admin/zernio/instagram/gallery/retry' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    try {
+      const result = await retryInstagramGalleryPhotos(env, request, {
+        photoIds: Array.isArray(payload.photo_ids) ? payload.photo_ids : null,
+        retryAllFailed: Boolean(payload.retry_all_failed),
+      });
+      return jsonResponse(result);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not retry Instagram gallery posts' }, 422);
+    }
+  }
+  if (url.pathname === '/api/admin/zernio/instagram/gallery/queue' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    try {
+      return jsonResponse(await queueGalleryPhotosForInstagramRetry(env, payload.photo_ids || []));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not queue photos for Instagram retry' }, 422);
+    }
+  }
+  if (url.pathname === '/api/admin/zernio/instagram/gallery/dismiss-all' && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    return jsonResponse(await dismissAllInstagramGalleryPending(env));
+  }
+  const igGalleryMatch = url.pathname.match(/^\/api\/admin\/zernio\/instagram\/gallery\/(\d+)\/(retry|dismiss)$/);
+  if (igGalleryMatch && request.method === 'POST') {
+    const auth = await requirePermission(request, env, 'site');
+    if (auth.response) return auth.response;
+    const photoId = Number(igGalleryMatch[1]);
+    const action = igGalleryMatch[2];
+    try {
+      if (action === 'dismiss') {
+        return jsonResponse(await dismissInstagramGalleryPending(env, photoId));
+      }
+      return jsonResponse(await retryInstagramGalleryPhotos(env, request, { photoIds: [photoId] }));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Could not update Instagram gallery queue' }, 422);
+    }
+  }
 
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
@@ -9863,12 +10136,21 @@ async function routeApi(request, env, url, ctx = null) {
       );
       // Return the saved photo immediately. Instagram autopost can take many seconds and
       // made gallery uploads look like they did nothing while the request hung.
-      const publishTask = maybePublishGalleryPhotoToInstagram(env, request, stored).catch((error) => ({
-        attempted: true,
-        ok: false,
-        reason: 'publish_failed',
-        error: String(error?.message || error || 'Instagram publish failed'),
-      }));
+      const publishTask = maybePublishGalleryPhotoToInstagram(env, request, stored)
+        .catch((error) => ({
+          attempted: true,
+          ok: false,
+          reason: 'publish_failed',
+          error: String(error?.message || error || 'Instagram publish failed'),
+        }))
+        .then(async (instagram) => {
+          try {
+            await recordInstagramGalleryPublishResult(env, stored, instagram);
+          } catch {
+            // Queue persistence is best-effort; never fail the upload response.
+          }
+          return instagram;
+        });
       if (ctx && typeof ctx.waitUntil === 'function') {
         ctx.waitUntil(publishTask);
         return jsonResponse({
@@ -9911,6 +10193,15 @@ async function routeApi(request, env, url, ctx = null) {
         return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
       }
       await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      try {
+        const state = await getInstagramGallerySyncState(env);
+        delete state.pending[String(id)];
+        delete state.posted[String(id)];
+        delete state.dismissed[String(id)];
+        await saveInstagramGallerySyncState(env, state);
+      } catch {
+        // ignore queue cleanup failures
+      }
       return jsonResponse({ ok: true });
     }
     const meta = normalizePhotoMetaPayload(await request.json(), photo);
@@ -10492,7 +10783,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <div class="admin-card stack zernio-instagram-card">
   <div class="utility-links-head">
     <h2>Instagram connection</h2>
-    <p class="muted">Uses the same Zernio key as Facebook — nothing to paste. Click Refresh status to load the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically.</p>
+    <p class="muted">Uses the same Zernio key as Facebook — nothing to paste. Click Refresh status to load the Instagram account already linked in Zernio. When gallery auto-post is on, new Photos uploads publish to Instagram automatically. Failed posts appear below so you can retry after reconnecting.</p>
   </div>
   <p class="notice" id="zernio-instagram-status">Checking Instagram connection…</p>
   <label class="toggle-line" id="zernio-instagram-autopost-row" hidden>
@@ -10503,6 +10794,16 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     <a class="btn primary" id="zernio-instagram-connect" href="/admin/zernio/instagram/connect" hidden>Connect Instagram</a>
     <button class="btn outline" type="button" id="zernio-instagram-refresh">Refresh status</button>
     <button class="btn outline" type="button" id="zernio-instagram-disconnect" hidden>Disconnect</button>
+  </div>
+  <div id="zernio-instagram-gallery-queue" class="zernio-instagram-gallery-queue" hidden>
+    <h3>Gallery auto-post retries</h3>
+    <p class="notice" id="zernio-instagram-gallery-summary">No failed gallery posts waiting.</p>
+    <div id="zernio-instagram-gallery-list" class="admin-list zernio-events-queue-list"></div>
+    <div class="panel-actions">
+      <button class="btn primary" type="button" id="zernio-instagram-gallery-retry-all" hidden>Retry all failed</button>
+      <button class="btn outline" type="button" id="zernio-instagram-gallery-dismiss-all" hidden>Dismiss all</button>
+    </div>
+    <p class="status" id="zernio-instagram-gallery-status"></p>
   </div>
   <p class="status" id="zernio-instagram-message"></p>
 </div>
