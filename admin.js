@@ -18,6 +18,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/pages',
   '/api/admin/zernio/instagram',
   '/api/admin/zernio/instagram/settings',
+  '/api/admin/zernio/instagram/gallery',
 ];
 
 let savedToastTimer = null;
@@ -321,7 +322,7 @@ const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
 ];
 
-const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], caldevEvents: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
+const state = { me: null, pages: [], pageCatalog: [], users: [], mailRecipients: [], events: [], caldevEvents: [], photos: [], sponsors: [], staff: [], boosterMembers: [], contactTopics: [], contactMessages: [], minutes: [], selectedMinutesId: null, ensemblesBodyHtml: '', site: null, utilityLinks: [], socialLinks: [], zernioFacebook: null, zernioInstagram: null, zernioInstagramGallery: null, zernioPages: [], zernioPosts: [], zernioEventQueue: null, homeBodyHtml: '', securityLogPage: 1, securityLogPageSize: 5, securityLogTotal: 0, eventsViewYear: new Date().getFullYear(), eventsViewMonth: new Date().getMonth() + 1 };
 
 const DEFAULT_HOME_FEATURE_CARDS = {
   boosters_tag: 'Boosters',
@@ -2583,6 +2584,160 @@ function renderZernioInstagramStatus(status) {
     autopost.checked = status?.gallery_autopost !== false;
     autopost.disabled = !status?.connected;
   }
+  renderZernioInstagramGalleryQueue();
+}
+
+function renderZernioInstagramGalleryQueue() {
+  const wrap = document.querySelector('#zernio-instagram-gallery-queue');
+  const list = document.querySelector('#zernio-instagram-gallery-list');
+  const summary = document.querySelector('#zernio-instagram-gallery-summary');
+  const retryAllBtn = document.querySelector('#zernio-instagram-gallery-retry-all');
+  const dismissAllBtn = document.querySelector('#zernio-instagram-gallery-dismiss-all');
+  if (!wrap || !list) return;
+  const connected = Boolean(state.zernioInstagram?.connected);
+  const queue = state.zernioInstagramGallery;
+  const photos = Array.isArray(queue?.pending_photos) ? queue.pending_photos : [];
+  wrap.hidden = !connected && !photos.length;
+  if (summary) {
+    if (!connected) {
+      summary.textContent = 'Connect Instagram to retry failed gallery auto-posts.';
+    } else if (!photos.length) {
+      summary.textContent = 'No failed gallery posts waiting. New upload failures will appear here for retry.';
+    } else {
+      summary.textContent = `${photos.length} gallery photo${photos.length === 1 ? '' : 's'} need${photos.length === 1 ? 's' : ''} an Instagram retry.`;
+    }
+  }
+  list.innerHTML = photos.length
+    ? photos.map((photo) => {
+      const title = plainTextFromHtml(photo.caption || photo.alt_text || photo.original_name || 'Gallery photo') || 'Gallery photo';
+      const reason = photo.reason === 'not_connected'
+        ? 'Not connected'
+        : (photo.reason === 'not_configured'
+          ? 'Zernio not configured'
+          : (photo.reason === 'manual_retry' ? 'Queued for retry' : 'Publish failed'));
+      const error = String(photo.error || '').trim();
+      const when = photo.attempted_at
+        ? new Date(photo.attempted_at).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' })
+        : '';
+      const thumb = photo.url
+        ? `<img src="${escapeAttr(photo.url)}" alt="" width="56" height="42" loading="lazy" decoding="async">`
+        : '';
+      return `<article class="admin-row photo-row"><div class="photo-row-main">${thumb}<div><b>${escapeHtml(title)}</b><small>${escapeHtml(reason)}${when ? ` · ${escapeHtml(when)} ET` : ''}${error ? ` · ${escapeHtml(error.slice(0, 120))}` : ''}</small></div></div><div class="row-actions"><button type="button" class="btn primary" data-retry-instagram-photo="${escapeAttr(photo.photo_id)}">Retry</button><button type="button" class="btn outline" data-dismiss-instagram-photo="${escapeAttr(photo.photo_id)}">Dismiss</button></div></article>`;
+    }).join('')
+    : '<p class="muted">Nothing waiting to retry.</p>';
+  list.querySelectorAll('[data-retry-instagram-photo]').forEach((button) => {
+    button.addEventListener('click', () => retryZernioInstagramGalleryPhoto(button.dataset.retryInstagramPhoto));
+  });
+  list.querySelectorAll('[data-dismiss-instagram-photo]').forEach((button) => {
+    button.addEventListener('click', () => dismissZernioInstagramGalleryPhoto(button.dataset.dismissInstagramPhoto));
+  });
+  if (retryAllBtn) {
+    retryAllBtn.hidden = !connected || !photos.length;
+    retryAllBtn.disabled = !photos.length;
+  }
+  if (dismissAllBtn) {
+    dismissAllBtn.hidden = !photos.length;
+    dismissAllBtn.disabled = !photos.length;
+  }
+}
+
+async function loadZernioInstagramGalleryQueue() {
+  const statusEl = document.querySelector('#zernio-instagram-gallery-status');
+  if (!hasPermission('site')) {
+    state.zernioInstagramGallery = null;
+    renderZernioInstagramGalleryQueue();
+    return null;
+  }
+  try {
+    state.zernioInstagramGallery = await jsonFetch('/api/admin/zernio/instagram/gallery');
+    renderZernioInstagramGalleryQueue();
+    if (statusEl && !statusEl.textContent) statusEl.textContent = '';
+    return state.zernioInstagramGallery;
+  } catch (error) {
+    state.zernioInstagramGallery = { pending_photos: [], pending_count: 0 };
+    renderZernioInstagramGalleryQueue();
+    if (statusEl) statusEl.textContent = error.message || 'Could not load Instagram gallery retries.';
+    return null;
+  }
+}
+
+async function retryZernioInstagramGalleryPhoto(photoId) {
+  const statusEl = document.querySelector('#zernio-instagram-gallery-status');
+  const id = String(photoId || '').trim();
+  if (!id) return;
+  if (statusEl) statusEl.textContent = 'Retrying Instagram post…';
+  try {
+    const result = await jsonFetch(`/api/admin/zernio/instagram/gallery/${encodeURIComponent(id)}/retry`, {
+      method: 'POST',
+      body: '{}',
+    });
+    state.zernioInstagramGallery = result;
+    renderZernioInstagramGalleryQueue();
+    const row = Array.isArray(result.results) ? result.results[0] : null;
+    if (statusEl) {
+      statusEl.textContent = row?.ok
+        ? 'Posted to Instagram.'
+        : (row?.error || row?.reason || 'Instagram retry failed.');
+    }
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not retry Instagram post.';
+  }
+}
+
+async function retryAllZernioInstagramGallery() {
+  const statusEl = document.querySelector('#zernio-instagram-gallery-status');
+  const count = Number(state.zernioInstagramGallery?.pending_count || 0);
+  if (!count) return;
+  if (!confirm(`Retry posting ${count} gallery photo${count === 1 ? '' : 's'} to Instagram now?`)) return;
+  if (statusEl) statusEl.textContent = 'Retrying failed Instagram posts…';
+  try {
+    const result = await jsonFetch('/api/admin/zernio/instagram/gallery/retry', {
+      method: 'POST',
+      body: JSON.stringify({ retry_all_failed: true }),
+    });
+    state.zernioInstagramGallery = result;
+    renderZernioInstagramGalleryQueue();
+    if (statusEl) {
+      statusEl.textContent = `Posted ${result.published_count || 0}, failed ${result.failed_count || 0}.`;
+    }
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not retry Instagram posts.';
+  }
+}
+
+async function dismissZernioInstagramGalleryPhoto(photoId) {
+  const statusEl = document.querySelector('#zernio-instagram-gallery-status');
+  const id = String(photoId || '').trim();
+  if (!id) return;
+  if (statusEl) statusEl.textContent = 'Dismissing…';
+  try {
+    state.zernioInstagramGallery = await jsonFetch(`/api/admin/zernio/instagram/gallery/${encodeURIComponent(id)}/dismiss`, {
+      method: 'POST',
+      body: '{}',
+    });
+    renderZernioInstagramGalleryQueue();
+    if (statusEl) statusEl.textContent = 'Dismissed.';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not dismiss item.';
+  }
+}
+
+async function dismissAllZernioInstagramGallery() {
+  const statusEl = document.querySelector('#zernio-instagram-gallery-status');
+  const count = Number(state.zernioInstagramGallery?.pending_count || 0);
+  if (!count) return;
+  if (!confirm(`Dismiss all ${count} failed Instagram gallery item${count === 1 ? '' : 's'}?`)) return;
+  if (statusEl) statusEl.textContent = 'Clearing failed posts…';
+  try {
+    state.zernioInstagramGallery = await jsonFetch('/api/admin/zernio/instagram/gallery/dismiss-all', {
+      method: 'POST',
+      body: '{}',
+    });
+    renderZernioInstagramGalleryQueue();
+    if (statusEl) statusEl.textContent = 'All failed gallery posts dismissed.';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not clear failed posts.';
+  }
 }
 
 async function loadZernioInstagramStatus({ sync = false } = {}) {
@@ -2592,6 +2747,7 @@ async function loadZernioInstagramStatus({ sync = false } = {}) {
     const path = sync ? '/api/admin/zernio/instagram?sync=1' : '/api/admin/zernio/instagram';
     const status = await jsonFetch(path);
     renderZernioInstagramStatus(status);
+    await loadZernioInstagramGalleryQueue();
     return status;
   } catch (error) {
     if (statusEl) statusEl.textContent = error.message || 'Could not check Instagram connection.';
@@ -2792,6 +2948,7 @@ async function loadSocialPanel({ sync = false } = {}) {
   await loadZernioFacebookStatus({ sync: sync || !state.zernioFacebook?.connected });
   // Always sync Instagram so the shared Facebook/Zernio key picks up the linked account.
   await loadZernioInstagramStatus({ sync: true });
+  await loadZernioInstagramGalleryQueue();
   if (state.zernioFacebook?.needsPageSelection) await loadZernioFacebookPages();
   if (state.zernioFacebook?.connected) await loadZernioEventQueue();
   else {
@@ -6154,6 +6311,13 @@ function bindForms() {
 
   document.querySelector('#zernio-instagram-autopost')?.addEventListener('change', async (event) => {
     await saveZernioInstagramAutopost(Boolean(event.currentTarget.checked));
+  });
+
+  document.querySelector('#zernio-instagram-gallery-retry-all')?.addEventListener('click', () => {
+    retryAllZernioInstagramGallery();
+  });
+  document.querySelector('#zernio-instagram-gallery-dismiss-all')?.addEventListener('click', () => {
+    dismissAllZernioInstagramGallery();
   });
 
   document.querySelectorAll('#zernio-post-form input[name="publish_mode"]').forEach((input) => {
