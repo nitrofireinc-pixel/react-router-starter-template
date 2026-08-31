@@ -320,6 +320,20 @@ test('event helpers decode contenteditable entities instead of showing &amp; / &
   assert.match(formatRichText('Meet&nbsp;at the field'), /<p>Meet at the field<\/p>/);
   assert.doesNotMatch(formatInlineRichText('Band &amp; Guard'), /&amp;amp;/);
   assert.doesNotMatch(formatInlineRichText('Hello&nbsp;World'), /&nbsp;/);
+
+  // CMS stores footer_note as block HTML (<p>...</p>). Wrapping that in another <p>
+  // makes the browser split the tags, then client hydrate fills the empty one — duplicate text.
+  const footerNote = formatRichText('<p>This site has been donated by Nitrofire Computing.</p>');
+  const footerHtml = `<div class="footer-note" data-site-field="footer_note">${footerNote}</div>`;
+  assert.match(footerHtml, /class="footer-note"/);
+  assert.doesNotMatch(footerHtml, /<p[^>]*data-site-field="footer_note"/);
+  assert.match(footerHtml, /<div class="footer-note"[^>]*>\s*<p>This site has been donated by Nitrofire Computing\.<\/p>\s*<\/div>/);
+  const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /<div class="footer-note" data-site-field="footer_note">\$\{formatRichText\(site\.footer_note\)\}<\/div>/);
+  assert.doesNotMatch(workerSrc, /<p data-site-field="footer_note">/);
+  const indexHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
+  assert.match(indexHtml, /<div class="footer-note" data-site-field="footer_note">/);
+  assert.doesNotMatch(indexHtml, /<p data-site-field="footer_note">/);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {
@@ -345,9 +359,15 @@ test('ensureCalendarMonthMount replaces nested event timelines with the Schedule
   const html = '<section class="content soft"><div class="wrap"><div class="timeline" data-events data-limit="5"><article class="event"><div class="datebox">Aug <span>01</span></div><div><h3>Band Camp</h3><p>Details</p></div></article></div></div></section>';
   const next = ensureCalendarMonthMount(html);
   assert.match(next, /id=["']caldev-app["']/);
+  assert.match(next, /caldev-section/);
+  assert.match(next, /caldev-wrap/);
   assert.doesNotMatch(next, /data-events/);
   assert.doesNotMatch(next, /Band Camp/);
   assert.equal(ensureCalendarMonthMount(next), next);
+  const alreadyMounted = ensureCalendarMonthMount('<section class="page-hero" data-cms-layout="calendar"><div class="page-title"><h1>Calendar</h1></div></section><section class="content soft"><div class="wrap"><div id="caldev-app" class="caldev-app" aria-live="polite"></div></div></section>');
+  assert.match(alreadyMounted, /class="content soft caldev-section"/);
+  assert.match(alreadyMounted, /class="wrap caldev-wrap"/);
+  assert.doesNotMatch(alreadyMounted, /page-hero[^>]*caldev-section/);
 });
 
 test('sortPhotosByRecent orders by created_at then id', () => {
@@ -2049,4 +2069,16 @@ test('subscribe deep link and print-only QR assets are wired', () => {
   assert.match(qrPage, /Subscribe!/);
   assert.doesNotMatch(readFileSync(join(root, 'calendar.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
   assert.doesNotMatch(readFileSync(join(root, 'fundraising.html'), 'utf8'), /email-list-signup-qr|sponsor-qr\.png|donate-qr\.png/);
+});
+
+test('styles.css brace balance stays closed so public Schedule Board CSS applies', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  const open = (css.match(/\{/g) || []).length;
+  const close = (css.match(/\}/g) || []).length;
+  assert.equal(open - close, 0, `styles.css brace delta should be 0, got ${open - close}`);
+  assert.match(css, /\.cms-managed-body-note\{[\s\S]*?background:#f5f9ff;\s*\}/);
+  assert.match(css, /\.caldev-board\{/);
+  assert.match(css, /\.cms-caldev-editor-overlay\{/);
+  assert.match(css, /\.cms-caldev-editor-toast\[hidden\]\{display:none!important\}/);
 });

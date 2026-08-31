@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'caldev-public-board-20260831';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -3785,14 +3785,35 @@ async function getEventById(env, id) {
 }
 
 /** Replace legacy event timelines / month grids with the Schedule Board mount on the Calendar page. */
+function ensureCaldevLayoutClasses(html) {
+  let next = String(html || '');
+  next = next.replace(
+    /<section\b([^>]*\bclass=")([^"]*\bcontent\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-section\b/.test(cls)) return match;
+      return `<section${pre}${cls} caldev-section${post}`;
+    },
+  );
+  next = next.replace(
+    /(<section\b[^>]*\bcaldev-section\b[^>]*>[\s\S]*?<div\b[^>]*\bclass=")([^"]*\bwrap\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-wrap\b/.test(cls)) return match;
+      return `${pre}${cls} caldev-wrap${post}`;
+    },
+  );
+  return next;
+}
+
 export function ensureCalendarMonthMount(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
   const mount = '<div id="caldev-app" class="caldev-app" aria-live="polite"></div>';
   if (/id=["']caldev-app["']/i.test(source) || /\bcaldev-app\b/i.test(source)) {
-    return source
-      .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
-      .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, '');
+    return ensureCaldevLayoutClasses(
+      source
+        .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
+        .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, ''),
+    );
   }
   const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
   const ranges = [];
@@ -3825,19 +3846,19 @@ export function ensureCalendarMonthMount(html) {
       /<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi,
       mount,
     );
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(?:<div id="caldev-app" class="caldev-app" aria-live="polite"><\/div>\s*){2,}/gi,
       `${mount}\n`,
-    );
+    ));
   }
-  if (/id=["']caldev-app["']/i.test(next)) return next;
+  if (/id=["']caldev-app["']/i.test(next)) return ensureCaldevLayoutClasses(next);
   if (/<div class="wrap">/i.test(next)) {
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
       `$1$2${mount}$3`,
-    );
+    ));
   }
-  return `${next}${mount}`;
+  return ensureCaldevLayoutClasses(`${next}${mount}`);
 }
 
 export function ensureBoosterMeetingsSlot(html) {
@@ -10123,7 +10144,7 @@ ${previewBanner}
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
