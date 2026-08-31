@@ -364,9 +364,10 @@ test('ensureCalendarMonthMount replaces nested event timelines with the Schedule
   assert.doesNotMatch(next, /data-events/);
   assert.doesNotMatch(next, /Band Camp/);
   assert.equal(ensureCalendarMonthMount(next), next);
-  const alreadyMounted = ensureCalendarMonthMount('<section class="content soft"><div class="wrap"><div id="caldev-app" class="caldev-app" aria-live="polite"></div></div></section>');
+  const alreadyMounted = ensureCalendarMonthMount('<section class="page-hero" data-cms-layout="calendar"><div class="page-title"><h1>Calendar</h1></div></section><section class="content soft"><div class="wrap"><div id="caldev-app" class="caldev-app" aria-live="polite"></div></div></section>');
   assert.match(alreadyMounted, /class="content soft caldev-section"/);
   assert.match(alreadyMounted, /class="wrap caldev-wrap"/);
+  assert.doesNotMatch(alreadyMounted, /page-hero[^>]*caldev-section/);
 });
 
 test('sortPhotosByRecent orders by created_at then id', () => {

@@ -3788,9 +3788,9 @@ async function getEventById(env, id) {
 function ensureCaldevLayoutClasses(html) {
   let next = String(html || '');
   next = next.replace(
-    /<section\b([^>]*\bclass=")([^"]*)(")/i,
+    /<section\b([^>]*\bclass=")([^"]*\bcontent\b[^"]*)(")/i,
     (match, pre, cls, post) => {
-      if (!/\bcontent\b/.test(cls) || /\bcaldev-section\b/.test(cls)) return match;
+      if (/\bcaldev-section\b/.test(cls)) return match;
       return `<section${pre}${cls} caldev-section${post}`;
     },
   );
