@@ -227,7 +227,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'footer-note-once-20260830';
+const ASSET_VERSION = 'caldev-public-board-20260831';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -3785,14 +3785,35 @@ async function getEventById(env, id) {
 }
 
 /** Replace legacy event timelines / month grids with the Schedule Board mount on the Calendar page. */
+function ensureCaldevLayoutClasses(html) {
+  let next = String(html || '');
+  next = next.replace(
+    /<section\b([^>]*\bclass=")([^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (!/\bcontent\b/.test(cls) || /\bcaldev-section\b/.test(cls)) return match;
+      return `<section${pre}${cls} caldev-section${post}`;
+    },
+  );
+  next = next.replace(
+    /(<section\b[^>]*\bcaldev-section\b[^>]*>[\s\S]*?<div\b[^>]*\bclass=")([^"]*\bwrap\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-wrap\b/.test(cls)) return match;
+      return `${pre}${cls} caldev-wrap${post}`;
+    },
+  );
+  return next;
+}
+
 export function ensureCalendarMonthMount(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
   const mount = '<div id="caldev-app" class="caldev-app" aria-live="polite"></div>';
   if (/id=["']caldev-app["']/i.test(source) || /\bcaldev-app\b/i.test(source)) {
-    return source
-      .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
-      .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, '');
+    return ensureCaldevLayoutClasses(
+      source
+        .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
+        .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, ''),
+    );
   }
   const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
   const ranges = [];
@@ -3825,19 +3846,19 @@ export function ensureCalendarMonthMount(html) {
       /<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi,
       mount,
     );
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(?:<div id="caldev-app" class="caldev-app" aria-live="polite"><\/div>\s*){2,}/gi,
       `${mount}\n`,
-    );
+    ));
   }
-  if (/id=["']caldev-app["']/i.test(next)) return next;
+  if (/id=["']caldev-app["']/i.test(next)) return ensureCaldevLayoutClasses(next);
   if (/<div class="wrap">/i.test(next)) {
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
       `$1$2${mount}$3`,
-    );
+    ));
   }
-  return `${next}${mount}`;
+  return ensureCaldevLayoutClasses(`${next}${mount}`);
 }
 
 export function ensureBoosterMeetingsSlot(html) {

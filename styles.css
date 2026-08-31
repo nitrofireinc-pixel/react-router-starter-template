@@ -4590,7 +4590,7 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
   border:1px dashed #9db4d0;
   border-radius:16px;
   background:#f5f9ff;
-
+}
 
 /* Band dues payment preview + modal */
 .dues-dev-section{padding-top:42px}
@@ -4953,17 +4953,20 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 
 /* Create / Edit Event toast */
 .cms-caldev-editor-overlay{
-  position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:16px;
+  position:fixed;inset:0;z-index:240;display:grid;place-items:center;padding:16px;
+  padding-bottom:max(16px, env(safe-area-inset-bottom, 0px));
 }
 .cms-caldev-editor-overlay[hidden]{display:none!important}
 .cms-caldev-editor-backdrop{
   position:absolute;inset:0;border:0;background:rgba(8,18,32,.48);cursor:pointer;
 }
 .cms-caldev-editor-toast{
-  position:relative;z-index:1;width:min(520px,100%);max-height:min(88vh,860px);overflow:auto;
+  position:relative;z-index:1;width:min(520px,100%);max-height:min(88vh,860px);max-height:min(88dvh,860px);overflow:auto;
   display:grid;gap:12px;padding:18px 18px 16px;border-radius:18px;background:#fff;
   border:1px solid #d7e2ef;box-shadow:0 24px 60px rgba(8,18,32,.28);
+  -webkit-overflow-scrolling:touch;
 }
+.cms-caldev-editor-toast[hidden]{display:none!important}
 .cms-caldev-editor-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .cms-caldev-editor-head h4{margin:0;color:var(--navy);font-size:1.25rem;font-weight:900;line-height:1.2}
 .cms-caldev-close-btn{
@@ -5018,6 +5021,10 @@ body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
 }
 .cms-caldev-desc:empty:before{content:attr(data-placeholder);color:#94a3b8;font-weight:650}
 body.cms-caldev-editor-open{overflow:hidden}
+body.cms-caldev-editor-open .image-admin-shell,
+body.cms-caldev-editor-open .admin-workspace{
+  overflow:visible!important;
+}
 @media(max-width:820px){
   .cms-caldev-week{grid-template-columns:1fr}
   .cms-caldev-dow{display:none}
@@ -5028,9 +5035,18 @@ body.cms-caldev-editor-open{overflow:hidden}
   .cms-caldev-actions{width:100%;justify-content:center}
   .cms-caldev-range{width:100%}
   .cms-caldev-range-field select{width:100%;min-width:0}
-  .cms-caldev-editor-toast{
-    width:100%;max-height:86vh;border-radius:18px 18px 0 0;align-self:end;
+  .cms-caldev-editor-overlay{
+    align-items:end;
+    padding:0;
+    padding-bottom:env(safe-area-inset-bottom, 0px);
   }
-  .cms-caldev-editor-overlay{align-items:end;padding:0}
+  .cms-caldev-editor-toast{
+    width:100%;
+    max-height:min(90vh, 920px);
+    max-height:min(90dvh, 920px);
+    border-radius:18px 18px 0 0;
+    align-self:end;
+    padding-bottom:max(16px, env(safe-area-inset-bottom, 0px));
+  }
   .cms-caldev-repeat-grid{grid-template-columns:1fr}
 }
