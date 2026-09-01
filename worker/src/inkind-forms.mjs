@@ -280,7 +280,7 @@ export function renderInKindPageBody(page = {}) {
   <article class="card inkind-card">
     <span class="tag">In-kind</span>
     <h2>In-kind donation form</h2>
-    <p>Tell us about your business and what you would like to donate. On submit we send a PDF of this form to the Band Boosters committee selected in the CMS.</p>
+    <p>Tell us about your business and what you would like to donate.</p>
     ${renderInKindFormHtml()}
   </article>
 </div></section>`;
