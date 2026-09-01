@@ -6,6 +6,7 @@ import {
   buildInKindEmail,
   buildInKindPdfBase64,
   canAccessFormsPage,
+  formatInKindAddress,
   normalizeInKindPayload,
   parseFormsUserIds,
   renderInKindPageBody,
@@ -5039,6 +5040,35 @@ export async function recordDuesFailedLedger(env, dues = {}) {
   return refreshPaymentLedgerXml(env);
 }
 
+export function buildInKindLedgerEntry(data = {}, { id = 0, paidAt = '' } = {}) {
+  const items = String(data.items || '').trim();
+  const value = String(data.value || '').trim();
+  const amountCents = parseSponsorAmountCents(value);
+  const contact = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+  const noteParts = [contact, data.email, data.phone].filter(Boolean);
+  if (items.length > 80) noteParts.push(items);
+  return {
+    kind: 'sponsor',
+    refType: 'inkind_form',
+    refId: Number(id) || null,
+    name: String(data.business_name || '').trim(),
+    address: formatInKindAddress(data).split('\n').filter(Boolean).join(', '),
+    amountCents,
+    amountDisplay: value || formatLedgerAmountDisplay(amountCents),
+    packageLabel: (items || 'In-kind donation').slice(0, 80),
+    note: noteParts.join(' · ').slice(0, 500),
+    moneyExchanged: false,
+    paidAt: paidAt || new Date().toISOString(),
+  };
+}
+
+export async function recordInKindFormLedger(env, data = {}, submissionId = 0) {
+  const id = Number(submissionId || data.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, buildInKindLedgerEntry(data, { id }));
+  return refreshPaymentLedgerXml(env);
+}
+
 export function buildDuesReceipt(dues = {}, { failed = false } = {}) {
   const studentName = String(dues.student_name || '').trim() || 'Student';
   const email = String(dues.email || '').trim().toLowerCase();
@@ -8296,11 +8326,6 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
     }
     const recipients = await resolveFormsRecipientEmails(env);
-    if (!recipients.length) {
-      return jsonResponse({
-        detail: 'This form is not configured for delivery yet. Please email the band office or try again later.',
-      }, 503);
-    }
     const site = await getSite(env).catch(() => ({}));
     const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
     const mail = buildInKindEmail({ data: normalized.data, siteTitle });
@@ -8314,6 +8339,7 @@ async function routeApi(request, env, url, ctx = null) {
     let delivered = 0;
     let deliveryError = '';
     try {
+      if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
       if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
       if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
       await sendViaResend(env, {
@@ -8333,18 +8359,22 @@ async function routeApi(request, env, url, ctx = null) {
     const inserted = await env.DB.prepare(
       'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
     ).bind('inkind', JSON.stringify(normalized.data), delivered, deliveryError).run();
+    const submissionId = inserted?.meta?.last_row_id || null;
+    try {
+      await recordInKindFormLedger(env, normalized.data, submissionId);
+    } catch { /* ledger is best-effort */ }
     if (!delivered) {
       return jsonResponse({
         ok: true,
         delivered: false,
-        id: inserted?.meta?.last_row_id || null,
+        id: submissionId,
         detail: 'Form received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
       });
     }
     return jsonResponse({
       ok: true,
       delivered: true,
-      id: inserted?.meta?.last_row_id || null,
+      id: submissionId,
       detail: 'Thank you. Your in-kind donation form was sent.',
     });
   }
