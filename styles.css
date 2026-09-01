@@ -5050,3 +5050,13 @@ body.cms-caldev-editor-open .admin-workspace{
   }
   .cms-caldev-repeat-grid{grid-template-columns:1fr}
 }
+
+.sponsor-choice-modal .sponsor-signup-panel{max-width:440px}
+.sponsor-choice-actions{display:flex;flex-wrap:wrap;gap:12px;margin:4px 0 16px}
+.inkind-wrap{max-width:760px;margin:0 auto}
+.inkind-card h2{margin:.2rem 0 .7rem}
+.inkind-form .field-hint{display:block;margin-top:6px;font-weight:600;color:var(--muted)}
+.inkind-form .muted{font-weight:600;color:var(--muted)}
+.inkind-honeypot{position:absolute;left:-9999px;height:0;overflow:hidden}
+.inkind-form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:6px}
+.inkind-form-actions .status{margin:0}

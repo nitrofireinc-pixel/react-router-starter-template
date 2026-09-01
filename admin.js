@@ -383,6 +383,11 @@ function canAccessScheduleBoard() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
 }
 
+function canAccessForms() {
+  if (isSuperAdmin()) return true;
+  return Boolean(state.me?.forms_access);
+}
+
 function canManageAllEvents() {
   return isSuperAdmin() || hasPermission('events:manage');
 }
@@ -1271,7 +1276,7 @@ function buildEditablePagePreview(payload = {}) {
     ? '<div id="caldev-app" class="caldev-app cms-events-placeholder" aria-live="polite"><p class="draft">Public visitors see the Schedule Board here. Manage events in the Schedule Board tab. Meetings also appear on Boosters.</p></div>'
     : '';
   const sponsorsCallout = showCallout
-    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><button type="button" class="btn secondary" data-sponsor-choice-open disabled title="Opens on the public page">Sponsor/In-Kind</button></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
 
   if (layout === 'calendar') {
@@ -1299,7 +1304,7 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings come from Schedule Board Meetings (and legacy Calendar Events marked for Boosters).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><button type="button" class="btn primary" data-sponsor-choice-open disabled title="Opens on the public page">Sponsor/In-Kind</button><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
@@ -2087,6 +2092,9 @@ function activateTab(name) {
     if (name === 'security-log' && !isSuperAdmin()) {
     return Promise.resolve(false);
   }
+  if (name === 'forms' && !canAccessForms()) {
+    return Promise.resolve(false);
+  }
   if (name === 'caldev' && !canAccessScheduleBoard()) {
     return Promise.resolve(false);
   }
@@ -2117,6 +2125,10 @@ function activateTab(name) {
     }
     if (name === 'mail') {
       loadMailRecipients().catch(() => {});
+    }
+    if (name === 'forms') {
+      if (!canAccessForms()) return;
+      loadFormsPanel().catch(() => {});
     }
     if (name === 'social') {
       loadSocialPanel().catch(() => {});
@@ -2172,8 +2184,8 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
-const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
-const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'calendar']);
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind']);
+const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'calendar']);
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -2297,6 +2309,7 @@ function showAllowedPanels() {
     social: hasPermission('site'),
     users: hasPermission('users'),
     'security-log': isSuperAdmin(),
+    forms: canAccessForms(),
     caldev: canAccessScheduleBoard(),
     events: canViewEvents(),
     photos: hasPermission('photos'),
@@ -2889,6 +2902,7 @@ function renderDashboard() {
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
+    canAccessForms() && ['Forms', 'Choose who can manage public forms and who receives in-kind donation PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
     canCreateEvents() && !isSuperAdmin()
@@ -5123,6 +5137,81 @@ function renderContactMessages() {
     : '<p class="draft">No contact messages yet.</p>';
 }
 
+function selectedFormsUserIds(name) {
+  return [...document.querySelectorAll(`#forms-settings-form input[name="${name}"]:checked`)]
+    .map((input) => Number(input.value))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function renderFormsUserBoxes(targetId, inputName, users, selectedIds, { emailOnly = false } = {}) {
+  const box = document.querySelector(targetId);
+  if (!box) return;
+  const selected = new Set((selectedIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  const options = (users || []).filter((user) => !emailOnly || user.can_email);
+  box.innerHTML = options.length
+    ? options.map((user) => `
+      <label class="checkline contact-recipient-option">
+        <input type="checkbox" name="${escapeAttr(inputName)}" value="${escapeAttr(user.id)}" ${selected.has(Number(user.id)) ? 'checked' : ''}>
+        <span><b>${escapeHtml(user.display_name || user.username)}</b><small>${escapeHtml(user.email || user.username)}</small></span>
+      </label>
+    `).join('')
+    : `<p class="draft">${emailOnly ? 'No CMS users with email logins are available yet.' : 'No CMS users are available yet.'}</p>`;
+}
+
+function renderFormsSubmissions(submissions = []) {
+  const list = document.querySelector('#forms-submissions-list');
+  if (!list) return;
+  list.innerHTML = submissions.length
+    ? submissions.map((item) => `
+    <article class="admin-row">
+      <div>
+        <b>${escapeHtml(item.business_name || 'In-kind donation')}</b>
+        <span>${escapeHtml(item.name || '')}${item.email ? ` &lt;${escapeHtml(item.email)}&gt;` : ''}</span>
+        <small>${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
+      </div>
+      <div class="row-actions"><a class="btn outline" href="/api/admin/forms/submissions/${encodeURIComponent(item.id)}.pdf">Download PDF</a></div>
+    </article>
+  `).join('')
+    : '<p class="draft">No in-kind submissions yet.</p>';
+}
+
+async function loadFormsPanel() {
+  if (!canAccessForms()) return;
+  const data = await jsonFetch('/api/admin/forms');
+  const users = data.users || [];
+  renderFormsUserBoxes('#forms-access-boxes', 'access_user_ids', users, data.access_user_ids || []);
+  renderFormsUserBoxes('#forms-recipient-boxes', 'recipient_user_ids', users, data.recipient_user_ids || [], { emailOnly: true });
+  renderFormsSubmissions(data.submissions || []);
+  const accessFieldset = document.querySelector('[data-forms-access-fieldset]');
+  if (accessFieldset) accessFieldset.hidden = !data.can_edit_access;
+  const status = document.querySelector('#forms-settings-status');
+  if (status) status.textContent = '';
+}
+
+function bindFormsSettingsForm() {
+  const form = document.querySelector('#forms-settings-form');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#forms-settings-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+      const payload = {
+        recipient_user_ids: selectedFormsUserIds('recipient_user_ids'),
+      };
+      if (isSuperAdmin()) {
+        payload.access_user_ids = selectedFormsUserIds('access_user_ids');
+      }
+      await jsonFetch('/api/admin/forms', { method: 'PUT', body: JSON.stringify(payload) });
+      await loadFormsPanel();
+      if (status) status.textContent = 'Form settings saved.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not save form settings.';
+    }
+  });
+}
+
 async function loadContactDeliveryStatus() {
   const status = document.querySelector('#contact-delivery-status');
   if (!status || !canEditContact()) return;
@@ -5994,6 +6083,7 @@ function bindPasswordControls() {
 
 function bindForms() {
   bindPasswordControls();
+  bindFormsSettingsForm();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();

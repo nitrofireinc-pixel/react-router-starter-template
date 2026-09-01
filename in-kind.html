@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Offer an in-kind donation to East Forsyth Band.">
+  <title>In-Kind Donation | East Forsyth Band</title>
+  <link rel="icon" href="assets/efhs-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="utility"><div class="wrap"><a href="calendar.html">Upcoming Events</a><a href="resources.html">Student Resources</a><a href="contact.html">Contact Us</a></div></div>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><img class="brand-logo" src="assets/efhs-logo.png" alt="East Forsyth High School logo"><span data-site-field="title">East Forsyth Band</span><img class="brand-mark" src="assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"></a>
+    <button class="menu-button" aria-expanded="false" aria-controls="site-nav">Menu</button>
+  </div>
+  <nav id="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a><a href="sponsors.html">Sponsors</a><a href="fundraising.html">Fundraising</a><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="contact.html">Contact</a></nav>
+</header>
+<main id="main">
+<section class="page-hero sponsor-hero" data-cms-layout="in-kind"><div class="page-title"><div class="kicker">Support</div><h1>In-Kind Donation</h1><p>Thank you for offering goods or services to the East Forsyth Band. Complete this form and we will follow up about delivery and recognition.</p></div></section>
+<section class="content sponsor-content"><div class="wrap inkind-wrap">
+  <article class="card inkind-card">
+    <span class="tag">In-kind</span>
+    <h2>In-kind donation form</h2>
+    <p>Tell us about your business and what you would like to donate. On submit we send a PDF of this form to the Band Boosters committee selected in the CMS.</p>
+    <form class="inkind-form form-grid" data-inkind-form novalidate>
+      <label class="full">Business name
+        <input name="business_name" required maxlength="160" autocomplete="organization" placeholder="As it should appear on recognition materials">
+      </label>
+      <label>First name
+        <input name="first_name" required maxlength="80" autocomplete="given-name">
+      </label>
+      <label>Last name
+        <input name="last_name" required maxlength="80" autocomplete="family-name">
+      </label>
+      <label>Email
+        <input name="email" type="email" required maxlength="160" autocomplete="email">
+      </label>
+      <label>Phone
+        <input name="phone" type="tel" required maxlength="40" autocomplete="tel">
+      </label>
+      <label class="full">Address
+        <input name="address1" required maxlength="160" autocomplete="address-line1" placeholder="Street address">
+      </label>
+      <label class="full">Address line 2 <span class="muted">(optional)</span>
+        <input name="address2" maxlength="160" autocomplete="address-line2">
+      </label>
+      <label>City
+        <input name="city" required maxlength="80" autocomplete="address-level2">
+      </label>
+      <label>State
+        <select name="state" required autocomplete="address-level1">
+          <option value="AL">AL</option><option value="AK">AK</option><option value="AZ">AZ</option><option value="AR">AR</option>
+          <option value="CA">CA</option><option value="CO">CO</option><option value="CT">CT</option><option value="DE">DE</option>
+          <option value="FL">FL</option><option value="GA">GA</option><option value="HI">HI</option><option value="ID">ID</option>
+          <option value="IL">IL</option><option value="IN">IN</option><option value="IA">IA</option><option value="KS">KS</option>
+          <option value="KY">KY</option><option value="LA">LA</option><option value="ME">ME</option><option value="MD">MD</option>
+          <option value="MA">MA</option><option value="MI">MI</option><option value="MN">MN</option><option value="MS">MS</option>
+          <option value="MO">MO</option><option value="MT">MT</option><option value="NE">NE</option><option value="NV">NV</option>
+          <option value="NH">NH</option><option value="NJ">NJ</option><option value="NM">NM</option><option value="NY">NY</option>
+          <option value="NC" selected>NC</option><option value="ND">ND</option><option value="OH">OH</option><option value="OK">OK</option>
+          <option value="OR">OR</option><option value="PA">PA</option><option value="RI">RI</option><option value="SC">SC</option>
+          <option value="SD">SD</option><option value="TN">TN</option><option value="TX">TX</option><option value="UT">UT</option>
+          <option value="VT">VT</option><option value="VA">VA</option><option value="WA">WA</option><option value="WV">WV</option>
+          <option value="WI">WI</option><option value="WY">WY</option>
+        </select>
+      </label>
+      <label>ZIP
+        <input name="zip" required maxlength="16" autocomplete="postal-code">
+      </label>
+      <label class="full">Value of In-kind donation
+        <input name="value" required maxlength="80" placeholder="$250 or estimated retail value">
+      </label>
+      <label class="full">In-Kind Sponsorship Items
+        <textarea name="items" required rows="5" maxlength="4000" placeholder="Please share what you would like to donate. A member of our sponsorship committee will be in touch."></textarea>
+      </label>
+      <label class="full">How did you hear about us? <span class="muted">(optional)</span>
+        <select name="hear_about" data-inkind-hear>
+          <option value="">Select one</option>
+          <option value="Student in the Bands or Colorguard">Student in the Bands or Colorguard</option>
+          <option value="Community Outreach">Community Outreach</option>
+          <option value="Previous Sponsor">Previous Sponsor</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label class="full" data-inkind-other hidden>If you marked “Other”, please share how you heard about sponsoring the Band
+        <input name="hear_about_other" maxlength="200">
+      </label>
+      <label class="full">Please share any other details you would like us to know <span class="muted">(optional)</span>
+        <textarea name="details" rows="4" maxlength="4000"></textarea>
+      </label>
+      <label class="full">Logo upload <span class="muted">(optional, up to two images)</span>
+        <input name="logos" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.svg" multiple>
+        <small class="field-hint">PNG or JPG preferred. Files are emailed with the form PDF.</small>
+      </label>
+      <p class="full inkind-honeypot" hidden><label>Company<input name="company" tabindex="-1" autocomplete="off"></label></p>
+      <div class="full inkind-form-actions">
+        <button class="btn primary" type="submit">Submit</button>
+        <p class="status" data-inkind-status aria-live="polite"></p>
+      </div>
+    </form>
+  </article>
+</div></section>
+</main>
+<footer class="footer">
+  <div class="wrap">
+    <div><h3 data-site-field="title">East Forsyth Band</h3><div class="footer-note" data-site-field="footer_note">Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div>
+    <div><h3>Program</h3><a href="ensembles.html">Ensembles</a><a href="directors.html">Directors & Staff</a><a href="calendar.html">Calendar</a></div>
+    <div><h3>Families</h3><a href="resources.html">Student Resources</a><a href="boosters.html">Boosters</a><a href="fundraising.html">Fundraising</a></div>
+    <div><h3>Community</h3><a href="sponsors.html">Sponsors</a><a href="become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div>
+  </div>
+</footer>
+<script src="script.js"></script>
+<script src="site-content.js"></script>
+</body>
+</html>

@@ -21,6 +21,7 @@ for (const name of [
   'fundraising.html',
   'sponsors.html',
   'become-a-sponsor.html',
+  'in-kind.html',
   'qr.html',
   'sponsor-payment-complete.html',
   'directors.html',
