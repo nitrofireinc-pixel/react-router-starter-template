@@ -841,6 +841,8 @@ async function loadPublicContent() {
   bindSponsorTierSignup();
   bindDonateButtons();
   bindDuesButtons();
+  bindSponsorChoiceButtons();
+  bindInKindForm();
   maybeAutoOpenDonate();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
@@ -2093,6 +2095,109 @@ function openDonateModal() {
   form?.querySelector('input[name="donor_name"]')?.focus();
 }
 
+function closeSponsorChoiceModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.sponsor-choice-modal');
+  const clearBody = () => {
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal, .dues-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+  };
+  if (!modal) {
+    clearBody();
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    clearBody();
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    clearBody();
+  }, 280);
+}
+
+function openSponsorChoiceModal() {
+  closeSponsorChoiceModal({ immediate: true });
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal sponsor-choice-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Choose sponsorship or in-kind');
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-choice-close aria-label="Close"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head">
+        <span class="sponsor-signup-kicker">Support the band</span>
+        <h3>How would you like to help?</h3>
+        <p>Choose Sponsorship Tiers or an In-Kind donation.</p>
+      </div>
+      <div class="sponsor-choice-actions">
+        <a class="btn primary" href="/become-a-sponsor.html">Sponsorship Tiers</a>
+        <a class="btn outline" href="/in-kind.html">In-Kind</a>
+      </div>
+      <button type="button" class="btn outline" data-choice-close>Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+  modal.querySelectorAll('[data-choice-close]').forEach((button) => {
+    button.addEventListener('click', () => closeSponsorChoiceModal());
+  });
+}
+
+function bindSponsorChoiceButtons(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('[data-sponsor-choice-open]').forEach((control) => {
+    if (control.dataset.sponsorChoiceBound === '1') return;
+    if (control.closest('#page-preview, .cms-shell, .admin-body')) return;
+    if (control.hasAttribute('disabled')) return;
+    control.dataset.sponsorChoiceBound = '1';
+    control.addEventListener('click', (event) => {
+      event.preventDefault();
+      openSponsorChoiceModal();
+    });
+  });
+}
+
+function bindInKindForm(root = document) {
+  const form = root.querySelector('[data-inkind-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  const hear = form.querySelector('[data-inkind-hear]');
+  const other = form.querySelector('[data-inkind-other]');
+  const syncOther = () => {
+    if (!other) return;
+    const show = String(hear?.value || '') === 'Other';
+    other.hidden = !show;
+    const input = other.querySelector('input');
+    if (input) input.required = show;
+  };
+  hear?.addEventListener('change', syncOther);
+  syncOther();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-inkind-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/inkind', {
+        method: 'POST',
+        body: new FormData(form),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      syncOther();
+      if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
 function bindDonateButtons(root = document) {
   if (isCmsAdminPreviewContext(root)) return;
   root.querySelectorAll('[data-donate-open]').forEach((button) => {
@@ -2499,9 +2604,16 @@ function bindDuesButtons(root = document) {
 
 ensurePublicBrandMark();
 hydrateMarqueeFromCache();
+bindSponsorChoiceButtons();
+bindInKindForm();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  const choice = document.querySelector('.sponsor-choice-modal');
+  if (choice) {
+    closeSponsorChoiceModal();
+    return;
+  }
   const dues = document.querySelector('.dues-modal');
   if (dues) {
     const confirm = dues.querySelector('[data-dues-confirm]');

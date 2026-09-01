@@ -1,5 +1,17 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 import {
+  FORMS_ACCESS_KEY,
+  FORMS_RECIPIENT_KEY,
+  INKIND_CMS_PAGE,
+  buildInKindEmail,
+  buildInKindPdfBase64,
+  canAccessFormsPage,
+  formatInKindAddress,
+  normalizeInKindPayload,
+  parseFormsUserIds,
+  renderInKindPageBody,
+} from './inkind-forms.mjs';
+import {
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
   enrichMailAuditMeta,
@@ -227,7 +239,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'sponsor-inkind-forms-20260901';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -361,6 +373,8 @@ export function canAccessSecurityLog(user) {
 export function canAccessWebsiteGuide(user) {
   return isSuperAdmin(user);
 }
+
+export { canAccessFormsPage, normalizeInKindPayload, parseFormsUserIds, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64 } from './inkind-forms.mjs';
 
 export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
 export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
@@ -1451,6 +1465,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS email_subscribers (email TEXT PRIMARY KEY, topics TEXT NOT NULL DEFAULT \'["calendar","fundraising"]\', status TEXT NOT NULL DEFAULT \'active\', source TEXT NOT NULL DEFAULT \'website\', unsubscribe_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, unsubscribed_at TEXT)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
@@ -1645,9 +1660,15 @@ async function initDb(env) {
         .run();
     }
   }
+  const existingInKind = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'in-kind'").first();
+  if (!existingInKind) {
+    await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(INKIND_CMS_PAGE.slug, INKIND_CMS_PAGE.path, INKIND_CMS_PAGE.title, INKIND_CMS_PAGE.body_html, INKIND_CMS_PAGE.nav_order, INKIND_CMS_PAGE.is_home, INKIND_CMS_PAGE.active)
+      .run();
+  }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html)));
+    const nextSponsorsHtml = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html))));
     if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextSponsorsHtml, sponsorsPageRow.id)
@@ -2089,6 +2110,105 @@ export function formatSquareError(payload = {}, status = 0) {
     status ? `HTTP ${status}` : '',
   ].filter(Boolean);
   return parts.join(' · ') || 'Square request failed';
+}
+
+export function rewriteSponsorChoiceButtons(html) {
+  return String(html || '').replace(
+    /<a([^>]*?)href="(?:\/)?become-a-sponsor\.html"([^>]*)>([\s\S]*?)<\/a>/gi,
+    (match, before, after, inner) => {
+      const existing = `${before || ''} ${after || ''}`;
+      if (/\bdata-sponsor-choice-open\b/i.test(existing)) return match;
+      const classMatch = existing.match(/\bclass="([^"]*)"/i);
+      const classStr = String(classMatch?.[1] || '').trim();
+      const label = /become a sponsor/i.test(String(inner || '')) ? 'Sponsor/In-Kind' : String(inner || '').trim();
+      const leftover = existing.replace(/\s*class="[^"]*"/gi, '').trim();
+      if (/\bbtn\b/i.test(classStr)) {
+        return `<button type="button" class="${classStr}" data-sponsor-choice-open${leftover ? ` ${leftover}` : ''}>${escapeHtml(label)}</button>`;
+      }
+      return `<a href="/become-a-sponsor.html" data-sponsor-choice-open${leftover ? ` ${leftover}` : ''}${classStr ? ` class="${classStr}"` : ''}>${escapeHtml(label)}</a>`;
+    }
+  );
+}
+
+export async function getFormsAccessUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, FORMS_ACCESS_KEY));
+}
+
+export async function getFormsRecipientUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, FORMS_RECIPIENT_KEY));
+}
+
+export async function saveFormsUserIds(env, key, ids) {
+  await setSiteContentValue(env, key, JSON.stringify((ids || []).map((id) => Number(id)).filter((id) => id > 0)));
+}
+
+export async function requireFormsAccess(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  const accessIds = await getFormsAccessUserIds(env);
+  if (!canAccessFormsPage(auth.user, accessIds)) {
+    return { user: auth.user, response: jsonResponse({ detail: 'Permission required: forms' }, 403) };
+  }
+  return auth;
+}
+
+function isSuperAdminUser(user) {
+  return String(user?.role || '').trim().toLowerCase() === 'admin';
+}
+
+async function listCmsFormUsers(env) {
+  const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
+  return (rows.results || []).map((user) => ({
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    email: String(user.username || '').trim().toLowerCase(),
+    can_email: isValidEmail(user.username),
+  }));
+}
+
+export async function resolveFormsRecipientEmails(env) {
+  const ids = new Set(await getFormsRecipientUserIds(env));
+  if (!ids.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => ids.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
+}
+
+async function collectInKindLogoAttachments(files = []) {
+  const attachments = [];
+  const names = [];
+  for (const file of (files || []).slice(0, 2)) {
+    if (!file || typeof file.arrayBuffer !== 'function') continue;
+    const name = String(file.name || 'logo').replace(/[^\w.\- ()]+/g, '').trim().slice(0, 160) || 'logo.png';
+    const type = String(file.type || '');
+    if (!/^image\//i.test(type) && !/\.(png|jpe?g|webp|gif|svg)$/i.test(name)) continue;
+    const buffer = await file.arrayBuffer();
+    if (!buffer.byteLength || buffer.byteLength > 2 * 1024 * 1024) continue;
+    attachments.push({
+      filename: name,
+      content: bytesToBase64(new Uint8Array(buffer)),
+      content_type: type || 'image/png',
+    });
+    names.push(name);
+  }
+  return { attachments, names };
+}
+
+async function readInKindRequest(request) {
+  const contentType = String(request.headers.get('content-type') || '');
+  if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+    const form = await request.formData();
+    const payload = {};
+    for (const [key, value] of form.entries()) {
+      if (typeof value === 'string') payload[key] = value;
+    }
+    const files = form.getAll('logos').filter((file) => file && typeof file.arrayBuffer === 'function' && Number(file.size || 0) > 0);
+    return { payload, files };
+  }
+  const payload = await request.json().catch(() => ({}));
+  return { payload, files: [] };
 }
 
 export function pickSquareLocationId(locations = [], preferredId = '') {
@@ -3785,14 +3905,35 @@ async function getEventById(env, id) {
 }
 
 /** Replace legacy event timelines / month grids with the Schedule Board mount on the Calendar page. */
+function ensureCaldevLayoutClasses(html) {
+  let next = String(html || '');
+  next = next.replace(
+    /<section\b([^>]*\bclass=")([^"]*\bcontent\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-section\b/.test(cls)) return match;
+      return `<section${pre}${cls} caldev-section${post}`;
+    },
+  );
+  next = next.replace(
+    /(<section\b[^>]*\bcaldev-section\b[^>]*>[\s\S]*?<div\b[^>]*\bclass=")([^"]*\bwrap\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-wrap\b/.test(cls)) return match;
+      return `${pre}${cls} caldev-wrap${post}`;
+    },
+  );
+  return next;
+}
+
 export function ensureCalendarMonthMount(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
   const mount = '<div id="caldev-app" class="caldev-app" aria-live="polite"></div>';
   if (/id=["']caldev-app["']/i.test(source) || /\bcaldev-app\b/i.test(source)) {
-    return source
-      .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
-      .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, '');
+    return ensureCaldevLayoutClasses(
+      source
+        .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
+        .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, ''),
+    );
   }
   const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
   const ranges = [];
@@ -3825,19 +3966,19 @@ export function ensureCalendarMonthMount(html) {
       /<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi,
       mount,
     );
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(?:<div id="caldev-app" class="caldev-app" aria-live="polite"><\/div>\s*){2,}/gi,
       `${mount}\n`,
-    );
+    ));
   }
-  if (/id=["']caldev-app["']/i.test(next)) return next;
+  if (/id=["']caldev-app["']/i.test(next)) return ensureCaldevLayoutClasses(next);
   if (/<div class="wrap">/i.test(next)) {
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
       `$1$2${mount}$3`,
-    );
+    ));
   }
-  return `${next}${mount}`;
+  return ensureCaldevLayoutClasses(`${next}${mount}`);
 }
 
 export function ensureBoosterMeetingsSlot(html) {
@@ -4899,6 +5040,35 @@ export async function recordDuesFailedLedger(env, dues = {}) {
   return refreshPaymentLedgerXml(env);
 }
 
+export function buildInKindLedgerEntry(data = {}, { id = 0, paidAt = '' } = {}) {
+  const items = String(data.items || '').trim();
+  const value = String(data.value || '').trim();
+  const amountCents = parseSponsorAmountCents(value);
+  const contact = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+  const noteParts = [contact, data.email, data.phone].filter(Boolean);
+  if (items.length > 80) noteParts.push(items);
+  return {
+    kind: 'sponsor',
+    refType: 'inkind_form',
+    refId: Number(id) || null,
+    name: String(data.business_name || '').trim(),
+    address: formatInKindAddress(data).split('\n').filter(Boolean).join(', '),
+    amountCents,
+    amountDisplay: value || formatLedgerAmountDisplay(amountCents),
+    packageLabel: (items || 'In-kind donation').slice(0, 80),
+    note: noteParts.join(' · ').slice(0, 500),
+    moneyExchanged: false,
+    paidAt: paidAt || new Date().toISOString(),
+  };
+}
+
+export async function recordInKindFormLedger(env, data = {}, submissionId = 0) {
+  const id = Number(submissionId || data.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, buildInKindLedgerEntry(data, { id }));
+  return refreshPaymentLedgerXml(env);
+}
+
 export function buildDuesReceipt(dues = {}, { failed = false } = {}) {
   const studentName = String(dues.student_name || '').trim() || 'Student';
   const email = String(dues.email || '').trim().toLowerCase();
@@ -5343,36 +5513,37 @@ export function rewriteBecomeSponsorLinks(html) {
     .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html\1(?=[^>]*>\s*(?:Become a sponsor|Ask about sponsoring))/gi, 'href="/become-a-sponsor.html"');
 }
 
-export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
+export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><button type="button" class="btn primary" data-sponsor-choice-open>Sponsor/In-Kind</button><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
 
 export function ensureSponsorDonateButton(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
-  if (/data-donate-open/i.test(source)) return source;
-  if (/sponsor-intro-actions/i.test(source)) return source;
-  // Wrap the primary Become a sponsor control in the intro with a Donate button.
-  const wrapped = source.replace(
-    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
-    `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
-  );
-  if (wrapped !== source) return wrapped;
-  // Fallback: insert actions before the sponsor directory when intro link was already removed/customized.
-  return source.replace(
-    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
-    `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
-  );
+  let next = source;
+  if (!/data-donate-open/i.test(source) && !/sponsor-intro-actions/i.test(source)) {
+    const wrapped = source.replace(
+      /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
+      `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
+    );
+    next = wrapped !== source
+      ? wrapped
+      : source.replace(
+        /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
+        `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
+      );
+  }
+  return rewriteSponsorChoiceButtons(next);
 }
 
 function renderSponsorPageBody(page, sponsors) {
   const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
-  let html = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || '')));
+  let html = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || ''))));
   if (html.includes('data-sponsors')) {
     return replaceMarkedDirectory(html, 'data-sponsors', directory) || `${html}${directory}`;
   }
   if (html.includes('class="sponsor-directory"')) {
     return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
   }
-  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
+  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><button type="button" class="btn secondary" data-sponsor-choice-open>Sponsor/In-Kind</button></aside></div></section>`;
 }
 
 function renderBecomeSponsorPageBody(page) {
@@ -6077,6 +6248,7 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
 function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
+  if (page.slug === 'in-kind') return renderInKindPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') {
@@ -7229,7 +7401,7 @@ export function generateStructuredPageHtml(payload = {}) {
 
   if (layout === 'sponsors') {
     const sponsorCallout = calloutTitle || calloutText
-      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside>`
+      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><button type="button" class="btn secondary" data-sponsor-choice-open>Sponsor/In-Kind</button></aside>`
       : '';
     return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div>${SPONSOR_INTRO_ACTIONS_HTML}</div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
   }
@@ -8143,6 +8315,69 @@ async function routeApi(request, env, url, ctx = null) {
     }
     return jsonResponse({ ok: true, delivered: true, detail: 'Message sent. Thank you!' });
   }
+  if (url.pathname === '/api/inkind' && request.method === 'POST') {
+    const { payload, files } = await readInKindRequest(request);
+    if (String(payload.company || '').trim()) {
+      return jsonResponse({ ok: true });
+    }
+    const logos = await collectInKindLogoAttachments(files);
+    const normalized = normalizeInKindPayload({ ...payload, logo_names: logos.names });
+    if (!normalized.ok) {
+      return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
+    }
+    const recipients = await resolveFormsRecipientEmails(env);
+    const site = await getSite(env).catch(() => ({}));
+    const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+    const mail = buildInKindEmail({ data: normalized.data, siteTitle });
+    const pdf = buildInKindPdfBase64(normalized.data);
+    const attachments = [
+      { filename: 'efhs-in-kind-donation.pdf', content: pdf, content_type: 'application/pdf' },
+      ...logos.attachments,
+    ];
+    const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+    const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
+    let delivered = 0;
+    let deliveryError = '';
+    try {
+      if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
+      if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
+      if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+      await sendViaResend(env, {
+        to: recipients,
+        replyTo: normalized.data.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        fromEmail,
+        fromName,
+        attachments,
+      });
+      delivered = 1;
+    } catch (error) {
+      deliveryError = String(error?.message || error || 'Delivery failed');
+    }
+    const inserted = await env.DB.prepare(
+      'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
+    ).bind('inkind', JSON.stringify(normalized.data), delivered, deliveryError).run();
+    const submissionId = inserted?.meta?.last_row_id || null;
+    try {
+      await recordInKindFormLedger(env, normalized.data, submissionId);
+    } catch { /* ledger is best-effort */ }
+    if (!delivered) {
+      return jsonResponse({
+        ok: true,
+        delivered: false,
+        id: submissionId,
+        detail: 'Form received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
+      });
+    }
+    return jsonResponse({
+      ok: true,
+      delivered: true,
+      id: submissionId,
+      detail: 'Thank you. Your in-kind donation form was sent.',
+    });
+  }
   if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
   if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
@@ -8154,7 +8389,90 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/me') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    return jsonResponse({ user: publicUser(auth.user), permissions: GLOBAL_PERMISSIONS, pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })) });
+    const formsAccessIds = await getFormsAccessUserIds(env);
+    return jsonResponse({
+      user: publicUser(auth.user),
+      permissions: GLOBAL_PERMISSIONS,
+      forms_access: canAccessFormsPage(auth.user, formsAccessIds),
+      pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })),
+    });
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const [accessIds, recipientIds, users, rows] = await Promise.all([
+      getFormsAccessUserIds(env),
+      getFormsRecipientUserIds(env),
+      listCmsFormUsers(env),
+      env.DB.prepare('SELECT id, kind, payload_json, delivered, delivery_error, created_at FROM form_submissions ORDER BY id DESC LIMIT 50').all(),
+    ]);
+    const submissions = (rows.results || []).map((row) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(row.payload_json || '{}') || {};
+      } catch {
+        payload = {};
+      }
+      return {
+        id: row.id,
+        kind: row.kind,
+        business_name: payload.business_name || '',
+        name: `${payload.first_name || ''} ${payload.last_name || ''}`.trim(),
+        email: payload.email || '',
+        value: payload.value || '',
+        delivered: Boolean(row.delivered),
+        delivery_error: row.delivery_error || '',
+        created_at: row.created_at,
+      };
+    });
+    return jsonResponse({
+      access_user_ids: accessIds,
+      recipient_user_ids: recipientIds,
+      can_edit_access: isSuperAdminUser(auth.user),
+      users,
+      submissions,
+    });
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'PUT') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    if (Object.prototype.hasOwnProperty.call(payload, 'access_user_ids')) {
+      if (!isSuperAdminUser(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admin can change who may open Forms.' }, 403);
+      }
+      await saveFormsUserIds(env, FORMS_ACCESS_KEY, parseFormsUserIds(payload.access_user_ids));
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'recipient_user_ids')) {
+      await saveFormsUserIds(env, FORMS_RECIPIENT_KEY, parseFormsUserIds(payload.recipient_user_ids));
+    }
+    return jsonResponse({
+      ok: true,
+      access_user_ids: await getFormsAccessUserIds(env),
+      recipient_user_ids: await getFormsRecipientUserIds(env),
+    });
+  }
+  const formsPdfMatch = url.pathname.match(/^\/api\/admin\/forms\/submissions\/(\d+)\.pdf$/);
+  if (formsPdfMatch && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const row = await env.DB.prepare('SELECT id, payload_json FROM form_submissions WHERE id = ?').bind(Number(formsPdfMatch[1])).first();
+    if (!row) return jsonResponse({ detail: 'Submission not found' }, 404);
+    let payload = {};
+    try {
+      payload = JSON.parse(row.payload_json || '{}') || {};
+    } catch {
+      payload = {};
+    }
+    const pdf = buildInKindPdfBase64(payload, { submittedAt: '' });
+    return new Response(base64ToBytes(pdf), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'cache-control': 'no-store',
+        'content-disposition': `attachment; filename="efhs-in-kind-${row.id}.pdf"`,
+      },
+    });
   }
   if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
@@ -10084,7 +10402,7 @@ export function renderStaffAuthNavLink(loggedIn = false) {
 
 export function renderNav(pages, { loggedIn = false } = {}) {
   const pageLinks = pages
-    .filter((page) => page.slug !== 'become-a-sponsor')
+      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
   return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
@@ -10123,7 +10441,7 @@ ${previewBanner}
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
 ${marqueeHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
@@ -10350,6 +10668,9 @@ export default {
     if (url.pathname === '/sponsor' || url.pathname === '/sponsor/') {
       return Response.redirect(new URL('/become-a-sponsor.html', url.origin).toString(), 302);
     }
+    if (url.pathname === '/in-kind' || url.pathname === '/in-kind/') {
+      return Response.redirect(new URL('/in-kind.html', url.origin).toString(), 302);
+    }
     if (url.pathname === '/donate' || url.pathname === '/donate/') {
       const target = new URL('/sponsors.html', url.origin);
       target.searchParams.set('donate', '1');
@@ -10382,7 +10703,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -10564,6 +10885,26 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <div id="zernio-posts-list" class="admin-list zernio-posts-list"></div>
   <p class="status" id="zernio-posts-status"></p>
 </div>
+</div>
+</section>
+<section id="tab-forms" class="cms-panel" hidden>
+<div class="panel-head"><div><p class="kicker">Manage</p><h1>Forms</h1><p>Choose who can open this page and who receives in-kind donation PDFs. Super Admin always has access.</p></div></div>
+<div class="editor-layout">
+<form id="forms-settings-form" class="admin-card stack">
+<fieldset class="contact-topic-recipients" data-forms-access-fieldset>
+  <legend>Who can manage Forms</legend>
+  <p class="muted">Super Admin selects the CMS users who may open this page. Super Admin always retains access.</p>
+  <div id="forms-access-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
+<fieldset class="contact-topic-recipients">
+  <legend>Email form PDFs to</legend>
+  <p class="muted">Selected users receive the completed in-kind donation PDF at their login email.</p>
+  <div id="forms-recipient-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
+<button class="btn primary" type="submit">Save form settings</button>
+<p class="status" id="forms-settings-status"></p>
+</form>
+<div class="admin-card"><h2>Recent submissions</h2><p class="muted">In-kind donation forms are stored here. Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
 </div>
 </section>
 <section id="tab-contact" class="cms-panel">
