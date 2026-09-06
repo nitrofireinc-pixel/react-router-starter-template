@@ -339,7 +339,7 @@ function ensureSiteChrome(header, mount) {
   }
   if (header.parentElement !== chrome) chrome.appendChild(header);
   if (mount && mount.parentElement !== chrome) chrome.appendChild(mount);
-  // Keep header above the marquee inside the sticky chrome.
+  // Keep header above the marquee inside the site chrome.
   if (mount && mount.previousElementSibling !== header) chrome.appendChild(mount);
   return chrome;
 }
