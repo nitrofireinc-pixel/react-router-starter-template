@@ -384,7 +384,7 @@ function canAccessScheduleBoard() {
 }
 
 function canAccessForms() {
-  if (isSuperAdmin()) return true;
+  if (isSuperAdmin() || hasPermission('president')) return true;
   return Boolean(state.me?.forms_access);
 }
 
@@ -2184,8 +2184,8 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
-const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind']);
-const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'calendar']);
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
+const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -2902,7 +2902,7 @@ function renderDashboard() {
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
-    canAccessForms() && ['Forms', 'Choose who can manage public forms and who receives in-kind donation PDFs.', 'forms', 'Manage', 'tab'],
+    canAccessForms() && ['Forms', 'Edit public forms and choose who receives in-kind and letterman jacket PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
     canCreateEvents() && !isSuperAdmin()
@@ -5165,14 +5165,14 @@ function renderFormsSubmissions(submissions = []) {
     ? submissions.map((item) => `
     <article class="admin-row">
       <div>
-        <b>${escapeHtml(item.business_name || 'In-kind donation')}</b>
+        <b>${escapeHtml(item.title || item.business_name || (item.kind === 'letterman-jacket' ? 'Letterman jacket order' : 'In-kind donation'))}</b>
         <span>${escapeHtml(item.name || '')}${item.email ? ` &lt;${escapeHtml(item.email)}&gt;` : ''}</span>
-        <small>${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
+        <small>${escapeHtml(item.kind === 'letterman-jacket' ? 'Letterman jacket' : 'In-kind')} · ${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
       </div>
       <div class="row-actions"><a class="btn outline" href="/api/admin/forms/submissions/${encodeURIComponent(item.id)}.pdf">Download PDF</a></div>
     </article>
   `).join('')
-    : '<p class="draft">No in-kind submissions yet.</p>';
+    : '<p class="draft">No form submissions yet.</p>';
 }
 
 async function loadFormsPanel() {
@@ -5181,11 +5181,37 @@ async function loadFormsPanel() {
   const users = data.users || [];
   renderFormsUserBoxes('#forms-access-boxes', 'access_user_ids', users, data.access_user_ids || []);
   renderFormsUserBoxes('#forms-recipient-boxes', 'recipient_user_ids', users, data.recipient_user_ids || [], { emailOnly: true });
+  renderFormsUserBoxes('#letterman-recipient-boxes', 'letterman_recipient_user_ids', users, data.letterman_recipient_user_ids || [], { emailOnly: true });
   renderFormsSubmissions(data.submissions || []);
+  fillLettermanFormSettings(data.letterman_form || {});
   const accessFieldset = document.querySelector('[data-forms-access-fieldset]');
   if (accessFieldset) accessFieldset.hidden = !data.can_edit_access;
   const status = document.querySelector('#forms-settings-status');
   if (status) status.textContent = '';
+}
+
+function fillLettermanFormSettings(copy = {}) {
+  const form = document.querySelector('#letterman-form-settings');
+  if (!form) return;
+  const fields = [
+    'kicker', 'heading', 'title', 'intro', 'student_section', 'jacket_section', 'jacket_size_label',
+    'pricing_s_xl_label', 'pricing_s_xl', 'pricing_2xl_label', 'pricing_2xl', 'pricing_3xl_label',
+    'pricing_3xl', 'payment_section', 'payment_note', 'acknowledgment', 'return_heading',
+    'return_name', 'deadline', 'questions', 'thank_you',
+  ];
+  fields.forEach((name) => {
+    if (form.elements[name]) form.elements[name].value = copy[name] || '';
+  });
+}
+
+function lettermanFormSettingsPayload(form = document.querySelector('#letterman-form-settings')) {
+  if (!form) return {};
+  const payload = {};
+  [...form.elements].forEach((el) => {
+    if (!el.name) return;
+    payload[el.name] = el.value;
+  });
+  return payload;
 }
 
 function bindFormsSettingsForm() {
@@ -5199,13 +5225,14 @@ function bindFormsSettingsForm() {
     try {
       const payload = {
         recipient_user_ids: selectedFormsUserIds('recipient_user_ids'),
+        letterman_recipient_user_ids: selectedFormsUserIds('letterman_recipient_user_ids'),
       };
       if (isSuperAdmin()) {
         payload.access_user_ids = selectedFormsUserIds('access_user_ids');
       }
       await jsonFetch('/api/admin/forms', { method: 'PUT', body: JSON.stringify(payload) });
       await loadFormsPanel();
-      if (status) status.textContent = 'Form settings saved.';
+      if (status) status.textContent = 'Delivery settings saved.';
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not save form settings.';
     }
@@ -6081,9 +6108,31 @@ function bindPasswordControls() {
   });
 }
 
+function bindLettermanFormSettings() {
+  const form = document.querySelector('#letterman-form-settings');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#letterman-form-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+      await jsonFetch('/api/admin/forms', {
+        method: 'PUT',
+        body: JSON.stringify({ letterman_form: lettermanFormSettingsPayload(form) }),
+      });
+      await loadFormsPanel();
+      if (status) status.textContent = 'Letterman jacket form saved.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not save the letterman form.';
+    }
+  });
+}
+
 function bindForms() {
   bindPasswordControls();
   bindFormsSettingsForm();
+  bindLettermanFormSettings();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();

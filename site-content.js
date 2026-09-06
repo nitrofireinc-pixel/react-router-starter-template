@@ -843,6 +843,7 @@ async function loadPublicContent() {
   bindDuesButtons();
   bindSponsorChoiceButtons();
   bindInKindForm();
+  bindLettermanForm();
   maybeAutoOpenDonate();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
@@ -2198,6 +2199,46 @@ function bindInKindForm(root = document) {
   });
 }
 
+function bindLettermanForm(root = document) {
+  const form = root.querySelector('[data-letterman-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  const amount = form.querySelector('[data-letterman-amount]');
+  const priceForSize = (size) => {
+    const key = String(size || '').toUpperCase();
+    if (key === '3XL') return form.closest('[data-letterman-copy]')?.querySelector('[data-price-3xl]')?.textContent?.trim() || '';
+    if (key === '2XL') return form.closest('[data-letterman-copy]')?.querySelector('[data-price-2xl]')?.textContent?.trim() || '';
+    if (key) return form.closest('[data-letterman-copy]')?.querySelector('[data-price-s-xl]')?.textContent?.trim() || '';
+    return '';
+  };
+  form.querySelectorAll('input[name="jacket_size"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!amount) return;
+      const next = priceForSize(input.value);
+      if (next) amount.value = next;
+    });
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-letterman-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const payload = Object.fromEntries(new FormData(form).entries());
+      const response = await fetch('/api/letterman-jacket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      if (status) status.textContent = result.detail || 'Thank you. Your order was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
 function bindDonateButtons(root = document) {
   if (isCmsAdminPreviewContext(root)) return;
   root.querySelectorAll('[data-donate-open]').forEach((button) => {
@@ -2606,6 +2647,7 @@ ensurePublicBrandMark();
 hydrateMarqueeFromCache();
 bindSponsorChoiceButtons();
 bindInKindForm();
+bindLettermanForm();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;

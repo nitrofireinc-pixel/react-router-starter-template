@@ -20,6 +20,7 @@ cpSync(join(SOURCE, 'worker.mjs'), join(OUTPUT, '_worker.js'));
 cpSync(join(SOURCE, 'default-pages.mjs'), join(OUTPUT, 'default-pages.mjs'));
 cpSync(join(SOURCE, 'admin-audit-log.mjs'), join(OUTPUT, 'admin-audit-log.mjs'));
 cpSync(join(SOURCE, 'inkind-forms.mjs'), join(OUTPUT, 'inkind-forms.mjs'));
+cpSync(join(SOURCE, 'letterman-jacket-form.mjs'), join(OUTPUT, 'letterman-jacket-form.mjs'));
 cpSync(join(SOURCE, 'caldev.mjs'), join(OUTPUT, 'caldev.mjs'));
 cpSync(join(SOURCE, 'web-push-browser'), join(OUTPUT, 'web-push-browser'), { recursive: true });
 

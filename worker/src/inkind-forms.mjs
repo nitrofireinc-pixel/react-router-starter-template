@@ -49,9 +49,17 @@ export function parseFormsUserIds(value) {
   return ids;
 }
 
+function userPermissionList(user) {
+  const raw = user?.permissions;
+  const list = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,]+/);
+  return list.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+}
+
 export function canAccessFormsPage(user, accessIds = []) {
   if (!user) return false;
   if (String(user.role || '').trim().toLowerCase() === 'admin') return true;
+  const perms = userPermissionList(user);
+  if (perms.includes('all') || perms.includes('president')) return true;
   const id = Number(user.id);
   return Number.isInteger(id) && id > 0 && parseFormsUserIds(accessIds).includes(id);
 }

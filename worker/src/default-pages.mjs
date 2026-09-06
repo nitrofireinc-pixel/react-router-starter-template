@@ -90,6 +90,15 @@ export const DEFAULT_CMS_PAGES = [
     "active": 1
   },
   {
+    "slug": "letterman-jacket",
+    "path": "/letterman-jacket.html",
+    "title": "Letterman Jacket Order Form",
+    "body_html": "",
+    "nav_order": 99,
+    "is_home": 0,
+    "active": 1
+  },
+  {
     "slug": "directors",
     "path": "/directors.html",
     "title": "Directors & Staff",

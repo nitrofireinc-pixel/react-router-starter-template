@@ -5060,3 +5060,15 @@ body.cms-caldev-editor-open .admin-workspace{
 .inkind-honeypot{position:absolute;left:-9999px;height:0;overflow:hidden}
 .inkind-form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:6px}
 .inkind-form-actions .status{margin:0}
+.letterman-section{margin:10px 0 0;color:var(--navy);font-size:1.15rem}
+.letterman-choices{margin:0;padding:0;border:0}
+.letterman-choices legend{font-weight:800;color:var(--navy);margin-bottom:8px}
+.letterman-choice-row{display:flex;flex-wrap:wrap;gap:10px}
+.letterman-choice{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;font-weight:800;cursor:pointer}
+.letterman-pricing{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:4px 0 8px}
+.letterman-pricing div{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #e0e6ee;border-radius:14px;background:#f7f9fc}
+.letterman-pricing span{font-weight:700;color:var(--muted);font-size:.92rem}
+.letterman-ack,.letterman-return{margin:8px 0 0}
+.letterman-return{padding-top:18px;border-top:1px solid #e0e6ee}
+.letterman-thanks{margin-top:12px}
+@media(max-width:700px){.letterman-pricing{grid-template-columns:1fr}}

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, canAccessCheckout, canAccessScheduleBoard, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, canAccessCheckout, canAccessScheduleBoard, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, renderStaffAuthNavLink, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, renderLettermanPageBody, buildLettermanPdfBase64 } from '../worker/src/worker.mjs';
 
 
 test('wrangler worker assets config must stay on worker/public', () => {
@@ -991,11 +991,47 @@ test('in-kind form submissions map company and donated items onto the ledger', (
   assert.match(workerSrc, /\/api\/inkind/);
 });
 
-test('forms page access is Super Admin or selected users only', () => {
+test('forms page access is Super Admin, President, or selected users only', () => {
   assert.equal(canAccessFormsPage({ id: 1, role: 'admin' }, []), true);
+  assert.equal(canAccessFormsPage({ id: 2, role: 'editor', permissions: ['president'] }, []), true);
   assert.equal(canAccessFormsPage({ id: 4, role: 'editor' }, [4, 9]), true);
   assert.equal(canAccessFormsPage({ id: 5, role: 'editor' }, [4, 9]), false);
   assert.equal(canAccessFormsPage(null, [1]), false);
+});
+
+test('letterman jacket form matches the paper order and builds a PDF', () => {
+  const missing = normalizeLettermanPayload({});
+  assert.equal(missing.ok, false);
+  assert.ok(missing.errors.some((error) => /Student name/i.test(error)));
+  const ok = normalizeLettermanPayload({
+    student_name: 'Jordan Smith',
+    grade: '11',
+    parent_name: 'Alex Smith',
+    phone: '336-555-0142',
+    email: 'alex@example.com',
+    order_date: '2026-09-01',
+    embroidered_name: 'Jordan',
+    second_embroidery: 'Trumpet 2027',
+    jacket_size: 'L',
+    payment_method: 'Check',
+    amount_enclosed: '$52.00',
+    parent_signature: 'Alex Smith',
+    parent_sign_date: '2026-09-01',
+    student_signature: 'Jordan Smith',
+    student_sign_date: '2026-09-01',
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.data.jacket_size, 'L');
+  const copy = normalizeLettermanFormCopy({ deadline: 'September 5th, 2026', pricing_s_xl: '$52.00' });
+  assert.equal(copy.deadline, 'September 5th, 2026');
+  assert.equal(copy.heading, DEFAULT_LETTERMAN_FORM.heading);
+  const page = renderLettermanPageBody({ title: 'Letterman Jacket Order Form' }, copy);
+  assert.match(page, /data-letterman-form/);
+  assert.match(page, /Name to be embroidered/);
+  assert.match(page, /\$52\.00/);
+  const pdf = buildLettermanPdfBase64(ok.data, { copy });
+  const bytes = Buffer.from(pdf, 'base64').toString('latin1');
+  assert.match(bytes, /Letterman Jacket Order Form|East Forsyth Band/);
 });
 
 test('buildSponsorDonationInvoice describes Band Boosters donation from no-reply sender', () => {
@@ -1643,12 +1679,14 @@ test('notify me nav control is rendered in public navigation', () => {
     { slug: 'home', path: '/', title: 'Home' },
     { slug: 'become-a-sponsor', path: '/become-a-sponsor.html', title: 'Become a Sponsor' },
     { slug: 'in-kind', path: '/in-kind.html', title: 'In-Kind Donation' },
+    { slug: 'letterman-jacket', path: '/letterman-jacket.html', title: 'Letterman Jacket Order Form' },
     { slug: 'contact', path: '/contact.html', title: 'Contact' },
   ]);
   assert.match(nav, />Home</);
   assert.match(nav, />Contact</);
   assert.doesNotMatch(nav, /Become a Sponsor/);
   assert.doesNotMatch(nav, /In-Kind Donation/);
+  assert.doesNotMatch(nav, /Letterman Jacket/);
   assert.match(nav, /data-staff-auth-link/);
   assert.match(nav, />Login</);
   assert.match(nav, /data-notify-me/);

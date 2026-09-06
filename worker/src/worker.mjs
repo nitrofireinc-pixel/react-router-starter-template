@@ -12,6 +12,17 @@ import {
   renderInKindPageBody,
 } from './inkind-forms.mjs';
 import {
+  LETTERMAN_CMS_PAGE,
+  LETTERMAN_FORM_KEY,
+  LETTERMAN_RECIPIENT_KEY,
+  buildLettermanEmail,
+  buildLettermanPdfBase64,
+  normalizeLettermanFormCopy,
+  normalizeLettermanPayload,
+  parseLettermanFormCopy,
+  renderLettermanPageBody,
+} from './letterman-jacket-form.mjs';
+import {
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
   enrichMailAuditMeta,
@@ -239,7 +250,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'sponsor-inkind-forms-20260901';
+const ASSET_VERSION = 'letterman-jacket-form-20260906';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -375,6 +386,7 @@ export function canAccessWebsiteGuide(user) {
 }
 
 export { canAccessFormsPage, normalizeInKindPayload, parseFormsUserIds, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64 } from './inkind-forms.mjs';
+export { DEFAULT_LETTERMAN_FORM, normalizeLettermanFormCopy, normalizeLettermanPayload, parseLettermanFormCopy, renderLettermanPageBody, buildLettermanPdfBase64, priceForJacketSize } from './letterman-jacket-form.mjs';
 
 export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
 export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
@@ -1666,6 +1678,12 @@ async function initDb(env) {
       .bind(INKIND_CMS_PAGE.slug, INKIND_CMS_PAGE.path, INKIND_CMS_PAGE.title, INKIND_CMS_PAGE.body_html, INKIND_CMS_PAGE.nav_order, INKIND_CMS_PAGE.is_home, INKIND_CMS_PAGE.active)
       .run();
   }
+  const existingLetterman = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'letterman-jacket'").first();
+  if (!existingLetterman) {
+    await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(LETTERMAN_CMS_PAGE.slug, LETTERMAN_CMS_PAGE.path, LETTERMAN_CMS_PAGE.title, LETTERMAN_CMS_PAGE.body_html, LETTERMAN_CMS_PAGE.nav_order, LETTERMAN_CMS_PAGE.is_home, LETTERMAN_CMS_PAGE.active)
+      .run();
+  }
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
     const nextSponsorsHtml = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html))));
@@ -2136,6 +2154,28 @@ export async function getFormsAccessUserIds(env) {
 
 export async function getFormsRecipientUserIds(env) {
   return parseFormsUserIds(await getSiteContentValue(env, FORMS_RECIPIENT_KEY));
+}
+
+export async function getLettermanRecipientUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, LETTERMAN_RECIPIENT_KEY));
+}
+
+export async function getLettermanFormCopy(env) {
+  return parseLettermanFormCopy(await getSiteContentValue(env, LETTERMAN_FORM_KEY));
+}
+
+export async function saveLettermanFormCopy(env, copy) {
+  const next = normalizeLettermanFormCopy(copy);
+  await setSiteContentValue(env, LETTERMAN_FORM_KEY, JSON.stringify(next));
+  return next;
+}
+
+export async function resolveLettermanRecipientEmails(env) {
+  const ids = new Set(await getLettermanRecipientUserIds(env));
+  if (!ids.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => ids.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
 }
 
 export async function saveFormsUserIds(env, key, ids) {
@@ -6249,6 +6289,7 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
+  if (page.slug === 'letterman-jacket') return renderLettermanPageBody(page, page.letterman_copy);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') {
@@ -8378,6 +8419,69 @@ async function routeApi(request, env, url, ctx = null) {
       detail: 'Thank you. Your in-kind donation form was sent.',
     });
   }
+  if (url.pathname === '/api/letterman-jacket' && request.method === 'GET') {
+    return jsonResponse({
+      copy: await getLettermanFormCopy(env),
+      sizes: ['S', 'M', 'L', 'XL', '2XL', '3XL'],
+      payment_methods: ['Cash', 'Check'],
+    });
+  }
+  if (url.pathname === '/api/letterman-jacket' && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    if (String(payload.company || '').trim()) {
+      return jsonResponse({ ok: true });
+    }
+    const copy = await getLettermanFormCopy(env);
+    const normalized = normalizeLettermanPayload(payload, copy);
+    if (!normalized.ok) {
+      return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
+    }
+    const recipients = await resolveLettermanRecipientEmails(env);
+    const site = await getSite(env).catch(() => ({}));
+    const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+    const mail = buildLettermanEmail({ data: normalized.data, siteTitle, copy });
+    const pdf = buildLettermanPdfBase64(normalized.data, { copy });
+    const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+    const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
+    let delivered = 0;
+    let deliveryError = '';
+    try {
+      if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
+      if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
+      if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+      await sendViaResend(env, {
+        to: recipients,
+        replyTo: normalized.data.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        fromEmail,
+        fromName,
+        attachments: [{ filename: 'efhs-letterman-jacket-order.pdf', content: pdf, content_type: 'application/pdf' }],
+      });
+      delivered = 1;
+    } catch (error) {
+      deliveryError = String(error?.message || error || 'Delivery failed');
+    }
+    const inserted = await env.DB.prepare(
+      'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
+    ).bind('letterman-jacket', JSON.stringify(normalized.data), delivered, deliveryError).run();
+    const submissionId = inserted?.meta?.last_row_id || null;
+    if (!delivered) {
+      return jsonResponse({
+        ok: true,
+        delivered: false,
+        id: submissionId,
+        detail: 'Order received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
+      });
+    }
+    return jsonResponse({
+      ok: true,
+      delivered: true,
+      id: submissionId,
+      detail: 'Thank you. Your letterman jacket order was sent.',
+    });
+  }
   if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
   if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
@@ -8400,9 +8504,11 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/forms' && request.method === 'GET') {
     const auth = await requireFormsAccess(request, env);
     if (auth.response) return auth.response;
-    const [accessIds, recipientIds, users, rows] = await Promise.all([
+    const [accessIds, recipientIds, lettermanRecipientIds, lettermanCopy, users, rows] = await Promise.all([
       getFormsAccessUserIds(env),
       getFormsRecipientUserIds(env),
+      getLettermanRecipientUserIds(env),
+      getLettermanFormCopy(env),
       listCmsFormUsers(env),
       env.DB.prepare('SELECT id, kind, payload_json, delivered, delivery_error, created_at FROM form_submissions ORDER BY id DESC LIMIT 50').all(),
     ]);
@@ -8413,13 +8519,16 @@ async function routeApi(request, env, url, ctx = null) {
       } catch {
         payload = {};
       }
+      const jacket = row.kind === 'letterman-jacket';
       return {
         id: row.id,
         kind: row.kind,
-        business_name: payload.business_name || '',
-        name: `${payload.first_name || ''} ${payload.last_name || ''}`.trim(),
+        title: jacket ? (payload.student_name || 'Letterman jacket order') : (payload.business_name || 'In-kind donation'),
+        name: jacket
+          ? (payload.parent_name || '')
+          : `${payload.first_name || ''} ${payload.last_name || ''}`.trim(),
         email: payload.email || '',
-        value: payload.value || '',
+        value: jacket ? (payload.amount_enclosed || payload.jacket_size || '') : (payload.value || ''),
         delivered: Boolean(row.delivered),
         delivery_error: row.delivery_error || '',
         created_at: row.created_at,
@@ -8428,7 +8537,10 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({
       access_user_ids: accessIds,
       recipient_user_ids: recipientIds,
+      letterman_recipient_user_ids: lettermanRecipientIds,
+      letterman_form: lettermanCopy,
       can_edit_access: isSuperAdminUser(auth.user),
+      can_edit_form: true,
       users,
       submissions,
     });
@@ -8446,17 +8558,25 @@ async function routeApi(request, env, url, ctx = null) {
     if (Object.prototype.hasOwnProperty.call(payload, 'recipient_user_ids')) {
       await saveFormsUserIds(env, FORMS_RECIPIENT_KEY, parseFormsUserIds(payload.recipient_user_ids));
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'letterman_recipient_user_ids')) {
+      await saveFormsUserIds(env, LETTERMAN_RECIPIENT_KEY, parseFormsUserIds(payload.letterman_recipient_user_ids));
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'letterman_form')) {
+      await saveLettermanFormCopy(env, payload.letterman_form);
+    }
     return jsonResponse({
       ok: true,
       access_user_ids: await getFormsAccessUserIds(env),
       recipient_user_ids: await getFormsRecipientUserIds(env),
+      letterman_recipient_user_ids: await getLettermanRecipientUserIds(env),
+      letterman_form: await getLettermanFormCopy(env),
     });
   }
   const formsPdfMatch = url.pathname.match(/^\/api\/admin\/forms\/submissions\/(\d+)\.pdf$/);
   if (formsPdfMatch && request.method === 'GET') {
     const auth = await requireFormsAccess(request, env);
     if (auth.response) return auth.response;
-    const row = await env.DB.prepare('SELECT id, payload_json FROM form_submissions WHERE id = ?').bind(Number(formsPdfMatch[1])).first();
+    const row = await env.DB.prepare('SELECT id, kind, payload_json FROM form_submissions WHERE id = ?').bind(Number(formsPdfMatch[1])).first();
     if (!row) return jsonResponse({ detail: 'Submission not found' }, 404);
     let payload = {};
     try {
@@ -8464,13 +8584,16 @@ async function routeApi(request, env, url, ctx = null) {
     } catch {
       payload = {};
     }
-    const pdf = buildInKindPdfBase64(payload, { submittedAt: '' });
+    const jacket = row.kind === 'letterman-jacket';
+    const pdf = jacket
+      ? buildLettermanPdfBase64(payload, { copy: await getLettermanFormCopy(env) })
+      : buildInKindPdfBase64(payload, { submittedAt: '' });
     return new Response(base64ToBytes(pdf), {
       status: 200,
       headers: {
         'content-type': 'application/pdf',
         'cache-control': 'no-store',
-        'content-disposition': `attachment; filename="efhs-in-kind-${row.id}.pdf"`,
+        'content-disposition': `attachment; filename="${jacket ? 'efhs-letterman-jacket' : 'efhs-in-kind'}-${row.id}.pdf"`,
       },
     });
   }
@@ -10402,7 +10525,7 @@ export function renderStaffAuthNavLink(loggedIn = false) {
 
 export function renderNav(pages, { loggedIn = false } = {}) {
   const pageLinks = pages
-      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind')
+      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind' && page.slug !== 'letterman-jacket')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
   return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
@@ -10575,6 +10698,9 @@ async function serveStaticOrCms(request, env, url) {
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
+      if (page.slug === 'letterman-jacket') {
+        page.letterman_copy = await getLettermanFormCopy(env);
+      }
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
@@ -10670,6 +10796,9 @@ export default {
     }
     if (url.pathname === '/in-kind' || url.pathname === '/in-kind/') {
       return Response.redirect(new URL('/in-kind.html', url.origin).toString(), 302);
+    }
+    if (url.pathname === '/letterman-jacket' || url.pathname === '/letterman-jacket/') {
+      return Response.redirect(new URL('/letterman-jacket.html', url.origin).toString(), 302);
     }
     if (url.pathname === '/donate' || url.pathname === '/donate/') {
       const target = new URL('/sponsors.html', url.origin);
@@ -10888,23 +11017,57 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-forms" class="cms-panel" hidden>
-<div class="panel-head"><div><p class="kicker">Manage</p><h1>Forms</h1><p>Choose who can open this page and who receives in-kind donation PDFs. Super Admin always has access.</p></div></div>
+<div class="panel-head"><div><p class="kicker">Manage</p><h1>Forms</h1><p>Super Admin and President can edit public forms and choose who receives each PDF. Super Admin can also grant other users access to this page.</p></div></div>
 <div class="editor-layout">
 <form id="forms-settings-form" class="admin-card stack">
 <fieldset class="contact-topic-recipients" data-forms-access-fieldset>
   <legend>Who can manage Forms</legend>
-  <p class="muted">Super Admin selects the CMS users who may open this page. Super Admin always retains access.</p>
+  <p class="muted">Super Admin selects extra CMS users who may open this page. Super Admin and President always have access.</p>
   <div id="forms-access-boxes" class="contact-recipient-boxes"></div>
 </fieldset>
 <fieldset class="contact-topic-recipients">
-  <legend>Email form PDFs to</legend>
-  <p class="muted">Selected users receive the completed in-kind donation PDF at their login email.</p>
+  <legend>Email in-kind PDFs to</legend>
+  <p class="muted">Selected users receive completed in-kind donation PDFs at their login email.</p>
   <div id="forms-recipient-boxes" class="contact-recipient-boxes"></div>
 </fieldset>
-<button class="btn primary" type="submit">Save form settings</button>
+<fieldset class="contact-topic-recipients">
+  <legend>Email letterman jacket orders to</legend>
+  <p class="muted">Selected users receive completed letterman jacket order PDFs at their login email.</p>
+  <div id="letterman-recipient-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
+<button class="btn primary" type="submit">Save delivery settings</button>
 <p class="status" id="forms-settings-status"></p>
 </form>
-<div class="admin-card"><h2>Recent submissions</h2><p class="muted">In-kind donation forms are stored here. Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
+<form id="letterman-form-settings" class="admin-card stack">
+<h2>Letterman jacket order form</h2>
+<p class="muted">These fields appear on <a href="/letterman-jacket.html" target="_blank" rel="noreferrer">/letterman-jacket.html</a>. Super Admin and President can edit this copy.</p>
+<div class="form-grid">
+<label>Small label<input name="kicker" maxlength="80"></label>
+<label>Heading<input name="heading" maxlength="120"></label>
+<label class="full">Form title<input name="title" maxlength="160"></label>
+<label class="full">Intro<textarea name="intro" rows="3" maxlength="800"></textarea></label>
+<label>Student section heading<input name="student_section" maxlength="80"></label>
+<label>Jacket section heading<input name="jacket_section" maxlength="80"></label>
+<label>Jacket size label<input name="jacket_size_label" maxlength="80"></label>
+<label>S–XL price label<input name="pricing_s_xl_label" maxlength="80"></label>
+<label>S–XL price<input name="pricing_s_xl" maxlength="40"></label>
+<label>2XL price label<input name="pricing_2xl_label" maxlength="80"></label>
+<label>2XL price<input name="pricing_2xl" maxlength="40"></label>
+<label>3XL price label<input name="pricing_3xl_label" maxlength="80"></label>
+<label>3XL price<input name="pricing_3xl" maxlength="40"></label>
+<label>Payment section heading<input name="payment_section" maxlength="80"></label>
+<label class="full">Payment note<textarea name="payment_note" rows="2" maxlength="800"></textarea></label>
+<label class="full">Acknowledgment<textarea name="acknowledgment" rows="4" maxlength="800"></textarea></label>
+<label>Return heading<input name="return_heading" maxlength="120"></label>
+<label>Return name<input name="return_name" maxlength="160"></label>
+<label>Deadline<input name="deadline" maxlength="80"></label>
+<label class="full">Questions / contact<textarea name="questions" rows="2" maxlength="800"></textarea></label>
+<label class="full">Thank-you line<input name="thank_you" maxlength="200"></label>
+</div>
+<button class="btn primary" type="submit">Save letterman form</button>
+<p class="status" id="letterman-form-status"></p>
+</form>
+<div class="admin-card"><h2>Recent submissions</h2><p class="muted">In-kind and letterman jacket forms are stored here. Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
 </div>
 </section>
 <section id="tab-contact" class="cms-panel">
