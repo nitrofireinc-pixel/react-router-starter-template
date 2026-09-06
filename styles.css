@@ -358,6 +358,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     position:relative;
     top:auto;
   }
+  .site-chrome{overflow-x:clip}
   header.site-header{
     display:flex;
     flex-direction:column;
@@ -4655,14 +4656,14 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 }
 
 /* Schedule Board (caldev) — isolated test calendar */
-.caldev-body{background:linear-gradient(180deg,#eef3fa 0%,#f7f9fc 38%,#fff 100%)}
+.caldev-body{background:linear-gradient(180deg,#eef3fa 0%,#f7f9fc 38%,#fff 100%);overflow-x:clip}
 .caldev-test-badge{
   display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:.82rem;color:#57470a;
 }
 .caldev-hero .page-title p{max-width:42rem}
-.caldev-section{padding-top:8px}
-.caldev-wrap{max-width:1180px}
-.caldev-app{display:grid;gap:16px}
+.caldev-section{padding-top:8px;min-width:0;max-width:100%}
+.caldev-wrap{max-width:1180px;min-width:0;width:100%}
+.caldev-app{display:grid;gap:16px;min-width:0;max-width:100%}
 .caldev-toolbar{
   display:grid;justify-items:center;gap:12px;text-align:center;
   padding:14px 16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
@@ -4792,16 +4793,47 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 }
 .caldev-cms-item-actions{display:flex;gap:8px;align-items:center}
 @media(max-width:900px){
+  .caldev-section,
+  .caldev-wrap,
+  .caldev-app,
+  .caldev-board,
+  .caldev-toolbar,
+  .caldev-legend,
+  .caldev-month,
+  .caldev-week,
+  .caldev-rundown{
+    min-width:0;
+    max-width:100%;
+    box-sizing:border-box;
+  }
+  .caldev-section,
+  .caldev-app,
+  .caldev-board{overflow-x:clip}
   .caldev-week{grid-template-columns:1fr}
-  .caldev-day{min-height:84px}
+  main .caldev-week-col,
+  .caldev-week-col{padding:10px;min-width:0;max-width:100%}
+  .caldev-day{min-height:84px;min-width:0;overflow:hidden}
+  .caldev-event-chip,
+  .caldev-week-event,
+  .caldev-rundown-item{min-width:0;max-width:100%}
+  .caldev-rundown-copy{min-width:0;overflow-wrap:anywhere}
   .caldev-legend{padding:10px 12px}
   .caldev-legend-item{font-size:.86rem}
+  .caldev-view-switch{display:flex;flex-wrap:wrap;justify-content:center;width:100%;max-width:100%}
+  .caldev-view-btn{flex:1 1 auto;min-width:0;padding:8px 10px}
 }
-@media(max-width:700px){
-  .caldev-weekday-row{display:none}
-  .caldev-month-grid{grid-template-columns:1fr; }
-  .caldev-day.is-spacer{display:none}
-  .caldev-toolbar{padding:12px}
+@media(max-width:760px){
+  .caldev-section.content{padding-left:12px;padding-right:12px}
+  .caldev-toolbar{padding:10px}
+  .caldev-board{padding:8px}
+  .caldev-weekday-row,
+  .caldev-month-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+  .caldev-weekday-row{display:grid}
+  .caldev-weekday-row span{font-size:.6rem;letter-spacing:.02em}
+  .caldev-day.is-spacer{display:flex}
+  .caldev-day{min-height:58px;padding:4px 3px;border-radius:8px}
+  .caldev-day-head{font-size:.72rem}
+  .caldev-event-chip{font-size:.6rem;padding:2px 4px}
 }
 
 .dash-card-caldev{

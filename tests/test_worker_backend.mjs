@@ -2320,6 +2320,20 @@ test('styles.css brace balance stays closed so public Schedule Board CSS applies
   assert.match(css, /\.cms-caldev-editor-toast\[hidden\]\{display:none!important\}/);
 });
 
+test('mobile Schedule Board stays inside the phone viewport', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  const js = readFileSync(join(root, 'caldev.js'), 'utf8');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(css, /\.caldev-app\{display:grid;gap:16px;min-width:0;max-width:100%\}/);
+  assert.match(css, /\.caldev-section,\s*\.caldev-app,\s*\.caldev-board\{overflow-x:clip\}/);
+  assert.match(css, /\.caldev-month-grid\{grid-template-columns:repeat\(7,minmax\(0,1fr\)\);gap:3px\}/);
+  assert.match(css, /\.caldev-view-switch\{display:flex;flex-wrap:wrap/);
+  assert.match(js, /<div class="caldev-week-col/);
+  assert.doesNotMatch(js, /<section class="caldev-week-col/);
+  assert.match(workerSrc, /caldev-body/);
+});
+
 test('mobile public header and chrome scroll with the page instead of staying sticky', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const css = readFileSync(join(root, 'styles.css'), 'utf8');
