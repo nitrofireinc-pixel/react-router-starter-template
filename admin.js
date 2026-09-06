@@ -384,7 +384,7 @@ function canAccessScheduleBoard() {
 }
 
 function canAccessForms() {
-  if (isSuperAdmin() || hasPermission('president')) return true;
+  if (isSuperAdmin() || hasPermission('president') || hasPermission('forms')) return true;
   return Boolean(state.me?.forms_access);
 }
 
@@ -2187,6 +2187,12 @@ function pageShortcutLabel(page) {
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
+function isFormMakerPage(page) {
+  if (!page) return false;
+  if (page.is_form || page.slug === 'letterman-jacket') return true;
+  return /data-cms-form=/.test(String(page.body_html || ''));
+}
+
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
   // Editors with only page:{slug} use Manage shortcuts instead.
@@ -2205,7 +2211,7 @@ function syncPageSettingsAccess() {
 function editablePages() {
   return (state.pages || [])
     .filter((page) => {
-      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
+      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug) || isFormMakerPage(page)) return false;
       if (page.slug === 'boosters') return canEditBoostersPage();
       return canManageSitePages() && canEditPage(page);
     })
@@ -2902,7 +2908,7 @@ function renderDashboard() {
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
-    canAccessForms() && ['Forms', 'Edit public forms and choose who receives in-kind and letterman jacket PDFs.', 'forms', 'Manage', 'tab'],
+    canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
     canCreateEvents() && !isSuperAdmin()
@@ -3001,7 +3007,8 @@ function editPage(slug, { skipGuard = false } = {}) {
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
+  const pages = ((state.pageCatalog?.length ? state.pageCatalog : state.pages) || [])
+    .filter((page) => !isFormMakerPage(page) && page.slug !== 'in-kind');
   box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
 }
 
@@ -5137,8 +5144,9 @@ function renderContactMessages() {
     : '<p class="draft">No contact messages yet.</p>';
 }
 
-function selectedFormsUserIds(name) {
-  return [...document.querySelectorAll(`#forms-settings-form input[name="${name}"]:checked`)]
+function selectedFormsUserIds(name, rootSelector = '#forms-settings-form') {
+  const root = typeof rootSelector === 'string' ? document.querySelector(rootSelector) : rootSelector;
+  return [...(root || document).querySelectorAll(`input[name="${name}"]:checked`)]
     .map((input) => Number(input.value))
     .filter((id) => Number.isInteger(id) && id > 0);
 }
@@ -5165,9 +5173,9 @@ function renderFormsSubmissions(submissions = []) {
     ? submissions.map((item) => `
     <article class="admin-row">
       <div>
-        <b>${escapeHtml(item.title || item.business_name || (item.kind === 'letterman-jacket' ? 'Letterman jacket order' : 'In-kind donation'))}</b>
+        <b>${escapeHtml(item.title || item.business_name || (item.kind === 'letterman-jacket' ? 'Letterman jacket order' : item.kind === 'inkind' ? 'In-kind donation' : 'Form submission'))}</b>
         <span>${escapeHtml(item.name || '')}${item.email ? ` &lt;${escapeHtml(item.email)}&gt;` : ''}</span>
-        <small>${escapeHtml(item.kind === 'letterman-jacket' ? 'Letterman jacket' : 'In-kind')} · ${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
+        <small>${escapeHtml(item.kind === 'letterman-jacket' ? 'Letterman jacket' : item.kind === 'inkind' ? 'In-kind' : item.kind || 'Form')} · ${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
       </div>
       <div class="row-actions"><a class="btn outline" href="/api/admin/forms/submissions/${encodeURIComponent(item.id)}.pdf">Download PDF</a></div>
     </article>
@@ -5175,241 +5183,373 @@ function renderFormsSubmissions(submissions = []) {
     : '<p class="draft">No form submissions yet.</p>';
 }
 
+const FORM_BUILDER_TYPES = [
+  { type: 'heading', label: 'Heading' },
+  { type: 'text', label: 'Short Text' },
+  { type: 'textarea', label: 'Long Text' },
+  { type: 'email', label: 'Email' },
+  { type: 'phone', label: 'Phone' },
+  { type: 'number', label: 'Number' },
+  { type: 'date', label: 'Date Picker' },
+  { type: 'dropdown', label: 'Dropdown' },
+  { type: 'choice', label: 'Single Choice' },
+  { type: 'checkbox', label: 'Multiple Choice' },
+  { type: 'note', label: 'Paragraph' },
+  { type: 'pricing', label: 'Price List' },
+];
+const FORM_BUILDER_INPUTS = new Set(['text', 'textarea', 'email', 'phone', 'number', 'date', 'dropdown', 'choice', 'checkbox']);
+const MAX_FORM_BUILDER_FIELDS = 40;
+
+const formBuilderState = {
+  record: null,
+  selectedId: '',
+  users: [],
+  dirty: false,
+};
+
+function newFormBuilderFieldId(type = 'field') {
+  return `${String(type || 'field').replace(/[^a-z0-9]+/gi, '_').slice(0, 24)}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function createBuilderField(type = 'text') {
+  const meta = FORM_BUILDER_TYPES.find((item) => item.type === type) || FORM_BUILDER_TYPES[1];
+  const isInput = FORM_BUILDER_INPUTS.has(meta.type);
+  return {
+    id: newFormBuilderFieldId(meta.type),
+    type: meta.type,
+    label: meta.type === 'heading' ? 'Heading' : meta.type === 'note' ? '' : meta.label,
+    required: isInput && meta.type !== 'checkbox',
+    full: meta.type === 'heading' || meta.type === 'note' || meta.type === 'pricing' || meta.type === 'textarea' || meta.type === 'choice' || meta.type === 'checkbox',
+    optional: false,
+    placeholder: '',
+    text: meta.type === 'note' ? 'Add your text.' : '',
+    options: meta.type === 'choice' || meta.type === 'dropdown' || meta.type === 'checkbox' ? ['Option 1', 'Option 2'] : [],
+    items: meta.type === 'pricing' ? [{ label: 'Item', price: '$0.00', sizes: '' }] : [],
+    price_from: false,
+    emphasize: false,
+    italic: false,
+  };
+}
+
+function formBuilderDefinition() {
+  const record = formBuilderState.record;
+  const definition = record?.definition && typeof record.definition === 'object' ? record.definition : {};
+  if (!Array.isArray(definition.fields)) definition.fields = [];
+  return definition;
+}
+
+function selectedBuilderField() {
+  const id = formBuilderState.selectedId;
+  return formBuilderDefinition().fields.find((field) => field.id === id) || null;
+}
+
+function slugPreviewFromTitle(title) {
+  const slug = String(title || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || 'form';
+}
+
+function markFormBuilderDirty() {
+  formBuilderState.dirty = true;
+}
+
+function showFormsListView() {
+  const list = document.querySelector('#forms-list-view');
+  const builder = document.querySelector('#forms-builder-view');
+  if (list) list.hidden = false;
+  if (builder) builder.hidden = true;
+  formBuilderState.record = null;
+  formBuilderState.selectedId = '';
+  formBuilderState.dirty = false;
+}
+
+function showFormsBuilderView() {
+  const list = document.querySelector('#forms-list-view');
+  const builder = document.querySelector('#forms-builder-view');
+  if (list) list.hidden = true;
+  if (builder) builder.hidden = false;
+}
+
+function renderCmsFormsList(forms = []) {
+  const list = document.querySelector('#cms-forms-list');
+  if (!list) return;
+  list.innerHTML = forms.length
+    ? forms.map((item) => `
+      <article class="admin-row">
+        <div>
+          <b>${escapeHtml(item.title || 'Untitled Form')}</b>
+          <span><a href="${escapeAttr(item.path || `/${item.slug}.html`)}" target="_blank" rel="noreferrer">${escapeHtml(item.path || `/${item.slug}.html`)}</a></span>
+          <small>Updated ${escapeHtml(item.updated_at || '')}</small>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn outline" data-edit-form="${escapeAttr(item.id)}">Edit</button>
+          <button type="button" class="btn outline" data-delete-form="${escapeAttr(item.id)}" data-form-title="${escapeAttr(item.title || '')}" data-form-path="${escapeAttr(item.path || '')}">Delete</button>
+        </div>
+      </article>
+    `).join('')
+    : '<p class="draft">No forms yet. Create one above. The title becomes the public HTML page.</p>';
+}
+
+function renderFormBuilderPalette() {
+  const palette = document.querySelector('#form-builder-palette');
+  if (!palette) return;
+  const atMax = (formBuilderDefinition().fields || []).length >= MAX_FORM_BUILDER_FIELDS;
+  palette.innerHTML = FORM_BUILDER_TYPES.map((item) => (
+    `<button type="button" class="form-builder-palette-item" data-add-field="${escapeAttr(item.type)}"${atMax ? ' disabled' : ''}>
+      <span class="form-builder-palette-mark">${escapeHtml(item.label.slice(0, 1))}</span>
+      <span>${escapeHtml(item.label)}</span>
+    </button>`
+  )).join('');
+}
+
+function formBuilderFieldPreviewHtml(field) {
+  const type = field.type || 'text';
+  const label = field.label || (type === 'note' ? '' : 'Untitled');
+  if (type === 'heading') return `<h3 class="letterman-section">${escapeHtml(label)}</h3>`;
+  if (type === 'note') {
+    const body = field.emphasize ? `<b>${escapeHtml(field.text || '')}</b>` : field.italic ? `<em>${escapeHtml(field.text || '')}</em>` : escapeHtml(field.text || '');
+    return `<p class="letterman-note">${body}</p>`;
+  }
+  if (type === 'pricing') {
+    const items = (field.items || []).map((item) => `<div><span>${escapeHtml(item.label || '')}</span><b>${escapeHtml(item.price || '')}</b></div>`).join('');
+    return `<div class="letterman-pricing">${items}</div>`;
+  }
+  if (type === 'choice' || type === 'checkbox') {
+    const inputType = type === 'checkbox' ? 'checkbox' : 'radio';
+    const options = (field.options || []).map((option) => (
+      `<label class="letterman-choice"><input type="${inputType}" disabled> ${escapeHtml(option)}</label>`
+    )).join('');
+    return `<fieldset class="letterman-choices"><legend>${escapeHtml(label)}${field.required ? ' *' : ''}</legend><div class="letterman-choice-row">${options}</div></fieldset>`;
+  }
+  if (type === 'dropdown') {
+    const options = ['<option>Select</option>', ...(field.options || []).map((option) => `<option>${escapeHtml(option)}</option>`)].join('');
+    return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<select disabled>${options}</select></label>`;
+  }
+  if (type === 'textarea') {
+    return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<textarea rows="3" disabled placeholder="${escapeAttr(field.placeholder || '')}"></textarea></label>`;
+  }
+  const inputType = type === 'date' ? 'date' : type === 'email' ? 'email' : type === 'phone' ? 'tel' : type === 'number' ? 'number' : 'text';
+  return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<input type="${inputType}" disabled placeholder="${escapeAttr(field.placeholder || '')}"></label>`;
+}
+
+function renderFormBuilderCanvas() {
+  const canvas = document.querySelector('#form-builder-canvas');
+  const definition = formBuilderDefinition();
+  const title = document.querySelector('#form-builder-title')?.value || formBuilderState.record?.title || 'Untitled Form';
+  const lockedSlug = formBuilderState.record?.slug === 'letterman-jacket';
+  const path = lockedSlug ? '/letterman-jacket.html' : `/${slugPreviewFromTitle(title)}.html`;
+  const pathHint = document.querySelector('#form-builder-path');
+  if (pathHint) pathHint.textContent = `Public page: ${path}`;
+  const kicker = document.querySelector('#form-builder-kicker-preview');
+  if (kicker) kicker.textContent = definition.kicker || 'Band Boosters';
+  const heading = document.querySelector('#form-builder-heading-preview');
+  if (heading) heading.textContent = definition.heading || 'East Forsyth Band';
+  const submit = document.querySelector('#form-builder-submit-preview');
+  if (submit) submit.textContent = definition.submit_label || 'Submit';
+  if (!canvas) return;
+  const fields = definition.fields || [];
+  canvas.innerHTML = fields.length
+    ? fields.map((field) => `
+      <article class="form-builder-field${field.id === formBuilderState.selectedId ? ' is-selected' : ''}${field.full ? ' is-full' : ''}" data-field-id="${escapeAttr(field.id)}" draggable="false">
+        <button type="button" class="drag-handle" aria-label="Drag to reorder field" title="Drag to reorder">⋮⋮</button>
+        <div class="form-builder-field-preview">${formBuilderFieldPreviewHtml(field)}</div>
+      </article>
+    `).join('')
+    : '<p class="draft">Click a field type on the left to add it to the form.</p>';
+}
+
+function renderFormBuilderProps() {
+  const box = document.querySelector('#form-builder-props');
+  if (!box) return;
+  const definition = formBuilderDefinition();
+  const field = selectedBuilderField();
+  if (!field) {
+    box.innerHTML = `
+      <p class="muted">Select a field on the form to edit it, or set the page heading below.</p>
+      <label>Kicker<input data-form-kicker maxlength="80" value="${escapeHtml(definition.kicker || '')}"></label>
+      <label>Heading<input data-form-heading maxlength="120" value="${escapeHtml(definition.heading || '')}"></label>
+      <label>Submit button<input data-form-submit maxlength="80" value="${escapeHtml(definition.submit_label || 'Submit')}"></label>
+    `;
+    return;
+  }
+  const isInput = FORM_BUILDER_INPUTS.has(field.type);
+  const showOptions = field.type === 'choice' || field.type === 'dropdown' || field.type === 'checkbox';
+  box.innerHTML = `
+    <p class="form-builder-prop-type">${escapeHtml(FORM_BUILDER_TYPES.find((item) => item.type === field.type)?.label || field.type)}</p>
+    <label${field.type === 'note' || field.type === 'pricing' ? ' hidden' : ''}>Field title
+      <input data-prop-label maxlength="120" value="${escapeHtml(field.label || '')}">
+    </label>
+    <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-prop-required${field.required ? ' checked' : ''}> Required</label>
+    <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-prop-full${field.full ? ' checked' : ''}> Full width</label>
+    <label${isInput && field.type !== 'choice' && field.type !== 'checkbox' && field.type !== 'date' ? '' : ' hidden'}>Placeholder
+      <input data-prop-placeholder maxlength="120" value="${escapeHtml(field.placeholder || '')}">
+    </label>
+    <label${showOptions ? '' : ' hidden'}>Choices <small>one per line</small>
+      <textarea data-prop-options rows="5" maxlength="400">${escapeHtml((field.options || []).join('\n'))}</textarea>
+    </label>
+    <label${field.type === 'note' ? '' : ' hidden'}>Paragraph text
+      <textarea data-prop-text rows="4" maxlength="800">${escapeHtml(field.text || '')}</textarea>
+    </label>
+    <label class="checkline"${field.type === 'note' ? '' : ' hidden'}><input type="checkbox" data-prop-emphasize${field.emphasize ? ' checked' : ''}> Bold note</label>
+    <label class="checkline"${field.type === 'note' ? '' : ' hidden'}><input type="checkbox" data-prop-italic${field.italic ? ' checked' : ''}> Italic note</label>
+    <div class="letterman-price-list"${field.type === 'pricing' ? '' : ' hidden'}>
+      ${(field.items || [{ label: '', price: '', sizes: '' }]).map((item, index) => `
+        <div class="letterman-price-edit" data-price-index="${index}">
+          <input data-price-label maxlength="80" placeholder="Price title" value="${escapeHtml(item.label || '')}">
+          <input data-price-value maxlength="40" placeholder="$0.00" value="${escapeHtml(item.price || '')}">
+          <input data-price-sizes maxlength="80" placeholder="Sizes: S, M, L" value="${escapeHtml(item.sizes || '')}">
+          <button type="button" class="btn outline" data-remove-price>Remove</button>
+        </div>
+      `).join('')}
+      <button type="button" class="btn outline" data-add-price>Add price</button>
+    </div>
+    <div class="form-builder-prop-actions">
+      <button type="button" class="btn outline" data-duplicate-field>Duplicate</button>
+      <button type="button" class="btn outline" data-remove-field>Delete field</button>
+    </div>
+  `;
+}
+
+function syncFormBuilderChrome() {
+  const record = formBuilderState.record;
+  const titleInput = document.querySelector('#form-builder-title');
+  const intro = document.querySelector('#form-builder-intro');
+  const open = document.querySelector('#form-builder-open');
+  if (titleInput && document.activeElement !== titleInput) titleInput.value = record?.title || '';
+  if (intro && document.activeElement !== intro) intro.value = record?.definition?.intro || '';
+  if (open) {
+    open.href = record?.path || '/';
+    open.hidden = !record?.path;
+  }
+  renderFormBuilderPalette();
+  renderFormBuilderCanvas();
+  renderFormBuilderProps();
+  renderFormsUserBoxes('#form-builder-recipients', 'form_recipient_user_ids', formBuilderState.users, record?.recipient_user_ids || [], { emailOnly: true });
+}
+
+function openFormBuilder(record) {
+  formBuilderState.record = {
+    ...record,
+    definition: {
+      kicker: record?.definition?.kicker || 'Band Boosters',
+      heading: record?.definition?.heading || 'East Forsyth Band',
+      title: record?.definition?.title || record?.title || 'Untitled Form',
+      intro: record?.definition?.intro || '',
+      submit_label: record?.definition?.submit_label || 'Submit',
+      fields: Array.isArray(record?.definition?.fields) ? record.definition.fields.map((field) => ({ ...field })) : [],
+    },
+    recipient_user_ids: Array.isArray(record?.recipient_user_ids) ? record.recipient_user_ids.slice() : [],
+  };
+  formBuilderState.selectedId = formBuilderState.record.definition.fields[0]?.id || '';
+  formBuilderState.dirty = false;
+  showFormsBuilderView();
+  syncFormBuilderChrome();
+}
+
+function addFormBuilderField(type) {
+  const definition = formBuilderDefinition();
+  if (definition.fields.length >= MAX_FORM_BUILDER_FIELDS) return;
+  const field = createBuilderField(type);
+  const selectedIndex = definition.fields.findIndex((item) => item.id === formBuilderState.selectedId);
+  if (selectedIndex >= 0) definition.fields.splice(selectedIndex + 1, 0, field);
+  else definition.fields.push(field);
+  formBuilderState.selectedId = field.id;
+  markFormBuilderDirty();
+  syncFormBuilderChrome();
+  document.querySelector(`[data-field-id="${CSS.escape(field.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function applyFormBuilderProp(name, value) {
+  const definition = formBuilderDefinition();
+  if (name === 'kicker' || name === 'heading' || name === 'submit_label') {
+    definition[name] = value;
+    markFormBuilderDirty();
+    renderFormBuilderCanvas();
+    return;
+  }
+  const field = selectedBuilderField();
+  if (!field) return;
+  field[name] = value;
+  markFormBuilderDirty();
+  renderFormBuilderCanvas();
+}
+
+async function loadFormBuilder(id) {
+  const status = document.querySelector('#form-builder-status');
+  if (status) status.textContent = 'Loading form…';
+  const record = await jsonFetch(`/api/admin/forms/${encodeURIComponent(id)}`);
+  openFormBuilder(record);
+  if (status) status.textContent = '';
+}
+
+async function saveFormBuilder() {
+  const record = formBuilderState.record;
+  if (!record?.id) return;
+  const status = document.querySelector('#form-builder-status');
+  const title = String(document.querySelector('#form-builder-title')?.value || record.title || '').trim();
+  if (!title) {
+    if (status) status.textContent = 'Form title is required.';
+    return;
+  }
+  const definition = formBuilderDefinition();
+  definition.title = title;
+  definition.intro = document.querySelector('#form-builder-intro')?.value || '';
+  if (status) status.textContent = 'Saving…';
+  try {
+    const saved = await jsonFetch(`/api/admin/forms/${encodeURIComponent(record.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        title,
+        definition,
+        recipient_user_ids: selectedFormsUserIds('form_recipient_user_ids', '#form-builder-recipients'),
+      }),
+    });
+    formBuilderState.dirty = false;
+    openFormBuilder(saved);
+    if (status) status.textContent = `Saved. Public page: ${saved.path}`;
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save the form.';
+  }
+}
+
+async function createCmsForm(title) {
+  const record = await jsonFetch('/api/admin/forms', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+  openFormBuilder(record);
+  const status = document.querySelector('#form-builder-status');
+  if (status) status.textContent = `Created ${record.path}. Add fields, then save.`;
+}
+
+async function deleteCmsForm(id, title, path) {
+  const label = title || 'this form';
+  if (!window.confirm(`Delete "${label}" and its public page ${path || ''}? This cannot be undone.`)) return;
+  await jsonFetch(`/api/admin/forms/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (formBuilderState.record && Number(formBuilderState.record.id) === Number(id)) showFormsListView();
+  await loadFormsPanel();
+}
+
 async function loadFormsPanel() {
   if (!canAccessForms()) return;
   const data = await jsonFetch('/api/admin/forms');
   const users = data.users || [];
+  formBuilderState.users = users;
   renderFormsUserBoxes('#forms-access-boxes', 'access_user_ids', users, data.access_user_ids || []);
   renderFormsUserBoxes('#forms-recipient-boxes', 'recipient_user_ids', users, data.recipient_user_ids || [], { emailOnly: true });
-  renderFormsUserBoxes('#letterman-recipient-boxes', 'letterman_recipient_user_ids', users, data.letterman_recipient_user_ids || [], { emailOnly: true });
+  renderCmsFormsList(data.forms || []);
   renderFormsSubmissions(data.submissions || []);
-  fillLettermanFormSettings(data.letterman_form || {});
   const accessFieldset = document.querySelector('[data-forms-access-fieldset]');
   if (accessFieldset) accessFieldset.hidden = !data.can_edit_access;
   const status = document.querySelector('#forms-settings-status');
   if (status) status.textContent = '';
-}
-
-const LETTERMAN_FIELD_TYPE_LABELS = {
-  heading: 'Section title',
-  text: 'Text field',
-  textarea: 'Long text',
-  date: 'Date',
-  email: 'Email',
-  phone: 'Phone',
-  choice: 'Multiple choice',
-  note: 'Note / paragraph',
-  pricing: 'Price list',
-};
-
-function lettermanFieldTypeOptions(selected = 'text') {
-  return Object.entries(LETTERMAN_FIELD_TYPE_LABELS).map(([value, label]) => (
-    `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`
-  )).join('');
-}
-
-function newLettermanFieldId() {
-  return `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function lettermanPricingEditor(items = []) {
-  const rows = (items.length ? items : [{ label: '', price: '', sizes: '' }]).map((item) => `
-    <div class="letterman-price-edit">
-      <input data-price-label maxlength="80" placeholder="Price title" value="${escapeHtml(item.label || '')}">
-      <input data-price-value maxlength="40" placeholder="$0.00" value="${escapeHtml(item.price || '')}">
-      <input data-price-sizes maxlength="80" placeholder="Sizes: S, M, L" value="${escapeHtml(item.sizes || '')}">
-      <button type="button" class="btn outline" data-remove-price>Remove</button>
-    </div>
-  `).join('');
-  return `<div class="letterman-price-list" data-for-type="pricing">${rows}<button type="button" class="btn outline" data-add-price>Add price</button></div>`;
-}
-
-function lettermanFieldRowHtml(field = {}) {
-  const type = field.type || 'text';
-  const isInput = ['text', 'textarea', 'date', 'email', 'phone', 'choice'].includes(type);
-  return `
-    <article class="letterman-field-row" data-field-id="${escapeHtml(field.id || newLettermanFieldId())}" draggable="true">
-      <button type="button" class="drag-handle" aria-label="Drag to reorder field" title="Drag to reorder">⋮⋮</button>
-      <div class="letterman-field-edit">
-        <div class="letterman-field-top">
-          <label>Type
-            <select data-field-type>${lettermanFieldTypeOptions(type)}</select>
-          </label>
-          <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-field-required${field.required ? ' checked' : ''}> Required</label>
-          <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-field-full${field.full ? ' checked' : ''}> Full width</label>
-          <button type="button" class="btn outline" data-remove-field>Remove</button>
-        </div>
-        <label data-for-type="label"${type === 'note' || type === 'pricing' ? ' hidden' : ''}>Field title
-          <input data-field-label maxlength="120" value="${escapeHtml(field.label || '')}" placeholder="Title visitors see">
-        </label>
-        <label data-for-type="placeholder"${isInput && type !== 'choice' && type !== 'date' ? '' : ' hidden'}>Placeholder
-          <input data-field-placeholder maxlength="120" value="${escapeHtml(field.placeholder || '')}">
-        </label>
-        <label data-for-type="options"${type === 'choice' ? '' : ' hidden'}>Choices
-          <input data-field-options maxlength="240" value="${escapeHtml((field.options || []).join(', '))}" placeholder="S, M, L, XL">
-        </label>
-        <label data-for-type="text"${type === 'note' ? '' : ' hidden'}>Note text
-          <textarea data-field-text rows="3" maxlength="800">${escapeHtml(field.text || '')}</textarea>
-        </label>
-        ${lettermanPricingEditor(field.items || [])}
-      </div>
-    </article>
-  `;
-}
-
-function lettermanFieldVisibility(row) {
-  const type = row.querySelector('[data-field-type]')?.value || 'text';
-  const isInput = ['text', 'textarea', 'date', 'email', 'phone', 'choice'].includes(type);
-  row.querySelectorAll('[data-field-required], [data-field-full]').forEach((input) => {
-    const wrap = input.closest('label');
-    if (wrap) wrap.hidden = !isInput;
-  });
-  const label = row.querySelector('[data-for-type="label"]');
-  if (label) label.hidden = type === 'note' || type === 'pricing';
-  const placeholder = row.querySelector('[data-for-type="placeholder"]');
-  if (placeholder) placeholder.hidden = !isInput || type === 'choice' || type === 'date';
-  const options = row.querySelector('[data-for-type="options"]');
-  if (options) options.hidden = type !== 'choice';
-  const text = row.querySelector('[data-for-type="text"]');
-  if (text) text.hidden = type !== 'note';
-  const pricing = row.querySelector('[data-for-type="pricing"]');
-  if (pricing) pricing.hidden = type !== 'pricing';
-}
-
-function readLettermanFieldRow(row) {
-  const type = row.querySelector('[data-field-type]')?.value || 'text';
-  const items = [...row.querySelectorAll('.letterman-price-edit')].map((item) => ({
-    label: item.querySelector('[data-price-label]')?.value || '',
-    price: item.querySelector('[data-price-value]')?.value || '',
-    sizes: item.querySelector('[data-price-sizes]')?.value || '',
-  })).filter((item) => item.label || item.price);
-  return {
-    id: row.dataset.fieldId,
-    type,
-    label: row.querySelector('[data-field-label]')?.value || '',
-    required: Boolean(row.querySelector('[data-field-required]')?.checked),
-    full: Boolean(row.querySelector('[data-field-full]')?.checked),
-    placeholder: row.querySelector('[data-field-placeholder]')?.value || '',
-    options: row.querySelector('[data-field-options]')?.value || '',
-    text: row.querySelector('[data-field-text]')?.value || '',
-    items,
-    price_from: row.dataset.fieldId === 'amount_enclosed',
-  };
-}
-
-function fillLettermanFormSettings(copy = {}) {
-  const form = document.querySelector('#letterman-form-settings');
-  if (!form) return;
-  ['kicker', 'heading', 'title', 'intro', 'submit_label'].forEach((name) => {
-    if (form.elements[name]) form.elements[name].value = copy[name] || '';
-  });
-  const list = document.querySelector('#letterman-field-list');
-  if (!list) return;
-  const fields = Array.isArray(copy.fields) && copy.fields.length ? copy.fields : [];
-  list.innerHTML = fields.map(lettermanFieldRowHtml).join('') || '<p class="draft">No fields yet. Add a text field to start.</p>';
-  list.querySelectorAll('.letterman-field-row').forEach(lettermanFieldVisibility);
-  bindLettermanFieldList(list);
-}
-
-function lettermanFormSettingsPayload(form = document.querySelector('#letterman-form-settings')) {
-  if (!form) return {};
-  return {
-    kicker: form.elements.kicker?.value || '',
-    heading: form.elements.heading?.value || '',
-    title: form.elements.title?.value || '',
-    intro: form.elements.intro?.value || '',
-    submit_label: form.elements.submit_label?.value || '',
-    fields: [...document.querySelectorAll('#letterman-field-list .letterman-field-row')].map(readLettermanFieldRow),
-  };
-}
-
-function bindLettermanFieldList(list) {
-  if (!list || list.dataset.bound === '1') {
-    list?.querySelectorAll('.letterman-field-row').forEach(lettermanFieldVisibility);
-    return;
+  if (formBuilderState.record && !document.querySelector('#forms-builder-view')?.hidden) {
+    renderFormsUserBoxes('#form-builder-recipients', 'form_recipient_user_ids', users, formBuilderState.record.recipient_user_ids || [], { emailOnly: true });
   }
-  list.dataset.bound = '1';
-  list.addEventListener('change', (event) => {
-    const row = event.target.closest('.letterman-field-row');
-    if (event.target.matches('[data-field-type]') && row) lettermanFieldVisibility(row);
-  });
-  list.addEventListener('click', (event) => {
-    const row = event.target.closest('.letterman-field-row');
-    if (event.target.closest('[data-remove-field]') && row) {
-      row.remove();
-      if (!list.querySelector('.letterman-field-row')) {
-        list.innerHTML = '<p class="draft">No fields yet. Add a text field to start.</p>';
-      }
-      return;
-    }
-    if (event.target.closest('[data-add-price]') && row) {
-      const wrap = row.querySelector('.letterman-price-list');
-      const button = wrap?.querySelector('[data-add-price]');
-      const html = lettermanPricingEditor([{ label: '', price: '', sizes: '' }]);
-      const temp = document.createElement('div');
-      temp.innerHTML = html;
-      const newRow = temp.querySelector('.letterman-price-edit');
-      if (newRow && button) button.before(newRow);
-      return;
-    }
-    if (event.target.closest('[data-remove-price]')) {
-      event.target.closest('.letterman-price-edit')?.remove();
-    }
-  });
-  let dragId = null;
-  let allowRowDrag = false;
-  list.addEventListener('mousedown', (event) => {
-    allowRowDrag = Boolean(event.target.closest('.drag-handle'));
-  });
-  list.addEventListener('touchstart', (event) => {
-    allowRowDrag = Boolean(event.target.closest('.drag-handle'));
-  }, { passive: true });
-  list.addEventListener('dragstart', (event) => {
-    const row = event.target.closest('.letterman-field-row');
-    if (!row || (!allowRowDrag && !event.target.closest('.drag-handle'))) {
-      event.preventDefault();
-      return;
-    }
-    dragId = row.dataset.fieldId;
-    row.classList.add('is-dragging');
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', dragId);
-  });
-  list.addEventListener('dragend', () => {
-    allowRowDrag = false;
-    dragId = null;
-    list.querySelectorAll('.is-dragging, .is-drop-target').forEach((item) => {
-      item.classList.remove('is-dragging', 'is-drop-target');
-    });
-  });
-  list.addEventListener('dragover', (event) => {
-    const row = event.target.closest('.letterman-field-row');
-    if (!row) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    if (row.dataset.fieldId !== dragId) row.classList.add('is-drop-target');
-  });
-  list.addEventListener('dragleave', (event) => {
-    event.target.closest('.letterman-field-row')?.classList.remove('is-drop-target');
-  });
-  list.addEventListener('drop', (event) => {
-    const row = event.target.closest('.letterman-field-row');
-    if (!row) return;
-    event.preventDefault();
-    allowRowDrag = false;
-    row.classList.remove('is-drop-target');
-    const fromId = event.dataTransfer.getData('text/plain') || dragId;
-    const toId = row.dataset.fieldId;
-    if (!fromId || !toId || fromId === toId) return;
-    const rows = [...list.querySelectorAll('.letterman-field-row')];
-    const from = rows.find((item) => item.dataset.fieldId === fromId);
-    if (!from) return;
-    const fromIndex = rows.indexOf(from);
-    const toIndex = rows.indexOf(row);
-    if (fromIndex < 0 || toIndex < 0) return;
-    if (fromIndex < toIndex) row.after(from);
-    else row.before(from);
-  });
 }
 
 function bindFormsSettingsForm() {
@@ -5423,18 +5563,251 @@ function bindFormsSettingsForm() {
     try {
       const payload = {
         recipient_user_ids: selectedFormsUserIds('recipient_user_ids'),
-        letterman_recipient_user_ids: selectedFormsUserIds('letterman_recipient_user_ids'),
       };
       if (isSuperAdmin()) {
         payload.access_user_ids = selectedFormsUserIds('access_user_ids');
       }
       await jsonFetch('/api/admin/forms', { method: 'PUT', body: JSON.stringify(payload) });
       await loadFormsPanel();
-      if (status) status.textContent = 'Delivery settings saved.';
+      if (status) status.textContent = 'Access and in-kind delivery settings saved.';
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not save form settings.';
     }
   });
+}
+
+function bindFormBuilder() {
+  const create = document.querySelector('#forms-create-form');
+  if (create && create.dataset.bound !== '1') {
+    create.dataset.bound = '1';
+    create.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = document.querySelector('#forms-create-status');
+      const title = String(create.elements.title?.value || '').trim();
+      if (status) status.textContent = 'Creating…';
+      try {
+        await createCmsForm(title);
+        create.reset();
+        if (status) status.textContent = '';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not create the form.';
+      }
+    });
+  }
+
+  const list = document.querySelector('#cms-forms-list');
+  if (list && list.dataset.bound !== '1') {
+    list.dataset.bound = '1';
+    list.addEventListener('click', async (event) => {
+      const edit = event.target.closest('[data-edit-form]');
+      if (edit) {
+        try {
+          await loadFormBuilder(edit.dataset.editForm);
+        } catch (error) {
+          alert(error.message || 'Could not open the form.');
+        }
+        return;
+      }
+      const remove = event.target.closest('[data-delete-form]');
+      if (remove) {
+        try {
+          await deleteCmsForm(remove.dataset.deleteForm, remove.dataset.formTitle, remove.dataset.formPath);
+        } catch (error) {
+          alert(error.message || 'Could not delete the form.');
+        }
+      }
+    });
+  }
+
+  const back = document.querySelector('#form-builder-back');
+  if (back && back.dataset.bound !== '1') {
+    back.dataset.bound = '1';
+    back.addEventListener('click', () => {
+      if (formBuilderState.dirty && !window.confirm('Leave without saving this form?')) return;
+      showFormsListView();
+      loadFormsPanel().catch(() => {});
+    });
+  }
+
+  const save = document.querySelector('#form-builder-save');
+  if (save && save.dataset.bound !== '1') {
+    save.dataset.bound = '1';
+    save.addEventListener('click', () => { saveFormBuilder().catch(() => {}); });
+  }
+
+  const title = document.querySelector('#form-builder-title');
+  if (title && title.dataset.bound !== '1') {
+    title.dataset.bound = '1';
+    title.addEventListener('input', () => {
+      if (!formBuilderState.record) return;
+      formBuilderState.record.title = title.value;
+      markFormBuilderDirty();
+      renderFormBuilderCanvas();
+    });
+  }
+
+  const intro = document.querySelector('#form-builder-intro');
+  if (intro && intro.dataset.bound !== '1') {
+    intro.dataset.bound = '1';
+    intro.addEventListener('input', () => {
+      if (!formBuilderState.record) return;
+      formBuilderDefinition().intro = intro.value;
+      markFormBuilderDirty();
+    });
+  }
+
+  const palette = document.querySelector('#form-builder-palette');
+  if (palette && palette.dataset.bound !== '1') {
+    palette.dataset.bound = '1';
+    palette.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-add-field]');
+      if (!button || button.disabled) return;
+      addFormBuilderField(button.dataset.addField);
+    });
+  }
+
+  const canvas = document.querySelector('#form-builder-canvas');
+  if (canvas && canvas.dataset.bound !== '1') {
+    canvas.dataset.bound = '1';
+    canvas.addEventListener('click', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      formBuilderState.selectedId = row.dataset.fieldId || '';
+      renderFormBuilderCanvas();
+      renderFormBuilderProps();
+    });
+    let dragId = null;
+    let allowRowDrag = false;
+    canvas.addEventListener('mousedown', (event) => {
+      allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+      const row = event.target.closest('.form-builder-field');
+      if (row && allowRowDrag) row.draggable = true;
+    });
+    canvas.addEventListener('touchstart', (event) => {
+      allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+    }, { passive: true });
+    canvas.addEventListener('dragstart', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row || !allowRowDrag) {
+        event.preventDefault();
+        return;
+      }
+      dragId = row.dataset.fieldId;
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', dragId);
+    });
+    canvas.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      dragId = null;
+      canvas.querySelectorAll('.form-builder-field').forEach((item) => {
+        item.draggable = false;
+        item.classList.remove('is-dragging', 'is-drop-target');
+      });
+    });
+    canvas.addEventListener('dragover', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (row.dataset.fieldId !== dragId) row.classList.add('is-drop-target');
+    });
+    canvas.addEventListener('dragleave', (event) => {
+      event.target.closest('.form-builder-field')?.classList.remove('is-drop-target');
+    });
+    canvas.addEventListener('drop', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      event.preventDefault();
+      const fromId = event.dataTransfer.getData('text/plain') || dragId;
+      const toId = row.dataset.fieldId;
+      const fields = formBuilderDefinition().fields;
+      const fromIndex = fields.findIndex((item) => item.id === fromId);
+      const toIndex = fields.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+      const [moved] = fields.splice(fromIndex, 1);
+      fields.splice(toIndex, 0, moved);
+      markFormBuilderDirty();
+      renderFormBuilderCanvas();
+    });
+  }
+
+  const props = document.querySelector('#form-builder-props');
+  if (props && props.dataset.bound !== '1') {
+    props.dataset.bound = '1';
+    props.addEventListener('input', (event) => {
+      const target = event.target;
+      if (target.matches('[data-form-kicker]')) applyFormBuilderProp('kicker', target.value);
+      else if (target.matches('[data-form-heading]')) applyFormBuilderProp('heading', target.value);
+      else if (target.matches('[data-form-submit]')) applyFormBuilderProp('submit_label', target.value);
+      else if (target.matches('[data-prop-label]')) applyFormBuilderProp('label', target.value);
+      else if (target.matches('[data-prop-placeholder]')) applyFormBuilderProp('placeholder', target.value);
+      else if (target.matches('[data-prop-text]')) applyFormBuilderProp('text', target.value);
+      else if (target.matches('[data-prop-options]')) {
+        applyFormBuilderProp('options', String(target.value || '').split(/\n+/).map((item) => item.trim()).filter(Boolean));
+      } else if (target.matches('[data-price-label], [data-price-value], [data-price-sizes]')) {
+        const field = selectedBuilderField();
+        if (!field || field.type !== 'pricing') return;
+        field.items = [...props.querySelectorAll('.letterman-price-edit')].map((row) => ({
+          label: row.querySelector('[data-price-label]')?.value || '',
+          price: row.querySelector('[data-price-value]')?.value || '',
+          sizes: row.querySelector('[data-price-sizes]')?.value || '',
+        }));
+        markFormBuilderDirty();
+        renderFormBuilderCanvas();
+      }
+    });
+    props.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target.matches('[data-prop-required]')) applyFormBuilderProp('required', target.checked);
+      else if (target.matches('[data-prop-full]')) applyFormBuilderProp('full', target.checked);
+      else if (target.matches('[data-prop-emphasize]')) applyFormBuilderProp('emphasize', target.checked);
+      else if (target.matches('[data-prop-italic]')) applyFormBuilderProp('italic', target.checked);
+    });
+    props.addEventListener('click', (event) => {
+      if (event.target.closest('[data-add-price]')) {
+        const field = selectedBuilderField();
+        if (!field || field.type !== 'pricing') return;
+        field.items = [...(field.items || []), { label: '', price: '', sizes: '' }];
+        markFormBuilderDirty();
+        renderFormBuilderProps();
+        renderFormBuilderCanvas();
+        return;
+      }
+      if (event.target.closest('[data-remove-price]')) {
+        const field = selectedBuilderField();
+        const row = event.target.closest('.letterman-price-edit');
+        if (!field || !row) return;
+        const index = Number(row.dataset.priceIndex);
+        field.items = (field.items || []).filter((_, itemIndex) => itemIndex !== index);
+        markFormBuilderDirty();
+        renderFormBuilderProps();
+        renderFormBuilderCanvas();
+        return;
+      }
+      if (event.target.closest('[data-duplicate-field]')) {
+        const field = selectedBuilderField();
+        if (!field) return;
+        const copy = { ...field, id: newFormBuilderFieldId(field.type), options: [...(field.options || [])], items: (field.items || []).map((item) => ({ ...item })) };
+        const fields = formBuilderDefinition().fields;
+        const index = fields.findIndex((item) => item.id === field.id);
+        fields.splice(index + 1, 0, copy);
+        formBuilderState.selectedId = copy.id;
+        markFormBuilderDirty();
+        syncFormBuilderChrome();
+        return;
+      }
+      if (event.target.closest('[data-remove-field]')) {
+        const field = selectedBuilderField();
+        if (!field) return;
+        const fields = formBuilderDefinition();
+        fields.fields = fields.fields.filter((item) => item.id !== field.id);
+        formBuilderState.selectedId = fields.fields[0]?.id || '';
+        markFormBuilderDirty();
+        syncFormBuilderChrome();
+      }
+    });
+  }
 }
 
 async function loadContactDeliveryStatus() {
@@ -6306,54 +6679,10 @@ function bindPasswordControls() {
   });
 }
 
-function bindLettermanFormSettings() {
-  const form = document.querySelector('#letterman-form-settings');
-  if (!form || form.dataset.bound === '1') return;
-  form.dataset.bound = '1';
-  document.querySelector('#letterman-add-field')?.addEventListener('click', () => {
-    const list = document.querySelector('#letterman-field-list');
-    if (!list) return;
-    list.querySelector('.draft')?.remove();
-    const type = document.querySelector('#letterman-add-type')?.value || 'text';
-    const defaults = {
-      heading: { type: 'heading', label: 'New section' },
-      note: { type: 'note', text: 'New note' },
-      choice: { type: 'choice', label: 'New choice', options: ['Option 1', 'Option 2'], required: true, full: true },
-      pricing: { type: 'pricing', items: [{ label: 'New price', price: '$0.00', sizes: '' }] },
-      textarea: { type: 'textarea', label: 'New field', full: true },
-      date: { type: 'date', label: 'Date' },
-      email: { type: 'email', label: 'Email' },
-      phone: { type: 'phone', label: 'Phone' },
-      text: { type: 'text', label: 'New field' },
-    };
-    const field = { id: newLettermanFieldId(), ...(defaults[type] || defaults.text) };
-    list.insertAdjacentHTML('beforeend', lettermanFieldRowHtml(field));
-    const row = list.querySelector('.letterman-field-row:last-of-type');
-    if (row) lettermanFieldVisibility(row);
-    row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    row?.querySelector('[data-field-label], [data-field-text]')?.focus();
-  });
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const status = document.querySelector('#letterman-form-status');
-    if (status) status.textContent = 'Saving…';
-    try {
-      await jsonFetch('/api/admin/forms', {
-        method: 'PUT',
-        body: JSON.stringify({ letterman_form: lettermanFormSettingsPayload(form) }),
-      });
-      await loadFormsPanel();
-      if (status) status.textContent = 'Letterman jacket form saved.';
-    } catch (error) {
-      if (status) status.textContent = error.message || 'Could not save the letterman form.';
-    }
-  });
-}
-
 function bindForms() {
   bindPasswordControls();
   bindFormsSettingsForm();
-  bindLettermanFormSettings();
+  bindFormBuilder();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();

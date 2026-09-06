@@ -59,7 +59,7 @@ export function canAccessFormsPage(user, accessIds = []) {
   if (!user) return false;
   if (String(user.role || '').trim().toLowerCase() === 'admin') return true;
   const perms = userPermissionList(user);
-  if (perms.includes('all') || perms.includes('president')) return true;
+  if (perms.includes('all') || perms.includes('president') || perms.includes('forms')) return true;
   const id = Number(user.id);
   return Number.isInteger(id) && id > 0 && parseFormsUserIds(accessIds).includes(id);
 }

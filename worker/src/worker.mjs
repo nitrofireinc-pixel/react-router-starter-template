@@ -15,6 +15,7 @@ import {
   LETTERMAN_CMS_PAGE,
   LETTERMAN_FORM_KEY,
   LETTERMAN_RECIPIENT_KEY,
+  DEFAULT_LETTERMAN_FORM,
   buildLettermanEmail,
   buildLettermanPdfBase64,
   normalizeLettermanFormCopy,
@@ -23,6 +24,24 @@ import {
   renderLettermanDeadlineBanner,
   renderLettermanPageBody,
 } from './letterman-jacket-form.mjs';
+import {
+  MAX_CMS_FORMS,
+  buildFormEmail,
+  buildFormPdfBase64,
+  emptyFormDefinition,
+  forgetFormRecord,
+  formPathFromSlug,
+  getFormById,
+  getFormBySlug,
+  isCmsFormPage,
+  isReservedFormSlug,
+  listCmsFormsSummary,
+  nextAvailableFormSlug,
+  normalizeFormDefinition,
+  normalizeFormPayload,
+  renderCmsFormPageBody,
+  slugFromFormTitle,
+} from './form-builder.mjs';
 import {
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
@@ -247,11 +266,11 @@ const SESSION_COOKIE = 'efband_session';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view', 'forms'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'letterman-deadline-banner-20260906';
+const ASSET_VERSION = 'cms-form-builder-20260906';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -388,6 +407,7 @@ export function canAccessWebsiteGuide(user) {
 
 export { canAccessFormsPage, normalizeInKindPayload, parseFormsUserIds, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64 } from './inkind-forms.mjs';
 export { DEFAULT_LETTERMAN_FORM, createLettermanField, normalizeLettermanFormCopy, normalizeLettermanPayload, parseLettermanFormCopy, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, priceForJacketSize } from './letterman-jacket-form.mjs';
+export { emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage } from './form-builder.mjs';
 
 export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
 export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
@@ -1479,6 +1499,7 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS email_subscribers (email TEXT PRIMARY KEY, topics TEXT NOT NULL DEFAULT \'["calendar","fundraising"]\', status TEXT NOT NULL DEFAULT \'active\', source TEXT NOT NULL DEFAULT \'website\', unsubscribe_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, unsubscribed_at TEXT)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_forms (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, definition_json TEXT NOT NULL DEFAULT \'{}\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', page_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
@@ -1685,6 +1706,7 @@ async function initDb(env) {
       .bind(LETTERMAN_CMS_PAGE.slug, LETTERMAN_CMS_PAGE.path, LETTERMAN_CMS_PAGE.title, LETTERMAN_CMS_PAGE.body_html, LETTERMAN_CMS_PAGE.nav_order, LETTERMAN_CMS_PAGE.is_home, LETTERMAN_CMS_PAGE.active)
       .run();
   }
+  await seedCmsFormMaker(env);
   const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
   if (sponsorsPageRow?.body_html) {
     const nextSponsorsHtml = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html))));
@@ -2181,6 +2203,103 @@ export async function resolveLettermanRecipientEmails(env) {
 
 export async function saveFormsUserIds(env, key, ids) {
   await setSiteContentValue(env, key, JSON.stringify((ids || []).map((id) => Number(id)).filter((id) => id > 0)));
+}
+
+async function seedCmsFormMaker(env) {
+  const existing = await env.DB.prepare("SELECT id FROM cms_forms WHERE slug = 'letterman-jacket'").first();
+  const page = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'letterman-jacket'").first();
+  const copy = await getLettermanFormCopy(env);
+  const definition = normalizeFormDefinition(copy, LETTERMAN_CMS_PAGE.title);
+  const recipients = JSON.stringify(await getLettermanRecipientUserIds(env));
+  const body = renderCmsFormPageBody(LETTERMAN_CMS_PAGE, definition, 'letterman-jacket');
+  if (page?.id) {
+    await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html = ? OR body_html NOT LIKE ?)')
+      .bind(body, page.id, '', '%data-cms-form=%')
+      .run();
+  }
+  if (existing?.id) return;
+  await env.DB.prepare(
+    'INSERT INTO cms_forms (slug, path, title, definition_json, recipient_user_ids, page_id) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(
+    LETTERMAN_CMS_PAGE.slug,
+    LETTERMAN_CMS_PAGE.path,
+    LETTERMAN_CMS_PAGE.title,
+    JSON.stringify(definition),
+    recipients,
+    page?.id || null,
+  ).run();
+}
+
+async function resolveFormRecipientEmails(env, ids = []) {
+  const wanted = new Set((ids || []).map((id) => Number(id)).filter((id) => id > 0));
+  if (!wanted.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => wanted.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
+}
+
+async function handleBuiltFormSubmit(request, env, slug) {
+  const payload = await request.json().catch(() => ({}));
+  if (String(payload.company || '').trim()) return jsonResponse({ ok: true });
+  const record = await getFormBySlug(env, slug);
+  if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+  const normalized = normalizeFormPayload(payload, record.definition);
+  if (!normalized.ok) {
+    return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
+  }
+  const recipients = await resolveFormRecipientEmails(env, record.recipient_user_ids);
+  const site = await getSite(env).catch(() => ({}));
+  const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const mail = buildFormEmail({ data: normalized.data, siteTitle, definition: record.definition });
+  const pdf = buildFormPdfBase64(normalized.data, { definition: record.definition });
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
+  let delivered = 0;
+  let deliveryError = '';
+  try {
+    if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
+    if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
+    if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+    await sendViaResend(env, {
+      to: recipients,
+      replyTo: normalized.data.email || undefined,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      fromEmail,
+      fromName,
+      attachments: [{ filename: `${record.slug}.pdf`, content: pdf, content_type: 'application/pdf' }],
+    });
+    delivered = 1;
+  } catch (error) {
+    deliveryError = String(error?.message || error || 'Delivery failed');
+  }
+  const inserted = await env.DB.prepare(
+    'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
+  ).bind(record.slug, JSON.stringify(normalized.data), delivered, deliveryError).run();
+  return jsonResponse({
+    ok: true,
+    delivered: Boolean(delivered),
+    id: inserted?.meta?.last_row_id || null,
+    detail: delivered
+      ? `Thank you. Your ${record.title} was sent.`
+      : 'Form received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
+  });
+}
+
+async function writeCmsFormPage(env, { slug, path, title, definition }) {
+  const body = renderCmsFormPageBody({ title, slug }, definition, slug);
+  const page = await env.DB.prepare('SELECT id FROM cms_pages WHERE slug = ?').bind(slug).first();
+  if (page?.id) {
+    await env.DB.prepare('UPDATE cms_pages SET path = ?, title = ?, body_html = ?, active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .bind(path, title, body, page.id)
+      .run();
+    return page.id;
+  }
+  const inserted = await env.DB.prepare(
+    'INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, 99, 0, 1)',
+  ).bind(slug, path, title, body).run();
+  return inserted?.meta?.last_row_id || null;
 }
 
 export async function requireFormsAccess(request, env) {
@@ -6290,6 +6409,7 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
+  if (isCmsFormPage(page)) return page.body_html;
   if (page.slug === 'letterman-jacket') return renderLettermanPageBody(page, page.letterman_copy);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
@@ -6364,7 +6484,10 @@ async function photoUsageLabels(env, filename) {
 async function getPages(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
   const rows = await env.DB.prepare(`SELECT id, slug, path, title, body_html, nav_order, is_home, active, updated_at FROM cms_pages ${where} ORDER BY nav_order, id`).all();
-  return rows.results || [];
+  return (rows.results || []).map((page) => ({
+    ...page,
+    is_form: isCmsFormPage(page) || page.slug === 'letterman-jacket',
+  }));
 }
 
 async function getPageBySlug(env, slug, includeInactive = false) {
@@ -8420,68 +8543,25 @@ async function routeApi(request, env, url, ctx = null) {
       detail: 'Thank you. Your in-kind donation form was sent.',
     });
   }
+  const publicFormMatch = url.pathname.match(/^\/api\/forms\/([a-z0-9-]+)$/);
+  if (publicFormMatch && request.method === 'GET') {
+    const record = await getFormBySlug(env, publicFormMatch[1]);
+    if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+    return jsonResponse({ slug: record.slug, path: record.path, title: record.title, definition: record.definition });
+  }
+  if (publicFormMatch && request.method === 'POST') {
+    return handleBuiltFormSubmit(request, env, publicFormMatch[1]);
+  }
   if (url.pathname === '/api/letterman-jacket' && request.method === 'GET') {
+    const record = await getFormBySlug(env, 'letterman-jacket');
     return jsonResponse({
-      copy: await getLettermanFormCopy(env),
+      copy: record?.definition || await getLettermanFormCopy(env),
       sizes: ['S', 'M', 'L', 'XL', '2XL', '3XL'],
       payment_methods: ['Cash', 'Check'],
     });
   }
   if (url.pathname === '/api/letterman-jacket' && request.method === 'POST') {
-    const payload = await request.json().catch(() => ({}));
-    if (String(payload.company || '').trim()) {
-      return jsonResponse({ ok: true });
-    }
-    const copy = await getLettermanFormCopy(env);
-    const normalized = normalizeLettermanPayload(payload, copy);
-    if (!normalized.ok) {
-      return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
-    }
-    const recipients = await resolveLettermanRecipientEmails(env);
-    const site = await getSite(env).catch(() => ({}));
-    const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
-    const mail = buildLettermanEmail({ data: normalized.data, siteTitle, copy });
-    const pdf = buildLettermanPdfBase64(normalized.data, { copy });
-    const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
-    const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
-    let delivered = 0;
-    let deliveryError = '';
-    try {
-      if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
-      if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
-      if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
-      await sendViaResend(env, {
-        to: recipients,
-        replyTo: normalized.data.email,
-        subject: mail.subject,
-        text: mail.text,
-        html: mail.html,
-        fromEmail,
-        fromName,
-        attachments: [{ filename: 'efhs-letterman-jacket-order.pdf', content: pdf, content_type: 'application/pdf' }],
-      });
-      delivered = 1;
-    } catch (error) {
-      deliveryError = String(error?.message || error || 'Delivery failed');
-    }
-    const inserted = await env.DB.prepare(
-      'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
-    ).bind('letterman-jacket', JSON.stringify(normalized.data), delivered, deliveryError).run();
-    const submissionId = inserted?.meta?.last_row_id || null;
-    if (!delivered) {
-      return jsonResponse({
-        ok: true,
-        delivered: false,
-        id: submissionId,
-        detail: 'Order received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
-      });
-    }
-    return jsonResponse({
-      ok: true,
-      delivered: true,
-      id: submissionId,
-      detail: 'Thank you. Your letterman jacket order was sent.',
-    });
+    return handleBuiltFormSubmit(request, env, 'letterman-jacket');
   }
   if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
   if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
@@ -8499,19 +8579,25 @@ async function routeApi(request, env, url, ctx = null) {
       user: publicUser(auth.user),
       permissions: GLOBAL_PERMISSIONS,
       forms_access: canAccessFormsPage(auth.user, formsAccessIds),
-      pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })),
+      pages: (await getPages(env, true)).map((page) => ({
+        slug: page.slug,
+        title: page.title,
+        path: page.path,
+        active: Boolean(page.active),
+        nav_order: page.nav_order,
+        is_form: Boolean(page.is_form),
+      })),
     });
   }
   if (url.pathname === '/api/admin/forms' && request.method === 'GET') {
     const auth = await requireFormsAccess(request, env);
     if (auth.response) return auth.response;
-    const [accessIds, recipientIds, lettermanRecipientIds, lettermanCopy, users, rows] = await Promise.all([
+    const [accessIds, recipientIds, users, forms, rows] = await Promise.all([
       getFormsAccessUserIds(env),
       getFormsRecipientUserIds(env),
-      getLettermanRecipientUserIds(env),
-      getLettermanFormCopy(env),
       listCmsFormUsers(env),
-      env.DB.prepare('SELECT id, kind, payload_json, delivered, delivery_error, created_at FROM form_submissions ORDER BY id DESC LIMIT 50').all(),
+      listCmsFormsSummary(env),
+      env.DB.prepare('SELECT id, kind, payload_json, delivered, delivery_error, created_at FROM form_submissions ORDER BY id DESC LIMIT 40').all(),
     ]);
     const submissions = (rows.results || []).map((row) => {
       let payload = {};
@@ -8524,12 +8610,12 @@ async function routeApi(request, env, url, ctx = null) {
       return {
         id: row.id,
         kind: row.kind,
-        title: jacket ? (payload.student_name || 'Letterman jacket order') : (payload.business_name || 'In-kind donation'),
+        title: payload.student_name || payload.name || payload.business_name || row.kind,
         name: jacket
           ? (payload.parent_name || '')
           : `${payload.first_name || ''} ${payload.last_name || ''}`.trim(),
         email: payload.email || '',
-        value: jacket ? (payload.amount_enclosed || payload.jacket_size || '') : (payload.value || ''),
+        value: payload.amount_enclosed || payload.jacket_size || payload.value || '',
         delivered: Boolean(row.delivered),
         delivery_error: row.delivery_error || '',
         created_at: row.created_at,
@@ -8538,13 +8624,32 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({
       access_user_ids: accessIds,
       recipient_user_ids: recipientIds,
-      letterman_recipient_user_ids: lettermanRecipientIds,
-      letterman_form: lettermanCopy,
       can_edit_access: isSuperAdminUser(auth.user),
-      can_edit_form: true,
+      field_types: ['heading', 'text', 'textarea', 'email', 'phone', 'number', 'date', 'dropdown', 'choice', 'checkbox', 'note', 'pricing'],
       users,
+      forms,
       submissions,
     });
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'POST') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_forms').first();
+    if (Number(count?.count || 0) >= MAX_CMS_FORMS) {
+      return jsonResponse({ detail: `You can create up to ${MAX_CMS_FORMS} forms.` }, 422);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const title = String(payload.title || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    if (!title) return jsonResponse({ detail: 'Form title is required.' }, 422);
+    const slug = await nextAvailableFormSlug(env, title);
+    const path = formPathFromSlug(slug);
+    const definition = emptyFormDefinition(title);
+    const pageId = await writeCmsFormPage(env, { slug, path, title, definition });
+    const inserted = await env.DB.prepare(
+      'INSERT INTO cms_forms (slug, path, title, definition_json, recipient_user_ids, page_id) VALUES (?, ?, ?, ?, ?, ?)',
+    ).bind(slug, path, title, JSON.stringify(definition), '[]', pageId).run();
+    const record = await getFormById(env, inserted?.meta?.last_row_id);
+    return jsonResponse(record, 201);
   }
   if (url.pathname === '/api/admin/forms' && request.method === 'PUT') {
     const auth = await requireFormsAccess(request, env);
@@ -8559,19 +8664,71 @@ async function routeApi(request, env, url, ctx = null) {
     if (Object.prototype.hasOwnProperty.call(payload, 'recipient_user_ids')) {
       await saveFormsUserIds(env, FORMS_RECIPIENT_KEY, parseFormsUserIds(payload.recipient_user_ids));
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'letterman_recipient_user_ids')) {
-      await saveFormsUserIds(env, LETTERMAN_RECIPIENT_KEY, parseFormsUserIds(payload.letterman_recipient_user_ids));
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'letterman_form')) {
-      await saveLettermanFormCopy(env, payload.letterman_form);
-    }
     return jsonResponse({
       ok: true,
       access_user_ids: await getFormsAccessUserIds(env),
       recipient_user_ids: await getFormsRecipientUserIds(env),
-      letterman_recipient_user_ids: await getLettermanRecipientUserIds(env),
-      letterman_form: await getLettermanFormCopy(env),
     });
+  }
+  const adminFormMatch = url.pathname.match(/^\/api\/admin\/forms\/(\d+)$/);
+  if (adminFormMatch && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const record = await getFormById(env, adminFormMatch[1]);
+    if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+    return jsonResponse(record);
+  }
+  if (adminFormMatch && request.method === 'PUT') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const existing = await getFormById(env, adminFormMatch[1]);
+    if (!existing) return jsonResponse({ detail: 'Form not found' }, 404);
+    const payload = await request.json().catch(() => ({}));
+    const title = String(payload.title || existing.title).replace(/\s+/g, ' ').trim().slice(0, 160) || existing.title;
+    const definition = normalizeFormDefinition(payload.definition || existing.definition, title);
+    definition.title = title;
+    const recipients = parseFormsUserIds(payload.recipient_user_ids ?? existing.recipient_user_ids);
+    let slug = existing.slug;
+    let path = existing.path;
+    if (title !== existing.title && existing.slug !== 'letterman-jacket') {
+      const wanted = slugFromFormTitle(title);
+      if (wanted !== existing.slug && !isReservedFormSlug(wanted)) {
+        const clash = await env.DB.prepare('SELECT id FROM cms_forms WHERE slug = ? AND id != ?').bind(wanted, existing.id).first();
+        const pageClash = await env.DB.prepare('SELECT id FROM cms_pages WHERE (slug = ? OR path = ?) AND id != ?')
+          .bind(wanted, formPathFromSlug(wanted), existing.page_id || 0).first();
+        if (!clash && !pageClash) {
+          slug = wanted;
+          path = formPathFromSlug(wanted);
+        }
+      }
+    }
+    forgetFormRecord(existing.slug);
+    const pageId = await writeCmsFormPage(env, { slug, path, title, definition });
+    if (existing.page_id && existing.slug !== slug) {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE id = ? AND slug = ?').bind(existing.page_id, existing.slug).run();
+    }
+    await env.DB.prepare(
+      'UPDATE cms_forms SET slug = ?, path = ?, title = ?, definition_json = ?, recipient_user_ids = ?, page_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(slug, path, title, JSON.stringify(definition), JSON.stringify(recipients), pageId, existing.id).run();
+    if (slug === 'letterman-jacket') {
+      await saveLettermanFormCopy(env, definition);
+      await saveFormsUserIds(env, LETTERMAN_RECIPIENT_KEY, recipients);
+    }
+    return jsonResponse(await getFormById(env, existing.id));
+  }
+  if (adminFormMatch && request.method === 'DELETE') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const existing = await getFormById(env, adminFormMatch[1]);
+    if (!existing) return jsonResponse({ detail: 'Form not found' }, 404);
+    forgetFormRecord(existing.slug);
+    if (existing.page_id) {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE id = ?').bind(existing.page_id).run();
+    } else {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE slug = ? OR path = ?').bind(existing.slug, existing.path).run();
+    }
+    await env.DB.prepare('DELETE FROM cms_forms WHERE id = ?').bind(existing.id).run();
+    return jsonResponse({ ok: true });
   }
   const formsPdfMatch = url.pathname.match(/^\/api\/admin\/forms\/submissions\/(\d+)\.pdf$/);
   if (formsPdfMatch && request.method === 'GET') {
@@ -8585,16 +8742,18 @@ async function routeApi(request, env, url, ctx = null) {
     } catch {
       payload = {};
     }
-    const jacket = row.kind === 'letterman-jacket';
-    const pdf = jacket
-      ? buildLettermanPdfBase64(payload, { copy: await getLettermanFormCopy(env) })
-      : buildInKindPdfBase64(payload, { submittedAt: '' });
+    const record = row.kind !== 'inkind' ? await getFormBySlug(env, row.kind) : null;
+    const pdf = record
+      ? buildFormPdfBase64(payload, { definition: record.definition })
+      : row.kind === 'letterman-jacket'
+        ? buildLettermanPdfBase64(payload, { copy: await getLettermanFormCopy(env) })
+        : buildInKindPdfBase64(payload, { submittedAt: '' });
     return new Response(base64ToBytes(pdf), {
       status: 200,
       headers: {
         'content-type': 'application/pdf',
         'cache-control': 'no-store',
-        'content-disposition': `attachment; filename="${jacket ? 'efhs-letterman-jacket' : 'efhs-in-kind'}-${row.id}.pdf"`,
+        'content-disposition': `attachment; filename="${record ? record.slug : (row.kind === 'letterman-jacket' ? 'efhs-letterman-jacket' : 'efhs-in-kind')}-${row.id}.pdf"`,
       },
     });
   }
@@ -10526,7 +10685,7 @@ export function renderStaffAuthNavLink(loggedIn = false) {
 
 export function renderNav(pages, { loggedIn = false } = {}) {
   const pageLinks = pages
-      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind' && page.slug !== 'letterman-jacket')
+      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind' && !isCmsFormPage(page) && page.slug !== 'letterman-jacket')
     .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
   return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
@@ -10699,7 +10858,7 @@ async function serveStaticOrCms(request, env, url) {
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
-      if (page.slug === 'letterman-jacket') {
+      if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
         page.letterman_copy = await getLettermanFormCopy(env);
       }
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
@@ -11018,12 +11177,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 </section>
 <section id="tab-forms" class="cms-panel" hidden>
-<div class="panel-head"><div><p class="kicker">Manage</p><h1>Forms</h1><p>Super Admin and President can edit public forms and choose who receives each PDF. Super Admin can also grant other users access to this page.</p></div></div>
-<div class="editor-layout">
+<div class="panel-head"><div><p class="kicker">Manage</p><h1>Form Builder</h1><p>Create public forms the same way Jotform does: add fields from the left, click the canvas to edit, and drag to reorder. The form title becomes its web page. Super Admin sets who can open this builder.</p></div></div>
+<div id="forms-list-view" class="editor-layout">
 <form id="forms-settings-form" class="admin-card stack">
 <fieldset class="contact-topic-recipients" data-forms-access-fieldset>
-  <legend>Who can manage Forms</legend>
-  <p class="muted">Super Admin selects extra CMS users who may open this page. Super Admin and President always have access.</p>
+  <legend>Who can use Form Builder</legend>
+  <p class="muted">Super Admin, President, and users with the Forms role always have access. Super Admin can also grant extra users here.</p>
   <div id="forms-access-boxes" class="contact-recipient-boxes"></div>
 </fieldset>
 <fieldset class="contact-topic-recipients">
@@ -11031,51 +11190,55 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <p class="muted">Selected users receive completed in-kind donation PDFs at their login email.</p>
   <div id="forms-recipient-boxes" class="contact-recipient-boxes"></div>
 </fieldset>
-<fieldset class="contact-topic-recipients">
-  <legend>Email letterman jacket orders to</legend>
-  <p class="muted">Selected users receive completed letterman jacket order PDFs at their login email.</p>
-  <div id="letterman-recipient-boxes" class="contact-recipient-boxes"></div>
-</fieldset>
-<button class="btn primary" type="submit">Save delivery settings</button>
+<button class="btn primary" type="submit">Save access settings</button>
 <p class="status" id="forms-settings-status"></p>
 </form>
-<form id="letterman-form-settings" class="admin-card stack">
-<h2>Letterman jacket order form</h2>
-<p class="muted">Edit the public page at <a href="/letterman-jacket.html" target="_blank" rel="noreferrer">/letterman-jacket.html</a>. Change titles, add or remove fields, and drag rows to reorder. Super Admin and President can edit this form.</p>
-<div class="form-grid">
-<label>Small label<input name="kicker" maxlength="80"></label>
-<label>Heading<input name="heading" maxlength="120"></label>
-<label class="full">Form title<input name="title" maxlength="160"></label>
-<label class="full">Intro<textarea name="intro" rows="3" maxlength="800"></textarea></label>
-<label>Submit button<input name="submit_label" maxlength="80"></label>
-</div>
-<div class="letterman-builder-head">
-  <div>
-    <h3>Form fields</h3>
-    <p class="muted">Drag the handle to move a field. Each row’s title is what visitors see.</p>
-  </div>
-  <div class="letterman-builder-add">
-    <label class="letterman-add-type">Add
-      <select id="letterman-add-type">
-        <option value="text">Text field</option>
-        <option value="textarea">Long text</option>
-        <option value="date">Date</option>
-        <option value="email">Email</option>
-        <option value="phone">Phone</option>
-        <option value="choice">Multiple choice</option>
-        <option value="heading">Section title</option>
-        <option value="note">Note / paragraph</option>
-        <option value="pricing">Price list</option>
-      </select>
-    </label>
-    <button class="btn outline" type="button" id="letterman-add-field">Add field</button>
-  </div>
-</div>
-<div id="letterman-field-list" class="letterman-field-list"></div>
-<button class="btn primary" type="submit">Save letterman form</button>
-<p class="status" id="letterman-form-status"></p>
+<form id="forms-create-form" class="admin-card stack">
+<h2>Create a form</h2>
+<p class="muted">The title becomes the public page, for example <code>Band Trip Form</code> → <code>/band-trip-form.html</code>.</p>
+<label class="full">Form title<input name="title" required maxlength="160" placeholder="Letterman Jacket Order Form"></label>
+<button class="btn primary" type="submit">Create form</button>
+<p class="status" id="forms-create-status"></p>
 </form>
-<div class="admin-card"><h2>Recent submissions</h2><p class="muted">In-kind and letterman jacket forms are stored here. Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Your forms</h2><p class="muted">Edit a form in the builder, or remove it to delete its public HTML page.</p><div id="cms-forms-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Recent submissions</h2><p class="muted">Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
+</div>
+<div id="forms-builder-view" class="form-builder-shell" hidden>
+  <div class="form-builder-top">
+    <button class="btn outline" type="button" id="form-builder-back">← All forms</button>
+    <label class="form-builder-title">Form title<input id="form-builder-title" maxlength="160"></label>
+    <a class="btn outline" id="form-builder-open" href="/letterman-jacket.html" target="_blank" rel="noreferrer">Open page</a>
+    <button class="btn primary" type="button" id="form-builder-save">Save form</button>
+  </div>
+  <p class="form-builder-path-hint" id="form-builder-path"></p>
+  <p class="status" id="form-builder-status"></p>
+  <div class="form-builder-workspace">
+    <aside class="form-builder-palette" aria-label="Add form elements">
+      <h3>Add Form Element</h3>
+      <p class="muted">Click to add. Drag fields on the form to move them.</p>
+      <div id="form-builder-palette" class="form-builder-palette-list"></div>
+    </aside>
+    <section class="form-builder-canvas" aria-label="Form preview">
+      <article class="card letterman-card form-builder-preview">
+        <span class="tag" id="form-builder-kicker-preview">Band Boosters</span>
+        <h2 id="form-builder-heading-preview">East Forsyth Band</h2>
+        <label class="full">Intro<textarea id="form-builder-intro" rows="2" maxlength="800" placeholder="Optional intro shown above the fields"></textarea></label>
+        <div id="form-builder-canvas" class="form-builder-canvas-list"></div>
+        <div class="full inkind-form-actions">
+          <button class="btn primary" type="button" id="form-builder-submit-preview" disabled>Submit</button>
+        </div>
+      </article>
+    </section>
+    <aside class="form-builder-props" aria-label="Field properties">
+      <h3>Properties</h3>
+      <div id="form-builder-props" class="form-builder-props-body"><p class="muted">Select a field on the form to edit its title, choices, and required setting.</p></div>
+      <fieldset class="contact-topic-recipients" style="margin-top:18px">
+        <legend>Email this form to</legend>
+        <p class="muted">Selected CMS users receive the completed PDF.</p>
+        <div id="form-builder-recipients" class="contact-recipient-boxes"></div>
+      </fieldset>
+    </aside>
+  </div>
 </div>
 </section>
 <section id="tab-contact" class="cms-panel">
@@ -11302,7 +11465,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms (create, edit, and delete public forms)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

@@ -857,6 +857,7 @@ async function loadPublicContent() {
   bindSponsorChoiceButtons();
   bindInKindForm();
   bindLettermanForm();
+  bindCmsForms();
   maybeAutoOpenDonate();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
@@ -2212,16 +2213,25 @@ function bindInKindForm(root = document) {
   });
 }
 
-function bindLettermanForm(root = document) {
-  const form = root.querySelector('[data-letterman-form]');
-  if (!form || form.dataset.bound === '1') return;
-  form.dataset.bound = '1';
+function cmsFormPayload(form) {
+  const data = {};
+  for (const [key, value] of new FormData(form).entries()) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      data[key] = Array.isArray(data[key]) ? [...data[key], value] : [data[key], value];
+    } else {
+      data[key] = value;
+    }
+  }
+  return data;
+}
+
+function bindLettermanAmountAutofill(form) {
   const amount = form.querySelector('[data-letterman-amount]');
   const priceForSize = (size) => {
     const key = String(size || '').trim().toUpperCase();
     if (!key) return '';
-    const root = form.closest('[data-letterman-copy]') || form;
-    for (const item of root.querySelectorAll('[data-letterman-price]')) {
+    const wrap = form.closest('[data-letterman-copy]') || form;
+    for (const item of wrap.querySelectorAll('[data-letterman-price]')) {
       const sizes = String(item.dataset.priceSizes || '').split(/[\s,]+/).map((part) => part.trim().toUpperCase()).filter(Boolean);
       if (sizes.includes(key)) return item.querySelector('b')?.textContent?.trim() || '';
     }
@@ -2234,16 +2244,22 @@ function bindLettermanForm(root = document) {
       if (next) amount.value = next;
     });
   });
+}
+
+function bindLettermanForm(root = document) {
+  const form = root.querySelector('[data-letterman-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  bindLettermanAmountAutofill(form);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = form.querySelector('[data-letterman-status]');
     if (status) status.textContent = 'Sending…';
     try {
-      const payload = Object.fromEntries(new FormData(form).entries());
       const response = await fetch('/api/letterman-jacket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cmsFormPayload(form)),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
@@ -2252,6 +2268,37 @@ function bindLettermanForm(root = document) {
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not submit the form.';
     }
+  });
+}
+
+function bindCmsForms(root = document) {
+  root.querySelectorAll('[data-cms-form]').forEach((form) => {
+    if (form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+    bindLettermanAmountAutofill(form);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const slug = String(form.getAttribute('data-cms-form') || '').trim();
+      const status = form.querySelector('[data-cms-form-status], [data-letterman-status]');
+      if (!slug) {
+        if (status) status.textContent = 'This form is missing its page name.';
+        return;
+      }
+      if (status) status.textContent = 'Sending…';
+      try {
+        const response = await fetch(`/api/forms/${encodeURIComponent(slug)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cmsFormPayload(form)),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+        form.reset();
+        if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not submit the form.';
+      }
+    });
   });
 }
 
@@ -2665,6 +2712,7 @@ hydrateMarqueeFromCache();
 bindSponsorChoiceButtons();
 bindInKindForm();
 bindLettermanForm();
+bindCmsForms();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
