@@ -5271,7 +5271,10 @@ function showFormsBuilderView() {
   const list = document.querySelector('#forms-list-view');
   const builder = document.querySelector('#forms-builder-view');
   if (list) list.hidden = true;
-  if (builder) builder.hidden = false;
+  if (builder) {
+    builder.hidden = false;
+    builder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function renderCmsFormsList(forms = []) {

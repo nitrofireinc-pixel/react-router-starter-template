@@ -5141,6 +5141,8 @@ body.cms-caldev-editor-open .admin-workspace{
 }
 
 .form-builder-shell{display:grid;gap:14px}
+#forms-list-view[hidden],
+.form-builder-shell[hidden]{display:none!important}
 .form-builder-top{
   display:flex;
   flex-wrap:wrap;
