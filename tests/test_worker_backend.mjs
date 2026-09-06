@@ -1029,9 +1029,29 @@ test('letterman jacket form matches the paper order and builds a PDF', () => {
   assert.match(page, /data-letterman-form/);
   assert.match(page, /Name to be embroidered/);
   assert.match(page, /\$52\.00/);
+  assert.match(page, /drop box in the band room/);
+  assert.doesNotMatch(page, /Kuropas|Mrs\. Murphy/);
+  const paymentAt = page.indexOf('>Payment<');
+  const depositAt = page.indexOf('drop box in the band room');
+  const methodAt = page.indexOf('Payment method');
+  assert.ok(paymentAt >= 0 && depositAt > paymentAt && methodAt > depositAt);
   const pdf = buildLettermanPdfBase64(ok.data, { copy });
   const bytes = Buffer.from(pdf, 'base64').toString('latin1');
   assert.match(bytes, /Letterman Jacket Order Form|East Forsyth Band/);
+});
+
+test('letterman form drops the old contact line and keeps the band-room deposit note', () => {
+  const migrated = normalizeLettermanFormCopy({
+    fields: [
+      { id: 'payment_section', type: 'heading', label: 'Payment' },
+      { id: 'payment_method', type: 'choice', label: 'Payment method', options: ['Cash', 'Check'] },
+      { id: 'questions', type: 'note', text: 'Please speak to a Band Booster Board Member, Mr. Kuropas or Mrs. Murphy.' },
+    ],
+  });
+  assert.equal(migrated.fields.some((field) => field.id === 'questions'), false);
+  assert.equal(migrated.fields[0].id, 'payment_section');
+  assert.equal(migrated.fields[1].id, 'payment_deposit');
+  assert.match(migrated.fields[1].text, /drop box in the band room/);
 });
 
 test('letterman form editor can add, remove, retitle, and reorder fields', () => {

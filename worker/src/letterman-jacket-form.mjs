@@ -7,6 +7,8 @@ export const LETTERMAN_INPUT_TYPES = ['text', 'textarea', 'date', 'email', 'phon
 export const JACKET_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL'];
 export const PAYMENT_METHODS = ['Cash', 'Check'];
 export const MAX_LETTERMAN_FIELDS = 40;
+export const LETTERMAN_PAYMENT_DEPOSIT_NOTE = 'Please deposit method of payment in the drop box in the band room with the students name on the envelope.';
+const LETTERMAN_RETIRED_QUESTIONS_NOTE = 'Please speak to a Band Booster Board Member, Mr. Kuropas or Mrs. Murphy.';
 
 const PAGE_KEYS = ['kicker', 'heading', 'title', 'intro', 'submit_label'];
 
@@ -56,6 +58,11 @@ export function defaultLettermanFields() {
       ],
     }),
     field({ id: 'payment_section', type: 'heading', label: 'Payment' }),
+    field({
+      id: 'payment_deposit',
+      type: 'note',
+      text: LETTERMAN_PAYMENT_DEPOSIT_NOTE,
+    }),
     field({ id: 'payment_method', type: 'choice', label: 'Payment method', required: true, full: true, options: [...PAYMENT_METHODS] }),
     field({ id: 'amount_enclosed', type: 'text', label: 'Amount enclosed', required: true, placeholder: '$52.00', price_from: true }),
     field({ id: 'payment_note', type: 'note', text: 'Make checks payable to: East Forsyth Band Boosters' }),
@@ -71,7 +78,6 @@ export function defaultLettermanFields() {
     field({ id: 'return_heading', type: 'heading', label: 'Return form & payment to' }),
     field({ id: 'return_name', type: 'note', text: 'East Forsyth Band Boosters', emphasize: true }),
     field({ id: 'deadline', type: 'note', text: 'Deadline: September 5th, 2026' }),
-    field({ id: 'questions', type: 'note', text: 'Please speak to a Band Booster Board Member, Mr. Kuropas or Mrs. Murphy.' }),
     field({ id: 'thank_you', type: 'note', text: 'Thank you for supporting the East Forsyth Band!', italic: true }),
   ];
 }
@@ -227,7 +233,6 @@ function applyLegacyCopyToFields(fields, source = {}) {
   setLabel('return_heading', trimText(source.return_heading, 120));
   setText('return_name', trimText(source.return_name, 160));
   if (trimText(source.deadline, 80)) setText('deadline', `Deadline: ${trimText(source.deadline, 80)}`);
-  setText('questions', trimMultiline(source.questions, 800));
   setText('thank_you', trimText(source.thank_you, 200));
   const pricing = next.find((item) => item.type === 'pricing');
   if (pricing) {
@@ -272,7 +277,32 @@ export function normalizeLettermanFormCopy(input = {}) {
     fields = applyLegacyCopyToFields(defaultLettermanFields(), source).map((item) => normalizeLettermanField(item, used));
   }
   if (!fields.length) fields = defaultLettermanFields();
+  fields = syncLettermanStockCopy(fields);
   return { ...page, fields };
+}
+
+function syncLettermanStockCopy(fields = []) {
+  const hadOldQuestions = fields.some((item) => (
+    item.id === 'questions' || String(item.text || '').trim() === LETTERMAN_RETIRED_QUESTIONS_NOTE
+  ));
+  const next = fields.filter((item) => (
+    item.id !== 'questions' && String(item.text || '').trim() !== LETTERMAN_RETIRED_QUESTIONS_NOTE
+  ));
+  const hasDeposit = next.some((item) => (
+    item.id === 'payment_deposit' || String(item.text || '').includes('drop box in the band room')
+  ));
+  if (hadOldQuestions && !hasDeposit) {
+    const used = new Set(next.map((item) => item.id));
+    const deposit = normalizeLettermanField({
+      id: 'payment_deposit',
+      type: 'note',
+      text: LETTERMAN_PAYMENT_DEPOSIT_NOTE,
+    }, used);
+    const payIndex = next.findIndex((item) => item.id === 'payment_section');
+    if (payIndex >= 0) next.splice(payIndex + 1, 0, deposit);
+    else next.unshift(deposit);
+  }
+  return next;
 }
 
 export function parseLettermanFormCopy(value) {
