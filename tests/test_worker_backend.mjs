@@ -2319,3 +2319,14 @@ test('styles.css brace balance stays closed so public Schedule Board CSS applies
   assert.match(css, /\.cms-caldev-editor-overlay\{/);
   assert.match(css, /\.cms-caldev-editor-toast\[hidden\]\{display:none!important\}/);
 });
+
+test('mobile public header and chrome scroll with the page instead of staying sticky', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  const mobile = css.match(/@media\(max-width:760px\)\{[\s\S]*?body\.nav-drawer-open\{overflow:hidden\}/);
+  assert.ok(mobile, 'expected the phone header/nav media query');
+  assert.match(mobile[0], /header\.site-header,\s*\.site-chrome\{\s*position:relative;\s*top:auto;/);
+  assert.doesNotMatch(mobile[0], /position:\s*sticky/);
+  assert.match(css, /header\.site-header\{position:sticky;top:0;/);
+  assert.match(css, /\.site-chrome\{\s*position:sticky;/);
+});

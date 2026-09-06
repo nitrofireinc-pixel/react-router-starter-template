@@ -351,6 +351,13 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
 /* Phones/small tablets: brand title row; hamburger + Notify Me in navy tray. */
 @media(max-width:760px){
   .utility{display:none}
+  /* Keep header, navy tray, deadline banner, and marquee in document flow so they
+     scroll off the phone viewport instead of eating tap targets. */
+  header.site-header,
+  .site-chrome{
+    position:relative;
+    top:auto;
+  }
   header.site-header{
     display:flex;
     flex-direction:column;
@@ -3027,7 +3034,7 @@ body.sponsor-signup-open{overflow:hidden}
   align-items:start;
 }
 
-/* Sitewide sponsor marquee under the header — locked with the sticky chrome */
+/* Sitewide sponsor marquee under the header (sticky with chrome on desktop) */
 .sponsor-marquee-section{
   padding:7px 0;
   background:linear-gradient(180deg,#f4f7fb,#eef3f9);
@@ -4187,8 +4194,10 @@ body.minutes-frame-open{overflow:hidden}
   outline:none;
 }
 body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
-body.maintenance-preview header.site-header,
-body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
+@media(min-width:761px){
+  body.maintenance-preview header.site-header,
+  body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
+}
 @media(max-width:640px){
   :root{--maintenance-banner-h:64px}
   .maintenance-preview-banner{font-size:.82rem;padding:10px 12px}
