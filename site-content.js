@@ -316,6 +316,18 @@ function ensurePublicBrandMark() {
   });
 }
 
+function ensureLettermanDeadlineBanner() {
+  const nav = document.querySelector('#site-nav');
+  if (!nav || document.querySelector('[data-letterman-deadline]')) return;
+  if (document.body?.classList.contains('admin-body') || document.querySelector('.cms-shell')) return;
+  const banner = document.createElement('div');
+  banner.className = 'letterman-deadline-banner';
+  banner.setAttribute('data-letterman-deadline', '');
+  banner.setAttribute('role', 'status');
+  banner.innerHTML = 'Deadline: Letterman Jacket Forms and Payments Due By September 8th! <a href="/letterman-jacket.html">Click Here</a> for order form!';
+  nav.insertAdjacentElement('afterend', banner);
+}
+
 function ensureSiteChrome(header, mount) {
   if (!header) return null;
   let chrome = document.querySelector('[data-site-chrome]');
@@ -745,6 +757,7 @@ function initMonthCalendars(allEvents) {
 }
 
 async function loadPublicContent() {
+  ensureLettermanDeadlineBanner();
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
   const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
@@ -841,6 +854,10 @@ async function loadPublicContent() {
   bindSponsorTierSignup();
   bindDonateButtons();
   bindDuesButtons();
+  bindSponsorChoiceButtons();
+  bindInKindForm();
+  bindLettermanForm();
+  bindCmsForms();
   maybeAutoOpenDonate();
   await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
@@ -2093,6 +2110,198 @@ function openDonateModal() {
   form?.querySelector('input[name="donor_name"]')?.focus();
 }
 
+function closeSponsorChoiceModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.sponsor-choice-modal');
+  const clearBody = () => {
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal, .dues-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+  };
+  if (!modal) {
+    clearBody();
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    clearBody();
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    clearBody();
+  }, 280);
+}
+
+function openSponsorChoiceModal() {
+  closeSponsorChoiceModal({ immediate: true });
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal sponsor-choice-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Choose sponsorship or in-kind');
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-choice-close aria-label="Close"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head">
+        <span class="sponsor-signup-kicker">Support the band</span>
+        <h3>How would you like to help?</h3>
+        <p>Choose Sponsorship Tiers or an In-Kind donation.</p>
+      </div>
+      <div class="sponsor-choice-actions">
+        <a class="btn primary" href="/become-a-sponsor.html">Sponsorship Tiers</a>
+        <a class="btn outline" href="/in-kind.html">In-Kind</a>
+      </div>
+      <button type="button" class="btn outline" data-choice-close>Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+  modal.querySelectorAll('[data-choice-close]').forEach((button) => {
+    button.addEventListener('click', () => closeSponsorChoiceModal());
+  });
+}
+
+function bindSponsorChoiceButtons(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('[data-sponsor-choice-open]').forEach((control) => {
+    if (control.dataset.sponsorChoiceBound === '1') return;
+    if (control.closest('#page-preview, .cms-shell, .admin-body')) return;
+    if (control.hasAttribute('disabled')) return;
+    control.dataset.sponsorChoiceBound = '1';
+    control.addEventListener('click', (event) => {
+      event.preventDefault();
+      openSponsorChoiceModal();
+    });
+  });
+}
+
+function bindInKindForm(root = document) {
+  const form = root.querySelector('[data-inkind-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  const hear = form.querySelector('[data-inkind-hear]');
+  const other = form.querySelector('[data-inkind-other]');
+  const syncOther = () => {
+    if (!other) return;
+    const show = String(hear?.value || '') === 'Other';
+    other.hidden = !show;
+    const input = other.querySelector('input');
+    if (input) input.required = show;
+  };
+  hear?.addEventListener('change', syncOther);
+  syncOther();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-inkind-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/inkind', {
+        method: 'POST',
+        body: new FormData(form),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      syncOther();
+      if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
+function cmsFormPayload(form) {
+  const data = {};
+  for (const [key, value] of new FormData(form).entries()) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      data[key] = Array.isArray(data[key]) ? [...data[key], value] : [data[key], value];
+    } else {
+      data[key] = value;
+    }
+  }
+  return data;
+}
+
+function bindLettermanAmountAutofill(form) {
+  const amount = form.querySelector('[data-letterman-amount]');
+  const priceForSize = (size) => {
+    const key = String(size || '').trim().toUpperCase();
+    if (!key) return '';
+    const wrap = form.closest('[data-letterman-copy]') || form;
+    for (const item of wrap.querySelectorAll('[data-letterman-price]')) {
+      const sizes = String(item.dataset.priceSizes || '').split(/[\s,]+/).map((part) => part.trim().toUpperCase()).filter(Boolean);
+      if (sizes.includes(key)) return item.querySelector('b')?.textContent?.trim() || '';
+    }
+    return '';
+  };
+  form.querySelectorAll('input[type="radio"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!amount) return;
+      const next = priceForSize(input.value);
+      if (next) amount.value = next;
+    });
+  });
+}
+
+function bindLettermanForm(root = document) {
+  const form = root.querySelector('[data-letterman-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  bindLettermanAmountAutofill(form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-letterman-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/letterman-jacket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cmsFormPayload(form)),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      if (status) status.textContent = result.detail || 'Thank you. Your order was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
+function bindCmsForms(root = document) {
+  root.querySelectorAll('[data-cms-form]').forEach((form) => {
+    if (form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+    bindLettermanAmountAutofill(form);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const slug = String(form.getAttribute('data-cms-form') || '').trim();
+      const status = form.querySelector('[data-cms-form-status], [data-letterman-status]');
+      if (!slug) {
+        if (status) status.textContent = 'This form is missing its page name.';
+        return;
+      }
+      if (status) status.textContent = 'Sending…';
+      try {
+        const response = await fetch(`/api/forms/${encodeURIComponent(slug)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cmsFormPayload(form)),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+        form.reset();
+        if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not submit the form.';
+      }
+    });
+  });
+}
+
 function bindDonateButtons(root = document) {
   if (isCmsAdminPreviewContext(root)) return;
   root.querySelectorAll('[data-donate-open]').forEach((button) => {
@@ -2498,10 +2707,20 @@ function bindDuesButtons(root = document) {
 }
 
 ensurePublicBrandMark();
+ensureLettermanDeadlineBanner();
 hydrateMarqueeFromCache();
+bindSponsorChoiceButtons();
+bindInKindForm();
+bindLettermanForm();
+bindCmsForms();
 loadPublicContent();
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  const choice = document.querySelector('.sponsor-choice-modal');
+  if (choice) {
+    closeSponsorChoiceModal();
+    return;
+  }
   const dues = document.querySelector('.dues-modal');
   if (dues) {
     const confirm = dues.querySelector('[data-dues-confirm]');

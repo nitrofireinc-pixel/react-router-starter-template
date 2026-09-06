@@ -1,5 +1,14 @@
 # Agent notes (East Forsyth Band)
 
+## CMS login (Cursor agents)
+
+Use this account for live CMS checks on **https://efhsband.org/admin/login**. Do not commit other staff passwords.
+
+- Username: `agent@efhsband.org`
+- Password: `agent123$`
+
+The live user is Super Admin. Login is the singular `agent@` address, not `agents@`.
+
 ## Source of truth
 
 - Git branch **`main`** is production. Pull/rebase from `origin/main` before any deploy.
