@@ -18,6 +18,7 @@ import {
 } from './web-push-browser/index.js';
 import {
   CALDEV_TRACKS,
+  buildCaldevIcsFeed,
   clearCaldevEvents,
   deleteCaldevEvent,
   ensureCaldevSchema,
@@ -227,7 +228,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'calendar-ical-hide-fix-20260829';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -742,8 +743,41 @@ function randomEmailListToken(bytes = 24) {
   return [...arr].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'Get email updates', detail = 'Join the band email list. Reply STOP to any message to unsubscribe.', buttonLabel = 'Subscribe' } = {}) {
+export const ICAL_APPLE_HREF = 'webcal://efhsband.org/calendar.ics';
+export const ICAL_ANDROID_HREF = 'https://www.google.com/calendar/render?cid=https%3A%2F%2Fefhsband.org%2Fcalendar.ics';
+
+export function renderIcalSubscribeButtons({
+  appleHref = ICAL_APPLE_HREF,
+  androidHref = ICAL_ANDROID_HREF,
+  appleLabel = 'Add to Apple Calendar',
+  androidLabel = 'Add to Android Calendar',
+} = {}) {
+  return [
+    `<a class="btn outline" data-ical-subscribe data-ical-platform="ios" href="${escapeAttr(appleHref)}" hidden>${escapeHtml(appleLabel)}</a>`,
+    `<a class="btn outline" data-ical-subscribe data-ical-platform="android" href="${escapeAttr(androidHref)}" hidden target="_blank" rel="noopener noreferrer">${escapeHtml(androidLabel)}</a>`,
+  ].join('\n      ');
+}
+
+export function renderEmailListSignup({
+  topics = EMAIL_LIST_TOPICS,
+  heading = 'Get email updates',
+  detail = 'Join the band email list. Reply STOP to any message to unsubscribe.',
+  buttonLabel = 'Subscribe',
+  icalSubscribe = false,
+  icalLabel = 'Add to Apple Calendar',
+  icalHref = ICAL_APPLE_HREF,
+  androidHref = ICAL_ANDROID_HREF,
+  androidLabel = 'Add to Android Calendar',
+} = {}) {
   const topicList = normalizeEmailListTopics(topics, { defaultAll: true }).join(',');
+  const icalButtons = icalSubscribe
+    ? renderIcalSubscribeButtons({
+      appleHref: icalHref,
+      androidHref,
+      appleLabel: icalLabel,
+      androidLabel,
+    })
+    : '';
   return `<section class="content email-list-signup" data-email-list-signup data-email-list-topics="${escapeAttr(topicList)}">
   <div class="wrap email-list-signup-inner">
     <div class="email-list-signup-copy">
@@ -752,6 +786,7 @@ export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'G
     </div>
     <div class="email-list-signup-action">
       <button type="button" class="btn primary" data-email-list-open>${escapeHtml(buttonLabel)}</button>
+      ${icalButtons}
     </div>
   </div>
 </section>`;
@@ -765,6 +800,52 @@ export function ensureEmailListSignupSlot(html, options = {}) {
   }
   const stripped = source.replace(/<section\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/section>/gi, '');
   return `${stripped}${renderEmailListSignup(options)}`;
+}
+
+/** Ensure the calendar page email strip offers platform-specific calendar subscribe buttons. */
+export function ensureCalendarIcalSubscribe(html, options = {}) {
+  const source = String(html || '');
+  const appleHref = String(options.icalHref || ICAL_APPLE_HREF);
+  const androidHref = String(options.androidHref || ICAL_ANDROID_HREF);
+  const appleLabel = String(options.icalLabel || 'Add to Apple Calendar');
+  const androidLabel = String(options.androidLabel || 'Add to Android Calendar');
+  const icalButtons = renderIcalSubscribeButtons({
+    appleHref,
+    androidHref,
+    appleLabel,
+    androidLabel,
+  });
+  const hasIos = /data-ical-platform=["']ios["']/i.test(source);
+  const hasAndroid = /data-ical-platform=["']android["']/i.test(source);
+  if (hasIos && hasAndroid) {
+    return source
+      .replace(
+        /(<a\b[^>]*data-ical-platform=["']ios["'][^>]*href=")([^"]*)(")/i,
+        `$1${escapeAttr(appleHref)}$3`,
+      )
+      .replace(
+        /(<a\b[^>]*data-ical-platform=["']android["'][^>]*href=")([^"]*)(")/i,
+        `$1${escapeAttr(androidHref)}$3`,
+      );
+  }
+  if (/email-list-signup-action/i.test(source)) {
+    // Replace any legacy single iCal button, then ensure both platform buttons exist.
+    const withoutLegacy = source.replace(/\s*<a\b[^>]*data-ical-subscribe[^>]*>[\s\S]*?<\/a>/gi, '');
+    return withoutLegacy.replace(
+      /(<div class="email-list-signup-action">)([\s\S]*?)(<\/div>)/i,
+      (_, open, inner, close) => `${open}${inner.trim() ? `${inner.trim()}\n      ` : ''}${icalButtons}${close}`,
+    );
+  }
+  return ensureEmailListSignupSlot(source, {
+    topics: ['calendar', 'fundraising'],
+    heading: 'Email calendar updates',
+    detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
+    icalSubscribe: true,
+    icalHref: appleHref,
+    icalLabel: appleLabel,
+    androidHref,
+    androidLabel,
+  });
 }
 
 export function formatEmailListTopicsLabel(topics = []) {
@@ -1711,13 +1792,16 @@ async function initDb(env) {
   }
   const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
   if (calendarPageRow?.body_html) {
-    const nextCalendarHtml = ensureEmailListSignupSlot(
-      ensureCalendarMonthMount(calendarPageRow.body_html),
-      {
-        topics: ['calendar', 'fundraising'],
-        heading: 'Email calendar updates',
-        detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
-      },
+    const nextCalendarHtml = ensureCalendarIcalSubscribe(
+      ensureEmailListSignupSlot(
+        ensureCalendarMonthMount(calendarPageRow.body_html),
+        {
+          topics: ['calendar', 'fundraising'],
+          heading: 'Email calendar updates',
+          detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
+          icalSubscribe: true,
+        },
+      ),
     );
     if (nextCalendarHtml !== calendarPageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
@@ -6092,11 +6176,12 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'calendar') {
-    return ensureEmailListSignupSlot(ensureCalendarMonthMount(page.body_html), {
+    return ensureCalendarIcalSubscribe(ensureEmailListSignupSlot(ensureCalendarMonthMount(page.body_html), {
       topics: ['calendar', 'fundraising'],
       heading: 'Email calendar updates',
-      detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
-    });
+      detail: 'Get calendar changes by email, or add the schedule to your phone calendar. Reply STOP to any message to unsubscribe.',
+      icalSubscribe: true,
+    }));
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
   if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
@@ -7295,6 +7380,32 @@ export function serializePagePayload(payload, existing = null) {
   };
 }
 
+async function handleCalendarIcs(request, env, url) {
+  await ensureCaldevSchema(env);
+  let events = await listCaldevEvents(env);
+  if (!events.length) {
+    try {
+      await seedCaldevFromProduction(env, { getEvents, clear: true });
+      events = await listCaldevEvents(env);
+    } catch {
+      // Seeding is best-effort; empty calendar still returns a valid feed.
+    }
+  }
+  const origin = String(url?.origin || PUBLIC_SITE_ORIGIN_DEFAULT).replace(/\/$/, '');
+  const body = buildCaldevIcsFeed(events, {
+    calendarName: 'East Forsyth Band',
+    siteUrl: origin.includes('efhsband.org') ? PUBLIC_SITE_ORIGIN_DEFAULT : origin,
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'text/calendar; charset=utf-8',
+      'content-disposition': 'inline; filename="efhsband-calendar.ics"',
+      'cache-control': 'public, max-age=300',
+    },
+  });
+}
+
 async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
   let requestSummary = null;
@@ -7474,6 +7585,9 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
     return jsonResponse(CALDEV_TRACKS);
+  }
+  if ((url.pathname === '/api/calendar.ics' || url.pathname === '/calendar.ics') && request.method === 'GET') {
+    return handleCalendarIcs(request, env, url);
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
@@ -10336,6 +10450,9 @@ export default {
       }
     }
     if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return handleApi(request, env, url, ctx);
+    if (url.pathname === '/calendar.ics' || url.pathname === '/calendar.ics/') {
+      return handleCalendarIcs(request, env, url);
+    }
     if (url.pathname === '/subscribe' || url.pathname === '/subscribe/') {
       const target = new URL('/calendar.html', url.origin);
       target.searchParams.set('subscribe', '1');
