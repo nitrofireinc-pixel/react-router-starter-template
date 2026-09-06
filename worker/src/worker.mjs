@@ -250,7 +250,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'letterman-jacket-form-20260906';
+const ASSET_VERSION = 'letterman-form-builder-20260906';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -386,7 +386,7 @@ export function canAccessWebsiteGuide(user) {
 }
 
 export { canAccessFormsPage, normalizeInKindPayload, parseFormsUserIds, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64 } from './inkind-forms.mjs';
-export { DEFAULT_LETTERMAN_FORM, normalizeLettermanFormCopy, normalizeLettermanPayload, parseLettermanFormCopy, renderLettermanPageBody, buildLettermanPdfBase64, priceForJacketSize } from './letterman-jacket-form.mjs';
+export { DEFAULT_LETTERMAN_FORM, createLettermanField, normalizeLettermanFormCopy, normalizeLettermanPayload, parseLettermanFormCopy, renderLettermanPageBody, buildLettermanPdfBase64, priceForJacketSize } from './letterman-jacket-form.mjs';
 
 export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
 export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
@@ -11040,30 +11040,37 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 <form id="letterman-form-settings" class="admin-card stack">
 <h2>Letterman jacket order form</h2>
-<p class="muted">These fields appear on <a href="/letterman-jacket.html" target="_blank" rel="noreferrer">/letterman-jacket.html</a>. Super Admin and President can edit this copy.</p>
+<p class="muted">Edit the public page at <a href="/letterman-jacket.html" target="_blank" rel="noreferrer">/letterman-jacket.html</a>. Change titles, add or remove fields, and drag rows to reorder. Super Admin and President can edit this form.</p>
 <div class="form-grid">
 <label>Small label<input name="kicker" maxlength="80"></label>
 <label>Heading<input name="heading" maxlength="120"></label>
 <label class="full">Form title<input name="title" maxlength="160"></label>
 <label class="full">Intro<textarea name="intro" rows="3" maxlength="800"></textarea></label>
-<label>Student section heading<input name="student_section" maxlength="80"></label>
-<label>Jacket section heading<input name="jacket_section" maxlength="80"></label>
-<label>Jacket size label<input name="jacket_size_label" maxlength="80"></label>
-<label>S–XL price label<input name="pricing_s_xl_label" maxlength="80"></label>
-<label>S–XL price<input name="pricing_s_xl" maxlength="40"></label>
-<label>2XL price label<input name="pricing_2xl_label" maxlength="80"></label>
-<label>2XL price<input name="pricing_2xl" maxlength="40"></label>
-<label>3XL price label<input name="pricing_3xl_label" maxlength="80"></label>
-<label>3XL price<input name="pricing_3xl" maxlength="40"></label>
-<label>Payment section heading<input name="payment_section" maxlength="80"></label>
-<label class="full">Payment note<textarea name="payment_note" rows="2" maxlength="800"></textarea></label>
-<label class="full">Acknowledgment<textarea name="acknowledgment" rows="4" maxlength="800"></textarea></label>
-<label>Return heading<input name="return_heading" maxlength="120"></label>
-<label>Return name<input name="return_name" maxlength="160"></label>
-<label>Deadline<input name="deadline" maxlength="80"></label>
-<label class="full">Questions / contact<textarea name="questions" rows="2" maxlength="800"></textarea></label>
-<label class="full">Thank-you line<input name="thank_you" maxlength="200"></label>
+<label>Submit button<input name="submit_label" maxlength="80"></label>
 </div>
+<div class="letterman-builder-head">
+  <div>
+    <h3>Form fields</h3>
+    <p class="muted">Drag the handle to move a field. Each row’s title is what visitors see.</p>
+  </div>
+  <div class="letterman-builder-add">
+    <label class="letterman-add-type">Add
+      <select id="letterman-add-type">
+        <option value="text">Text field</option>
+        <option value="textarea">Long text</option>
+        <option value="date">Date</option>
+        <option value="email">Email</option>
+        <option value="phone">Phone</option>
+        <option value="choice">Multiple choice</option>
+        <option value="heading">Section title</option>
+        <option value="note">Note / paragraph</option>
+        <option value="pricing">Price list</option>
+      </select>
+    </label>
+    <button class="btn outline" type="button" id="letterman-add-field">Add field</button>
+  </div>
+</div>
+<div id="letterman-field-list" class="letterman-field-list"></div>
 <button class="btn primary" type="submit">Save letterman form</button>
 <p class="status" id="letterman-form-status"></p>
 </form>

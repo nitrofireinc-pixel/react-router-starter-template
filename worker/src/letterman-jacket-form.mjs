@@ -2,31 +2,83 @@ import { buildMultiPageTextPdfBase64 } from './admin-audit-log.mjs';
 
 export const LETTERMAN_FORM_KEY = 'letterman_jacket_form';
 export const LETTERMAN_RECIPIENT_KEY = 'letterman_jacket_recipient_user_ids';
+export const LETTERMAN_FIELD_TYPES = ['heading', 'text', 'textarea', 'date', 'email', 'phone', 'choice', 'note', 'pricing'];
+export const LETTERMAN_INPUT_TYPES = ['text', 'textarea', 'date', 'email', 'phone', 'choice'];
 export const JACKET_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL'];
 export const PAYMENT_METHODS = ['Cash', 'Check'];
+export const MAX_LETTERMAN_FIELDS = 40;
 
-export const DEFAULT_LETTERMAN_FORM = {
+const PAGE_KEYS = ['kicker', 'heading', 'title', 'intro', 'submit_label'];
+
+export const DEFAULT_LETTERMAN_PAGE = {
   kicker: 'Band Boosters',
   heading: 'East Forsyth Band',
   title: 'Letterman Jacket Order Form',
   intro: 'Complete this order form for an East Forsyth Band letterman jacket. Return the form with payment to the Band Boosters.',
-  student_section: 'Student Information',
-  jacket_section: 'Jacket Information',
-  jacket_size_label: 'Jacket Size',
-  pricing_s_xl_label: 'Jacket Size S–XL',
-  pricing_s_xl: '$52.00',
-  pricing_2xl_label: 'Jacket Size 2XL',
-  pricing_2xl: '$54.00',
-  pricing_3xl_label: 'Jacket Size 3XL',
-  pricing_3xl: '$55.00',
-  payment_section: 'Payment',
-  payment_note: 'Make checks payable to: East Forsyth Band Boosters',
-  acknowledgment: 'I have reviewed the jacket size, embroidered name, instrument, and pricing above. I understand that the order will be submitted after the completed form and payment are received.',
-  return_heading: 'Return form & payment to',
-  return_name: 'East Forsyth Band Boosters',
-  deadline: 'September 5th, 2026',
-  questions: 'Please speak to a Band Booster Board Member, Mr. Kuropas or Mrs. Murphy.',
-  thank_you: 'Thank you for supporting the East Forsyth Band!',
+  submit_label: 'Submit order',
+};
+
+export function defaultLettermanFields() {
+  return [
+    field({ id: 'student_section', type: 'heading', label: 'Student Information' }),
+    field({ id: 'student_name', type: 'text', label: 'Student name', required: true, full: true, autocomplete: 'name' }),
+    field({ id: 'grade', type: 'text', label: 'Grade', required: true, placeholder: '9, 10, 11, or 12' }),
+    field({ id: 'order_date', type: 'date', label: 'Date', required: true }),
+    field({ id: 'parent_name', type: 'text', label: 'Parent/Guardian name', required: true, full: true, autocomplete: 'name' }),
+    field({ id: 'phone', type: 'phone', label: 'Phone', required: true, autocomplete: 'tel' }),
+    field({ id: 'email', type: 'email', label: 'Email', required: true, autocomplete: 'email' }),
+    field({
+      id: 'embroidered_name',
+      type: 'text',
+      label: 'Name to be embroidered',
+      required: true,
+      full: true,
+      placeholder: 'First and last name, first name, or nickname',
+    }),
+    field({
+      id: 'second_embroidery',
+      type: 'text',
+      label: 'Second embroidery line',
+      full: true,
+      optional: true,
+      placeholder: 'Instrument or section, graduation year',
+    }),
+    field({ id: 'jacket_section', type: 'heading', label: 'Jacket Information' }),
+    field({ id: 'jacket_size', type: 'choice', label: 'Jacket Size', required: true, full: true, options: [...JACKET_SIZES] }),
+    field({
+      id: 'pricing',
+      type: 'pricing',
+      label: 'Pricing',
+      items: [
+        { label: 'Jacket Size S–XL', price: '$52.00', sizes: 'S, M, L, XL' },
+        { label: 'Jacket Size 2XL', price: '$54.00', sizes: '2XL' },
+        { label: 'Jacket Size 3XL', price: '$55.00', sizes: '3XL' },
+      ],
+    }),
+    field({ id: 'payment_section', type: 'heading', label: 'Payment' }),
+    field({ id: 'payment_method', type: 'choice', label: 'Payment method', required: true, full: true, options: [...PAYMENT_METHODS] }),
+    field({ id: 'amount_enclosed', type: 'text', label: 'Amount enclosed', required: true, placeholder: '$52.00', price_from: true }),
+    field({ id: 'payment_note', type: 'note', text: 'Make checks payable to: East Forsyth Band Boosters' }),
+    field({
+      id: 'acknowledgment',
+      type: 'note',
+      text: 'I have reviewed the jacket size, embroidered name, instrument, and pricing above. I understand that the order will be submitted after the completed form and payment are received.',
+    }),
+    field({ id: 'parent_signature', type: 'text', label: 'Parent/Guardian signature', required: true, placeholder: 'Type full name' }),
+    field({ id: 'parent_sign_date', type: 'date', label: 'Date', required: true }),
+    field({ id: 'student_signature', type: 'text', label: 'Student signature', required: true, placeholder: 'Type full name' }),
+    field({ id: 'student_sign_date', type: 'date', label: 'Date', required: true }),
+    field({ id: 'return_heading', type: 'heading', label: 'Return form & payment to' }),
+    field({ id: 'return_name', type: 'note', text: 'East Forsyth Band Boosters', emphasize: true }),
+    field({ id: 'deadline', type: 'note', text: 'Deadline: September 5th, 2026' }),
+    field({ id: 'questions', type: 'note', text: 'Please speak to a Band Booster Board Member, Mr. Kuropas or Mrs. Murphy.' }),
+    field({ id: 'thank_you', type: 'note', text: 'Thank you for supporting the East Forsyth Band!', italic: true }),
+  ];
+}
+
+export const DEFAULT_LETTERMAN_FORM = {
+  ...DEFAULT_LETTERMAN_PAGE,
+  fields: defaultLettermanFields(),
 };
 
 function trimText(value, max = 240) {
@@ -49,18 +101,178 @@ export function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-export function normalizeLettermanFormCopy(input = {}) {
+function slugFieldId(value, fallback = 'field') {
+  const slug = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+  return slug || fallback;
+}
+
+function uniqueFieldId(preferred, used) {
+  const base = slugFieldId(preferred, `field_${used.size + 1}`);
+  let next = base;
+  let index = 2;
+  while (used.has(next)) {
+    next = `${base}_${index}`.slice(0, 56);
+    index += 1;
+  }
+  used.add(next);
+  return next;
+}
+
+function normalizeOptions(value) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/[\n,]+/);
+  const seen = new Set();
+  const options = [];
+  for (const item of raw) {
+    const option = trimText(item, 40);
+    if (!option) continue;
+    const key = option.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push(option);
+    if (options.length >= 20) break;
+  }
+  return options;
+}
+
+function normalizePricingItems(value) {
+  const raw = Array.isArray(value) ? value : [];
+  const items = [];
+  for (const item of raw) {
+    const label = trimText(item?.label, 80);
+    const price = trimText(item?.price, 40);
+    const sizes = trimText(item?.sizes, 80);
+    if (!label && !price) continue;
+    items.push({ label: label || 'Price', price: price || '', sizes });
+    if (items.length >= 8) break;
+  }
+  return items;
+}
+
+function field(input = {}) {
+  return normalizeLettermanField(input, new Set());
+}
+
+export function normalizeLettermanField(input = {}, used = new Set()) {
   const source = input && typeof input === 'object' ? input : {};
-  const next = { ...DEFAULT_LETTERMAN_FORM };
-  for (const key of Object.keys(DEFAULT_LETTERMAN_FORM)) {
-    if (source[key] == null) continue;
-    const max = key === 'acknowledgment' || key === 'intro' || key === 'questions' || key === 'payment_note' ? 800 : 200;
-    const value = key === 'acknowledgment' || key === 'intro' || key === 'questions' || key === 'payment_note'
-      ? trimMultiline(source[key], max)
-      : trimText(source[key], max);
-    if (value) next[key] = value;
+  const type = LETTERMAN_FIELD_TYPES.includes(source.type) ? source.type : 'text';
+  const id = uniqueFieldId(source.id || source.label || type, used);
+  const label = trimText(source.label || (type === 'heading' ? 'Section' : type === 'note' ? '' : 'Field'), type === 'note' ? 200 : 120);
+  const next = {
+    id,
+    type,
+    label,
+    required: Boolean(source.required) && LETTERMAN_INPUT_TYPES.includes(type),
+    full: Boolean(source.full) || type === 'heading' || type === 'note' || type === 'pricing' || type === 'choice' || type === 'textarea',
+    optional: Boolean(source.optional),
+    placeholder: trimText(source.placeholder, 120),
+    autocomplete: trimText(source.autocomplete, 40),
+    price_from: Boolean(source.price_from) || id === 'amount_enclosed',
+    emphasize: Boolean(source.emphasize),
+    italic: Boolean(source.italic) || id === 'thank_you',
+    text: '',
+    options: [],
+    items: [],
+  };
+  if (type === 'note') next.text = trimMultiline(source.text || source.label, 800);
+  if (type === 'choice') {
+    next.options = normalizeOptions(source.options);
+    if (!next.options.length) next.options = [...JACKET_SIZES];
+  }
+  if (type === 'pricing') {
+    next.items = normalizePricingItems(source.items);
+    if (!next.items.length) {
+      next.items = [
+        { label: 'Jacket Size S–XL', price: '$52.00', sizes: 'S, M, L, XL' },
+        { label: 'Jacket Size 2XL', price: '$54.00', sizes: '2XL' },
+        { label: 'Jacket Size 3XL', price: '$55.00', sizes: '3XL' },
+      ];
+    }
   }
   return next;
+}
+
+export function createLettermanField(input = {}) {
+  return normalizeLettermanField({
+    type: input.type || 'text',
+    label: input.label || (input.type === 'heading' ? 'New section' : input.type === 'note' ? '' : 'New field'),
+    text: input.text || (input.type === 'note' ? 'New note' : ''),
+    options: input.options,
+    items: input.items,
+    required: input.required,
+    full: input.full,
+    placeholder: input.placeholder,
+  });
+}
+
+function applyLegacyCopyToFields(fields, source = {}) {
+  const next = fields.map((item) => ({ ...item, options: [...(item.options || [])], items: (item.items || []).map((row) => ({ ...row })) }));
+  const setLabel = (id, value) => {
+    const field = next.find((item) => item.id === id);
+    if (field && value) field.label = value;
+  };
+  const setText = (id, value) => {
+    const field = next.find((item) => item.id === id);
+    if (field && value) field.text = value;
+  };
+  setLabel('student_section', trimText(source.student_section, 80));
+  setLabel('jacket_section', trimText(source.jacket_section, 80));
+  setLabel('jacket_size', trimText(source.jacket_size_label, 80));
+  setLabel('payment_section', trimText(source.payment_section, 80));
+  setText('payment_note', trimMultiline(source.payment_note, 800));
+  setText('acknowledgment', trimMultiline(source.acknowledgment, 800));
+  setLabel('return_heading', trimText(source.return_heading, 120));
+  setText('return_name', trimText(source.return_name, 160));
+  if (trimText(source.deadline, 80)) setText('deadline', `Deadline: ${trimText(source.deadline, 80)}`);
+  setText('questions', trimMultiline(source.questions, 800));
+  setText('thank_you', trimText(source.thank_you, 200));
+  const pricing = next.find((item) => item.type === 'pricing');
+  if (pricing) {
+    if (source.pricing_s_xl_label || source.pricing_s_xl) {
+      pricing.items[0] = {
+        label: trimText(source.pricing_s_xl_label, 80) || pricing.items[0]?.label || 'Jacket Size S–XL',
+        price: trimText(source.pricing_s_xl, 40) || pricing.items[0]?.price || '$52.00',
+        sizes: pricing.items[0]?.sizes || 'S, M, L, XL',
+      };
+    }
+    if (source.pricing_2xl_label || source.pricing_2xl) {
+      pricing.items[1] = {
+        label: trimText(source.pricing_2xl_label, 80) || pricing.items[1]?.label || 'Jacket Size 2XL',
+        price: trimText(source.pricing_2xl, 40) || pricing.items[1]?.price || '$54.00',
+        sizes: pricing.items[1]?.sizes || '2XL',
+      };
+    }
+    if (source.pricing_3xl_label || source.pricing_3xl) {
+      pricing.items[2] = {
+        label: trimText(source.pricing_3xl_label, 80) || pricing.items[2]?.label || 'Jacket Size 3XL',
+        price: trimText(source.pricing_3xl, 40) || pricing.items[2]?.price || '$55.00',
+        sizes: pricing.items[2]?.sizes || '3XL',
+      };
+    }
+  }
+  return next;
+}
+
+export function normalizeLettermanFormCopy(input = {}) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const page = { ...DEFAULT_LETTERMAN_PAGE };
+  for (const key of PAGE_KEYS) {
+    if (source[key] == null) continue;
+    const value = key === 'intro' ? trimMultiline(source[key], 800) : trimText(source[key], key === 'title' ? 160 : 120);
+    if (value) page[key] = value;
+  }
+  const used = new Set();
+  let fields;
+  if (Array.isArray(source.fields) && source.fields.length) {
+    fields = source.fields.slice(0, MAX_LETTERMAN_FIELDS).map((item) => normalizeLettermanField(item, used));
+  } else {
+    fields = applyLegacyCopyToFields(defaultLettermanFields(), source).map((item) => normalizeLettermanField(item, used));
+  }
+  if (!fields.length) fields = defaultLettermanFields();
+  return { ...page, fields };
 }
 
 export function parseLettermanFormCopy(value) {
@@ -71,78 +283,56 @@ export function parseLettermanFormCopy(value) {
     try {
       return normalizeLettermanFormCopy(JSON.parse(value));
     } catch {
-      return { ...DEFAULT_LETTERMAN_FORM };
+      return normalizeLettermanFormCopy();
     }
   }
-  return { ...DEFAULT_LETTERMAN_FORM };
+  return normalizeLettermanFormCopy();
+}
+
+function pricingItems(copy = DEFAULT_LETTERMAN_FORM) {
+  const form = copy.fields ? copy : normalizeLettermanFormCopy(copy);
+  return form.fields.filter((item) => item.type === 'pricing').flatMap((item) => item.items || []);
 }
 
 export function priceForJacketSize(copy = DEFAULT_LETTERMAN_FORM, size = '') {
   const key = String(size || '').trim().toUpperCase();
-  if (key === '3XL') return String(copy.pricing_3xl || DEFAULT_LETTERMAN_FORM.pricing_3xl);
-  if (key === '2XL') return String(copy.pricing_2xl || DEFAULT_LETTERMAN_FORM.pricing_2xl);
-  if (JACKET_SIZES.includes(key)) return String(copy.pricing_s_xl || DEFAULT_LETTERMAN_FORM.pricing_s_xl);
+  if (!key) return '';
+  for (const item of pricingItems(copy)) {
+    const sizes = String(item.sizes || '').split(/[\s,]+/).map((part) => part.trim().toUpperCase()).filter(Boolean);
+    if (sizes.includes(key)) return String(item.price || '');
+  }
   return '';
 }
 
+function fieldValue(payload, field) {
+  const raw = payload?.[field.id];
+  if (field.type === 'textarea') return trimMultiline(raw, 800);
+  if (field.type === 'email') return trimText(raw, 160).toLowerCase();
+  if (field.type === 'choice') {
+    const value = trimText(raw, 40);
+    return field.options.includes(value) ? value : '';
+  }
+  return trimText(raw, field.type === 'phone' ? 40 : 160);
+}
+
 export function normalizeLettermanPayload(payload = {}, copy = DEFAULT_LETTERMAN_FORM) {
-  const student_name = trimText(payload.student_name, 160);
-  const grade = trimText(payload.grade, 20);
-  const parent_name = trimText(payload.parent_name, 160);
-  const phone = trimText(payload.phone, 40);
-  const email = trimText(payload.email, 160).toLowerCase();
-  const order_date = trimText(payload.order_date || payload.date, 40);
-  const embroidered_name = trimText(payload.embroidered_name, 160);
-  const second_embroidery = trimText(payload.second_embroidery, 160);
-  const jacket_size = JACKET_SIZES.includes(String(payload.jacket_size || '').trim().toUpperCase())
-    ? String(payload.jacket_size).trim().toUpperCase()
-    : '';
-  const payment_method = PAYMENT_METHODS.includes(String(payload.payment_method || '').trim())
-    ? String(payload.payment_method).trim()
-    : '';
-  const amount_enclosed = trimText(payload.amount_enclosed, 40) || priceForJacketSize(copy, jacket_size);
-  const parent_signature = trimText(payload.parent_signature, 160);
-  const parent_sign_date = trimText(payload.parent_sign_date, 40);
-  const student_signature = trimText(payload.student_signature, 160);
-  const student_sign_date = trimText(payload.student_sign_date, 40);
-
+  const form = normalizeLettermanFormCopy(copy);
+  const data = {};
   const errors = [];
-  if (!student_name) errors.push('Student name is required.');
-  if (!grade) errors.push('Grade is required.');
-  if (!parent_name) errors.push('Parent/guardian name is required.');
-  if (!phone) errors.push('Phone is required.');
-  if (!isValidEmail(email)) errors.push('A valid email is required.');
-  if (!order_date) errors.push('Date is required.');
-  if (!embroidered_name) errors.push('Name to be embroidered is required.');
-  if (!jacket_size) errors.push('Jacket size is required.');
-  if (!payment_method) errors.push('Payment method is required.');
-  if (!amount_enclosed) errors.push('Amount enclosed is required.');
-  if (!parent_signature) errors.push('Parent/guardian signature is required.');
-  if (!parent_sign_date) errors.push('Parent/guardian signature date is required.');
-  if (!student_signature) errors.push('Student signature is required.');
-  if (!student_sign_date) errors.push('Student signature date is required.');
-
-  return {
-    ok: errors.length === 0,
-    errors,
-    data: {
-      student_name,
-      grade,
-      parent_name,
-      phone,
-      email,
-      order_date,
-      embroidered_name,
-      second_embroidery,
-      jacket_size,
-      payment_method,
-      amount_enclosed,
-      parent_signature,
-      parent_sign_date,
-      student_signature,
-      student_sign_date,
-    },
-  };
+  for (const field of form.fields) {
+    if (!LETTERMAN_INPUT_TYPES.includes(field.type)) continue;
+    let value = fieldValue(payload, field);
+    if (field.price_from && !value) value = priceForJacketSize(form, payload.jacket_size || data.jacket_size);
+    data[field.id] = value;
+    if (field.required && !value) {
+      errors.push(`${field.label || 'This field'} is required.`);
+      continue;
+    }
+    if (field.type === 'email' && value && !isValidEmail(value)) {
+      errors.push('A valid email is required.');
+    }
+  }
+  return { ok: errors.length === 0, errors, data };
 }
 
 export function buildLettermanPdfLines(data = {}, { submittedAt = '', copy = DEFAULT_LETTERMAN_FORM } = {}) {
@@ -155,44 +345,23 @@ export function buildLettermanPdfLines(data = {}, { submittedAt = '', copy = DEF
     hour: 'numeric',
     minute: '2-digit',
   });
-  return [
-    form.heading,
-    form.title,
-    `Submitted: ${submitted} ET`,
-    '',
-    form.student_section,
-    `Student name: ${data.student_name || '—'}`,
-    `Grade: ${data.grade || '—'}`,
-    `Parent/Guardian: ${data.parent_name || '—'}`,
-    `Phone: ${data.phone || '—'}`,
-    `Email: ${data.email || '—'}`,
-    `Date: ${data.order_date || '—'}`,
-    `Name to be embroidered: ${data.embroidered_name || '—'}`,
-    `Second embroidery line: ${data.second_embroidery || '—'}`,
-    '',
-    form.jacket_section,
-    `Jacket size: ${data.jacket_size || '—'}`,
-    `${form.pricing_s_xl_label}: ${form.pricing_s_xl}`,
-    `${form.pricing_2xl_label}: ${form.pricing_2xl}`,
-    `${form.pricing_3xl_label}: ${form.pricing_3xl}`,
-    '',
-    form.payment_section,
-    `Payment method: ${data.payment_method || '—'}`,
-    `Amount enclosed: ${data.amount_enclosed || '—'}`,
-    form.payment_note,
-    '',
-    'Acknowledgment',
-    form.acknowledgment,
-    `Parent/Guardian signature: ${data.parent_signature || '—'}  Date: ${data.parent_sign_date || '—'}`,
-    `Student signature: ${data.student_signature || '—'}  Date: ${data.student_sign_date || '—'}`,
-    '',
-    form.return_heading,
-    form.return_name,
-    `Deadline: ${form.deadline}`,
-    form.questions,
-    '',
-    form.thank_you,
-  ];
+  const lines = [form.heading, form.title, `Submitted: ${submitted} ET`, ''];
+  for (const field of form.fields) {
+    if (field.type === 'heading') {
+      lines.push('', field.label, '');
+      continue;
+    }
+    if (field.type === 'note') {
+      if (field.text) lines.push(field.text);
+      continue;
+    }
+    if (field.type === 'pricing') {
+      for (const item of field.items) lines.push(`${item.label}: ${item.price}`);
+      continue;
+    }
+    lines.push(`${field.label}: ${data[field.id] || '—'}`);
+  }
+  return lines;
 }
 
 export function buildLettermanPdfBase64(data = {}, options = {}) {
@@ -202,31 +371,29 @@ export function buildLettermanPdfBase64(data = {}, options = {}) {
   });
 }
 
+function orderTitle(data = {}, form = DEFAULT_LETTERMAN_FORM) {
+  return data.student_name
+    || data[form.fields.find((item) => item.type === 'text' && item.required)?.id]
+    || 'Order';
+}
+
 export function buildLettermanEmail({ data, siteTitle = 'East Forsyth Band', copy = DEFAULT_LETTERMAN_FORM }) {
   const form = normalizeLettermanFormCopy(copy);
-  const subject = `Letterman jacket order: ${data.student_name || 'Student'}`;
+  const subject = `${form.title}: ${orderTitle(data, form)}`;
   const text = [
-    `A new letterman jacket order was submitted on the ${siteTitle} website.`,
+    `A new ${form.title.toLowerCase()} was submitted on the ${siteTitle} website.`,
     '',
     ...buildLettermanPdfLines(data, { copy: form }),
     '',
     'The completed form is attached as a PDF.',
   ].join('\n');
-  const html = `<p>A new letterman jacket order was submitted on the ${escapeHtml(siteTitle)} website.</p>
+  const rows = form.fields
+    .filter((field) => LETTERMAN_INPUT_TYPES.includes(field.type))
+    .map((field) => emailRow(field.label, data[field.id]))
+    .join('');
+  const html = `<p>A new ${escapeHtml(form.title.toLowerCase())} was submitted on the ${escapeHtml(siteTitle)} website.</p>
 <table style="border-collapse:collapse;width:100%;max-width:560px;font-family:Georgia,serif;font-size:15px;color:#10233c">
-  ${emailRow('Student', data.student_name)}
-  ${emailRow('Grade', data.grade)}
-  ${emailRow('Parent/Guardian', data.parent_name)}
-  ${emailRow('Phone', data.phone)}
-  ${emailRow('Email', data.email)}
-  ${emailRow('Date', data.order_date)}
-  ${emailRow('Name to be embroidered', data.embroidered_name)}
-  ${emailRow('Second embroidery line', data.second_embroidery || '—')}
-  ${emailRow('Jacket size', data.jacket_size)}
-  ${emailRow('Payment method', data.payment_method)}
-  ${emailRow('Amount enclosed', data.amount_enclosed)}
-  ${emailRow('Parent/Guardian signature', `${data.parent_signature || '—'} (${data.parent_sign_date || '—'})`)}
-  ${emailRow('Student signature', `${data.student_signature || '—'} (${data.student_sign_date || '—'})`)}
+  ${rows}
 </table>
 <p>The completed form is attached as a PDF.</p>`;
   return { subject, text, html };
@@ -236,75 +403,62 @@ function emailRow(label, value) {
   return `<tr><th align="left" style="padding:8px 10px 8px 0;border-bottom:1px solid #e1e8f1;width:38%;color:#014990">${escapeHtml(label)}</th><td style="padding:8px 0;border-bottom:1px solid #e1e8f1">${escapeHtml(value || '—')}</td></tr>`;
 }
 
+function renderFieldHtml(field) {
+  const full = field.full ? ' full' : '';
+  const required = field.required ? ' required' : '';
+  const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
+  const autocomplete = field.autocomplete ? ` autocomplete="${escapeHtml(field.autocomplete)}"` : '';
+  const optional = field.optional ? ' <span class="muted">(optional)</span>' : '';
+  if (field.type === 'heading') {
+    return `<h3 class="full letterman-section">${escapeHtml(field.label)}</h3>`;
+  }
+  if (field.type === 'note') {
+    const cls = [
+      'full',
+      'letterman-note',
+      field.emphasize ? 'letterman-note-strong' : '',
+      field.italic ? 'letterman-thanks' : '',
+      field.id === 'acknowledgment' ? 'letterman-ack' : '',
+      field.id === 'payment_note' ? 'muted' : '',
+    ].filter(Boolean).join(' ');
+    const body = field.emphasize ? `<b>${escapeHtml(field.text)}</b>` : field.italic ? `<em>${escapeHtml(field.text)}</em>` : escapeHtml(field.text);
+    return `<p class="${cls}">${body}</p>`;
+  }
+  if (field.type === 'pricing') {
+    const items = field.items.map((item) => (
+      `<div data-letterman-price data-price-sizes="${escapeHtml(item.sizes)}"><span>${escapeHtml(item.label)}</span><b>${escapeHtml(item.price)}</b></div>`
+    )).join('');
+    return `<div class="full letterman-pricing" data-letterman-pricing>${items}</div>`;
+  }
+  if (field.type === 'choice') {
+    const options = field.options.map((option) => (
+      `<label class="letterman-choice"><input type="radio" name="${escapeHtml(field.id)}" value="${escapeHtml(option)}"${required}> ${escapeHtml(option)}</label>`
+    )).join('');
+    return `<fieldset class="full letterman-choices">
+    <legend>${escapeHtml(field.label)}</legend>
+    <div class="letterman-choice-row">${options}</div>
+  </fieldset>`;
+  }
+  if (field.type === 'textarea') {
+    return `<label class="${full.trim() || 'full'}">${escapeHtml(field.label)}${optional}
+    <textarea name="${escapeHtml(field.id)}" rows="4" maxlength="800"${required}${placeholder}></textarea>
+  </label>`;
+  }
+  const inputType = field.type === 'date' ? 'date' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text';
+  const priceAttr = field.price_from ? ' data-letterman-amount' : '';
+  const max = field.type === 'date' ? '' : field.type === 'phone' ? ' maxlength="40"' : ' maxlength="160"';
+  return `<label class="${full.trim()}">${escapeHtml(field.label)}${optional}
+    <input name="${escapeHtml(field.id)}" type="${inputType}"${required}${max}${placeholder}${autocomplete}${priceAttr}>
+  </label>`;
+}
+
 export function renderLettermanFormHtml(copy = DEFAULT_LETTERMAN_FORM) {
   const form = normalizeLettermanFormCopy(copy);
-  const sizeOptions = JACKET_SIZES.map((size) => (
-    `<label class="letterman-choice"><input type="radio" name="jacket_size" value="${escapeHtml(size)}" required> ${escapeHtml(size)}</label>`
-  )).join('');
-  const payOptions = PAYMENT_METHODS.map((method) => (
-    `<label class="letterman-choice"><input type="radio" name="payment_method" value="${escapeHtml(method)}" required> ${escapeHtml(method)}</label>`
-  )).join('');
   return `<form class="inkind-form letterman-form form-grid" data-letterman-form novalidate>
-  <h3 class="full letterman-section">${escapeHtml(form.student_section)}</h3>
-  <label class="full">Student name
-    <input name="student_name" required maxlength="160" autocomplete="name">
-  </label>
-  <label>Grade
-    <input name="grade" required maxlength="20" placeholder="9, 10, 11, or 12">
-  </label>
-  <label>Date
-    <input name="order_date" type="date" required>
-  </label>
-  <label class="full">Parent/Guardian name
-    <input name="parent_name" required maxlength="160" autocomplete="name">
-  </label>
-  <label>Phone
-    <input name="phone" type="tel" required maxlength="40" autocomplete="tel">
-  </label>
-  <label>Email
-    <input name="email" type="email" required maxlength="160" autocomplete="email">
-  </label>
-  <label class="full">Name to be embroidered
-    <input name="embroidered_name" required maxlength="160" placeholder="First and last name, first name, or nickname">
-  </label>
-  <label class="full">Second embroidery line <span class="muted">(optional)</span>
-    <input name="second_embroidery" maxlength="160" placeholder="Instrument or section, graduation year">
-  </label>
-  <h3 class="full letterman-section">${escapeHtml(form.jacket_section)}</h3>
-  <fieldset class="full letterman-choices">
-    <legend>${escapeHtml(form.jacket_size_label)}</legend>
-    <div class="letterman-choice-row">${sizeOptions}</div>
-  </fieldset>
-  <div class="full letterman-pricing" data-letterman-pricing>
-    <div><span>${escapeHtml(form.pricing_s_xl_label)}</span><b data-price-s-xl>${escapeHtml(form.pricing_s_xl)}</b></div>
-    <div><span>${escapeHtml(form.pricing_2xl_label)}</span><b data-price-2xl>${escapeHtml(form.pricing_2xl)}</b></div>
-    <div><span>${escapeHtml(form.pricing_3xl_label)}</span><b data-price-3xl>${escapeHtml(form.pricing_3xl)}</b></div>
-  </div>
-  <h3 class="full letterman-section">${escapeHtml(form.payment_section)}</h3>
-  <fieldset class="full letterman-choices">
-    <legend>Payment method</legend>
-    <div class="letterman-choice-row">${payOptions}</div>
-  </fieldset>
-  <label>Amount enclosed
-    <input name="amount_enclosed" required maxlength="40" data-letterman-amount placeholder="$52.00">
-  </label>
-  <p class="full muted">${escapeHtml(form.payment_note)}</p>
-  <p class="full letterman-ack">${escapeHtml(form.acknowledgment)}</p>
-  <label>Parent/Guardian signature
-    <input name="parent_signature" required maxlength="160" placeholder="Type full name">
-  </label>
-  <label>Date
-    <input name="parent_sign_date" type="date" required>
-  </label>
-  <label>Student signature
-    <input name="student_signature" required maxlength="160" placeholder="Type full name">
-  </label>
-  <label>Date
-    <input name="student_sign_date" type="date" required>
-  </label>
+  ${form.fields.map(renderFieldHtml).join('\n  ')}
   <p class="full inkind-honeypot" hidden><label>Company<input name="company" tabindex="-1" autocomplete="off"></label></p>
   <div class="full inkind-form-actions">
-    <button class="btn primary" type="submit">Submit order</button>
+    <button class="btn primary" type="submit">${escapeHtml(form.submit_label)}</button>
     <p class="status" data-letterman-status aria-live="polite"></p>
   </div>
 </form>`;
@@ -320,13 +474,6 @@ export function renderLettermanPageBody(page = {}, copy = DEFAULT_LETTERMAN_FORM
     <h2>${escapeHtml(form.title)}</h2>
     <p data-letterman-intro>${escapeHtml(form.intro)}</p>
     ${renderLettermanFormHtml(form)}
-    <aside class="letterman-return">
-      <h3>${escapeHtml(form.return_heading)}</h3>
-      <p><b>${escapeHtml(form.return_name)}</b></p>
-      <p>Deadline: ${escapeHtml(form.deadline)}</p>
-      <p>${escapeHtml(form.questions)}</p>
-      <p class="letterman-thanks"><em>${escapeHtml(form.thank_you)}</em></p>
-    </aside>
   </article>
 </div></section>`;
 }

@@ -5068,7 +5068,51 @@ body.cms-caldev-editor-open .admin-workspace{
 .letterman-pricing{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:4px 0 8px}
 .letterman-pricing div{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #e0e6ee;border-radius:14px;background:#f7f9fc}
 .letterman-pricing span{font-weight:700;color:var(--muted);font-size:.92rem}
-.letterman-ack,.letterman-return{margin:8px 0 0}
+.letterman-ack,.letterman-return,.letterman-note{margin:8px 0 0}
 .letterman-return{padding-top:18px;border-top:1px solid #e0e6ee}
+.letterman-note-strong{font-weight:800;color:var(--navy)}
 .letterman-thanks{margin-top:12px}
 @media(max-width:700px){.letterman-pricing{grid-template-columns:1fr}}
+.letterman-builder-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px;margin:8px 0 0}
+.letterman-builder-head h3{margin:0 0 4px}
+.letterman-builder-add{display:flex;flex-wrap:wrap;align-items:end;gap:10px}
+.letterman-add-type{min-width:180px}
+.letterman-field-list{display:grid;gap:12px}
+.letterman-field-row{
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr);
+  gap:12px;
+  align-items:start;
+  padding:14px;
+  border:1px solid #e1e8f1;
+  border-radius:16px;
+  background:#f8fafc;
+}
+.letterman-field-row.is-dragging{opacity:.55}
+.letterman-field-row.is-drop-target{outline:2px solid #014990;outline-offset:2px}
+.letterman-field-row .drag-handle{
+  display:inline-grid;
+  place-items:center;
+  width:28px;
+  min-height:36px;
+  margin-top:22px;
+  padding:0;
+  border:1px solid #d5deea;
+  border-radius:10px;
+  background:#fff;
+  color:#5b6f88;
+  font-weight:900;
+  letter-spacing:-.08em;
+  cursor:grab;
+  user-select:none;
+}
+.letterman-field-edit{display:grid;gap:10px;min-width:0}
+.letterman-field-top{display:flex;flex-wrap:wrap;align-items:end;gap:12px}
+.letterman-field-top label{flex:1 1 160px}
+.letterman-field-top .checkline{flex:0 0 auto;align-self:center}
+.letterman-price-list{display:grid;gap:8px}
+.letterman-price-edit{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.8fr) minmax(0,1fr) auto;gap:8px;align-items:center}
+@media(max-width:800px){
+  .letterman-field-row{grid-template-columns:28px minmax(0,1fr)}
+  .letterman-price-edit{grid-template-columns:1fr}
+}

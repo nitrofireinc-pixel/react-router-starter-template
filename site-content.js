@@ -2205,13 +2205,16 @@ function bindLettermanForm(root = document) {
   form.dataset.bound = '1';
   const amount = form.querySelector('[data-letterman-amount]');
   const priceForSize = (size) => {
-    const key = String(size || '').toUpperCase();
-    if (key === '3XL') return form.closest('[data-letterman-copy]')?.querySelector('[data-price-3xl]')?.textContent?.trim() || '';
-    if (key === '2XL') return form.closest('[data-letterman-copy]')?.querySelector('[data-price-2xl]')?.textContent?.trim() || '';
-    if (key) return form.closest('[data-letterman-copy]')?.querySelector('[data-price-s-xl]')?.textContent?.trim() || '';
+    const key = String(size || '').trim().toUpperCase();
+    if (!key) return '';
+    const root = form.closest('[data-letterman-copy]') || form;
+    for (const item of root.querySelectorAll('[data-letterman-price]')) {
+      const sizes = String(item.dataset.priceSizes || '').split(/[\s,]+/).map((part) => part.trim().toUpperCase()).filter(Boolean);
+      if (sizes.includes(key)) return item.querySelector('b')?.textContent?.trim() || '';
+    }
     return '';
   };
-  form.querySelectorAll('input[name="jacket_size"]').forEach((input) => {
+  form.querySelectorAll('input[type="radio"]').forEach((input) => {
     input.addEventListener('change', () => {
       if (!amount) return;
       const next = priceForSize(input.value);

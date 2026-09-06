@@ -5190,28 +5190,226 @@ async function loadFormsPanel() {
   if (status) status.textContent = '';
 }
 
+const LETTERMAN_FIELD_TYPE_LABELS = {
+  heading: 'Section title',
+  text: 'Text field',
+  textarea: 'Long text',
+  date: 'Date',
+  email: 'Email',
+  phone: 'Phone',
+  choice: 'Multiple choice',
+  note: 'Note / paragraph',
+  pricing: 'Price list',
+};
+
+function lettermanFieldTypeOptions(selected = 'text') {
+  return Object.entries(LETTERMAN_FIELD_TYPE_LABELS).map(([value, label]) => (
+    `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`
+  )).join('');
+}
+
+function newLettermanFieldId() {
+  return `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function lettermanPricingEditor(items = []) {
+  const rows = (items.length ? items : [{ label: '', price: '', sizes: '' }]).map((item) => `
+    <div class="letterman-price-edit">
+      <input data-price-label maxlength="80" placeholder="Price title" value="${escapeHtml(item.label || '')}">
+      <input data-price-value maxlength="40" placeholder="$0.00" value="${escapeHtml(item.price || '')}">
+      <input data-price-sizes maxlength="80" placeholder="Sizes: S, M, L" value="${escapeHtml(item.sizes || '')}">
+      <button type="button" class="btn outline" data-remove-price>Remove</button>
+    </div>
+  `).join('');
+  return `<div class="letterman-price-list" data-for-type="pricing">${rows}<button type="button" class="btn outline" data-add-price>Add price</button></div>`;
+}
+
+function lettermanFieldRowHtml(field = {}) {
+  const type = field.type || 'text';
+  const isInput = ['text', 'textarea', 'date', 'email', 'phone', 'choice'].includes(type);
+  return `
+    <article class="letterman-field-row" data-field-id="${escapeHtml(field.id || newLettermanFieldId())}" draggable="true">
+      <button type="button" class="drag-handle" aria-label="Drag to reorder field" title="Drag to reorder">⋮⋮</button>
+      <div class="letterman-field-edit">
+        <div class="letterman-field-top">
+          <label>Type
+            <select data-field-type>${lettermanFieldTypeOptions(type)}</select>
+          </label>
+          <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-field-required${field.required ? ' checked' : ''}> Required</label>
+          <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-field-full${field.full ? ' checked' : ''}> Full width</label>
+          <button type="button" class="btn outline" data-remove-field>Remove</button>
+        </div>
+        <label data-for-type="label"${type === 'note' || type === 'pricing' ? ' hidden' : ''}>Field title
+          <input data-field-label maxlength="120" value="${escapeHtml(field.label || '')}" placeholder="Title visitors see">
+        </label>
+        <label data-for-type="placeholder"${isInput && type !== 'choice' && type !== 'date' ? '' : ' hidden'}>Placeholder
+          <input data-field-placeholder maxlength="120" value="${escapeHtml(field.placeholder || '')}">
+        </label>
+        <label data-for-type="options"${type === 'choice' ? '' : ' hidden'}>Choices
+          <input data-field-options maxlength="240" value="${escapeHtml((field.options || []).join(', '))}" placeholder="S, M, L, XL">
+        </label>
+        <label data-for-type="text"${type === 'note' ? '' : ' hidden'}>Note text
+          <textarea data-field-text rows="3" maxlength="800">${escapeHtml(field.text || '')}</textarea>
+        </label>
+        ${lettermanPricingEditor(field.items || [])}
+      </div>
+    </article>
+  `;
+}
+
+function lettermanFieldVisibility(row) {
+  const type = row.querySelector('[data-field-type]')?.value || 'text';
+  const isInput = ['text', 'textarea', 'date', 'email', 'phone', 'choice'].includes(type);
+  row.querySelectorAll('[data-field-required], [data-field-full]').forEach((input) => {
+    const wrap = input.closest('label');
+    if (wrap) wrap.hidden = !isInput;
+  });
+  const label = row.querySelector('[data-for-type="label"]');
+  if (label) label.hidden = type === 'note' || type === 'pricing';
+  const placeholder = row.querySelector('[data-for-type="placeholder"]');
+  if (placeholder) placeholder.hidden = !isInput || type === 'choice' || type === 'date';
+  const options = row.querySelector('[data-for-type="options"]');
+  if (options) options.hidden = type !== 'choice';
+  const text = row.querySelector('[data-for-type="text"]');
+  if (text) text.hidden = type !== 'note';
+  const pricing = row.querySelector('[data-for-type="pricing"]');
+  if (pricing) pricing.hidden = type !== 'pricing';
+}
+
+function readLettermanFieldRow(row) {
+  const type = row.querySelector('[data-field-type]')?.value || 'text';
+  const items = [...row.querySelectorAll('.letterman-price-edit')].map((item) => ({
+    label: item.querySelector('[data-price-label]')?.value || '',
+    price: item.querySelector('[data-price-value]')?.value || '',
+    sizes: item.querySelector('[data-price-sizes]')?.value || '',
+  })).filter((item) => item.label || item.price);
+  return {
+    id: row.dataset.fieldId,
+    type,
+    label: row.querySelector('[data-field-label]')?.value || '',
+    required: Boolean(row.querySelector('[data-field-required]')?.checked),
+    full: Boolean(row.querySelector('[data-field-full]')?.checked),
+    placeholder: row.querySelector('[data-field-placeholder]')?.value || '',
+    options: row.querySelector('[data-field-options]')?.value || '',
+    text: row.querySelector('[data-field-text]')?.value || '',
+    items,
+    price_from: row.dataset.fieldId === 'amount_enclosed',
+  };
+}
+
 function fillLettermanFormSettings(copy = {}) {
   const form = document.querySelector('#letterman-form-settings');
   if (!form) return;
-  const fields = [
-    'kicker', 'heading', 'title', 'intro', 'student_section', 'jacket_section', 'jacket_size_label',
-    'pricing_s_xl_label', 'pricing_s_xl', 'pricing_2xl_label', 'pricing_2xl', 'pricing_3xl_label',
-    'pricing_3xl', 'payment_section', 'payment_note', 'acknowledgment', 'return_heading',
-    'return_name', 'deadline', 'questions', 'thank_you',
-  ];
-  fields.forEach((name) => {
+  ['kicker', 'heading', 'title', 'intro', 'submit_label'].forEach((name) => {
     if (form.elements[name]) form.elements[name].value = copy[name] || '';
   });
+  const list = document.querySelector('#letterman-field-list');
+  if (!list) return;
+  const fields = Array.isArray(copy.fields) && copy.fields.length ? copy.fields : [];
+  list.innerHTML = fields.map(lettermanFieldRowHtml).join('') || '<p class="draft">No fields yet. Add a text field to start.</p>';
+  list.querySelectorAll('.letterman-field-row').forEach(lettermanFieldVisibility);
+  bindLettermanFieldList(list);
 }
 
 function lettermanFormSettingsPayload(form = document.querySelector('#letterman-form-settings')) {
   if (!form) return {};
-  const payload = {};
-  [...form.elements].forEach((el) => {
-    if (!el.name) return;
-    payload[el.name] = el.value;
+  return {
+    kicker: form.elements.kicker?.value || '',
+    heading: form.elements.heading?.value || '',
+    title: form.elements.title?.value || '',
+    intro: form.elements.intro?.value || '',
+    submit_label: form.elements.submit_label?.value || '',
+    fields: [...document.querySelectorAll('#letterman-field-list .letterman-field-row')].map(readLettermanFieldRow),
+  };
+}
+
+function bindLettermanFieldList(list) {
+  if (!list || list.dataset.bound === '1') {
+    list?.querySelectorAll('.letterman-field-row').forEach(lettermanFieldVisibility);
+    return;
+  }
+  list.dataset.bound = '1';
+  list.addEventListener('change', (event) => {
+    const row = event.target.closest('.letterman-field-row');
+    if (event.target.matches('[data-field-type]') && row) lettermanFieldVisibility(row);
   });
-  return payload;
+  list.addEventListener('click', (event) => {
+    const row = event.target.closest('.letterman-field-row');
+    if (event.target.closest('[data-remove-field]') && row) {
+      row.remove();
+      if (!list.querySelector('.letterman-field-row')) {
+        list.innerHTML = '<p class="draft">No fields yet. Add a text field to start.</p>';
+      }
+      return;
+    }
+    if (event.target.closest('[data-add-price]') && row) {
+      const wrap = row.querySelector('.letterman-price-list');
+      const button = wrap?.querySelector('[data-add-price]');
+      const html = lettermanPricingEditor([{ label: '', price: '', sizes: '' }]);
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      const newRow = temp.querySelector('.letterman-price-edit');
+      if (newRow && button) button.before(newRow);
+      return;
+    }
+    if (event.target.closest('[data-remove-price]')) {
+      event.target.closest('.letterman-price-edit')?.remove();
+    }
+  });
+  let dragId = null;
+  let allowRowDrag = false;
+  list.addEventListener('mousedown', (event) => {
+    allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+  });
+  list.addEventListener('touchstart', (event) => {
+    allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+  }, { passive: true });
+  list.addEventListener('dragstart', (event) => {
+    const row = event.target.closest('.letterman-field-row');
+    if (!row || (!allowRowDrag && !event.target.closest('.drag-handle'))) {
+      event.preventDefault();
+      return;
+    }
+    dragId = row.dataset.fieldId;
+    row.classList.add('is-dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', dragId);
+  });
+  list.addEventListener('dragend', () => {
+    allowRowDrag = false;
+    dragId = null;
+    list.querySelectorAll('.is-dragging, .is-drop-target').forEach((item) => {
+      item.classList.remove('is-dragging', 'is-drop-target');
+    });
+  });
+  list.addEventListener('dragover', (event) => {
+    const row = event.target.closest('.letterman-field-row');
+    if (!row) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (row.dataset.fieldId !== dragId) row.classList.add('is-drop-target');
+  });
+  list.addEventListener('dragleave', (event) => {
+    event.target.closest('.letterman-field-row')?.classList.remove('is-drop-target');
+  });
+  list.addEventListener('drop', (event) => {
+    const row = event.target.closest('.letterman-field-row');
+    if (!row) return;
+    event.preventDefault();
+    allowRowDrag = false;
+    row.classList.remove('is-drop-target');
+    const fromId = event.dataTransfer.getData('text/plain') || dragId;
+    const toId = row.dataset.fieldId;
+    if (!fromId || !toId || fromId === toId) return;
+    const rows = [...list.querySelectorAll('.letterman-field-row')];
+    const from = rows.find((item) => item.dataset.fieldId === fromId);
+    if (!from) return;
+    const fromIndex = rows.indexOf(from);
+    const toIndex = rows.indexOf(row);
+    if (fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex < toIndex) row.after(from);
+    else row.before(from);
+  });
 }
 
 function bindFormsSettingsForm() {
@@ -6112,6 +6310,29 @@ function bindLettermanFormSettings() {
   const form = document.querySelector('#letterman-form-settings');
   if (!form || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+  document.querySelector('#letterman-add-field')?.addEventListener('click', () => {
+    const list = document.querySelector('#letterman-field-list');
+    if (!list) return;
+    list.querySelector('.draft')?.remove();
+    const type = document.querySelector('#letterman-add-type')?.value || 'text';
+    const defaults = {
+      heading: { type: 'heading', label: 'New section' },
+      note: { type: 'note', text: 'New note' },
+      choice: { type: 'choice', label: 'New choice', options: ['Option 1', 'Option 2'], required: true, full: true },
+      pricing: { type: 'pricing', items: [{ label: 'New price', price: '$0.00', sizes: '' }] },
+      textarea: { type: 'textarea', label: 'New field', full: true },
+      date: { type: 'date', label: 'Date' },
+      email: { type: 'email', label: 'Email' },
+      phone: { type: 'phone', label: 'Phone' },
+      text: { type: 'text', label: 'New field' },
+    };
+    const field = { id: newLettermanFieldId(), ...(defaults[type] || defaults.text) };
+    list.insertAdjacentHTML('beforeend', lettermanFieldRowHtml(field));
+    const row = list.querySelector('.letterman-field-row:last-of-type');
+    if (row) lettermanFieldVisibility(row);
+    row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    row?.querySelector('[data-field-label], [data-field-text]')?.focus();
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#letterman-form-status');
