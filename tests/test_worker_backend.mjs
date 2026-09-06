@@ -1888,6 +1888,11 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(siteContent, /autoOpenCalendarDayToast/);
   assert.match(siteContent, /\/api\/calendar-events/);
   assert.match(siteContent, /data-month-calendar/);
+  const caldevSrc = readFileSync(join(root, 'caldev.js'), 'utf8');
+  assert.match(caldevSrc, /autoOpenLandingEvents/);
+  assert.match(caldevSrc, /findNextDayIsoWithEvents/);
+  assert.match(caldevSrc, /showCalendarDayToast/);
+  assert.match(caldevSrc, /America\/New_York/);
   assert.match(siteContent, /renderPhotoGallery/);
   assert.match(siteContent, /openPhotoLightbox/);
   assert.match(siteContent, /bindPhotoGalleries/);
