@@ -508,6 +508,10 @@ export function renderLettermanPageBody(page = {}, copy = DEFAULT_LETTERMAN_FORM
 </div></section>`;
 }
 
+export function renderLettermanDeadlineBanner() {
+  return `<div class="letterman-deadline-banner" data-letterman-deadline role="status">Deadline: Letterman Jacket Forms and Payments Due By September 8th! <a href="/letterman-jacket.html">Click Here</a> for order form!</div>`;
+}
+
 export const LETTERMAN_CMS_PAGE = {
   slug: 'letterman-jacket',
   path: '/letterman-jacket.html',

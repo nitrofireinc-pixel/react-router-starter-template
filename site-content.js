@@ -316,6 +316,18 @@ function ensurePublicBrandMark() {
   });
 }
 
+function ensureLettermanDeadlineBanner() {
+  const nav = document.querySelector('#site-nav');
+  if (!nav || document.querySelector('[data-letterman-deadline]')) return;
+  if (document.body?.classList.contains('admin-body') || document.querySelector('.cms-shell')) return;
+  const banner = document.createElement('div');
+  banner.className = 'letterman-deadline-banner';
+  banner.setAttribute('data-letterman-deadline', '');
+  banner.setAttribute('role', 'status');
+  banner.innerHTML = 'Deadline: Letterman Jacket Forms and Payments Due By September 8th! <a href="/letterman-jacket.html">Click Here</a> for order form!';
+  nav.insertAdjacentElement('afterend', banner);
+}
+
 function ensureSiteChrome(header, mount) {
   if (!header) return null;
   let chrome = document.querySelector('[data-site-chrome]');
@@ -745,6 +757,7 @@ function initMonthCalendars(allEvents) {
 }
 
 async function loadPublicContent() {
+  ensureLettermanDeadlineBanner();
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
   const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
@@ -2647,6 +2660,7 @@ function bindDuesButtons(root = document) {
 }
 
 ensurePublicBrandMark();
+ensureLettermanDeadlineBanner();
 hydrateMarqueeFromCache();
 bindSponsorChoiceButtons();
 bindInKindForm();
