@@ -176,6 +176,22 @@ test('sanitizeRichHtml preserves body photo width and float for CMS editing', ()
   assert.match(html, /width: 280px/);
 });
 
+test('CMS Fundraising page editor can insert and upload body photos', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(workerSrc, /data-rich-insert-photo/);
+  assert.match(workerSrc, /canEditPage\(auth\.user, 'fundraising'\)/);
+  assert.match(adminSrc, /function insertPhotoIntoPageBody/);
+  assert.match(adminSrc, /function showPagePhotoToast/);
+  assert.match(adminSrc, /function uploadAndInsertPagePhoto/);
+  assert.match(adminSrc, /data-rich-insert-photo/);
+  assert.match(adminSrc, /sortOrder: -600/);
+  assert.match(styles, /\.admin-page-photo-toast/);
+  assert.match(styles, /\.cms-photo-resize-handles/);
+});
+
 test('generateStructuredPageHtml preserves body photo inserts', () => {
   const html = generateStructuredPageHtml({
     layout: 'standard',
