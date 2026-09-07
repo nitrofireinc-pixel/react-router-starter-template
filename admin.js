@@ -18,6 +18,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/pages',
   '/api/admin/zernio/instagram',
   '/api/admin/zernio/instagram/settings',
+  '/api/admin/photos',
 ];
 
 let savedToastTimer = null;
@@ -1715,12 +1716,600 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
+function currentEditorPageSlug() {
+  const form = document.querySelector('#page-form');
+  return String(form?.elements?.original_slug?.value || form?.elements?.slug?.value || '').trim();
+}
+
+function canInsertPageBodyPhotos() {
+  return currentEditorPageSlug() === 'fundraising' && canEditPage('fundraising');
+}
+
+function syncPagePhotoToolbar() {
+  const button = document.querySelector('#rich-text-toolbar [data-rich-insert-photo]');
+  if (button) button.hidden = !canInsertPageBodyPhotos();
+}
+
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
   // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
+  syncPagePhotoToolbar();
+}
+
+function getActivePageRichField({ multilineOnly = false } = {}) {
+  const preview = document.querySelector('#page-preview');
+  if (!preview) return null;
+  const field = preview.querySelector('.cms-edit-rich.is-focused')
+    || preview.querySelector('.cms-edit-rich:focus')
+    || (document.activeElement?.closest?.('.cms-edit-rich') || null);
+  if (!field || !preview.contains(field)) return null;
+  if (multilineOnly && field.classList.contains('cms-edit-inline')) return null;
+  return field;
+}
+
+const pageRichSelection = { field: null, range: null, offset: null };
+
+function getCaretCharacterOffsetWithin(element) {
+  const selection = window.getSelection();
+  if (!element || !selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) return null;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(element);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function setCaretCharacterOffsetWithin(element, offset) {
+  if (!element) return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const target = Math.max(0, Number(offset) || 0);
+  let current = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode();
+  while (node) {
+    const next = current + node.textContent.length;
+    if (target <= next) {
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, target - current));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+    current = next;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function clearPageRichCaretMarks(root = null) {
+  const roots = root
+    ? [root]
+    : [...document.querySelectorAll('#page-preview .cms-edit-rich')];
+  roots.forEach((node) => {
+    node?.querySelectorAll?.('[data-cms-caret-mark]').forEach((mark) => mark.remove());
+  });
+}
+
+function placePageRichCaretMark(field) {
+  if (!field) return false;
+  clearPageRichCaretMarks(field);
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  if (!selection) return false;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    if (pageRichSelection.range) {
+      try {
+        selection.removeAllRanges();
+        selection.addRange(pageRichSelection.range);
+      } catch {
+        /* fall through */
+      }
+    } else if (pageRichSelection.offset != null) {
+      setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) return false;
+  const range = selection.getRangeAt(0);
+  range.collapse(true);
+  const mark = document.createElement('span');
+  mark.setAttribute('data-cms-caret-mark', '1');
+  mark.setAttribute('aria-hidden', 'true');
+  mark.style.cssText = 'display:inline-block;width:0;height:0;overflow:hidden;font-size:0;line-height:0;';
+  mark.appendChild(document.createTextNode('\u200b'));
+  range.insertNode(mark);
+  const after = document.createRange();
+  after.setStartAfter(mark);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
+  pageRichSelection.field = field;
+  return true;
+}
+
+function savePageRichSelection(field = getActivePageRichField()) {
+  pageRichSelection.field = field || null;
+  pageRichSelection.range = null;
+  pageRichSelection.offset = null;
+  if (!field) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!field.contains(range.commonAncestorContainer)) return;
+  try {
+    pageRichSelection.range = range.cloneRange();
+  } catch {
+    pageRichSelection.range = null;
+  }
+  pageRichSelection.offset = getCaretCharacterOffsetWithin(field);
+}
+
+function restorePageRichSelection() {
+  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  if (!field) return null;
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  const mark = field.querySelector('[data-cms-caret-mark]');
+  if (mark && selection) {
+    const range = document.createRange();
+    range.setStartBefore(mark);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    mark.remove();
+    return field;
+  }
+  let restored = false;
+  if (pageRichSelection.range && selection) {
+    try {
+      selection.removeAllRanges();
+      selection.addRange(pageRichSelection.range);
+      restored = field.contains(selection.anchorNode);
+    } catch {
+      restored = false;
+    }
+  }
+  if (!restored && pageRichSelection.offset != null) {
+    restored = setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+  }
+  if (!restored && selection) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  return field;
+}
+
+function insertHtmlAtCaret(field, html) {
+  if (!field || !html) return null;
+  restorePageRichSelection();
+  field.focus();
+  const selection = window.getSelection();
+  if (!selection) return null;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  let node = null;
+  try {
+    const frag = range.createContextualFragment(html);
+    node = frag.lastChild;
+    range.insertNode(frag);
+  } catch {
+    document.execCommand('insertHTML', false, html);
+    node = [...field.querySelectorAll('img.cms-body-photo')].pop() || null;
+  }
+  if (node) {
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(after);
+  }
+  savePageRichSelection(field);
+  return node;
+}
+
+function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
+  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  if (!field) return false;
+  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : 280;
+  const cleaned = sanitizeRichHtml(
+    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo cms-body-photo-left" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
+  );
+  if (!cleaned || !/<img\b/i.test(cleaned)) return false;
+  const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
+  const insertedNode = insertHtmlAtCaret(field, html);
+  const inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+    ? insertedNode
+    : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  syncFieldFromPreview(field);
+  if (inserted) selectPageBodyPhoto(inserted);
+  savePageRichSelection(field);
+  return Boolean(inserted || html);
+}
+
+const pagePhotoResize = {
+  img: null,
+  dragging: false,
+  handle: 'se',
+  startX: 0,
+  startWidth: 0,
+};
+
+let pagePhotoToastLeaveTimer = null;
+
+function ensurePagePhotoResizeHandles() {
+  let root = document.querySelector('#cms-photo-resize-handles');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'cms-photo-resize-handles';
+  root.className = 'cms-photo-resize-handles';
+  root.hidden = true;
+  root.innerHTML = `
+    <div class="cms-photo-resize-toolbar">
+      <button type="button" class="cms-photo-delete-btn" data-photo-delete>Delete photo</button>
+    </div>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="nw" aria-label="Resize from top left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="ne" aria-label="Resize from top right"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="sw" aria-label="Resize from bottom left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="se" aria-label="Resize from bottom right"></button>
+  `;
+  document.body.appendChild(root);
+  root.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.querySelector('[data-photo-delete]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedPageBodyPhoto();
+  });
+  root.querySelectorAll('[data-photo-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (!pagePhotoResize.img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const img = pagePhotoResize.img;
+      pagePhotoResize.dragging = true;
+      pagePhotoResize.handle = handle.dataset.photoHandle || 'se';
+      pagePhotoResize.startX = event.clientX;
+      pagePhotoResize.startWidth = img.getBoundingClientRect().width || Number.parseFloat(img.style.width) || 280;
+      try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    });
+  });
+  window.addEventListener('pointermove', (event) => {
+    if (!pagePhotoResize.dragging || !pagePhotoResize.img) return;
+    event.preventDefault();
+    const img = pagePhotoResize.img;
+    const editor = img.closest('.cms-edit-rich');
+    const maxWidth = Math.max(120, Math.floor((editor?.clientWidth || 640) - 16));
+    const delta = event.clientX - pagePhotoResize.startX;
+    const outward = /e$/i.test(pagePhotoResize.handle || 'se') ? delta : -delta;
+    const next = Math.max(80, Math.min(maxWidth, Math.round(pagePhotoResize.startWidth + outward)));
+    img.style.width = `${next}px`;
+    img.style.height = 'auto';
+    img.setAttribute('data-photo-width', String(next));
+    positionPageBodyPhotoResizeHandles();
+  }, { passive: false });
+  window.addEventListener('pointerup', () => {
+    if (!pagePhotoResize.dragging) return;
+    pagePhotoResize.dragging = false;
+    const field = pagePhotoResize.img?.closest?.('.cms-edit-rich');
+    if (field) syncFieldFromPreview(field);
+    positionPageBodyPhotoResizeHandles();
+  });
+  window.addEventListener('scroll', () => positionPageBodyPhotoResizeHandles(), true);
+  window.addEventListener('resize', () => positionPageBodyPhotoResizeHandles());
+  return root;
+}
+
+function deleteSelectedPageBodyPhoto() {
+  const img = pagePhotoResize.img;
+  const field = img?.closest?.('.cms-edit-rich');
+  if (!img || !field) return false;
+  img.remove();
+  clearPageBodyPhotoSelection();
+  syncFieldFromPreview(field);
+  field.focus();
+  savePageRichSelection(field);
+  return true;
+}
+
+function clearPageBodyPhotoSelection() {
+  document.querySelectorAll('#page-preview img.cms-body-photo.is-selected').forEach((img) => {
+    img.classList.remove('is-selected');
+  });
+  pagePhotoResize.img = null;
+  pagePhotoResize.dragging = false;
+  const handles = document.querySelector('#cms-photo-resize-handles');
+  if (handles) {
+    handles.hidden = true;
+    handles.setAttribute('hidden', '');
+  }
+}
+
+function positionPageBodyPhotoResizeHandles() {
+  const root = ensurePagePhotoResizeHandles();
+  const img = pagePhotoResize.img;
+  if (!img || !document.body.contains(img) || !document.querySelector('#page-preview')?.contains(img)) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  const rect = img.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  root.hidden = false;
+  root.removeAttribute('hidden');
+  root.style.left = `${Math.round(rect.left)}px`;
+  root.style.top = `${Math.round(rect.top)}px`;
+  root.style.width = `${Math.round(rect.width)}px`;
+  root.style.height = `${Math.round(rect.height)}px`;
+}
+
+function selectPageBodyPhoto(img) {
+  if (!img) return;
+  const preview = document.querySelector('#page-preview');
+  const field = img.closest('.cms-edit-rich');
+  if (!preview || !field || !preview.contains(img)) return;
+  if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
+  if (!img.classList.contains('cms-body-photo-left')
+    && !img.classList.contains('cms-body-photo-right')
+    && !img.classList.contains('cms-body-photo-block')) {
+    img.classList.add('cms-body-photo-left');
+  }
+  ensurePagePhotoResizeHandles();
+  preview.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
+    if (node !== img) node.classList.remove('is-selected');
+  });
+  img.classList.add('is-selected');
+  pagePhotoResize.img = img;
+  const applyWidth = () => {
+    if (pagePhotoResize.img !== img) return;
+    const measured = Math.round(img.getBoundingClientRect().width);
+    const existing = Number.parseFloat(img.style.width || img.getAttribute('data-photo-width') || '');
+    const width = Number.isFinite(existing) && existing > 0 ? existing : measured;
+    if (width > 0) {
+      img.style.width = `${width}px`;
+      img.style.height = 'auto';
+      img.setAttribute('data-photo-width', String(width));
+    }
+    positionPageBodyPhotoResizeHandles();
+  };
+  if (img.complete && img.naturalWidth) applyWidth();
+  else img.addEventListener('load', applyWidth, { once: true });
+  applyWidth();
+  requestAnimationFrame(() => positionPageBodyPhotoResizeHandles());
+}
+
+function bindPageBodyPhotoResize() {
+  if (document.documentElement.dataset.pageBodyPhotoResizeBound === '1') return;
+  document.documentElement.dataset.pageBodyPhotoResizeBound = '1';
+  const isPhotoTarget = (preview, node) => {
+    const img = node?.closest?.('img.cms-body-photo, img');
+    if (!img || !preview?.contains(img)) return null;
+    if (!(img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) return null;
+    return img.tagName === 'IMG' ? img : img.querySelector('img');
+  };
+  const onSelectPointer = (event) => {
+    if (!canInsertPageBodyPhotos()) return;
+    if (event.target.closest?.('#cms-photo-resize-handles')) return;
+    const preview = document.querySelector('#page-preview');
+    if (!preview) return;
+    const target = isPhotoTarget(preview, event.target);
+    if (target) {
+      event.preventDefault();
+      const field = target.closest('.cms-edit-rich');
+      field?.classList.add('is-focused');
+      selectPageBodyPhoto(target);
+      savePageRichSelection(field);
+      setRichToolbarVisible(true);
+      return;
+    }
+    if (!event.target.closest?.('#cms-photo-resize-handles')) {
+      clearPageBodyPhotoSelection();
+    }
+  };
+  document.addEventListener('pointerdown', onSelectPointer, true);
+  document.addEventListener('dragstart', (event) => {
+    if (event.target?.closest?.('img.cms-body-photo')) event.preventDefault();
+  });
+}
+
+function ensurePagePhotoToast() {
+  let root = document.querySelector('#admin-page-photo-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-page-photo-toast';
+  root.className = 'admin-page-photo-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-page-photo-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-page-photo-toast-backdrop" data-page-photo-dismiss aria-label="Close insert photo"></button>
+    <div class="admin-page-photo-toast-panel">
+      <div class="admin-page-photo-toast-card">
+        <h3 id="admin-page-photo-toast-title">Insert photo</h3>
+        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are compressed in your browser before upload. After insert, drag a corner to resize. Save the page to publish.</p>
+        <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
+        <label class="admin-page-photo-file">Upload image
+          <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
+        </label>
+        <div class="admin-page-photo-toast-actions">
+          <button class="btn primary" type="button" data-page-photo-upload>Upload &amp; insert</button>
+          <button class="btn outline" type="button" data-page-photo-dismiss>Cancel</button>
+        </div>
+        <p class="admin-page-photo-toast-status" data-page-photo-status aria-live="polite"></p>
+        <div class="admin-page-photo-picker" data-page-photo-picker></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-page-photo-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePagePhotoToast());
+  });
+  root.querySelector('[data-page-photo-upload]')?.addEventListener('click', () => uploadAndInsertPagePhoto());
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hidePagePhotoToast();
+  });
+  return root;
+}
+
+async function loadPagePhotoPickerList() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  const picker = root?.querySelector('[data-page-photo-picker]');
+  if (!picker) return;
+  picker.innerHTML = '<p class="draft">Loading photos…</p>';
+  try {
+    const photos = await jsonFetch('/api/photos');
+    const ordered = [...photos].sort((a, b) => (
+      Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      || Number(b.id || 0) - Number(a.id || 0)
+    ));
+    if (!ordered.length) {
+      picker.innerHTML = '<p class="draft">No gallery photos yet. Upload one above.</p>';
+      return;
+    }
+    picker.innerHTML = `
+      <p class="admin-page-photo-picker-label">Or choose an existing photo</p>
+      <div class="admin-page-photo-grid">
+        ${ordered.map((photo) => `
+          <button type="button" class="admin-page-photo-thumb" data-page-photo-pick="${escapeAttr(photo.url)}" data-page-photo-alt="${escapeAttr(photo.alt_text || plainTextFromHtml(photo.caption) || 'Photo')}" title="${escapeAttr(plainTextFromHtml(photo.caption) || photo.original_name || 'Photo')}">
+            <img src="${escapeAttr(photo.url)}" alt="${escapeAttr(photo.alt_text || 'Photo')}">
+          </button>
+        `).join('')}
+      </div>`;
+    picker.querySelectorAll('[data-page-photo-pick]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const altInput = root.querySelector('[name="page_photo_alt"]');
+        const alt = String(altInput?.value || button.dataset.pagePhotoAlt || 'Photo').trim() || 'Photo';
+        if (insertPhotoIntoPageBody(button.dataset.pagePhotoPick, alt)) hidePagePhotoToast();
+      });
+    });
+  } catch (error) {
+    picker.innerHTML = `<p class="draft">Could not load photos: ${escapeHtml(error.message || 'error')}</p>`;
+  }
+}
+
+async function showPagePhotoToast() {
+  if (!canInsertPageBodyPhotos()) {
+    alert('Photo insert is available on the Fundraising page.');
+    return;
+  }
+  const preferred = getActivePageRichField({ multilineOnly: true });
+  savePageRichSelection(preferred);
+  if (!pageRichSelection.field) {
+    alert('Click into the Fundraising body text, then choose Photo.');
+    return;
+  }
+  placePageRichCaretMark(pageRichSelection.field);
+  const root = ensurePagePhotoToast();
+  const status = root.querySelector('[data-page-photo-status]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  if (status) status.textContent = '';
+  if (altInput) altInput.value = '';
+  if (fileInput) fileInput.value = '';
+  window.clearTimeout(pagePhotoToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  await loadPagePhotoPickerList();
+  window.setTimeout(() => altInput?.focus(), 40);
+}
+
+function hidePagePhotoToast() {
+  const markedField = pageRichSelection.field;
+  if (markedField?.querySelector?.('[data-cms-caret-mark]')) {
+    restorePageRichSelection();
+  } else {
+    clearPageRichCaretMarks();
+  }
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(pagePhotoToastLeaveTimer);
+  pagePhotoToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
+async function uploadAndInsertPagePhoto() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root) return;
+  const status = root.querySelector('[data-page-photo-status]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = 'Choose an image file to upload.';
+    return;
+  }
+  const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
+  if (status) {
+    status.textContent = Number(file.size || 0) > GALLERY_UPLOAD_MAX_BYTES
+      ? 'Compressing image…'
+      : 'Uploading…';
+  }
+  try {
+    const uploadFile = await prepareImageFileForUpload(file, 'page photo');
+    if (status && uploadFile !== file) {
+      status.textContent = `Uploading compressed image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
+    } else if (status) {
+      status.textContent = 'Uploading…';
+    }
+    const stored = await uploadPreparedGalleryPhoto({
+      file: uploadFile,
+      altText: alt,
+      caption: alt,
+      sortOrder: -600,
+    });
+    if (!insertPhotoIntoPageBody(stored.url, stored.alt_text || alt)) {
+      if (status) status.textContent = 'Uploaded, but could not insert into the body. Click the body and try again.';
+      return;
+    }
+    hidePagePhotoToast();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not upload photo.';
+  }
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1756,6 +2345,7 @@ function syncPreviewFromForm() {
     if (isHome && preview.querySelector('[data-cms-home-field]')) {
       state.homeBodyHtml = serializeHomePreviewHtml(preview);
     }
+    clearPageBodyPhotoSelection();
     preview.innerHTML = buildEditablePagePreview(payload);
     const chip = document.querySelector('[data-page-layout-chip]');
     if (chip) chip.textContent = layoutChipLabel(payload.layout);
@@ -1865,14 +2455,31 @@ function bindPageVisualEditor() {
 
   preview.addEventListener('focusin', event => {
     const field = event.target.closest?.('.cms-edit-rich');
+    if (field) {
+      preview.querySelectorAll('.cms-edit-rich.is-focused').forEach((node) => {
+        if (node !== field) node.classList.remove('is-focused');
+      });
+      field.classList.add('is-focused');
+      savePageRichSelection(field);
+    }
     setRichToolbarVisible(Boolean(field));
+  });
+  preview.addEventListener('mouseup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
+  });
+  preview.addEventListener('keyup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
   });
   preview.addEventListener('focusout', event => {
     const next = event.relatedTarget;
-    if (next?.closest?.('#rich-text-toolbar')) return;
+    if (next?.closest?.('#rich-text-toolbar') || next?.closest?.('#admin-page-photo-toast')) return;
     setTimeout(() => {
       const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-      setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
+      const toolbarFocus = Boolean(document.activeElement?.closest?.('#rich-text-toolbar')
+        || document.activeElement?.closest?.('#admin-page-photo-toast'));
+      setRichToolbarVisible(Boolean(active) || toolbarFocus);
     }, 0);
   });
 
@@ -1919,6 +2526,11 @@ function bindPageVisualEditor() {
     if (field) syncFieldFromPreview(field);
     event.target.value = '';
   });
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('click', () => {
+    showPagePhotoToast();
+  });
+  bindPageBodyPhotoResize();
 
   document.querySelector('#add-page-callout')?.addEventListener('click', () => {
     const title = form.elements.callout_title;
@@ -2982,6 +3594,7 @@ function editPage(slug, { skipGuard = false } = {}) {
       const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
       if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
     }
+    syncPagePhotoToolbar();
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     syncPageSettingsAccess();
