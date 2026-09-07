@@ -70,17 +70,18 @@
   Public site: https://efhsband.org<br>
   Staff CMS: https://efhsband.org/admin<br>
   Document: Super Admin operations guide (PDF)<br>
-  Last updated: August 16, 2026
+  Last updated: September 7, 2026
 </p>
 
 <div class="warn">
   <p><b>Restricted document.</b> This PDF is available only to Super Admin accounts. Editors, officers with limited permissions, and the public cannot open it. The Dashboard <b>Website Guide</b> card appears only for Super Admins, and the download URL is blocked for everyone else.</p>
-  <p><b>Scope:</b> Matches production as of this date. Tools that are not live (for example Treasurer Ledger or a separate Gallery page) are omitted.</p>
+  <p><b>Scope:</b> Matches live production on <b>efhsband.org</b> as of this date (Cloudflare Worker <span class="mono">efhsband-live</span>). After a deploy, hard-refresh the CMS (<span class="mono">Ctrl+Shift+R</span>) so you are not looking at a cached toolbar or page.</p>
 </div>
 
 <h2>1. System overview</h2>
-<p>The East Forsyth Band website is a public community site plus a private Content Management System (CMS) at <span class="mono">/admin</span>. Production runs on Cloudflare Pages with a Worker backend and a D1 database. CMS sessions last <b>24 hours</b>. Content saved in the CMS publishes to the live public site.</p>
+<p>The East Forsyth Band website is a public community site plus a private Content Management System (CMS) at <span class="mono">/admin</span>. Production is a <b>Cloudflare Worker</b> (<span class="mono">efhsband-live</span>) with a D1 database — not Cloudflare Pages. CMS sessions last <b>24 hours</b>. Content saved in the CMS publishes to the live public site.</p>
 <p>As a Super Admin you can use every CMS tool, manage other users’ roles and permissions, open the Security Audit Log, preview the site during maintenance mode, and download this guide.</p>
+<p><b>View Site</b> on the CMS Dashboard opens the public homepage in the <b>same window</b> (not a new tab). Use the browser Back button to return to the CMS.</p>
 
 <h2>2. Roles</h2>
 <table>
@@ -95,7 +96,7 @@
 <h2>3. What every logged-in user can do</h2>
 <p>These items are available to <b>any active CMS account</b> (Editor or Super Admin), even with no extra permissions:</p>
 <ul>
-  <li><b>Dashboard</b> (permission-filtered cards)</li>
+  <li><b>Dashboard</b> (permission-filtered cards) and <b>View Site</b> (same window)</li>
   <li><b>Staff Email</b> — compose and send rich-text mail to CMS users (with attachments)</li>
   <li><b>Change Password</b> and <b>Log Out</b></li>
   <li><b>Calendar Events — view only</b> — browse events by month (‹ / This month / ›). Create, edit, and delete still require calendar permissions</li>
@@ -108,21 +109,22 @@
 <h3>4.1 Global permissions</h3>
 <table>
   <tr><th>Permission</th><th>Checkbox label</th><th>What the user can access</th></tr>
-  <tr><td><span class="mono">site</span></td><td>Site settings, home text, logo</td><td>Site Settings (title, hero, footer, logo, maintenance mode, utility links); Social Media (account links + Facebook/Zernio)</td></tr>
-  <tr><td><span class="mono">pages</span></td><td>Add/remove/manage all pages</td><td>Full page catalog, page settings (title, slug, path, layout, active), and edit any page body</td></tr>
+  <tr><td><span class="mono">site</span></td><td>Site settings, home text, logo</td><td>Site Settings (title, hero, footer, logo, maintenance mode, utility links, Boosters Pay dues toggle); Social Media (account links, Instagram gallery auto-post, Facebook/Zernio)</td></tr>
+  <tr><td><span class="mono">pages</span></td><td>Add/remove/manage all pages</td><td>Full page catalog, page settings, and edit any page body (including Fundraising photo insert)</td></tr>
   <tr><td><span class="mono">sponsors</span></td><td>Manage sponsors</td><td>Manage sponsors list (add/edit/delete/reorder, logos, tiers, fly-in timing, Gold PDF). Related page copy still needs page permissions if editing Sponsors / Become a Sponsor pages</td></tr>
-  <tr><td><span class="mono">contact</span></td><td>Manage contact form topics</td><td>Contact Form topics, delivery emails, delivery status, and Recent Messages history</td></tr>
+  <tr><td><span class="mono">contact</span></td><td>Manage contact form topics</td><td>Contact Form topics, CMS user recipients (multiple allowed), delivery emails, delivery status, and Recent Messages history</td></tr>
   <tr><td><span class="mono">staff</span></td><td>Manage directors &amp; staff</td><td>Directors &amp; Staff directory (photos, roles, bios, reorder)</td></tr>
   <tr><td><span class="mono">boosters</span></td><td>Manage booster members</td><td>Booster Members directory; may also help with Boosters page content</td></tr>
   <tr><td><span class="mono">users</span></td><td>Manage users</td><td>User Management — invite editors, set permissions, activate/disable, see last login. Cannot promote Super Admins unless the actor is Super Admin</td></tr>
   <tr><td><span class="mono">mail</span></td><td>Send mail to CMS users</td><td>Mail helper scope (Staff Email UI is already open to all logged-in users)</td></tr>
   <tr><td><span class="mono">events</span></td><td>Create calendar events (edit/delete your own)</td><td>Create events; edit/delete events they created (legacy unowned rows remain editable by calendar editors)</td></tr>
   <tr><td><span class="mono">events:manage</span></td><td>Manage all calendar events</td><td>Edit/delete any calendar event</td></tr>
-  <tr><td><span class="mono">photos</span></td><td>Upload/delete photos</td><td>Home photo gallery uploads, captions, alt text, reorder, delete</td></tr>
+  <tr><td><span class="mono">photos</span></td><td>Upload/delete photos</td><td>Photos tab: Home/Gallery uploads, captions, alt text, reorder, delete. Instagram auto-post when connected</td></tr>
   <tr><td><span class="mono">minutes</span></td><td>Meeting Minutes Secretary (add/edit)</td><td>Add Minutes, Upload .docx, and edit within the 10-day meeting-date window</td></tr>
-  <tr><td><span class="mono">treasurer</span></td><td>Treasurer (Square Checkout)</td><td>CMS Checkout tab (Square card charge)</td></tr>
-  <tr><td><span class="mono">president</span></td><td>President (Square Checkout)</td><td>CMS Checkout tab</td></tr>
-  <tr><td><span class="mono">vice-president</span></td><td>Vice President (Square Checkout)</td><td>CMS Checkout tab</td></tr>
+  <tr><td><span class="mono">forms</span></td><td>Forms (create, edit, and delete public forms)</td><td>Form Builder. Super Admin and President always have access; extra users can also be granted inside Form Builder settings</td></tr>
+  <tr><td><span class="mono">treasurer</span></td><td>Treasurer (Ledger + Square Checkout)</td><td>Ledger and Checkout</td></tr>
+  <tr><td><span class="mono">president</span></td><td>President (Ledger + Square Checkout)</td><td>Ledger, Checkout, Schedule Board, and Form Builder</td></tr>
+  <tr><td><span class="mono">vice-president</span></td><td>Vice President (Square Checkout)</td><td>Checkout and Schedule Board (not Ledger)</td></tr>
 </table>
 
 <div class="warn">
@@ -130,15 +132,16 @@
 </div>
 
 <h3>4.2 Page-level permissions</h3>
-<p>In addition to global scopes, User Management lists a checkbox per CMS page: <span class="mono">page:&lt;slug&gt;</span>. That grants visual editing of that page’s content without giving full <span class="mono">pages</span> management.</p>
+<p>In addition to global scopes, User Management lists a checkbox per CMS page: <span class="mono">page:&lt;slug&gt;</span>. That grants visual editing of that page’s content without giving full <span class="mono">pages</span> management. Built-in form pages (Letterman Jacket, custom Form Builder pages) and In-Kind are not listed as page checkboxes; they are managed under Forms.</p>
 <table>
   <tr><th>Page</th><th>Slug / permission</th><th>Public URL</th><th>Who typically edits</th></tr>
   <tr><td>Home</td><td><span class="mono">page:home</span></td><td>/</td><td>Super Admin or site/pages editors (hero text also ties to Site Settings)</td></tr>
-  <tr><td>Calendar</td><td><span class="mono">page:calendar</span></td><td>/calendar.html</td><td>Page editors for header/instructions; events themselves use Calendar Events permissions</td></tr>
+  <tr><td>Calendar</td><td><span class="mono">page:calendar</span></td><td>/calendar.html</td><td>Page editors for header/instructions; the live board is edited in Schedule Board</td></tr>
   <tr><td>Contact</td><td><span class="mono">page:contact</span></td><td>/contact.html</td><td>Page copy; topics/messages use <span class="mono">contact</span></td></tr>
-  <tr><td>Boosters</td><td><span class="mono">page:boosters</span></td><td>/boosters.html</td><td>Page intro/body; members use <span class="mono">boosters</span>; meetings come from Calendar Events</td></tr>
+  <tr><td>Boosters</td><td><span class="mono">page:boosters</span></td><td>/boosters.html</td><td>Page intro/body; members use <span class="mono">boosters</span>; meetings come from Schedule Board when What = Meetings</td></tr>
   <tr><td>Student Resources</td><td><span class="mono">page:resources</span></td><td>/resources.html</td><td>Page editors</td></tr>
-  <tr><td>Fundraising</td><td><span class="mono">page:fundraising</span></td><td>/fundraising.html</td><td>Page editors (Donate button is injected when present)</td></tr>
+  <tr><td>Fundraising</td><td><span class="mono">page:fundraising</span></td><td>/fundraising.html</td><td>Page editors — click body, then <b>Photo</b> on the Formatting bar to insert images</td></tr>
+  <tr><td>Gallery</td><td><span class="mono">page:gallery</span></td><td>/gallery.html</td><td>Page header/intro; photos themselves use the Photos tab</td></tr>
   <tr><td>Sponsors</td><td><span class="mono">page:sponsors</span></td><td>/sponsors.html</td><td>Page header/intro/callout; businesses use <span class="mono">sponsors</span></td></tr>
   <tr><td>Become a Sponsor</td><td><span class="mono">page:become-a-sponsor</span></td><td>/become-a-sponsor.html</td><td>Package cards and inquiry page copy</td></tr>
   <tr><td>Directors &amp; Staff</td><td><span class="mono">page:directors</span></td><td>/directors.html</td><td>Page text; directory people use <span class="mono">staff</span></td></tr>
@@ -150,13 +153,14 @@
 <table>
   <tr><th>Officer / role</th><th>Recommended permissions</th></tr>
   <tr><td>Site Administrator</td><td>Super Admin role (this guide + Security Log + all tools)</td></tr>
-  <tr><td>Treasurer</td><td><span class="mono">treasurer</span>; often also <span class="mono">sponsors</span></td></tr>
-  <tr><td>President</td><td><span class="mono">president</span>; add other scopes as needed</td></tr>
-  <tr><td>Vice President</td><td><span class="mono">vice-president</span>; add other scopes as needed</td></tr>
+  <tr><td>Treasurer</td><td><span class="mono">treasurer</span> (Ledger + Checkout); often also <span class="mono">sponsors</span></td></tr>
+  <tr><td>President</td><td><span class="mono">president</span> (Ledger + Checkout + Schedule Board + Form Builder); add other scopes as needed</td></tr>
+  <tr><td>Vice President</td><td><span class="mono">vice-president</span> (Checkout + Schedule Board)</td></tr>
   <tr><td>Minutes Secretary</td><td><span class="mono">minutes</span></td></tr>
-  <tr><td>Calendar editor</td><td><span class="mono">events</span> (or <span class="mono">events:manage</span> for full control)</td></tr>
+  <tr><td>Calendar editor</td><td><span class="mono">events</span> (or <span class="mono">events:manage</span> for full control). Schedule Board itself is Super Admin / President / Vice President</td></tr>
+  <tr><td>Forms editor</td><td><span class="mono">forms</span>, or grant the person inside Form Builder → Who can use Form Builder</td></tr>
   <tr><td>Sponsors coordinator</td><td><span class="mono">sponsors</span> + optionally <span class="mono">page:sponsors</span> / <span class="mono">page:become-a-sponsor</span></td></tr>
-  <tr><td>Photo manager</td><td><span class="mono">photos</span></td></tr>
+  <tr><td>Photo manager</td><td><span class="mono">photos</span> (+ <span class="mono">page:gallery</span> / <span class="mono">page:fundraising</span> if they also edit those pages)</td></tr>
   <tr><td>Contact coordinator</td><td><span class="mono">contact</span> + optionally <span class="mono">page:contact</span></td></tr>
   <tr><td>Staff directory editor</td><td><span class="mono">staff</span> or <span class="mono">page:directors</span></td></tr>
 </table>
@@ -176,7 +180,7 @@
 <ul>
   <li>Successful and failed logins (<span class="mono">login.failed</span> includes IP)</li>
   <li>Logouts</li>
-  <li>CMS mutations (pages, users, events, sponsors, staff, boosters, minutes, photos, contact topics, site settings, etc.)</li>
+  <li>CMS mutations (pages, users, events, sponsors, staff, boosters, minutes, photos, contact topics, forms, ledger, site settings, etc.)</li>
   <li>Staff Email sends (separate mail audit detail)</li>
   <li>Security log view / PDF export</li>
 </ul>
@@ -188,12 +192,12 @@
   <li><b>Website Guide</b> (this PDF) — Super Admin only</li>
   <li><b>Checkout</b> — Square officer payments</li>
   <li><b>Staff Email</b></li>
-  <li><b>Meeting Minutes</b></li>
-  <li>Sponsors tools, Directors &amp; Staff, Ensemble, Booster Members</li>
-  <li>Contact Form, User Management, Social Media, Calendar Events</li>
+  <li><b>Meeting Minutes</b>, Sponsors tools, Directors &amp; Staff, Ensemble, Booster Members</li>
+  <li><b>Ledger</b>, <b>Contact Form</b>, <b>Forms</b>, User Management, Social Media</li>
+  <li><b>Schedule Board</b> — public calendar drag-and-drop editor</li>
   <li><b>Security Log</b> — always pinned last</li>
 </ul>
-<p>Left nav mirrors those tools. Mobile uses the Menu bar with the same permission filtering.</p>
+<p>Left nav mirrors those tools. Mobile uses the Menu bar with the same permission filtering. <b>View Site</b> (top right of Dashboard) loads https://efhsband.org in the same window.</p>
 
 <h2>7. CMS tools (detailed)</h2>
 
@@ -204,6 +208,8 @@
 <h3>7.2 Pages (visual editor)</h3>
 <p><b>Who:</b> <span class="mono">pages</span> or <span class="mono">page:&lt;slug&gt;</span>.</p>
 <p>Live preview editing with bold/italic/underline/color/size. Super Admins / <span class="mono">pages</span> users can change page settings. Unsaved changes warn before leaving. Page shortcuts appear under Pages for site admins.</p>
+<p><b>Fundraising photos:</b> Open Fundraising, click into the body text, then click <b>Photo</b> on the Formatting bar (next to Size). Upload a new image or pick one from the gallery. The photo inserts at the cursor with text wrap. Drag a corner to resize, or use Delete photo. Click <b>Save Changes</b> to publish. Large images are compressed in the browser before upload. These body uploads stay out of the public Gallery grid.</p>
+<p>Fundraising saves can optionally email the fundraising subscriber list (Notify email list is on by default; turn it off for grammar-only edits).</p>
 
 <h3>7.3 Directors &amp; Staff</h3>
 <p><b>Who:</b> <span class="mono">staff</span> or directors page access.</p>
@@ -240,31 +246,57 @@
   <tr><td>Edit / delete any</td><td><span class="mono">events:manage</span> or Super Admin</td></tr>
 </table>
 <ul>
-  <li>CMS list is filtered by month with ‹ / This month / › controls. Public calendar is unchanged.</li>
-  <li>Supports rich titles/descriptions, repeating series, exceptions, and Boosters meeting placement (non-repeating only).</li>
-  <li>Past events remain in CMS but are hidden from the public Calendar (public shows a limited upcoming set).</li>
+  <li>CMS list is filtered by month with ‹ / This month / › controls.</li>
+  <li>Supports rich titles/descriptions, repeating series, exceptions, and Boosters meeting placement (non-repeating only). Prefer Schedule Board for day-to-day public calendar work.</li>
+  <li>Past events remain in CMS but are hidden from the public Calendar.</li>
   <li>Create/update/delete also triggers best-effort <b>Notify Me</b> browser push to opted-in visitors.</li>
   <li>View-only users see a note and no New event form; rows show View only instead of Edit/Delete.</li>
 </ul>
 
-<h3>7.8 Sponsors → Manage sponsors</h3>
+<h3>7.8 Schedule Board</h3>
+<p><b>Who:</b> Super Admin, President, or Vice President.</p>
+<p>This is the editor for the <b>public Calendar</b> at <span class="mono">/calendar.html</span> (month, week, and rundown views).</p>
+<ul>
+  <li>Single-click selects; double-click (or day <b>+</b>) opens Create/Edit Event.</li>
+  <li>Drag to reschedule (on phones: press-and-hold, then drag).</li>
+  <li>The track dropdown is labeled <b>What</b> (Games, Rehearsals, Meetings, Deadlines, Trips, Other) — not Who.</li>
+  <li>Events with What set to <b>Meetings</b> also appear on the public Boosters page.</li>
+  <li><b>Finished</b> emails calendar subscribers about the latest board.</li>
+  <li>On phones, the public header/nav scrolls away with the page, and the board stays inside the viewport.</li>
+</ul>
+
+<h3>7.9 Sponsors → Manage sponsors</h3>
 <p><b>Who:</b> <span class="mono">sponsors</span>.</p>
 <ul>
   <li>Add, edit, delete, reorder sponsors and logos</li>
   <li>Assign Bronze / Silver / Gold (marquee, fly-in, game-day recognition)</li>
   <li>Homepage fly-in timing</li>
-  <li>Print / download Gold sponsors PDF sheet</li>
+  <li>Print / download Gold sponsors PDF sheet (print stays in this page; no pop-up)</li>
 </ul>
 
-<h3>7.9 Checkout</h3>
+<h3>7.10 Checkout</h3>
 <p><b>Who:</b> <span class="mono">treasurer</span>, <span class="mono">president</span>, <span class="mono">vice-president</span>, or Super Admin.</p>
-<p>Key a Square card payment: payer/entity, description, amount (minimum $1.00), optional internal note. Card data stays with Square.</p>
+<p>Key a Square card payment: payer/entity, description, amount (minimum $1.00), optional internal note. Card data stays with Square. Super Admin can paste Square credentials on Checkout if Cloudflare secrets are missing on that host.</p>
 
-<h3>7.10 Contact Form</h3>
+<h3>7.11 Ledger</h3>
+<p><b>Who:</b> <span class="mono">treasurer</span>, <span class="mono">president</span>, or Super Admin (Vice President does <b>not</b> get Ledger).</p>
+<p>Record donors, sponsors, fundraisers, dues, and expenses. Choose cash or in-kind (fair-market value, no money exchanged). View the running list and download Excel/XML for books.</p>
+
+<h3>7.12 Contact Form</h3>
 <p><b>Who:</b> <span class="mono">contact</span> or Contact page access.</p>
-<p>Manage topics and destination emails; check delivery provider status; review Recent Messages (stored even if delivery fails). Clearing historical messages is an admin operations task (database cleanup), not an editor action.</p>
+<p>Manage topics and assign one or more CMS users as recipients (login emails). Check delivery provider status; review Recent Messages (stored even if delivery fails). Clearing historical messages is an admin operations task (database cleanup), not an editor action.</p>
+<p>On the <b>public</b> Contact page, Topic defaults to <b>General question</b> (or a topic labeled General Questions) when that topic exists, even if other topics sort first alphabetically. Rename the topic in this tab if you want the public wording to read “General Questions.”</p>
 
-<h3>7.11 User Management</h3>
+<h3>7.13 Forms (Form Builder)</h3>
+<p><b>Who:</b> Super Admin, President, users with <span class="mono">forms</span>, or extra users granted under Form Builder → Who can use Form Builder.</p>
+<ul>
+  <li>Create public forms (Jotform-style): add fields, click the canvas to edit, drag to reorder. The title becomes the public URL (for example Band Trip Form → <span class="mono">/band-trip-form.html</span>).</li>
+  <li>Built-in <b>Letterman Jacket</b> order form: <span class="mono">/letterman-jacket.html</span>. A red deadline banner appears under the site nav. Deposits are collected in the band room (not Square on that form).</li>
+  <li>Built-in <b>In-Kind Donation</b> form: <span class="mono">/in-kind.html</span> (not in the main nav). Completed PDFs email to the users selected under Email in-kind PDFs to. In-kind entries can also land on the Ledger.</li>
+  <li>Public Sponsor/In-Kind buttons open a toast: Sponsorship Tiers → Become a Sponsor; In-Kind → the in-kind form.</li>
+</ul>
+
+<h3>7.14 User Management</h3>
 <p><b>Who:</b> <span class="mono">users</span> (Super Admin for promoting admins).</p>
 <table>
   <tr><th>Field</th><th>Meaning</th></tr>
@@ -278,32 +310,35 @@
 </table>
 <p><b>Invite flow:</b> New user → email username, temporary password (min 8 chars), permissions → Send Invite / Save. Welcome email points to https://efhsband.org/admin when mail is configured.</p>
 
-<h3>7.12 Social Media</h3>
+<h3>7.15 Social Media</h3>
 <p><b>Who:</b> <span class="mono">site</span>.</p>
-<p>Add Instagram, YouTube, Facebook, X, and TikTok URLs for the footer social icons. Connect the band Facebook Page through Zernio to publish or schedule posts. Suggested calendar updates can be posted as one Facebook digest or ignored individually.</p>
+<p>Add Instagram, YouTube, Facebook, X, and TikTok URLs for the footer social icons. Connect the band Facebook Page through Zernio to publish or schedule posts. Suggested calendar updates can be posted as one Facebook digest or ignored individually. Connect Instagram to auto-post new <b>Gallery</b> photos (utility/staff/logo uploads with negative sort order are skipped).</p>
 
-<h3>7.13 Site Settings</h3>
+<h3>7.16 Site Settings</h3>
 <p><b>Who:</b> <span class="mono">site</span> (utility/home link editing may also allow pages or home page access).</p>
-<p>Site title, hero text, footer note, logo, maintenance mode, and top utility links. Social account links and Facebook publishing are managed under Social Media.</p>
+<p>Site title, hero text, footer note, logo, maintenance mode, top utility links, and whether Boosters shows the <b>Pay dues</b> card. Social account links, Instagram auto-post, and Facebook publishing are managed under Social Media.</p>
 <p><b>Maintenance mode:</b> Public visitors go to <span class="mono">/maintenance.html</span>. Super Admins can still open public pages and see a gold <b>Super Admin preview</b> banner. Non–super-admin staff are treated like the public.</p>
 
-<h3>7.14 Photos</h3>
+<h3>7.17 Photos</h3>
 <p><b>Who:</b> <span class="mono">photos</span>.</p>
-<p>Upload/edit/delete/reorder gallery photos (JPG, PNG, WEBP, GIF, SVG; ~2 MB server max / UI ~1.9 MB). Always include alt text. Staff photos and sponsor logos are excluded from the public Home gallery listing.</p>
+<p>Upload/edit/delete/reorder gallery photos (JPG, PNG, WEBP, GIF, SVG; ~2 MB server max / UI compresses to about 1.9 MB). Always include alt text. Staff photos, sponsor logos, and Fundraising body inserts use negative sort order and stay out of the public Home/Gallery grids. Multi-select upload is supported. New gallery photos can auto-post to Instagram when Social Media is connected.</p>
 
 <h2>8. Public website (what visitors see)</h2>
 <table>
   <tr><th>Page</th><th>URL</th><th>Notes</th></tr>
-  <tr><td>Home</td><td>/</td><td>Hero + Blue Regiment mark, Start Here cards, calendar highlights, photo gallery, booster cards, sponsor marquee, optional Silver/Gold fly-in</td></tr>
+  <tr><td>Home</td><td>/</td><td>Hero + Blue Regiment mark, Start Here cards, calendar highlights, photo gallery (newest 6), booster cards, sponsor marquee, optional Silver/Gold fly-in</td></tr>
   <tr><td>Ensembles</td><td>/ensembles.html</td><td>Program groups</td></tr>
   <tr><td>Directors &amp; Staff</td><td>/directors.html</td><td>Staff directory</td></tr>
-  <tr><td>Calendar</td><td>/calendar.html</td><td>Upcoming events; sitewide Notify Me bell for push alerts</td></tr>
-  <tr><td>Sponsors</td><td>/sponsors.html</td><td>Directory, Become a Sponsor CTA, Donate</td></tr>
+  <tr><td>Calendar</td><td>/calendar.html</td><td>Public Schedule Board (month / week / rundown) plus email-list signup</td></tr>
+  <tr><td>Gallery</td><td>/gallery.html</td><td>Full photo gallery with click-to-enlarge viewer</td></tr>
+  <tr><td>Sponsors</td><td>/sponsors.html</td><td>Directory, Sponsor/In-Kind toast, Donate</td></tr>
   <tr><td>Become a Sponsor</td><td>/become-a-sponsor.html</td><td>Bronze / Silver / Gold Square packages (linked from Sponsors/footer, not main nav)</td></tr>
-  <tr><td>Fundraising</td><td>/fundraising.html</td><td>Campaign copy + Direct Support Donate</td></tr>
+  <tr><td>In-Kind Donation</td><td>/in-kind.html</td><td>Public in-kind form (not in main nav)</td></tr>
+  <tr><td>Letterman Jacket</td><td>/letterman-jacket.html</td><td>Order form; red deadline banner under the nav sitewide</td></tr>
+  <tr><td>Fundraising</td><td>/fundraising.html</td><td>Campaign copy, body photos, Direct Support Donate, email-list signup</td></tr>
   <tr><td>Student Resources</td><td>/resources.html</td><td>Family/student resources</td></tr>
-  <tr><td>Boosters</td><td>/boosters.html</td><td>Intro, meetings from Calendar Events, member directory (minutes not public)</td></tr>
-  <tr><td>Contact</td><td>/contact.html</td><td>School info + topic-based contact form</td></tr>
+  <tr><td>Boosters</td><td>/boosters.html</td><td>Intro, meetings from Schedule Board, member directory, optional Pay dues (minutes not public)</td></tr>
+  <tr><td>Contact</td><td>/contact.html</td><td>School info + topic-based contact form (defaults to General question)</td></tr>
 </table>
 <h3>8.1 Shared public features</h3>
 <ul>
@@ -311,8 +346,10 @@
   <li>Sponsor marquee sitewide under the header</li>
   <li>Homepage fly-in for Silver/Gold (timing editable in Manage sponsors)</li>
   <li><b>Notify Me</b> browser push for calendar changes (HTTPS + supporting browser; Brave needs Google push services enabled)</li>
+  <li><b>Email list</b> — visitors subscribe for calendar and/or fundraising updates; reply STOP to unsubscribe</li>
   <li><b>Add to Home</b> helper on mobile where supported</li>
   <li>Public Login / Staff Menu nav links for staff access</li>
+  <li>On phones, the public header and nav scroll away with the page (not sticky)</li>
 </ul>
 
 <h2>9. Public payment flows</h2>
@@ -326,8 +363,10 @@
 <p><b>Default benefits:</b> Bronze = marquee; Silver = marquee + fly-in; Gold = marquee + fly-in + game-day announcement.</p>
 <h3>9.2 Donate</h3>
 <p>From Sponsors and Fundraising — donor name, amount, Square card when configured.</p>
-<h3>9.3 Officer Checkout (CMS)</h3>
-<p>Described in §7.9. Requires Square: <span class="mono">SQUARE_ACCESS_TOKEN</span>, <span class="mono">SQUARE_APPLICATION_ID</span> (or <span class="mono">SQUARE_APP_ID</span>), optional <span class="mono">SQUARE_LOCATION_ID</span>, <span class="mono">SQUARE_ENVIRONMENT</span>. If Cloudflare secrets are missing on a host (for example <span class="mono">efhsband.org</span> vs Pages), Super Admin can paste the same credentials on CMS → Checkout. Saved values live in the shared database and Cloudflare secrets still win when present.</p>
+<h3>9.3 Boosters Pay dues</h3>
+<p>Shown on the public Boosters page when enabled in Site Settings. Square card when configured; successful/failed payments can be recorded on the Ledger.</p>
+<h3>9.4 Officer Checkout (CMS)</h3>
+<p>Described in §7.10. Requires Square: <span class="mono">SQUARE_ACCESS_TOKEN</span>, <span class="mono">SQUARE_APPLICATION_ID</span> (or <span class="mono">SQUARE_APP_ID</span>), optional <span class="mono">SQUARE_LOCATION_ID</span>, <span class="mono">SQUARE_ENVIRONMENT</span>. If Cloudflare secrets are missing on a host, Super Admin can paste the same credentials on CMS → Checkout. Saved values live in the shared database and Cloudflare secrets still win when present.</p>
 
 <h2>10. Login, sessions &amp; passwords</h2>
 <ul>
@@ -343,12 +382,14 @@
   <li>Staff Email (internal)</li>
   <li>User welcome invites</li>
   <li>Contact form topic routing + Recent Messages in CMS</li>
+  <li>Public email list (calendar and fundraising); Schedule Board Finished and Fundraising save can notify subscribers</li>
   <li>Sponsor invoices from the Boosters invoice address after paid sponsorships</li>
+  <li>In-kind (and other form) PDF emails to selected CMS users</li>
 </ul>
 
 <h2>12. Photos &amp; media limits</h2>
 <ul>
-  <li>Gallery / logo / staff / booster / sponsor images: JPG, PNG, WEBP, GIF, SVG; ~2 MB</li>
+  <li>Gallery / logo / staff / booster / sponsor / Fundraising body images: JPG, PNG, WEBP, GIF, SVG; ~2 MB (browser compresses large photos first)</li>
   <li>Always include alt text</li>
   <li>Minutes DOCX uploads: up to about 8 MB</li>
   <li>Staff Email attachments: separate limits (see §7.1)</li>
@@ -360,14 +401,19 @@
   <tr><td>User missing a menu or Dashboard card</td><td>User Management permissions; Super Admin bypasses checks</td></tr>
   <tr><td>Website Guide missing or 403</td><td>Only Super Admins see the card and can download the PDF</td></tr>
   <tr><td>Security Log missing</td><td>Must be Super Admin role — cannot be granted via checkboxes</td></tr>
-  <tr><td>Checkout / donate form missing</td><td>Square token + application id + location. Super Admin can connect them on CMS → Checkout if Cloudflare secrets are missing on that host.</td></tr>
+  <tr><td>Cannot insert Fundraising photos</td><td>Open Fundraising, click the body, then Photo on the Formatting bar. Hard-refresh if Photo is missing. Save Changes to publish</td></tr>
+  <tr><td>Schedule Board still says Who</td><td>Hard-refresh CMS; the track field is labeled What</td></tr>
+  <tr><td>View Site opened a new tab</td><td>Hard-refresh CMS; View Site now uses the same window</td></tr>
+  <tr><td>Contact form topic is not General question</td><td>Confirm that topic exists and is active under Contact Form. Public form preselects General question / General Questions</td></tr>
+  <tr><td>Checkout / donate form missing</td><td>Square token + application id + location. Super Admin can connect them on CMS → Checkout if Cloudflare secrets are missing on that host</td></tr>
   <tr><td>Site stuck on maintenance</td><td>Site Settings → maintenance mode; only Super Admins preview live pages with the gold banner</td></tr>
   <tr><td>Cannot edit older minutes</td><td>Secretaries: 10-day window from meeting date; Super Admins can still edit</td></tr>
-  <tr><td>Calendar view-only</td><td>Expected without <span class="mono">events</span> / <span class="mono">events:manage</span>; grant permission to allow create/edit</td></tr>
+  <tr><td>Calendar view-only</td><td>Expected without <span class="mono">events</span> / <span class="mono">events:manage</span>; grant permission to allow create/edit. Schedule Board is Super Admin / President / VP</td></tr>
   <tr><td>Staff Email Reply-To wrong</td><td>Sender username must be a valid email</td></tr>
-  <tr><td>Changes not visible after deploy</td><td>Hard-refresh; confirm login page stylesheet <span class="mono">?v=</span> version updated</td></tr>
+  <tr><td>Changes not visible after deploy</td><td>Hard-refresh; confirm login/admin stylesheet <span class="mono">?v=</span> version updated</td></tr>
   <tr><td>Notify Me not working</td><td>HTTPS + supported browser; Brave: enable Google services for push messaging</td></tr>
-  <tr><td>Looking for Ledger / Gallery page</td><td>Not live on production yet</td></tr>
+  <tr><td>Pay dues missing on Boosters</td><td>Site Settings → Boosters Pay dues toggle</td></tr>
+  <tr><td>Form Builder missing</td><td>Need Super Admin, President, <span class="mono">forms</span>, or a Form Builder extra-user grant</td></tr>
 </table>
 
 <h2>14. Important URLs</h2>
@@ -375,12 +421,17 @@
   <li>Public site: https://efhsband.org</li>
   <li>CMS login / dashboard: https://efhsband.org/admin</li>
   <li>This guide (Super Admin PDF via CMS): Dashboard → Website Guide, or https://efhsband.org/api/admin/website-guide.pdf</li>
-  <li>Become a Sponsor: https://efhsband.org/become-a-sponsor.html</li>
+  <li>Calendar (public Schedule Board): https://efhsband.org/calendar.html</li>
+  <li>Gallery: https://efhsband.org/gallery.html</li>
+  <li>Fundraising: https://efhsband.org/fundraising.html</li>
   <li>Sponsors: https://efhsband.org/sponsors.html</li>
-  <li>Calendar: https://efhsband.org/calendar.html</li>
+  <li>Become a Sponsor: https://efhsband.org/become-a-sponsor.html</li>
+  <li>In-Kind: https://efhsband.org/in-kind.html</li>
+  <li>Letterman Jacket: https://efhsband.org/letterman-jacket.html</li>
+  <li>Contact: https://efhsband.org/contact.html</li>
 </ul>
 
-<p class="meta" style="margin-top:16pt;">End of guide — East Forsyth Band Website &amp; CMS · Super Admin edition · production as of August 16, 2026</p>
+<p class="meta" style="margin-top:16pt;">End of guide — East Forsyth Band Website &amp; CMS · Super Admin edition · production as of September 7, 2026</p>
 
 </body>
 </html>
