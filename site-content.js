@@ -1034,9 +1034,17 @@ function bindPhotoGalleries(root = document) {
   protectPhotoMedia(root);
 }
 
+function isDefaultContactTopicLabel(label) {
+  return /^general\s+questions?$/i.test(String(label || '').trim());
+}
+
 function buildContactFormHtml(topics = []) {
+  const selectedId = (Array.isArray(topics) ? topics : []).find((topic) => isDefaultContactTopicLabel(topic?.label))?.id;
   const options = topics.length
-    ? topics.map((topic) => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.label)}</option>`).join('')
+    ? topics.map((topic) => {
+      const selected = selectedId != null && Number(topic.id) === Number(selectedId) ? ' selected' : '';
+      return `<option value="${escapeHtml(topic.id)}"${selected}>${escapeHtml(topic.label)}</option>`;
+    }).join('')
     : '<option value="" disabled selected>Contact topics coming soon</option>';
   const disabled = topics.length ? '' : ' disabled';
   return `
