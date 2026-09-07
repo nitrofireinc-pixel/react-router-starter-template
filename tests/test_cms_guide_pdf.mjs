@@ -31,7 +31,7 @@ test('CMS Website Guide ships as a real PDF download', () => {
   const admin = readFileSync(join(ROOT, 'admin.js'), 'utf8');
   assert.match(admin, /\/api\/admin\/website-guide\.pdf/);
   assert.match(admin, /isSuperAdmin\(\) && \['Website Guide'/);
-  assert.match(admin, /website-guide-api-20260816/);
+  assert.match(admin, /website-guide-api-20260907/);
 
   const worker = readFileSync(join(ROOT, 'worker/src/worker.mjs'), 'utf8');
   assert.match(worker, /canAccessWebsiteGuide/);
@@ -56,6 +56,23 @@ test('Website Guide HTML covers Super Admin topics', () => {
   assert.match(html, /maintenance mode/i);
   assert.match(html, /Notify Me/);
   assert.match(html, /\/api\/admin\/website-guide\.pdf/);
+  assert.match(html, /September 7, 2026/);
+  assert.match(html, /efhsband-live/);
+  assert.match(html, /Schedule Board/);
+  assert.match(html, /labeled <b>What<\/b>/);
+  assert.match(html, /Fundraising photos/);
+  assert.match(html, /General question/);
+  assert.match(html, /same window/);
+  assert.match(html, /Form Builder/);
+  assert.match(html, /Ledger/);
+  assert.match(html, /gallery.html/);
+  assert.match(html, /in-kind.html/);
+  assert.match(html, /letterman-jacket.html/);
+  assert.match(html, /Email list/);
+  assert.match(html, /Instagram/);
+  assert.match(html, /Pay dues/);
+  assert.doesNotMatch(html, /Not live on production yet/);
+  assert.doesNotMatch(html, /Cloudflare Pages with a Worker/);
 });
 
 test('Website Guide access helpers are Super Admin only', () => {
