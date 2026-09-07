@@ -1307,8 +1307,11 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
   font-weight:850;
   cursor:pointer;
 }
-.rich-text-toolbar button:hover,
-.rich-text-toolbar label:hover{border-color:#014990;background:#f8fbff}
+.rich-text-toolbar button[data-rich-insert-photo]{
+  font-weight:950;
+  border-color:#014990;
+  color:#014990;
+}
 .rich-text-toolbar input[type="color"]{
   width:28px;
   height:22px;

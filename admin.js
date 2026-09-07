@@ -1722,12 +1722,17 @@ function currentEditorPageSlug() {
 }
 
 function canInsertPageBodyPhotos() {
-  return currentEditorPageSlug() === 'fundraising' && canEditPage('fundraising');
+  const slug = currentEditorPageSlug();
+  if (!slug) return canEditPage('fundraising');
+  return canEditPage(slug);
 }
 
 function syncPagePhotoToolbar() {
   const button = document.querySelector('#rich-text-toolbar [data-rich-insert-photo]');
-  if (button) button.hidden = !canInsertPageBodyPhotos();
+  if (!button) return;
+  // Always keep Photo on the Formatting bar while a page is open.
+  button.hidden = false;
+  button.removeAttribute('hidden');
 }
 
 function setRichToolbarVisible(activeField = false) {
@@ -2227,13 +2232,13 @@ async function loadPagePhotoPickerList() {
 
 async function showPagePhotoToast() {
   if (!canInsertPageBodyPhotos()) {
-    alert('Photo insert is available on the Fundraising page.');
+    alert('You need permission to edit this page before inserting a photo.');
     return;
   }
   const preferred = getActivePageRichField({ multilineOnly: true });
   savePageRichSelection(preferred);
   if (!pageRichSelection.field) {
-    alert('Click into the Fundraising body text, then choose Photo.');
+    alert('Click into the page body text, then choose Photo.');
     return;
   }
   placePageRichCaretMark(pageRichSelection.field);
