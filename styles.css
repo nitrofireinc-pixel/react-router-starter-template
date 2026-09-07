@@ -4951,6 +4951,15 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 .caldev-detail-panel h3{margin:10px 0 6px;color:var(--navy);font-size:1.35rem}
 .caldev-detail-when,.caldev-detail-location{margin:0 0 8px;color:#5b6472;font-weight:700}
 .caldev-detail-body{margin:0;color:#243447;line-height:1.5}
+.caldev-detail-body a,
+.caldev-rundown-copy a{
+  color:#014990;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+.caldev-detail-body a:hover,
+.caldev-rundown-copy a:hover{color:#002142}
 .caldev-cms-preview-link{margin-left:8px}
 .caldev-cms-list{display:grid;gap:10px;margin-top:14px}
 .caldev-cms-item{
@@ -5250,6 +5259,20 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   min-height:120px;padding:12px;border:1px solid #d5deea;border-radius:12px;background:#fff;color:#10233c;font:inherit;line-height:1.45;
 }
 .cms-caldev-desc:empty:before{content:attr(data-placeholder);color:#94a3b8;font-weight:650}
+.cms-caldev-desc a{
+  color:#014990;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+.cms-caldev-desc-toolbar [data-cms-caldev-desc-link]{min-width:52px;padding:0 10px;font-size:.78rem}
+.cms-caldev-link-bar{
+  display:grid;gap:8px;padding:10px;border:1px solid #d5deea;border-radius:12px;background:#eef5ff;
+}
+.cms-caldev-link-bar[hidden]{display:none!important}
+.cms-caldev-link-bar label{display:grid;gap:4px;margin:0;font-size:.78rem;font-weight:800;color:#10233c}
+.cms-caldev-link-bar input{width:100%;min-height:38px}
+.cms-caldev-link-bar-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 body.cms-caldev-editor-open{overflow:hidden}
 body.cms-caldev-editor-open .image-admin-shell,
 body.cms-caldev-editor-open .admin-workspace{

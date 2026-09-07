@@ -77,9 +77,92 @@ export function stripSimpleHtml(value = '') {
     .trim();
 }
 
+function decodeBasicHtmlEntities(value = '') {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+}
+
+function escapeHtmlAttr(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export function normalizeCaldevLinkUrl(raw = '') {
+  const url = decodeBasicHtmlEntities(String(raw || '')).trim();
+  if (!url || /[\s<>]/.test(url)) return '';
+  if (/^(javascript:|data:|vbscript:)/i.test(url)) return '';
+  if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//')) return url;
+  if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+  return '';
+}
+
+function extractHtmlAttr(attrs, name) {
+  const match = String(attrs || '').match(new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+  return decodeBasicHtmlEntities(match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+function sanitizeCaldevStyleAttribute(attrs = '') {
+  const style = extractHtmlAttr(attrs, 'style');
+  if (!style || /expression|url\s*\(|javascript/i.test(style)) return '';
+  const parts = [];
+  const color = style.match(/color\s*:\s*([^;]+)/i);
+  const size = style.match(/font-size\s*:\s*([^;]+)/i);
+  if (color && /^(#(?:[0-9a-f]{3}|[0-9a-f]{6})|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|[a-z]+)$/i.test(color[1].trim())) {
+    parts.push(`color: ${color[1].trim()}`);
+  }
+  if (size && /^\d+(\.\d+)?(px|pt|em|rem)$/i.test(size[1].trim())) {
+    parts.push(`font-size: ${size[1].trim()}`);
+  }
+  return parts.join('; ');
+}
+
+/** Keep safe description markup (links + basic formatting). Strip everything else. */
+export function sanitizeCaldevDescriptionHtml(value = '') {
+  let html = String(value || '');
+  if (!html.trim()) return '';
+  html = html
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/<(p|div)(\s[^>]*)?>/gi, '')
+    .replace(/<\/(p|div)>/gi, '<br>');
+  const allowed = new Set(['a', 'b', 'i', 'u', 'strong', 'em', 'span', 'br']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (tag === 'br') return '<br>';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'a') {
+      const href = normalizeCaldevLinkUrl(extractHtmlAttr(attrs, 'href'));
+      if (!href) return '';
+      return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">`;
+    }
+    if (tag === 'span') {
+      const style = sanitizeCaldevStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  return html
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/(?:<br>\s*)+$/gi, '')
+    .trim()
+    .slice(0, 4000);
+}
+
 export function normalizeCaldevPayload(payload = {}, existing = null) {
   const title = stripSimpleHtml(payload.title ?? existing?.title ?? '').slice(0, 200);
-  const description = stripSimpleHtml(payload.description ?? existing?.description ?? '').slice(0, 4000);
+  const description = sanitizeCaldevDescriptionHtml(payload.description ?? existing?.description ?? '');
   const location = stripSimpleHtml(payload.location ?? existing?.location ?? '').slice(0, 200);
   const who = stripSimpleHtml(payload.who ?? existing?.who ?? '').slice(0, 200);
   let start_date = String(payload.start_date ?? existing?.start_date ?? '').trim();
