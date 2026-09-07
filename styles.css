@@ -5266,6 +5266,13 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   text-underline-offset:2px;
 }
 .cms-caldev-desc-toolbar [data-cms-caldev-desc-link]{min-width:52px;padding:0 10px;font-size:.78rem}
+.cms-caldev-link-bar{
+  display:grid;gap:8px;padding:10px;border:1px solid #d5deea;border-radius:12px;background:#eef5ff;
+}
+.cms-caldev-link-bar[hidden]{display:none!important}
+.cms-caldev-link-bar label{display:grid;gap:4px;margin:0;font-size:.78rem;font-weight:800;color:#10233c}
+.cms-caldev-link-bar input{width:100%;min-height:38px}
+.cms-caldev-link-bar-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 body.cms-caldev-editor-open{overflow:hidden}
 body.cms-caldev-editor-open .image-admin-shell,
 body.cms-caldev-editor-open .admin-workspace{

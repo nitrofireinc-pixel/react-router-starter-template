@@ -33,6 +33,7 @@
   let exceptionDates = [];
   let lastTap = { id: null, at: 0 };
   let longPress = { timer: null, id: null, active: false, startX: 0, startY: 0 };
+  let descLinkRange = null;
 
   function pad(n) {
     return String(n).padStart(2, "0");
@@ -415,6 +416,7 @@
     panel.dataset.who = form.who || "";
     panel.querySelector('[name="location"]').value = form.location || "";
     panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
+    closeDescLinkBar();
     panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
     panel.querySelector('[name="repeat_no"]').checked = !form.repeat;
     const yesRadio = panel.querySelector('[data-cms-caldev-repeat-yes]');
@@ -447,6 +449,7 @@
       panel.hidden = true;
       panel.dataset.eventId = "";
     }
+    closeDescLinkBar();
     document.body.classList.remove("cms-caldev-editor-open");
     renderBoardOnly();
   }
@@ -579,41 +582,94 @@
     });
   }
 
+  function selectedDescText(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !editor.contains(sel.anchorNode)) return "";
+    return String(sel.toString() || "").replace(/\s+/g, " ").trim();
+  }
+
+  function restoreDescLinkSelection(editor) {
+    if (!descLinkRange || !editor) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(descLinkRange);
+    editor.focus();
+  }
+
+  function closeDescLinkBar() {
+    const bar = root?.querySelector("[data-cms-caldev-link-bar]");
+    if (bar) bar.hidden = true;
+    descLinkRange = null;
+  }
+
+  function openDescLinkBar() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    const bar = root.querySelector("[data-cms-caldev-link-bar]");
+    const textInput = root.querySelector("[data-cms-caldev-link-text]");
+    const urlInput = root.querySelector("[data-cms-caldev-link-url]");
+    if (!editor || !bar || !textInput || !urlInput) return;
+    const sel = window.getSelection();
+    descLinkRange = sel && sel.rangeCount && editor.contains(sel.anchorNode)
+      ? sel.getRangeAt(0).cloneRange()
+      : null;
+    const existing = findLinkInSelection(editor);
+    textInput.value = existing
+      ? String(existing.textContent || "").replace(/\s+/g, " ").trim()
+      : (selectedDescText(editor) || "Click Here");
+    urlInput.value = existing?.getAttribute("href") || "https://";
+    bar.hidden = false;
+    urlInput.focus();
+    urlInput.select();
+  }
+
   function applyDescLink() {
     const editor = root.querySelector("[data-cms-caldev-desc]");
+    const textInput = root.querySelector("[data-cms-caldev-link-text]");
+    const urlInput = root.querySelector("[data-cms-caldev-link-url]");
     if (!editor) return;
-    editor.focus();
-    const existing = findLinkInSelection(editor);
-    const sel = window.getSelection();
-    const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-    const raw = window.prompt("Link address", existing?.getAttribute("href") || "https://");
-    if (raw == null) return;
-    if (range) {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-    const trimmed = String(raw).trim();
-    if (!trimmed) {
-      document.execCommand("unlink", false, null);
-      return;
-    }
-    const href = normalizeLinkUrl(trimmed);
+    const label = String(textInput?.value || "").replace(/\s+/g, " ").trim() || "Click Here";
+    const href = normalizeLinkUrl(urlInput?.value || "");
     if (!href) {
       showToast("Enter a web address like https://efhsband.org", true);
       return;
     }
+    restoreDescLinkSelection(editor);
+    const existing = findLinkInSelection(editor);
+    const html = `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
     if (existing) {
       existing.setAttribute("href", href);
       existing.setAttribute("target", "_blank");
       existing.setAttribute("rel", "noopener noreferrer");
-      return;
+      existing.textContent = label;
+    } else if (descLinkRange && !descLinkRange.collapsed) {
+      descLinkRange.deleteContents();
+      const wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      const node = wrap.firstChild;
+      descLinkRange.insertNode(node);
+    } else {
+      editor.focus();
+      document.execCommand("insertHTML", false, html);
     }
-    if (!sel || sel.isCollapsed) {
-      document.execCommand("insertHTML", false, `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>`);
-      return;
-    }
-    document.execCommand("createLink", false, href);
     polishDescLinks(editor);
+    closeDescLinkBar();
+  }
+
+  function removeDescLink() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    if (!editor) return;
+    restoreDescLinkSelection(editor);
+    const existing = findLinkInSelection(editor);
+    if (existing) {
+      const parent = existing.parentNode;
+      if (parent) {
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+      }
+    } else {
+      document.execCommand("unlink", false, null);
+    }
+    closeDescLinkBar();
   }
 
   function renderShell() {
@@ -729,6 +785,19 @@
                     <option value="28px">Extra large</option>
                   </select>
                 </label>
+              </div>
+              <div class="cms-caldev-link-bar" data-cms-caldev-link-bar hidden>
+                <label>Text to click
+                  <input type="text" data-cms-caldev-link-text maxlength="200" placeholder="Click Here" />
+                </label>
+                <label>Goes to
+                  <input type="url" data-cms-caldev-link-url placeholder="https://example.org/page" />
+                </label>
+                <div class="cms-caldev-link-bar-actions">
+                  <button type="button" class="btn primary" data-cms-caldev-link-apply>Add link</button>
+                  <button type="button" class="btn outline" data-cms-caldev-link-remove>Remove</button>
+                  <button type="button" class="btn outline" data-cms-caldev-link-cancel>Cancel</button>
+                </div>
               </div>
               <div class="cms-caldev-desc" contenteditable="true" role="textbox" aria-multiline="true" data-cms-caldev-desc data-placeholder="Event details"></div>
             </label>
@@ -1018,6 +1087,24 @@
     if (bound) return;
     bound = true;
 
+    root.addEventListener("mousedown", (e) => {
+      if (e.target.closest("[data-cms-caldev-desc-link], [data-cms-caldev-link-apply], [data-cms-caldev-link-remove], [data-cms-caldev-link-cancel]")) {
+        e.preventDefault();
+      }
+    });
+
+    root.addEventListener("keydown", (e) => {
+      if (!e.target.closest("[data-cms-caldev-link-bar]")) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyDescLink();
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeDescLinkBar();
+      }
+    });
+
     root.addEventListener("click", (e) => {
       const trackBtn = e.target.closest("[data-cms-caldev-track]");
       if (trackBtn && root.contains(trackBtn)) {
@@ -1070,7 +1157,22 @@
       const descLink = e.target.closest("[data-cms-caldev-desc-link]");
       if (descLink) {
         e.preventDefault();
+        openDescLinkBar();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-apply]")) {
+        e.preventDefault();
         applyDescLink();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-remove]")) {
+        e.preventDefault();
+        removeDescLink();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-cancel]")) {
+        e.preventDefault();
+        closeDescLinkBar();
         return;
       }
 
