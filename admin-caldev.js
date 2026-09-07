@@ -618,7 +618,7 @@
               <label>End<input name="end_time" type="time" /></label>
             </div>
 
-            <label>Who
+            <label>What
               <select name="track">
                 ${TRACKS.map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
               </select>
@@ -672,7 +672,7 @@
     el.hidden = false;
     el.textContent = isCompact()
       ? "Tap once to select. Double-tap to edit. Press and hold, then drag to reschedule. Meetings also show on Boosters."
-      : "Click once to select. Double-click to edit. Drag to reschedule. Who → Meetings also appears on the Boosters page.";
+      : "Click once to select. Double-click to edit. Drag to reschedule. What → Meetings also appears on the Boosters page.";
   }
 
   function renderUndated() {
