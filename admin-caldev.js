@@ -282,19 +282,43 @@
     return out.length ? out : [startDate].filter(Boolean);
   }
 
+  function normalizeLinkUrl(raw) {
+    const url = String(raw || "").trim();
+    if (!url || /[\s<>]/.test(url)) return "";
+    if (/^(javascript:|data:|vbscript:)/i.test(url)) return "";
+    if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+    if (url.startsWith("/") && !url.startsWith("//")) return url;
+    if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+    return "";
+  }
+
+  function unwrapNode(node, child) {
+    while (child.firstChild) node.insertBefore(child.firstChild, child);
+    node.removeChild(child);
+  }
+
   function sanitizeDescHtml(html) {
-    const allowed = /^(?:#text|B|STRONG|I|EM|U|BR|SPAN|DIV|P)$/i;
+    const allowed = /^(?:#text|B|STRONG|I|EM|U|BR|SPAN|DIV|P|A)$/i;
     const wrap = document.createElement("div");
     wrap.innerHTML = String(html || "");
     const walk = (node) => {
       [...node.childNodes].forEach((child) => {
         if (child.nodeType === 3) return;
         if (child.nodeType !== 1 || !allowed.test(child.tagName)) {
-          while (child.firstChild) node.insertBefore(child.firstChild, child);
-          node.removeChild(child);
+          unwrapNode(node, child);
           return;
         }
-        if (child.tagName === "SPAN") {
+        if (child.tagName === "A") {
+          const href = normalizeLinkUrl(child.getAttribute("href") || "");
+          [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+          if (!href) {
+            unwrapNode(node, child);
+            return;
+          }
+          child.setAttribute("href", href);
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener noreferrer");
+        } else if (child.tagName === "SPAN") {
           const color = String(child.style.color || "").trim();
           const size = String(child.style.fontSize || "").trim();
           child.removeAttribute("style");
@@ -304,8 +328,7 @@
           if (size) styles.push(`font-size:${size}`);
           if (styles.length) child.setAttribute("style", styles.join(";"));
           else {
-            while (child.firstChild) node.insertBefore(child.firstChild, child);
-            node.removeChild(child);
+            unwrapNode(node, child);
             return;
           }
         } else {
@@ -528,6 +551,71 @@
     document.execCommand(cmd, false, null);
   }
 
+  function findLinkInSelection(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let node = sel.anchorNode;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    while (node && node !== editor) {
+      if (node.tagName === "A") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function polishDescLinks(editor) {
+    editor.querySelectorAll("a").forEach((anchor) => {
+      const href = normalizeLinkUrl(anchor.getAttribute("href") || "");
+      if (!href) {
+        const parent = anchor.parentNode;
+        if (!parent) return;
+        while (anchor.firstChild) parent.insertBefore(anchor.firstChild, anchor);
+        parent.removeChild(anchor);
+        return;
+      }
+      anchor.setAttribute("href", href);
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    });
+  }
+
+  function applyDescLink() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    if (!editor) return;
+    editor.focus();
+    const existing = findLinkInSelection(editor);
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    const raw = window.prompt("Link address", existing?.getAttribute("href") || "https://");
+    if (raw == null) return;
+    if (range) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    const trimmed = String(raw).trim();
+    if (!trimmed) {
+      document.execCommand("unlink", false, null);
+      return;
+    }
+    const href = normalizeLinkUrl(trimmed);
+    if (!href) {
+      showToast("Enter a web address like https://efhsband.org", true);
+      return;
+    }
+    if (existing) {
+      existing.setAttribute("href", href);
+      existing.setAttribute("target", "_blank");
+      existing.setAttribute("rel", "noopener noreferrer");
+      return;
+    }
+    if (!sel || sel.isCollapsed) {
+      document.execCommand("insertHTML", false, `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>`);
+      return;
+    }
+    document.execCommand("createLink", false, href);
+    polishDescLinks(editor);
+  }
+
   function renderShell() {
     root.innerHTML = `
       <div class="cms-caldev" data-cms-caldev-app>
@@ -630,6 +718,7 @@
                 <button type="button" data-cms-caldev-desc-cmd="bold" title="Bold"><b>B</b></button>
                 <button type="button" data-cms-caldev-desc-cmd="italic" title="Italic"><i>I</i></button>
                 <button type="button" data-cms-caldev-desc-cmd="underline" title="Underline"><u>U</u></button>
+                <button type="button" data-cms-caldev-desc-link title="Insert or edit a link">Link</button>
                 <label title="Color"><span>Color</span><input type="color" data-cms-caldev-desc-color value="#002142"></label>
                 <label title="Size"><span>Size</span>
                   <select data-cms-caldev-desc-size>
@@ -975,6 +1064,13 @@
       if (removeEx) {
         exceptionDates = exceptionDates.filter((d) => d !== removeEx.getAttribute("data-cms-caldev-remove-exception"));
         renderExceptions();
+        return;
+      }
+
+      const descLink = e.target.closest("[data-cms-caldev-desc-link]");
+      if (descLink) {
+        e.preventDefault();
+        applyDescLink();
         return;
       }
 

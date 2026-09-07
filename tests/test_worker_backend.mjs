@@ -1285,6 +1285,8 @@ test('CMS View Site stays in the same window and Schedule Board uses What', () =
   assert.match(adminCaldev, /<label>What/);
   assert.doesNotMatch(adminCaldev, /<label>Who/);
   assert.match(adminCaldev, /What → Meetings/);
+  assert.match(adminCaldev, /data-cms-caldev-desc-link/);
+  assert.match(adminCaldev, /function applyDescLink/);
   assert.match(siteContent, /isDefaultContactTopicLabel/);
   assert.match(siteContent, /selectedId/);
 });
