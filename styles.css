@@ -55,29 +55,6 @@ header.site-header nav a:focus{background:#eef3fa;outline:none}
 header.site-header nav .nav-notify-me{font-size:.86rem;font-weight:800;color:var(--navy);padding:8px 10px;border-radius:999px}
 header.site-header nav .nav-notify-me:hover,
 header.site-header nav .nav-notify-me:focus-visible{background:#eef3fa;outline:none}
-.letterman-deadline-banner{
-  width:100%;
-  margin:0;
-  padding:10px 16px;
-  background:var(--red);
-  color:#fff;
-  text-align:center;
-  font-weight:800;
-  font-size:clamp(.95rem,2.4vw,1.12rem);
-  line-height:1.4;
-  box-sizing:border-box;
-}
-.letterman-deadline-banner a{
-  color:#fff;
-  text-decoration:underline;
-  text-underline-offset:3px;
-  font-weight:900;
-}
-.letterman-deadline-banner a:hover,
-.letterman-deadline-banner a:focus-visible{
-  color:var(--gold);
-  outline:none;
-}
 .nav-notify-me{
   display:inline-flex;
   align-items:center;
