@@ -77,6 +77,56 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+  const DEADLINE_BANNER_LEAD_DAYS = 7;
+  function easternTodayIso() {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const read = (type) => parts.find((part) => part.type === type)?.value;
+    return `${read("year")}-${read("month")}-${read("day")}`;
+  }
+  function shiftIsoDate(iso, days) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return "";
+    const [year, month, day] = String(iso).split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+  }
+  function deadlineDueIso(event) {
+    const start = String(event?.start_date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return "";
+    const end = String(event?.end_date || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(end) && end >= start) return end;
+    return start;
+  }
+  function formatDeadlineBannerDate(iso) {
+    const date = parseDateKey(iso);
+    if (!date || Number.isNaN(date.getTime())) return "";
+    const day = date.getDate();
+    const suffix = (day % 100 >= 11 && day % 100 <= 13)
+      ? "th"
+      : ({ 1: "st", 2: "nd", 3: "rd" }[day % 10] || "th");
+    return `${MONTHS[date.getMonth()]} ${day}${suffix}, ${date.getFullYear()}`;
+  }
+  function firstDescLink(html) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = String(html || "");
+    const href = String(wrap.querySelector("a[href]")?.getAttribute("href") || "").trim();
+    if (!href || /^(javascript:|data:|vbscript:)/i.test(href)) return "";
+    return href;
+  }
+  function activeDeadlineEvents(list, today) {
+    return (list || []).filter((event) => {
+      if (String(event?.track || "").toLowerCase() !== "deadline") return false;
+      const due = deadlineDueIso(event);
+      if (!due) return false;
+      const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
+      return today >= windowStart && today <= due;
+    }).sort((a, b) => deadlineDueIso(a).localeCompare(deadlineDueIso(b))
+      || String(a.title || "").localeCompare(String(b.title || "")));
+  }
   function eventDayKey(ev) {
     return String(ev.start_date || "").slice(0, 10);
   }
@@ -676,6 +726,7 @@
     root.innerHTML = `
       <div class="cms-caldev" data-cms-caldev-app>
         <div class="cms-caldev-toast" data-cms-caldev-toast hidden></div>
+        <div class="cms-caldev-deadline-banners" data-cms-caldev-deadline-banners hidden></div>
         <div class="cms-caldev-toolbar">
           <div class="cms-caldev-range" role="group" aria-label="Month and year">
             <label class="cms-caldev-range-field">
@@ -1021,11 +1072,36 @@
     }
   }
 
+  function renderDeadlineBanners() {
+    const host = root.querySelector("[data-cms-caldev-deadline-banners]");
+    if (!host) return;
+    const items = activeDeadlineEvents(events, easternTodayIso());
+    if (!items.length) {
+      host.innerHTML = "";
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
+    host.innerHTML = items.map((event) => {
+      const due = deadlineDueIso(event);
+      const href = firstDescLink(event.description);
+      const text = `Deadline: ${escapeHtml(event.title || "Deadline")} due ${escapeHtml(formatDeadlineBannerDate(due))}!`;
+      const cta = href
+        ? ` <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Click Here</a>`
+        : ` <button type="button" data-cms-caldev-deadline-open="${escapeHtml(event.id)}">View details</button>`;
+      return `<div class="caldev-deadline-banner" role="status">${text}${cta}</div>`;
+    }).join("");
+    host.querySelectorAll("[data-cms-caldev-deadline-open]").forEach((button) => {
+      button.addEventListener("click", () => openEventById(button.getAttribute("data-cms-caldev-deadline-open")));
+    });
+  }
+
   function renderBoardOnly() {
     view = "month";
     syncRangeSelects();
     renderTracks();
     renderHint();
+    renderDeadlineBanners();
     renderUndated();
     const main = root.querySelector("[data-cms-caldev-main]");
     if (!main) return;

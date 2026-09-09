@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  activeDeadlineBannerEvents,
   compareCaldevEvents,
+  deadlineBannerCopy,
+  deadlineDueIso,
+  formatDeadlineBannerDate,
   inferCaldevTrack,
+  isDeadlineBannerActive,
   isoToProductionDateParts,
   normalizeCaldevLinkUrl,
   normalizeCaldevPayload,
@@ -12,6 +17,7 @@ import {
   productionEventToStartDate,
   sanitizeCaldevDescriptionHtml,
   shiftCaldevEventToDate,
+  shiftIsoDate,
   stripSimpleHtml,
 } from '../worker/src/caldev.mjs';
 
@@ -106,6 +112,37 @@ test('iso dates map to production event date parts for Boosters bridge', () => {
     date_detail: '09',
   });
   assert.equal(isoToProductionDateParts('TBD'), null);
+});
+
+test('deadline banner window is one week through due day, then gone', () => {
+  assert.equal(shiftIsoDate('2026-10-20', -7), '2026-10-13');
+  assert.equal(shiftIsoDate('2026-10-20', 1), '2026-10-21');
+  const deadline = {
+    title: 'Letterman Jacket Forms',
+    track: 'deadline',
+    start_date: '2026-10-20',
+    description: 'Order at <a href="https://efhsband.org/letterman-jacket.html">form</a>',
+  };
+  assert.equal(deadlineDueIso(deadline), '2026-10-20');
+  assert.equal(isDeadlineBannerActive(deadline, '2026-10-12'), false);
+  assert.equal(isDeadlineBannerActive(deadline, '2026-10-13'), true);
+  assert.equal(isDeadlineBannerActive(deadline, '2026-10-20'), true);
+  assert.equal(isDeadlineBannerActive(deadline, '2026-10-21'), false);
+  assert.equal(isDeadlineBannerActive({ ...deadline, track: 'game' }, '2026-10-20'), false);
+  const ranged = { ...deadline, start_date: '2026-10-18', end_date: '2026-10-20' };
+  assert.equal(deadlineDueIso(ranged), '2026-10-20');
+  assert.equal(isDeadlineBannerActive(ranged, '2026-10-13'), true);
+  assert.equal(isDeadlineBannerActive(ranged, '2026-10-21'), false);
+  const copy = deadlineBannerCopy(deadline);
+  assert.equal(copy.text, 'Deadline: Letterman Jacket Forms due October 20th, 2026!');
+  assert.equal(copy.href, 'https://efhsband.org/letterman-jacket.html');
+  assert.equal(formatDeadlineBannerDate('2026-10-21'), 'October 21st, 2026');
+  const active = activeDeadlineBannerEvents([
+    deadline,
+    { title: 'Older dues', track: 'deadline', start_date: '2026-09-01' },
+    { title: 'Far trip form', track: 'deadline', start_date: '2026-11-15' },
+  ], '2026-10-16');
+  assert.deepEqual(active.map((event) => event.title), ['Letterman Jacket Forms']);
 });
 
 test('production booster meetings seed as Meetings track', () => {
