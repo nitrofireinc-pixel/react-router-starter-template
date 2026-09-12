@@ -192,6 +192,26 @@ test('CMS Fundraising page editor can insert and upload body photos', () => {
   assert.match(styles, /\.cms-photo-resize-handles/);
 });
 
+test('CMS Home Band information card is one rich editor with lists and photos', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(adminSrc, /querySelectorAll\('\.hero-card'\)/);
+  assert.match(adminSrc, /cms-home-hero-card/);
+  assert.match(adminSrc, /dataset\.cmsHomeField = 'hero-card'/);
+  assert.match(adminSrc, /el\.closest\('\.hero-card, \.cms-edit-field'\)/);
+  assert.match(adminSrc, /inHeroCard \? 'cms-body-photo-block' : 'cms-body-photo-left'/);
+  assert.match(adminSrc, /function sanitizeHomeHeroPasteHtml/);
+  assert.match(workerSrc, /data-rich="insertUnorderedList"/);
+  assert.match(workerSrc, /• List/);
+  assert.match(workerSrc, /add or remove bullets/);
+  assert.match(styles, /\.page-preview \.hero-card\.cms-edit-rich/);
+  assert.match(styles, /\.hero-card img\.cms-body-photo-block/);
+  const assetHtml = sanitizeRichHtml('<p><img src="/assets/efhs-blue-regiment-mark.png" alt="Mark"></p>');
+  assert.match(assetHtml, /src="\/assets\/efhs-blue-regiment-mark\.png"/);
+});
+
 test('generateStructuredPageHtml preserves body photo inserts', () => {
   const html = generateStructuredPageHtml({
     layout: 'standard',
@@ -606,6 +626,10 @@ test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
   assert.match(next, /efhs-blue-regiment-mark\.png\?v=[^"']+/);
   assert.doesNotMatch(next, /efhs-logo\.png/);
   assert.match(next, /Band information in one place/);
+
+  const custom = '<aside class="hero-card"><img src="/uploads/custom-card.png" alt="Custom"><h2>Band information in one place</h2></aside>';
+  assert.match(refreshHomeHeroBrandMark(custom), /\/uploads\/custom-card\.png/);
+  assert.doesNotMatch(refreshHomeHeroBrandMark(custom), /efhs-blue-regiment-mark/);
 });
 
 test('refreshHomeStartHereSection updates outdated Start here copy', () => {
@@ -1471,6 +1495,26 @@ test('home feature cards extract, normalize, and patch without wiping the page',
   }, { body_html: page, slug: 'home' });
   assert.match(savedFull.body_html, /Families expect this/);
   assert.match(savedFull.body_html, /Updated copy/);
+
+  const heroCard = sanitizeHomeBodyHtml(`
+    <aside class="hero-card cms-edit-field cms-edit-rich cms-home-hero-card is-focused" contenteditable="true" data-cms-home-field="hero-card" data-edit-label="Band information card">
+      <img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment" class="cms-body-photo cms-body-photo-block is-selected" style="width: 170px; height: auto;" data-photo-width="170">
+      <h2>Band information in one place</h2>
+      <ul>
+        <li>Ensembles and program overview</li>
+        <li></li>
+        <li>Upcoming events and rehearsal notes</li>
+      </ul>
+    </aside>
+  `);
+  assert.match(heroCard, /<aside class="hero-card">/);
+  assert.match(heroCard, /<ul>/);
+  assert.match(heroCard, /Ensembles and program overview/);
+  assert.match(heroCard, /Upcoming events and rehearsal notes/);
+  assert.match(heroCard, /src="\/assets\/efhs-blue-regiment-mark\.png"/);
+  assert.match(heroCard, /width: 170px/);
+  assert.doesNotMatch(heroCard, /contenteditable|cms-edit-field|cms-home-hero-card|is-selected|data-cms-home-field/);
+  assert.doesNotMatch(heroCard, /<li>\s*<\/li>/);
 });
 
 test('admin mail payload sanitizes rich html and builds plain text', () => {

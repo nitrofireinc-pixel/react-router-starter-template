@@ -781,21 +781,36 @@ function sanitizeRichImageFloatClass(attrs = '') {
   return 'cms-body-photo-block';
 }
 
-function sanitizeRichImageTag(attrs = '') {
-  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
-  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+function isAllowedRichImageSrc(src) {
+  const value = String(src || '').trim();
+  return /^\/uploads\//i.test(value) || /^\/?assets\//i.test(value);
+}
+
+function normalizeRichImageSrc(src) {
+  let value = String(src || '').trim();
+  if (!value || /^(javascript:|data:)/i.test(value)) return '';
   try {
-    if (/^https?:\/\//i.test(src)) {
-      const parsed = new URL(src);
-      if (!parsed.pathname.startsWith('/uploads/')) return '';
-      src = parsed.pathname + (parsed.search || '');
+    if (/^https?:\/\//i.test(value)) {
+      const parsed = new URL(value);
+      value = parsed.pathname + (parsed.search || '');
     }
   } catch {
     return '';
   }
-  if (!src.startsWith('/uploads/')) return '';
-  if (/[<>"\s]/.test(src)) return '';
+  if (/^assets\//i.test(value)) value = `/${value}`;
+  if (!isAllowedRichImageSrc(value)) return '';
+  if (/[<>"\s]/.test(value)) return '';
+  return value;
+}
+
+function sanitizeHomeHeroPasteHtml(dirty) {
+  return sanitizeRichHtml(dirty);
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const src = normalizeRichImageSrc(srcMatch?.[1] || srcMatch?.[2] || '');
+  if (!src) return '';
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
   const floatClass = sanitizeRichImageFloatClass(attrs);
@@ -1162,11 +1177,23 @@ function markHomeHtmlEditable(html = '') {
     node.setAttribute('data-cms-dynamic-label', 'Links to Gallery page');
   });
 
+  root.querySelectorAll('.hero-card').forEach((card) => {
+    if (card.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
+    card.classList.add('cms-edit-field', 'cms-edit-rich', 'cms-home-hero-card');
+    card.setAttribute('contenteditable', 'true');
+    card.setAttribute('role', 'textbox');
+    card.setAttribute('spellcheck', 'true');
+    card.setAttribute('aria-multiline', 'true');
+    card.setAttribute('aria-label', 'Band information card');
+    card.dataset.editLabel = 'Band information card';
+    card.dataset.cmsHomeField = 'hero-card';
+  });
+
   const targets = root.querySelectorAll('.eyebrow, .kicker, .tag, h1, h2, h3, p, li, a.btn, figcaption');
   let index = 0;
   targets.forEach((el) => {
     if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
-    if (el.closest('.cms-edit-field')) return;
+    if (el.closest('.hero-card, .cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
     const inline = !['P', 'LI'].includes(el.tagName);
@@ -1189,7 +1216,7 @@ function markHomeHtmlEditable(html = '') {
     }
   });
 
-  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
+  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. The Band information card is one live editor: press Enter to add a bullet, Backspace on an empty bullet to remove it, or use List on the Formatting bar. Select text for bold, color, and size. Click a photo to resize or delete it, or use Photo to add one. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
   return note + template.innerHTML;
 }
 
@@ -1208,6 +1235,7 @@ function serializeHomePreviewHtml(preview) {
   });
   const clone = preview.cloneNode(true);
   clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field').forEach((node) => node.remove());
+  clone.querySelectorAll('img.is-selected').forEach((img) => img.classList.remove('is-selected'));
   clone.querySelectorAll('[contenteditable], [data-cms-home-field], .cms-edit-field').forEach((el) => {
     el.removeAttribute('contenteditable');
     el.removeAttribute('role');
@@ -1219,7 +1247,14 @@ function serializeHomePreviewHtml(preview) {
     el.removeAttribute('data-cms-field');
     el.removeAttribute('data-cms-href');
     el.removeAttribute('data-cms-dynamic-label');
-    el.classList.remove('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic');
+    el.classList.remove('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic', 'cms-home-hero-card');
+  });
+  clone.querySelectorAll('.hero-card li').forEach((li) => {
+    if (li.querySelector('img')) return;
+    if (!String(li.textContent || '').replace(/\u00a0/g, ' ').trim()) li.remove();
+  });
+  clone.querySelectorAll('.hero-card ul, .hero-card ol').forEach((list) => {
+    if (!list.children.length) list.remove();
   });
   return clone.innerHTML.trim();
 }
@@ -1943,9 +1978,11 @@ function insertHtmlAtCaret(field, html) {
 function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
   const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
-  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : 280;
+  const inHeroCard = field.matches?.('.hero-card');
+  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : (inHeroCard ? 170 : 280);
+  const floatClass = inHeroCard ? 'cms-body-photo-block' : 'cms-body-photo-left';
   const cleaned = sanitizeRichHtml(
-    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo cms-body-photo-left" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
+    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo ${floatClass}" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
   );
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
   const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
@@ -2089,9 +2126,12 @@ function selectPageBodyPhoto(img) {
   if (!img) return;
   const preview = document.querySelector('#page-preview');
   const field = img.closest('.cms-edit-rich');
-  if (!preview || !field || !preview.contains(img)) return;
+  if (!preview || !field || field.classList.contains('cms-edit-inline') || !preview.contains(img)) return;
   if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
-  if (!img.classList.contains('cms-body-photo-left')
+  if (img.closest('.hero-card')) {
+    img.classList.remove('cms-body-photo-left', 'cms-body-photo-right');
+    img.classList.add('cms-body-photo-block');
+  } else if (!img.classList.contains('cms-body-photo-left')
     && !img.classList.contains('cms-body-photo-right')
     && !img.classList.contains('cms-body-photo-block')) {
     img.classList.add('cms-body-photo-left');
@@ -2124,10 +2164,11 @@ function bindPageBodyPhotoResize() {
   if (document.documentElement.dataset.pageBodyPhotoResizeBound === '1') return;
   document.documentElement.dataset.pageBodyPhotoResizeBound = '1';
   const isPhotoTarget = (preview, node) => {
-    const img = node?.closest?.('img.cms-body-photo, img');
-    if (!img || !preview?.contains(img)) return null;
-    if (!(img.classList.contains('cms-body-photo') || img.closest('.cms-body-photo'))) return null;
-    return img.tagName === 'IMG' ? img : img.querySelector('img');
+    const img = node?.closest?.('img');
+    if (!img || img.tagName !== 'IMG' || !preview?.contains(img)) return null;
+    const field = img.closest('.cms-edit-rich');
+    if (!field || field.classList.contains('cms-edit-inline')) return null;
+    return img;
   };
   const onSelectPointer = (event) => {
     if (!canInsertPageBodyPhotos()) return;
@@ -2150,7 +2191,9 @@ function bindPageBodyPhotoResize() {
   };
   document.addEventListener('pointerdown', onSelectPointer, true);
   document.addEventListener('dragstart', (event) => {
-    if (event.target?.closest?.('img.cms-body-photo')) event.preventDefault();
+    if (event.target?.closest?.('img.cms-body-photo, #page-preview .cms-edit-rich img, .hero-card img')) {
+      event.preventDefault();
+    }
   });
 }
 
@@ -2495,9 +2538,14 @@ function bindPageVisualEditor() {
     if (field.classList.contains('cms-edit-rich')) {
       const html = event.clipboardData?.getData('text/html');
       const text = event.clipboardData?.getData('text/plain') || '';
-      const clean = field.classList.contains('cms-edit-inline')
-        ? (html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text))
-        : (html ? sanitizeRichHtml(html) : formatRichText(text));
+      let clean = '';
+      if (field.classList.contains('cms-edit-inline')) {
+        clean = html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text);
+      } else if (field.matches?.('.hero-card')) {
+        clean = html ? sanitizeHomeHeroPasteHtml(html) : formatRichText(text);
+      } else {
+        clean = html ? sanitizeRichHtml(html) : formatRichText(text);
+      }
       document.execCommand('insertHTML', false, clean || escapeHtml(text));
       syncFieldFromPreview(field);
     } else {
