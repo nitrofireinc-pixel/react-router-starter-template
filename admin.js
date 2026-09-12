@@ -384,6 +384,10 @@ function canAccessScheduleBoard() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
 }
 
+function canAccessBadgeCreator() {
+  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
 function canAccessForms() {
   if (isSuperAdmin() || hasPermission('president') || hasPermission('forms')) return true;
   return Boolean(state.me?.forms_access);
@@ -2763,6 +2767,9 @@ function activateTab(name) {
   if (name === 'caldev' && !canAccessScheduleBoard()) {
     return Promise.resolve(false);
   }
+  if (name === 'badge-creator' && !canAccessBadgeCreator()) {
+    return Promise.resolve(false);
+  }
   const pagesPanel = document.querySelector('#tab-pages');
   const leavingPages = Boolean(pagesPanel && !pagesPanel.hidden && name !== 'pages');
   const apply = () => {
@@ -2777,8 +2784,13 @@ function activateTab(name) {
     if (name === 'ledger') {
       loadLedger().catch(() => {});
     }
-    if (name === 'booster-members' || name === 'minutes') {
+    if (name === 'booster-members' || name === 'minutes' || name === 'badge-creator') {
       setBoostersMenuOpen(true);
+    }
+    if (name === 'badge-creator') {
+      if (typeof window.initBadgeCreatorPanel === 'function') {
+        window.initBadgeCreatorPanel().catch(() => {});
+      }
     }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
@@ -2894,7 +2906,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canViewMinutes();
+  return canEditBoosterMembers() || canViewMinutes() || canAccessBadgeCreator();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -2975,6 +2987,7 @@ function showAllowedPanels() {
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
     minutes: canViewMinutes(),
+    'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
     social: hasPermission('site'),
@@ -3006,6 +3019,8 @@ function showAllowedPanels() {
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+    const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
+    if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
   }
   bindBoostersMenu();
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
@@ -3572,6 +3587,7 @@ function renderDashboard() {
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
+    canAccessBadgeCreator() && ['Badge Creator', 'Build, save, download, and print CR80 committee and officer badges.', 'badge-creator', 'Boosters', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
     canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
@@ -8284,6 +8300,11 @@ function bindForms() {
     }
   });
 }
+
+window.jsonFetch = jsonFetch;
+window.prepareImageFileForUpload = prepareImageFileForUpload;
+window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
+window.canAccessBadgeCreator = canAccessBadgeCreator;
 
 bindFormRichEditors();
 bindPageVisualEditor();
