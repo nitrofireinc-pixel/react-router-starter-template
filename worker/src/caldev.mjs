@@ -95,6 +95,14 @@ function escapeHtmlAttr(value = '') {
     .replace(/>/g, '&gt;');
 }
 
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function normalizeCaldevLinkUrl(raw = '') {
   const url = decodeBasicHtmlEntities(String(raw || '')).trim();
   if (!url || /[\s<>]/.test(url)) return '';
@@ -332,9 +340,39 @@ export function deadlineBannerCopy(event) {
     title,
     due,
     dateLabel,
-    text: dateLabel ? `Deadline: ${title} due ${dateLabel}!` : `Deadline: ${title}!`,
+    text: dateLabel ? `Deadline: ${title} ${dateLabel}!` : `Deadline: ${title}!`,
     href: firstCaldevDescriptionLink(event?.description || ''),
   };
+}
+
+export function buildDeadlineBannerItems(events = [], todayIso = '') {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  return activeDeadlineBannerEvents(events, today).map((event) => {
+    const copy = deadlineBannerCopy(event);
+    const href = copy.href || '/calendar.html';
+    return {
+      text: copy.text,
+      href,
+      cta: copy.href ? 'Click Here' : 'View details',
+    };
+  });
+}
+
+export function renderSiteDeadlineBannersHtml(items = []) {
+  const banners = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const text = String(item?.text || '').trim();
+      if (!text) return '';
+      const href = normalizeCaldevLinkUrl(item.href) || '/calendar.html';
+      const cta = String(item?.cta || 'View details').trim() || 'View details';
+      return `<div class="caldev-deadline-banner" role="status">${escapeHtml(text)} <a href="${escapeHtmlAttr(href)}">${escapeHtml(cta)}</a></div>`;
+    })
+    .filter(Boolean)
+    .join('');
+  if (!banners) {
+    return '<div class="site-deadline-banners" data-site-deadline-banners hidden></div>';
+  }
+  return `<div class="site-deadline-banners" data-site-deadline-banners>${banners}</div>`;
 }
 
 let caldevSchemaReady = false;
@@ -517,6 +555,17 @@ export async function listCaldevEvents(env) {
   const rows = await env.DB.prepare(`
     SELECT ${CALDEV_SELECT}
     FROM caldev_events
+    ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
+  `).all();
+  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+/** Read-only deadline rows for public banners. Never seeds or migrates. */
+export async function listDeadlineCaldevEvents(env) {
+  const rows = await env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE lower(track) = 'deadline'
     ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
   `).all();
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);

@@ -61,20 +61,28 @@ import {
 } from './web-push-browser/index.js';
 import {
   CALDEV_TRACKS,
+  buildDeadlineBannerItems,
   clearCaldevEvents,
   deleteCaldevEvent,
+  easternTodayIso,
   ensureCaldevSchema,
   getCaldevEventById,
   insertCaldevEvent,
   listCaldevEvents,
+  listDeadlineCaldevEvents,
   normalizeCaldevPayload,
+  renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
   updateCaldevEvent,
 } from './caldev.mjs';
 
 export {
   CALDEV_TRACKS,
+  buildDeadlineBannerItems,
+  easternTodayIso,
+  listDeadlineCaldevEvents,
   normalizeCaldevPayload,
+  renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
 } from './caldev.mjs';
 
@@ -270,7 +278,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'restore-badge-creator-20260912';
+const ASSET_VERSION = 'site-deadline-banner-nodue-20260914';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -8026,6 +8034,14 @@ async function routeApi(request, env, url, ctx = null) {
     // Full month view needs past and future months, not only upcoming rows.
     return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
   }
+  if (url.pathname === '/api/caldev/deadline-banners' && request.method === 'GET') {
+    try {
+      const events = await listDeadlineCaldevEvents(env);
+      return jsonResponse(buildDeadlineBannerItems(events, easternTodayIso()));
+    } catch {
+      return jsonResponse([]);
+    }
+  }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
     let events = await listCaldevEvents(env);
@@ -10991,12 +11007,13 @@ export function renderNav(pages, { loggedIn = false } = {}) {
   return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
+  const deadlineHtml = deadlineBannersHtml || renderSiteDeadlineBannersHtml([]);
   const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
   const bodyClasses = [];
   if (maintenancePreview) bodyClasses.push('maintenance-preview');
@@ -11027,6 +11044,7 @@ ${previewBanner}
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
+${deadlineHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
@@ -11154,12 +11172,13 @@ async function serveStaticOrCms(request, env, url) {
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
     if (page) {
-      const [site, pages, allSponsors, staff, boosterMembers] = await Promise.all([
+      const [site, pages, allSponsors, staff, boosterMembers, deadlineEvents] = await Promise.all([
         getSite(env),
         getPages(env),
         getSponsors(env),
         page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
+        listDeadlineCaldevEvents(env).catch(() => []),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
       if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
@@ -11168,6 +11187,9 @@ async function serveStaticOrCms(request, env, url) {
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
+        deadlineBannersHtml: renderSiteDeadlineBannersHtml(
+          buildDeadlineBannerItems(deadlineEvents, easternTodayIso()),
+        ),
       }));
     }
   }

@@ -316,7 +316,7 @@ function ensurePublicBrandMark() {
   });
 }
 
-function ensureSiteChrome(header, mount) {
+function ensureSiteChrome(header, marquee, deadlineMount) {
   if (!header) return null;
   let chrome = document.querySelector('[data-site-chrome]');
   if (!chrome) {
@@ -326,9 +326,14 @@ function ensureSiteChrome(header, mount) {
     header.parentNode?.insertBefore(chrome, header);
   }
   if (header.parentElement !== chrome) chrome.appendChild(header);
-  if (mount && mount.parentElement !== chrome) chrome.appendChild(mount);
-  // Keep header above the marquee inside the site chrome.
-  if (mount && mount.previousElementSibling !== header) chrome.appendChild(mount);
+  if (marquee && marquee.parentElement !== chrome) chrome.appendChild(marquee);
+  if (deadlineMount && deadlineMount.parentElement !== chrome) chrome.appendChild(deadlineMount);
+  if (marquee && marquee.previousElementSibling !== header) header.after(marquee);
+  if (deadlineMount && marquee && deadlineMount.previousElementSibling !== marquee) {
+    marquee.after(deadlineMount);
+  } else if (deadlineMount && !marquee && deadlineMount.previousElementSibling !== header) {
+    header.after(deadlineMount);
+  }
   return chrome;
 }
 
@@ -344,7 +349,7 @@ function ensureSponsorMarqueeMount() {
     mount.setAttribute('aria-label', 'Sponsor marquee');
     mount.hidden = true;
   }
-  ensureSiteChrome(header, mount);
+  ensureSiteChrome(header, mount, document.querySelector('[data-site-deadline-banners]'));
   document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
     if (node !== mount) node.remove();
   });
@@ -392,6 +397,69 @@ async function loadSponsorMarquee() {
     renderSponsorMarquee(list);
   } catch {
     // Keep any already-visible SSR/cache marquee in place.
+  }
+}
+
+function isPublicSiteDeadlineContext() {
+  if (document.body?.classList.contains('admin-body')) return false;
+  if (document.querySelector('.cms-shell')) return false;
+  return !isCmsAdminPreviewContext();
+}
+
+function safeDeadlineBannerHref(value) {
+  const href = String(value || '').trim();
+  if (!href || /^(javascript:|data:|vbscript:)/i.test(href)) return '/calendar.html';
+  if (/^https?:\/\//i.test(href) || href.startsWith('/') || /^mailto:/i.test(href)) return href;
+  return '/calendar.html';
+}
+
+function ensureSiteDeadlineBannersMount() {
+  if (!isPublicSiteDeadlineContext()) return document.querySelector('[data-site-deadline-banners]') || null;
+  const header = document.querySelector('header.site-header');
+  const marquee = document.querySelector('[data-sponsor-marquee]') || ensureSponsorMarqueeMount();
+  let mount = document.querySelector('[data-site-deadline-banners]');
+  if (!mount) {
+    mount = document.createElement('div');
+    mount.className = 'site-deadline-banners';
+    mount.setAttribute('data-site-deadline-banners', '');
+    mount.hidden = true;
+  }
+  if (header) ensureSiteChrome(header, marquee, mount);
+  else if (marquee && mount.previousElementSibling !== marquee) marquee.after(mount);
+  document.querySelectorAll('[data-site-deadline-banners]').forEach((node) => {
+    if (node !== mount) node.remove();
+  });
+  return mount;
+}
+
+function renderSiteDeadlineBanners(items = []) {
+  const mount = ensureSiteDeadlineBannersMount();
+  if (!mount) return;
+  const banners = (Array.isArray(items) ? items : []).map((item) => {
+    const text = String(item?.text || '').trim();
+    if (!text) return '';
+    const href = safeDeadlineBannerHref(item.href);
+    const cta = String(item?.cta || 'View details').trim() || 'View details';
+    return `<div class="caldev-deadline-banner" role="status">${escapeHtml(text)} <a href="${escapeHtml(href)}">${escapeHtml(cta)}</a></div>`;
+  }).filter(Boolean);
+  if (!banners.length) {
+    mount.hidden = true;
+    mount.innerHTML = '';
+    return;
+  }
+  mount.hidden = false;
+  mount.innerHTML = banners.join('');
+}
+
+async function loadSiteDeadlineBanners() {
+  if (!isPublicSiteDeadlineContext()) return;
+  ensureSiteDeadlineBannersMount();
+  try {
+    const items = await fetch('/api/caldev/deadline-banners', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : []));
+    renderSiteDeadlineBanners(Array.isArray(items) ? items : []);
+  } catch {
+    // Keep any server-rendered banners in place.
   }
 }
 
@@ -747,6 +815,7 @@ function initMonthCalendars(allEvents) {
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
+  const deadlinePromise = loadSiteDeadlineBanners();
   const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
   const [site, events, photos, calendarEvents] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
@@ -846,7 +915,7 @@ async function loadPublicContent() {
   bindLettermanForm();
   bindCmsForms();
   maybeAutoOpenDonate();
-  await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
+  await Promise.all([marqueePromise, deadlinePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
 function shouldAutoOpenDonate() {
