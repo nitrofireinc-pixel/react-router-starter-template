@@ -504,7 +504,6 @@
     const board = state.view === 'week' ? renderWeek() : state.view === 'rundown' ? renderRundown() : renderMonth();
     root.classList.toggle('is-compact', isCompactLayout());
     root.innerHTML = `
-      ${renderDeadlineBanners()}
       ${renderToolbar()}
       ${renderLegend()}
       <div class="caldev-board">

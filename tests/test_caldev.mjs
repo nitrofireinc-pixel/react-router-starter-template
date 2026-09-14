@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   activeDeadlineBannerEvents,
+  buildDeadlineBannerItems,
   compareCaldevEvents,
   deadlineBannerCopy,
   deadlineDueIso,
@@ -15,6 +16,7 @@ import {
   normalizeCaldevTrack,
   productionEventToCaldevPayload,
   productionEventToStartDate,
+  renderSiteDeadlineBannersHtml,
   sanitizeCaldevDescriptionHtml,
   shiftCaldevEventToDate,
   shiftIsoDate,
@@ -143,6 +145,22 @@ test('deadline banner window is one week through due day, then gone', () => {
     { title: 'Far trip form', track: 'deadline', start_date: '2026-11-15' },
   ], '2026-10-16');
   assert.deepEqual(active.map((event) => event.title), ['Letterman Jacket Forms']);
+  const items = buildDeadlineBannerItems([deadline], '2026-10-16');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].cta, 'Click Here');
+  const html = renderSiteDeadlineBannersHtml(items);
+  assert.match(html, /data-site-deadline-banners/);
+  assert.match(html, /caldev-deadline-banner/);
+  assert.match(html, /Letterman Jacket Forms/);
+  assert.match(html, /href="https:\/\/efhsband\.org\/letterman-jacket\.html"/);
+  assert.doesNotMatch(renderSiteDeadlineBannersHtml([]), /caldev-deadline-banner/);
+  const untitled = buildDeadlineBannerItems([{
+    title: 'Booster dues',
+    track: 'deadline',
+    start_date: '2026-10-20',
+  }], '2026-10-16');
+  assert.equal(untitled[0].cta, 'View details');
+  assert.equal(untitled[0].href, '/calendar.html');
 });
 
 test('production booster meetings seed as Meetings track', () => {
