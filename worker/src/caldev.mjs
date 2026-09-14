@@ -340,7 +340,7 @@ export function deadlineBannerCopy(event) {
     title,
     due,
     dateLabel,
-    text: dateLabel ? `Deadline: ${title} due ${dateLabel}!` : `Deadline: ${title}!`,
+    text: dateLabel ? `Deadline: ${title} ${dateLabel}!` : `Deadline: ${title}!`,
     href: firstCaldevDescriptionLink(event?.description || ''),
   };
 }

@@ -136,7 +136,7 @@ test('deadline banner window is one week through due day, then gone', () => {
   assert.equal(isDeadlineBannerActive(ranged, '2026-10-13'), true);
   assert.equal(isDeadlineBannerActive(ranged, '2026-10-21'), false);
   const copy = deadlineBannerCopy(deadline);
-  assert.equal(copy.text, 'Deadline: Letterman Jacket Forms due October 20th, 2026!');
+  assert.equal(copy.text, 'Deadline: Letterman Jacket Forms October 20th, 2026!');
   assert.equal(copy.href, 'https://efhsband.org/letterman-jacket.html');
   assert.equal(formatDeadlineBannerDate('2026-10-21'), 'October 21st, 2026');
   const active = activeDeadlineBannerEvents([

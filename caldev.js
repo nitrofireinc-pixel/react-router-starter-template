@@ -199,7 +199,7 @@
     return items.map((event) => {
       const due = deadlineDueIso(event);
       const href = firstDescLink(event.description);
-      const text = `Deadline: ${escapeHtml(event.title || 'Deadline')} due ${escapeHtml(formatDeadlineBannerDate(due))}!`;
+      const text = `Deadline: ${escapeHtml(event.title || 'Deadline')} ${escapeHtml(formatDeadlineBannerDate(due))}!`;
       const cta = href
         ? ` <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Click Here</a>`
         : ` <button type="button" data-caldev-open="${event.id}">View details</button>`;
