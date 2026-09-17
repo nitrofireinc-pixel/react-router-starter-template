@@ -202,6 +202,7 @@ test('CMS Home Band information card is one rich editor with lists and photos', 
   assert.match(adminSrc, /dataset\.cmsHomeField = 'hero-card'/);
   assert.match(adminSrc, /el\.closest\('\.hero-card, \.cms-edit-field'\)/);
   assert.match(adminSrc, /inHeroCard \? 'cms-body-photo-block' : 'cms-body-photo-left'/);
+  assert.match(adminSrc, /selectedImg\.replaceWith\(inserted\)/);
   assert.match(adminSrc, /function sanitizeHomeHeroPasteHtml/);
   assert.match(workerSrc, /data-rich="insertUnorderedList"/);
   assert.match(workerSrc, /• List/);
@@ -620,16 +621,14 @@ test('ensureFundraisingDonateSlot injects popup donate button into CMS fundraisi
 });
 
 
-test('refreshHomeHeroBrandMark updates the Band information card logo', () => {
+test('refreshHomeHeroBrandMark leaves Band information card images as saved', () => {
   const html = '<aside class="hero-card"><img src="/assets/efhs-logo.png" alt="East Forsyth logo"><h2>Band information in one place</h2></aside>';
-  const next = refreshHomeHeroBrandMark(html);
-  assert.match(next, /efhs-blue-regiment-mark\.png\?v=[^"']+/);
-  assert.doesNotMatch(next, /efhs-logo\.png/);
-  assert.match(next, /Band information in one place/);
-
+  assert.equal(refreshHomeHeroBrandMark(html), html);
   const custom = '<aside class="hero-card"><img src="/uploads/custom-card.png" alt="Custom"><h2>Band information in one place</h2></aside>';
-  assert.match(refreshHomeHeroBrandMark(custom), /\/uploads\/custom-card\.png/);
-  assert.doesNotMatch(refreshHomeHeroBrandMark(custom), /efhs-blue-regiment-mark/);
+  assert.equal(refreshHomeHeroBrandMark(custom), custom);
+  const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
+  assert.match(workerSrc, /if \(page\.slug === 'home' \|\| page\.is_home\) return ensureHomePhotoGallerySlot\(page\.body_html\)/);
+  assert.doesNotMatch(workerSrc, /ensureHomePhotoGallerySlot\(refreshHomeHeroBrandMark/);
 });
 
 test('refreshHomeStartHereSection updates outdated Start here copy', () => {
@@ -1497,7 +1496,7 @@ test('home feature cards extract, normalize, and patch without wiping the page',
   assert.match(savedFull.body_html, /Updated copy/);
 
   const heroCard = sanitizeHomeBodyHtml(`
-    <aside class="hero-card cms-edit-field cms-edit-rich cms-home-hero-card is-focused" contenteditable="true" data-cms-home-field="hero-card" data-edit-label="Band information card">
+    <aside class="hero-card cms-edit-field cms-edit-rich cms-home-hero-card is-focused" contenteditable="true" aria-multiline="true" data-cms-home-field="hero-card" data-edit-label="Band information card">
       <img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment" class="cms-body-photo cms-body-photo-block is-selected" style="width: 170px; height: auto;" data-photo-width="170">
       <h2>Band information in one place</h2>
       <ul>
@@ -1513,7 +1512,7 @@ test('home feature cards extract, normalize, and patch without wiping the page',
   assert.match(heroCard, /Upcoming events and rehearsal notes/);
   assert.match(heroCard, /src="\/assets\/efhs-blue-regiment-mark\.png"/);
   assert.match(heroCard, /width: 170px/);
-  assert.doesNotMatch(heroCard, /contenteditable|cms-edit-field|cms-home-hero-card|is-selected|data-cms-home-field/);
+  assert.doesNotMatch(heroCard, /contenteditable|cms-edit-field|cms-home-hero-card|is-selected|data-cms-home-field|aria-multiline/);
   assert.doesNotMatch(heroCard, /<li>\s*<\/li>/);
 });
 

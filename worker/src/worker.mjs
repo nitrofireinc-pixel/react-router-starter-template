@@ -278,7 +278,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'site-deadline-banner-nodue-20260914';
+const ASSET_VERSION = 'hero-card-keep-edits-20260917';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -1946,7 +1946,7 @@ async function migrateAndSeedDb(env) {
   }
   const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
   if (homePageRow?.body_html) {
-    const nextHomeHtml = ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(refreshHomeStartHereSection(homePageRow.body_html)));
+    const nextHomeHtml = ensureHomePhotoGallerySlot(refreshHomeStartHereSection(homePageRow.body_html));
     if (nextHomeHtml !== homePageRow.body_html) {
       await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .bind(nextHomeHtml, homePageRow.id)
@@ -4418,23 +4418,9 @@ export function refreshHomeStartHereSection(html) {
     );
 }
 
-function isManagedHomeHeroMarkSrc(src) {
-  const value = String(src || '');
-  return /efhs-logo\.png/i.test(value)
-    || /efhs-blue-regiment-mark\.png/i.test(value)
-    || /efhs-admin-mark\.png/i.test(value);
-}
-
-export function refreshHomeHeroBrandMark(html, markUrl = PUBLIC_BRAND_MARK) {
-  const source = String(html || '');
-  if (!source.trim() || !/<aside\b[^>]*\bhero-card\b/i.test(source)) return source;
-  const mark = String(markUrl || PUBLIC_BRAND_MARK || BLUE_REGIMENT_MARK_PATH).trim() || BLUE_REGIMENT_MARK_PATH;
-  return source.replace(
-    /(<aside\b[^>]*\bhero-card\b[^>]*>[\s\S]*?<img\b[^>]*?\bsrc=["'])([^"']+)(["'])/i,
-    (match, prefix, src, suffix) => (
-      isManagedHomeHeroMarkSrc(src) ? `${prefix}${mark}${suffix}` : match
-    ),
-  );
+/** Keep CMS Band information card HTML as saved. Do not rewrite the first image. */
+export function refreshHomeHeroBrandMark(html, _markUrl = PUBLIC_BRAND_MARK) {
+  return String(html || '');
 }
 
 export function ensureHomePhotoGallerySlot(html) {
@@ -6657,7 +6643,7 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
-  if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
+  if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(page.body_html);
   return page.body_html;
 }
 
@@ -7819,7 +7805,7 @@ export function sanitizeHomeBodyHtml(html = '') {
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\scontenteditable\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:role|spellcheck|aria-label|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:role|spellcheck|aria-label|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\sclass="([^"]*)"/gi, (_, classes) => {
       const cleaned = String(classes || '')
         .split(/\s+/)

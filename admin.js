@@ -1983,17 +1983,34 @@ function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
   const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
   const inHeroCard = field.matches?.('.hero-card');
-  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : (inHeroCard ? 170 : 280);
+  const selectedImg = (pagePhotoResize.img && field.contains(pagePhotoResize.img))
+    ? pagePhotoResize.img
+    : null;
+  const selectedWidth = selectedImg
+    ? Number.parseFloat(selectedImg.getAttribute('data-photo-width') || selectedImg.style.width || '')
+    : NaN;
+  const width = Number(widthPx) > 0
+    ? Math.round(Number(widthPx))
+    : (Number.isFinite(selectedWidth) && selectedWidth > 0 ? Math.round(selectedWidth) : (inHeroCard ? 170 : 280));
   const floatClass = inHeroCard ? 'cms-body-photo-block' : 'cms-body-photo-left';
   const cleaned = sanitizeRichHtml(
     `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo ${floatClass}" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
   );
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
   const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
-  const insertedNode = insertHtmlAtCaret(field, html);
-  const inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
-    ? insertedNode
-    : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  let inserted = null;
+  if (selectedImg) {
+    const holder = document.createElement('div');
+    holder.innerHTML = html;
+    inserted = holder.querySelector('img');
+    if (!inserted) return false;
+    selectedImg.replaceWith(inserted);
+  } else {
+    const insertedNode = insertHtmlAtCaret(field, html);
+    inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+      ? insertedNode
+      : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  }
   syncFieldFromPreview(field);
   if (inserted) selectPageBodyPhoto(inserted);
   savePageRichSelection(field);
