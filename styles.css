@@ -4324,8 +4324,9 @@ body.minutes-frame-open{overflow:hidden}
 }
 body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 @media(min-width:761px){
-  body.maintenance-preview header.site-header,
-  body.maintenance-preview .site-chrome{top:var(--maintenance-banner-h)}
+  body.maintenance-preview .site-chrome,
+  body.maintenance-preview header.site-header{top:var(--maintenance-banner-h)}
+  body.maintenance-preview .site-chrome header.site-header{top:auto}
 }
 @media(max-width:640px){
   :root{--maintenance-banner-h:64px}

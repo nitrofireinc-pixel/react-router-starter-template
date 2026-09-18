@@ -92,6 +92,10 @@ body.efhs-theme .site-chrome{
 body.efhs-theme .site-chrome header.site-header{
   background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
   margin:0;
+  top:auto;
+}
+body.maintenance-preview.efhs-theme .site-chrome header.site-header{
+  top:auto;
 }
 body.efhs-theme .header-inner{
   grid-area:brand;

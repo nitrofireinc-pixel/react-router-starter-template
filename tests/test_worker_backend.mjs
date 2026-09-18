@@ -2134,6 +2134,7 @@ test('staff auth lives in the utility bar, not the main public nav', () => {
   assert.match(styles, /header-quick-actions \.utility-auth/);
   assert.match(themeCss, /border-top:1px solid #fff/);
   assert.match(themeCss, /header-quick-actions \.utility-auth/);
+  assert.match(styles, /body\.maintenance-preview \.site-chrome header\.site-header\{top:auto\}/);
 });
 
 test('admin sessions stay fresh for 24 hours and public nav reflects login state', () => {
