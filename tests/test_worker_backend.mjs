@@ -2066,13 +2066,30 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg"\)/);
-  assert.match(themeCss, /background-position:center 46%/);
+  assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
+  assert.match(themeCss, /background-position:center,center,center,center,center,46% 44%/);
+  assert.match(themeCss, /background-position:center,center,center,center,center,50% 46%/);
+  assert.match(themeCss, /mask-image:linear-gradient\(108deg/);
+  assert.match(themeCss, /radial-gradient\(ellipse 34% 40% at 78% 6%/);
+  assert.match(themeCss, /var\(--efhs-hero-photo, none\)/);
+  assert.doesNotMatch(themeCss, /DISCIPLINE|CHARACTER|OPPORTUNITY|COMMUNITY|ONE BAND A BRIGHTER TOMORROW|MUSIC BUILDS MORE THAN MUSICIANS/);
   assert.match(themeCss, /prefers-reduced-motion/);
   assert.match(themeCss, /\.nav-support/);
   assert.doesNotMatch(themeCss, /Jason Reynolds|Allison Carter|Mattress Warehouse/);
   assert.equal(homeHeroBytes[0], 0xff);
   assert.equal(homeHeroBytes[1], 0xd8);
   assert.ok(homeHeroBytes.length > 50_000);
+  let heroWidth = 0;
+  let heroHeight = 0;
+  for (let i = 0; i < homeHeroBytes.length - 8; i++) {
+    if (homeHeroBytes[i] === 0xff && (homeHeroBytes[i + 1] === 0xc0 || homeHeroBytes[i + 1] === 0xc1 || homeHeroBytes[i + 1] === 0xc2)) {
+      heroHeight = homeHeroBytes.readUInt16BE(i + 5);
+      heroWidth = homeHeroBytes.readUInt16BE(i + 7);
+      break;
+    }
+  }
+  assert.equal(heroWidth, 1468, 'Home Game Performance (4) should stay 1468px wide');
+  assert.equal(heroHeight, 788, 'Home Game Performance (4) should stay 788px tall');
   const open = (themeCss.match(/\{/g) || []).length;
   const close = (themeCss.match(/\}/g) || []).length;
   assert.equal(open - close, 0, `public-theme.css brace delta should be 0, got ${open - close}`);
@@ -2178,8 +2195,9 @@ test('public homepage stacks nav under a centered banner and hides the hero card
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[\s\S]*?display:none/);
-  assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:center/);
-  assert.match(themeCss, /body\.efhs-theme \.hero \.button-row\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
+  assert.match(themeCss, /body\.efhs-theme \.hero h1::first-line/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
 });
