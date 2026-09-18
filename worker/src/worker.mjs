@@ -278,7 +278,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'visual-redesign-20260918';
+const ASSET_VERSION = 'visual-nav-support-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -11010,18 +11010,67 @@ export function renderStaffAuthNavLink(loggedIn = false) {
   return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
+const SUPPORT_NAV_SLUGS = ['boosters', 'fundraising', 'sponsors'];
+
+function isHiddenPublicNavPage(page = {}) {
+  return page.slug === 'become-a-sponsor'
+    || page.slug === 'in-kind'
+    || page.slug === 'letterman-jacket'
+    || isCmsFormPage(page);
+}
+
+function publicNavPageLabel(page = {}) {
+  return String(page.title || '').replace(/\s*\|\s*East Forsyth Band$/, '');
+}
+
+function isCurrentPublicNavPath(page, currentPath = '') {
+  const href = String(page?.path || '');
+  const current = String(currentPath || '');
+  if (!href || !current) return false;
+  return href === current || (current === '/' && (page.slug === 'home' || page.is_home));
+}
+
+function renderPublicNavLink(page, currentPath = '') {
+  const href = String(page.path || '');
+  const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+  return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+}
+
+function renderSupportNavHtml(pages = [], currentPath = '') {
+  const items = (Array.isArray(pages) ? pages : []).filter((page) => page?.path);
+  if (!items.length) return '';
+  const childCurrent = items.some((page) => isCurrentPublicNavPath(page, currentPath));
+  const links = items.map((page) => {
+    const href = String(page.path || '');
+    const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+    return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+  }).join('');
+  return `<div class="nav-support${childCurrent ? ' is-current' : ''}" data-nav-support><button type="button" class="nav-support-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="nav-support-menu">Support the Band <span class="nav-support-caret" aria-hidden="true"></span></button><div id="nav-support-menu" class="nav-support-menu">${links}</div></div>`;
+}
+
 export function renderNav(pages, { loggedIn = false, currentPath = '' } = {}) {
   const current = String(currentPath || '');
-  const pageLinks = pages
-      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind' && !isCmsFormPage(page) && page.slug !== 'letterman-jacket')
-    .map((page) => {
-      const href = String(page.path || '');
-      const active = current && (href === current || (current === '/' && (page.slug === 'home' || page.is_home)))
-        ? ' aria-current="page"'
-        : '';
-      return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`;
-    }).join('');
-  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+  const visible = (Array.isArray(pages) ? pages : []).filter((page) => !isHiddenPublicNavPage(page));
+  const supportBySlug = new Map(
+    visible
+      .filter((page) => SUPPORT_NAV_SLUGS.includes(String(page.slug || '')))
+      .map((page) => [page.slug, page]),
+  );
+  const supportPages = SUPPORT_NAV_SLUGS.map((slug) => supportBySlug.get(slug)).filter(Boolean);
+  const parts = [];
+  let supportInserted = false;
+  for (const page of visible) {
+    if (SUPPORT_NAV_SLUGS.includes(String(page.slug || ''))) {
+      if (!supportInserted && supportPages.length) {
+        parts.push(renderSupportNavHtml(supportPages, current));
+        supportInserted = true;
+      }
+      continue;
+    }
+    parts.push(renderPublicNavLink(page, current));
+  }
+  if (!supportInserted && supportPages.length) parts.push(renderSupportNavHtml(supportPages, current));
+  return `${parts.join('')}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
 export function safePublicThemePhotoUrl(url = '') {

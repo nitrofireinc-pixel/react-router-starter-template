@@ -1947,6 +1947,68 @@ test('notify me nav control is rendered in public navigation', () => {
   assert.doesNotMatch(currentNav, /href="\/" aria-current="page"/);
 });
 
+test('public nav groups Boosters, Fundraising, and Sponsors under Support the Band', () => {
+  const pages = [
+    { slug: 'home', path: '/', title: 'Home' },
+    { slug: 'calendar', path: '/calendar.html', title: 'Calendar' },
+    { slug: 'gallery', path: '/gallery.html', title: 'Gallery' },
+    { slug: 'directors', path: '/directors.html', title: 'Directors & Staff' },
+    { slug: 'sponsors', path: '/sponsors.html', title: 'Sponsors' },
+    { slug: 'boosters', path: '/boosters.html', title: 'Boosters' },
+    { slug: 'fundraising', path: '/fundraising.html', title: 'Fundraising' },
+    { slug: 'contact', path: '/contact.html', title: 'Contact' },
+    { slug: 'become-a-sponsor', path: '/become-a-sponsor.html', title: 'Become a Sponsor' },
+  ];
+  const nav = renderNav(pages);
+  assert.match(nav, /data-nav-support/);
+  assert.match(nav, /aria-controls="nav-support-menu"/);
+  assert.match(nav, /aria-expanded="false"/);
+  assert.match(nav, /aria-haspopup="true"/);
+  assert.match(nav, />Support the Band </);
+  assert.match(nav, /href="\/boosters\.html"/);
+  assert.match(nav, /href="\/fundraising\.html"/);
+  assert.match(nav, /href="\/sponsors\.html"/);
+  assert.doesNotMatch(nav, /support-the-band\.html/);
+  assert.doesNotMatch(nav, /role="menu"/);
+  assert.equal((nav.match(/href="\/boosters\.html"/g) || []).length, 1);
+  assert.equal((nav.match(/href="\/fundraising\.html"/g) || []).length, 1);
+  assert.equal((nav.match(/href="\/sponsors\.html"/g) || []).length, 1);
+  const homeAt = nav.indexOf('href="/"');
+  const calendarAt = nav.indexOf('href="/calendar.html"');
+  const galleryAt = nav.indexOf('href="/gallery.html"');
+  const directorsAt = nav.indexOf('href="/directors.html"');
+  const supportAt = nav.indexOf('data-nav-support');
+  const boostersAt = nav.indexOf('href="/boosters.html"');
+  const fundraisingAt = nav.indexOf('href="/fundraising.html"');
+  const sponsorsAt = nav.indexOf('href="/sponsors.html"');
+  const contactAt = nav.indexOf('href="/contact.html"');
+  assert.ok(homeAt < calendarAt && calendarAt < galleryAt && galleryAt < directorsAt);
+  assert.ok(directorsAt < supportAt && supportAt < contactAt);
+  assert.ok(supportAt < boostersAt && boostersAt < fundraisingAt && fundraisingAt < sponsorsAt && sponsorsAt < contactAt);
+  const currentNav = renderNav(pages, { currentPath: '/boosters.html' });
+  assert.match(currentNav, /nav-support is-current/);
+  assert.match(currentNav, /href="\/boosters\.html" aria-current="page"/);
+  assert.doesNotMatch(currentNav, /href="\/fundraising\.html" aria-current="page"/);
+  const missingSponsors = renderNav(pages.filter((page) => page.slug !== 'sponsors'));
+  assert.match(missingSponsors, /href="\/boosters\.html"/);
+  assert.match(missingSponsors, /href="\/fundraising\.html"/);
+  assert.doesNotMatch(missingSponsors, /href="\/sponsors\.html"/);
+  const emptySupport = renderNav(pages.filter((page) => !['boosters', 'fundraising', 'sponsors'].includes(page.slug)));
+  assert.doesNotMatch(emptySupport, /data-nav-support/);
+  assert.match(emptySupport, />Home</);
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const script = readFileSync(join(root, 'script.js'), 'utf8');
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(script, /function bindSupportNav/);
+  assert.match(script, /closeOpenSupportNav/);
+  assert.match(script, /aria-expanded/);
+  assert.match(themeCss, /\.nav-support-menu/);
+  assert.match(themeCss, /\.nav-support-toggle/);
+  assert.match(styles, /\.nav-support-menu/);
+  assert.match(styles, /@media \(max-width:760px\)/);
+});
+
 test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
@@ -1960,6 +2022,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /prefers-reduced-motion/);
+  assert.match(themeCss, /\.nav-support/);
   assert.doesNotMatch(themeCss, /Jason Reynolds|Allison Carter|Mattress Warehouse/);
   const open = (themeCss.match(/\{/g) || []).length;
   const close = (themeCss.match(/\}/g) || []).length;
