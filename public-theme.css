@@ -69,22 +69,12 @@ body.efhs-theme .utility a.utility-auth:focus-visible{
   outline:2px solid #fff;
   outline-offset:3px;
 }
-body.efhs-theme hr.site-utility-rule{
-  display:block;
-  height:1px;
-  margin:0;
-  padding:0;
-  border:0;
-  background:#fff;
-  color:#fff;
-  width:100%;
-}
 
 /* ---------- Header / nav ---------- */
 body.efhs-theme header.site-header{
   background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
   border-bottom:0;
-  border-top:0;
+  border-top:1px solid #fff;
   margin:0;
   backdrop-filter:none;
   color:#fff;
@@ -715,9 +705,8 @@ body.efhs-theme .footer h3{
 
 /* ---------- Phone: keep existing drawer behavior ---------- */
 @media (max-width:760px){
-  body.efhs-theme hr.site-utility-rule{
-    height:1px;
-    margin:0;
+  body.efhs-theme header.site-header{
+    border-top:1px solid #fff;
   }
   body.efhs-theme .header-quick-actions .utility-auth{
     color:#eaf2ff;

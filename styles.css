@@ -24,7 +24,6 @@ img{max-width:100%;display:block}
 .utility{background:var(--navy);color:#fff;font-size:.9rem;margin:0}.utility .wrap{max-width:var(--max);margin:auto;padding:8px 20px;display:flex;gap:18px;justify-content:flex-end;flex-wrap:wrap;align-items:center}.utility-links{display:flex;flex-wrap:wrap;align-items:center;gap:18px}.utility a{text-decoration:underline;text-underline-offset:3px}
 .utility-auth{text-decoration:none;white-space:nowrap}
 .utility-auth:focus-visible{outline:2px solid #fff;outline-offset:2px}
-hr.site-utility-rule{display:block;height:1px;margin:0;padding:0;border:0;background:#fff;color:#fff;width:100%}
 header.site-header{position:sticky;top:0;z-index:50;display:flex;flex-direction:column;align-items:stretch;background:rgba(255,255,255,.96);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,33,66,.12);margin:0}
 .site-chrome{
   position:sticky;

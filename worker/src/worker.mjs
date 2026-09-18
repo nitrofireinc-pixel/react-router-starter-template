@@ -286,7 +286,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'utility-login-rule-20260918';
+const ASSET_VERSION = 'utility-login-rule-20260918b';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -11252,7 +11252,6 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site, { loggedIn })}</div></div>
-<hr class="site-utility-rule" aria-hidden="true">
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn, currentPath: page.path })}</nav>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
 ${deadlineHtml}

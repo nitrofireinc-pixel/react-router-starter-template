@@ -2125,14 +2125,14 @@ test('staff auth lives in the utility bar, not the main public nav', () => {
   const styles = readFileSync(join(root, 'styles.css'), 'utf8');
   const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
   assert.match(workerSrc, /renderUtilityLinks\(site, \{ loggedIn \}\)/);
-  assert.match(workerSrc, /<hr class="site-utility-rule"/);
+  assert.doesNotMatch(workerSrc, /site-utility-rule/);
+  assert.doesNotMatch(workerSrc, /<hr class=/);
   assert.doesNotMatch(workerSrc, /renderStaffAuthNavLink\(loggedIn\)\}?\$\{renderNotifyMeNavControl/);
   assert.match(script, /function utilityAuthHost/);
   assert.match(script, /\[data-header-quick-actions\]/);
   assert.match(script, /\[data-staff-auth-link\]/);
-  assert.match(styles, /hr\.site-utility-rule\{[^}]*height:1px/);
   assert.match(styles, /header-quick-actions \.utility-auth/);
-  assert.match(themeCss, /hr\.site-utility-rule\{[^}]*height:1px/);
+  assert.match(themeCss, /border-top:1px solid #fff/);
   assert.match(themeCss, /header-quick-actions \.utility-auth/);
 });
 
