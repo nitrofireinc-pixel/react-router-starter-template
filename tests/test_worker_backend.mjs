@@ -202,7 +202,10 @@ test('CMS Home Band information card is one rich editor with lists and photos', 
   assert.match(adminSrc, /dataset\.cmsHomeField = 'hero-card'/);
   assert.match(adminSrc, /el\.closest\('\.hero-card, \.cms-edit-field'\)/);
   assert.match(adminSrc, /inHeroCard \? 'cms-body-photo-block' : 'cms-body-photo-left'/);
-  assert.match(adminSrc, /selectedImg\.replaceWith\(inserted\)/);
+  assert.match(adminSrc, /selectedImg\.setAttribute\('src', url\)/);
+  assert.match(adminSrc, /#admin-page-photo-toast/);
+  assert.match(adminSrc, /function isHomeHeroBrandMarkSrc/);
+  assert.match(adminSrc, /function restoreHomeHeroCardUploadSrc/);
   assert.match(adminSrc, /function sanitizeHomeHeroPasteHtml/);
   assert.match(workerSrc, /data-rich="insertUnorderedList"/);
   assert.match(workerSrc, /• List/);
@@ -627,7 +630,7 @@ test('refreshHomeHeroBrandMark leaves Band information card images as saved', ()
   const custom = '<aside class="hero-card"><img src="/uploads/custom-card.png" alt="Custom"><h2>Band information in one place</h2></aside>';
   assert.equal(refreshHomeHeroBrandMark(custom), custom);
   const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
-  assert.match(workerSrc, /if \(page\.slug === 'home' \|\| page\.is_home\) return ensureHomePhotoGallerySlot\(page\.body_html\)/);
+  assert.match(workerSrc, /ensureHomePhotoGallerySlot\(restoreHomeHeroCardUploadSrc\(page\.body_html\)\)/);
   assert.doesNotMatch(workerSrc, /ensureHomePhotoGallerySlot\(refreshHomeHeroBrandMark/);
 });
 
@@ -1514,6 +1517,22 @@ test('home feature cards extract, normalize, and patch without wiping the page',
   assert.match(heroCard, /width: 170px/);
   assert.doesNotMatch(heroCard, /contenteditable|cms-edit-field|cms-home-hero-card|is-selected|data-cms-home-field|aria-multiline/);
   assert.doesNotMatch(heroCard, /<li>\s*<\/li>/);
+
+  const replaced = sanitizeHomeBodyHtml(`
+    <aside class="hero-card">
+      <img src="/assets/efhs-blue-regiment-mark.png?v=old" alt="1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6">
+      <img src="/uploads/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6.jpg" alt="Custom photo">
+      <h2>Band information</h2>
+    </aside>
+  `);
+  assert.match(replaced, /\/uploads\/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6\.jpg/);
+  assert.doesNotMatch(replaced, /efhs-blue-regiment-mark/);
+
+  const stuck = sanitizeHomeBodyHtml(`
+    <aside class="hero-card"><img src="/assets/efhs-blue-regiment-mark.png?v=fundraising-cms-photos-20260823" alt="1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6" class="cms-body-photo cms-body-photo-block" style="width: 211px; height: auto;" data-photo-width="211"><br></aside>
+  `);
+  assert.match(stuck, /src="\/uploads\/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6\.jpg"/);
+  assert.doesNotMatch(stuck, /efhs-blue-regiment-mark/);
 });
 
 test('admin mail payload sanitizes rich html and builds plain text', () => {

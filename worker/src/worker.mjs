@@ -278,7 +278,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'hero-card-keep-edits-20260917';
+const ASSET_VERSION = 'hero-card-keep-photo-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -4423,6 +4423,22 @@ export function refreshHomeHeroBrandMark(html, _markUrl = PUBLIC_BRAND_MARK) {
   return String(html || '');
 }
 
+const HOME_HERO_BRAND_MARK_SRC_RE = /(?:efhs-logo|efhs-blue-regiment-mark|efhs-admin-mark)\.png/i;
+const HOME_HERO_UPLOAD_ALT_RE = /^(\d{10,}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Photo used to change only alt, leaving the regiment mark src. Restore the upload. */
+export function restoreHomeHeroCardUploadSrc(html = '') {
+  return String(html || '').replace(/(<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>)/gi, (block) => (
+    block.replace(/<img\b([^>]*)>/gi, (tag, attrs) => {
+      const src = /\bsrc\s*=\s*(["'])([^"']*)\1/i.exec(attrs)?.[2] || '';
+      const alt = String(/\balt\s*=\s*(["'])([^"']*)\1/i.exec(attrs)?.[2] || '').trim();
+      if (!HOME_HERO_BRAND_MARK_SRC_RE.test(src) || !HOME_HERO_UPLOAD_ALT_RE.test(alt)) return tag;
+      const nextAttrs = attrs.replace(/\bsrc\s*=\s*(["'])[^"']*\1/i, `src="/uploads/${alt}.jpg"`);
+      return `<img${nextAttrs}>`;
+    })
+  ));
+}
+
 export function ensureHomePhotoGallerySlot(html) {
   let source = String(html || '');
   if (!source.trim() || !/\bdata-photo-gallery\b/i.test(source)) return source;
@@ -6643,7 +6659,9 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
-  if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(page.body_html);
+  if (page.slug === 'home' || page.is_home) {
+    return ensureHomePhotoGallerySlot(restoreHomeHeroCardUploadSrc(page.body_html));
+  }
   return page.body_html;
 }
 
@@ -7800,7 +7818,7 @@ export function generateStructuredPageHtml(payload = {}) {
 }
 
 export function sanitizeHomeBodyHtml(html = '') {
-  let source = String(html || '')
+  let source = restoreHomeHeroCardUploadSrc(html || '')
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
@@ -7818,9 +7836,15 @@ export function sanitizeHomeBodyHtml(html = '') {
     .replace(/<div class="cms-home-preview-note"[\s\S]*?<\/div>/gi, '')
     .replace(/<label class="cms-home-href-field"[\s\S]*?<\/label>/gi, '')
     .replace(/<span class="cms-home-link-edit">([\s\S]*?)<\/span>/gi, '$1')
-    .replace(/(<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>)/gi, (block) => block
-      .replace(/<li\b[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s)*<\/li>/gi, '')
-      .replace(/<(ul|ol)\b[^>]*>\s*<\/\1>/gi, ''));
+    .replace(/(<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>)/gi, (block) => {
+      let next = block
+        .replace(/<li\b[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s)*<\/li>/gi, '')
+        .replace(/<(ul|ol)\b[^>]*>\s*<\/\1>/gi, '');
+      if (/\/uploads\//i.test(next)) {
+        next = next.replace(/<img\b[^>]*\bsrc=["'][^"']*(?:efhs-logo|efhs-blue-regiment-mark|efhs-admin-mark)\.png[^"']*["'][^>]*>/gi, '');
+      }
+      return next;
+    });
   return source.trim();
 }
 
