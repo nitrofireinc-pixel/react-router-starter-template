@@ -286,7 +286,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'theme-caldev-highlights-20260918';
+const ASSET_VERSION = 'utility-login-rule-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -2740,8 +2740,8 @@ function canManageUtilityLinks(user) {
   return hasPermission(user, 'site') || hasPermission(user, 'pages') || canEditPage(user, 'home');
 }
 
-function renderUtilityLinks(site = {}) {
-  return normalizeUtilityLinks(site.utility_links)
+export function renderUtilityLinks(site = {}, { loggedIn = false } = {}) {
+  const links = normalizeUtilityLinks(site.utility_links)
     .map((link) => {
       const targetAttr = link.target === '_blank'
         ? ' target="_blank" rel="noopener noreferrer"'
@@ -2749,6 +2749,7 @@ function renderUtilityLinks(site = {}) {
       return `<a href="${escapeAttr(link.href)}"${targetAttr}>${escapeHtml(link.label)}</a>`;
     })
     .join('');
+  return `<span class="utility-links">${links}</span>${renderStaffAuthNavLink(loggedIn)}`;
 }
 
 export function normalizeSocialHref(value) {
@@ -11097,9 +11098,9 @@ async function logout(request, env) {
 
 export function renderStaffAuthNavLink(loggedIn = false) {
   if (loggedIn) {
-    return '<a href="/admin" data-staff-auth-link>Staff Menu</a>';
+    return '<a class="utility-auth" href="/admin" data-staff-auth-link>Staff Menu</a>';
   }
-  return '<a href="/admin/login" data-staff-auth-link>Login</a>';
+  return '<a class="utility-auth" href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
 const SUPPORT_NAV_SLUGS = ['boosters', 'fundraising', 'sponsors'];
@@ -11162,7 +11163,7 @@ export function renderNav(pages, { loggedIn = false, currentPath = '' } = {}) {
     parts.push(renderPublicNavLink(page, current));
   }
   if (!supportInserted && supportPages.length) parts.push(renderSupportNavHtml(supportPages, current));
-  return `${parts.join('')}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+  return `${parts.join('')}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
 export function safePublicThemePhotoUrl(url = '') {
@@ -11250,7 +11251,8 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
 <body${bodyClass}>
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
-<div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
+<div class="utility"><div class="wrap">${renderUtilityLinks(site, { loggedIn })}</div></div>
+<hr class="site-utility-rule" aria-hidden="true">
 <header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn, currentPath: page.path })}</nav>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
 ${deadlineHtml}

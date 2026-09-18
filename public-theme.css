@@ -38,10 +38,23 @@ body.efhs-theme .utility{
   letter-spacing:.14em;
   text-transform:uppercase;
   font-weight:700;
+  margin:0;
+  padding:0;
+  border:0;
+  line-height:1.25;
 }
 body.efhs-theme .utility .wrap{
   max-width:1240px;
   justify-content:space-between;
+  align-items:center;
+  padding:5px 20px;
+  gap:16px;
+}
+body.efhs-theme .utility-links{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:16px;
 }
 body.efhs-theme .utility a{
   text-decoration:none;
@@ -52,11 +65,27 @@ body.efhs-theme .utility a:focus-visible{
   color:#fff;
   outline:none;
 }
+body.efhs-theme .utility a.utility-auth:focus-visible{
+  outline:2px solid #fff;
+  outline-offset:3px;
+}
+body.efhs-theme hr.site-utility-rule{
+  display:block;
+  height:1px;
+  margin:0;
+  padding:0;
+  border:0;
+  background:#fff;
+  color:#fff;
+  width:100%;
+}
 
 /* ---------- Header / nav ---------- */
 body.efhs-theme header.site-header{
   background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
   border-bottom:0;
+  border-top:0;
+  margin:0;
   backdrop-filter:none;
   color:#fff;
   display:grid;
@@ -67,8 +96,12 @@ body.efhs-theme header.site-header{
   padding:0 18px;
   overflow:visible;
 }
+body.efhs-theme .site-chrome{
+  margin-top:0;
+}
 body.efhs-theme .site-chrome header.site-header{
   background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
+  margin:0;
 }
 body.efhs-theme .header-inner{
   grid-area:brand;
@@ -682,6 +715,23 @@ body.efhs-theme .footer h3{
 
 /* ---------- Phone: keep existing drawer behavior ---------- */
 @media (max-width:760px){
+  body.efhs-theme hr.site-utility-rule{
+    height:1px;
+    margin:0;
+  }
+  body.efhs-theme .header-quick-actions .utility-auth{
+    color:#eaf2ff;
+    font-size:.68rem;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+  }
+  body.efhs-theme .header-quick-actions .utility-auth:hover,
+  body.efhs-theme .header-quick-actions .utility-auth:focus-visible{
+    color:#fff;
+    background:rgba(255,255,255,.12);
+    outline:2px solid #fff;
+    outline-offset:2px;
+  }
   body.efhs-theme header.site-header,
   body.efhs-theme .site-chrome{
     position:relative;
@@ -689,6 +739,7 @@ body.efhs-theme .footer h3{
     display:flex;
     flex-direction:column;
     padding:0;
+    margin:0;
   }
   body.efhs-theme .header-inner{
     justify-content:center;
