@@ -2090,8 +2090,8 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
-  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=header-stadium-20260918"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'header-stadium-20260918'/);
+  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=header-stadium-v2-20260918"\)/);
+  assert.match(workerSrc, /ASSET_VERSION = 'header-stadium-v2-20260918'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
