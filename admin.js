@@ -1260,6 +1260,15 @@ function serializeHomePreviewHtml(preview) {
   clone.querySelectorAll('.hero-card ul, .hero-card ol').forEach((list) => {
     if (!list.children.length) list.remove();
   });
+  restoreHomeHeroCardImages(clone);
+  clone.querySelectorAll('.hero-card').forEach((card) => {
+    const imgs = [...card.querySelectorAll('img')];
+    const hasUpload = imgs.some((img) => /^\/uploads\//i.test(img.getAttribute('src') || ''));
+    if (!hasUpload) return;
+    imgs.forEach((img) => {
+      if (isHomeHeroBrandMarkSrc(img.getAttribute('src') || '')) img.remove();
+    });
+  });
   return clone.innerHTML.trim();
 }
 
@@ -1663,7 +1672,7 @@ async function discardPageEdits() {
     const page = state.pages.find(item => item.slug === slug);
     if (page) {
       const isHomePage = Boolean(page.is_home) || page.slug === 'home';
-      state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
+      state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
       fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
       form.elements.active.checked = Boolean(page.active);
       syncPreviewFromForm();
@@ -1979,22 +1988,84 @@ function insertHtmlAtCaret(field, html) {
   return node;
 }
 
+function isHomeHeroBrandMarkSrc(src = '') {
+  return /efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/i.test(String(src || ''));
+}
+
+function isHomeHeroUploadAlt(alt = '') {
+  return /^\d{10,}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(alt || '').trim());
+}
+
+function restoreHomeHeroCardImages(root) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll('.hero-card img').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    const alt = String(img.getAttribute('alt') || '').trim();
+    if (!isHomeHeroBrandMarkSrc(src) || !isHomeHeroUploadAlt(alt)) return;
+    const nextSrc = `/uploads/${alt}.jpg`;
+    img.setAttribute('src', nextSrc);
+    img.src = nextSrc;
+  });
+}
+
+function restoreHomeHeroCardUploadSrc(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  restoreHomeHeroCardImages(template.content);
+  return template.innerHTML;
+}
+
 function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
   const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
   if (!field) return false;
   const inHeroCard = field.matches?.('.hero-card');
-  const width = Number(widthPx) > 0 ? Math.round(Number(widthPx)) : (inHeroCard ? 170 : 280);
+  let selectedImg = (pagePhotoResize.img && field.contains(pagePhotoResize.img))
+    ? pagePhotoResize.img
+    : null;
+  if (inHeroCard && !selectedImg) {
+    selectedImg = [...field.querySelectorAll('img')].find((img) => (
+      isHomeHeroBrandMarkSrc(img.getAttribute('src') || img.src || '')
+    )) || field.querySelector('img');
+  }
+  const selectedWidth = selectedImg
+    ? Number.parseFloat(selectedImg.getAttribute('data-photo-width') || selectedImg.style.width || '')
+    : NaN;
+  const width = Number(widthPx) > 0
+    ? Math.round(Number(widthPx))
+    : (Number.isFinite(selectedWidth) && selectedWidth > 0 ? Math.round(selectedWidth) : (inHeroCard ? 170 : 280));
   const floatClass = inHeroCard ? 'cms-body-photo-block' : 'cms-body-photo-left';
   const cleaned = sanitizeRichHtml(
     `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo ${floatClass}" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
   );
   if (!cleaned || !/<img\b/i.test(cleaned)) return false;
   const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
-  const insertedNode = insertHtmlAtCaret(field, html);
-  const inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
-    ? insertedNode
-    : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  let inserted = null;
+  if (selectedImg) {
+    selectedImg.setAttribute('src', url);
+    selectedImg.src = url;
+    selectedImg.setAttribute('alt', altText || 'Photo');
+    selectedImg.alt = altText || 'Photo';
+    selectedImg.classList.add('cms-body-photo', floatClass);
+    if (width > 0) {
+      selectedImg.style.width = `${width}px`;
+      selectedImg.style.height = 'auto';
+      selectedImg.setAttribute('data-photo-width', String(width));
+    }
+    inserted = selectedImg;
+  } else {
+    const insertedNode = insertHtmlAtCaret(field, html);
+    inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+      ? insertedNode
+      : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  }
+  if (inHeroCard && /^\/uploads\//i.test(url)) {
+    [...field.querySelectorAll('img')].forEach((img) => {
+      if (img !== inserted && isHomeHeroBrandMarkSrc(img.getAttribute('src') || img.src || '')) img.remove();
+    });
+  }
   syncFieldFromPreview(field);
+  const preview = document.querySelector('#page-preview');
+  if (inHeroCard && preview) state.homeBodyHtml = serializeHomePreviewHtml(preview);
   if (inserted) selectPageBodyPhoto(inserted);
   savePageRichSelection(field);
   return Boolean(inserted || html);
@@ -2176,7 +2247,7 @@ function bindPageBodyPhotoResize() {
   };
   const onSelectPointer = (event) => {
     if (!canInsertPageBodyPhotos()) return;
-    if (event.target.closest?.('#cms-photo-resize-handles')) return;
+    if (event.target.closest?.('#cms-photo-resize-handles, #admin-page-photo-toast, #rich-text-toolbar')) return;
     const preview = document.querySelector('#page-preview');
     if (!preview) return;
     const target = isPhotoTarget(preview, event.target);
@@ -2189,7 +2260,7 @@ function bindPageBodyPhotoResize() {
       setRichToolbarVisible(true);
       return;
     }
-    if (!event.target.closest?.('#cms-photo-resize-handles')) {
+    if (!event.target.closest?.('#cms-photo-resize-handles, #admin-page-photo-toast, #rich-text-toolbar')) {
       clearPageBodyPhotoSelection();
     }
   };
@@ -3641,7 +3712,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     const page = state.pages.find(item => item.slug === slug);
     if (!page) return;
     const isHomePage = Boolean(page.is_home) || page.slug === 'home';
-    state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
+    state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
