@@ -167,6 +167,50 @@ export function compareCaldevEvents(a, b) {
   return String(a?.title || '').localeCompare(String(b?.title || ''));
 }
 
+/** Homepage highlights and Schedule Board rundown use America/New_York calendar days. */
+export function easternTodayIso(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const read = (type) => parts.find((part) => part.type === type)?.value;
+  return `${read('year')}-${read('month')}-${read('day')}`;
+}
+
+export const CALDEV_UPCOMING_LIMIT_DEFAULT = 3;
+export const CALDEV_UPCOMING_LIMIT_MAX = 12;
+
+export function parseCaldevUpcomingLimit(value, fallback = CALDEV_UPCOMING_LIMIT_DEFAULT) {
+  if (value == null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(Math.floor(n), CALDEV_UPCOMING_LIMIT_MAX);
+}
+
+/** Map a Schedule Board row onto the homepage timeline datebox fields. */
+export function caldevEventToHighlight(event) {
+  const hydrated = event?.id != null && event?.start_date != null ? event : hydrateCaldevRow(event);
+  const parts = isoToProductionDateParts(hydrated?.start_date);
+  return {
+    id: Number(hydrated?.id) || 0,
+    title: String(hydrated?.title || ''),
+    description: String(hydrated?.description || ''),
+    location: String(hydrated?.location || ''),
+    who: String(hydrated?.who || ''),
+    start_date: String(hydrated?.start_date || ''),
+    end_date: String(hydrated?.end_date || ''),
+    start_time: String(hydrated?.start_time || ''),
+    end_time: String(hydrated?.end_time || ''),
+    track: normalizeCaldevTrack(hydrated?.track),
+    all_day: Number(hydrated?.all_day) ? 1 : 0,
+    date_label: parts?.date_label || '',
+    date_detail: parts?.date_detail || '',
+    event_year: parts?.event_year ?? null,
+  };
+}
+
 export async function ensureCaldevSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS caldev_events (
@@ -191,6 +235,7 @@ export async function ensureCaldevSchema(env) {
     "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
     'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
     'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
+    'CREATE INDEX IF NOT EXISTS idx_caldev_events_start_date ON caldev_events (start_date, start_time, id)',
   ]) {
     try {
       await env.DB.prepare(sql).run();
@@ -326,6 +371,29 @@ export async function listCaldevEvents(env) {
     FROM caldev_events
     ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
   `).all();
+  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+/**
+ * Upcoming Schedule Board rows for homepage highlights.
+ * Time-bounded (start_date >= Eastern today) and LIMITed so homepage
+ * render never loads the full caldev_events corpus into the Worker.
+ */
+export async function listUpcomingCaldevEvents(env, {
+  todayIso = '',
+  limit = CALDEV_UPCOMING_LIMIT_DEFAULT,
+} = {}) {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  const rowLimit = parseCaldevUpcomingLimit(limit, CALDEV_UPCOMING_LIMIT_DEFAULT);
+  if (rowLimit <= 0) return [];
+  const rows = await env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE start_date != ''
+      AND start_date >= ?
+    ORDER BY start_date ASC, start_time ASC, id ASC
+    LIMIT ?
+  `).bind(today, rowLimit).all();
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
 }
 

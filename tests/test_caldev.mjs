@@ -3,10 +3,14 @@ import { test } from 'node:test';
 
 import {
   compareCaldevEvents,
+  caldevEventToHighlight,
+  easternTodayIso,
   inferCaldevTrack,
   isoToProductionDateParts,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
   normalizeCaldevTrack,
+  parseCaldevUpcomingLimit,
   productionEventToCaldevPayload,
   productionEventToStartDate,
   shiftCaldevEventToDate,
@@ -104,4 +108,71 @@ test('production booster meetings seed as Meetings track', () => {
   assert.equal(payload.track, 'meeting');
   assert.equal(payload.booster_event_id, 88);
   assert.equal(payload.source_event_id, 88);
+});
+
+test('upcoming caldev highlights stay time-bounded and limited', async () => {
+  assert.equal(parseCaldevUpcomingLimit('3'), 3);
+  assert.equal(parseCaldevUpcomingLimit('99'), 12);
+  assert.equal(parseCaldevUpcomingLimit('nope'), 3);
+  assert.equal(parseCaldevUpcomingLimit(0), 0);
+  const mapped = caldevEventToHighlight({
+    id: 7,
+    title: 'Home Game vs West Forsyth',
+    description: 'Call time 6:00',
+    start_date: '2026-09-25',
+    start_time: '19:00',
+    track: 'game',
+    all_day: 0,
+  });
+  assert.equal(mapped.date_label, 'Sep');
+  assert.equal(mapped.date_detail, '25');
+  assert.equal(mapped.event_year, 2026);
+  assert.equal(mapped.title, 'Home Game vs West Forsyth');
+  assert.match(easternTodayIso(new Date('2026-09-18T16:00:00.000Z')), /^\d{4}-\d{2}-\d{2}$/);
+
+  let sql = '';
+  let binds = [];
+  const env = {
+    DB: {
+      prepare(text) {
+        sql = String(text);
+        return {
+          bind(...args) {
+            binds = args;
+            return this;
+          },
+          async all() {
+            return {
+              results: [{
+                id: 7,
+                title: 'Home Game vs West Forsyth',
+                description: 'Call time 6:00',
+                location: '',
+                who: '',
+                start_date: '2026-09-25',
+                end_date: '',
+                start_time: '19:00',
+                end_time: '',
+                track: 'game',
+                all_day: 0,
+                source_event_id: null,
+                booster_event_id: null,
+                created_at: '',
+                updated_at: '',
+              }],
+            };
+          },
+        };
+      },
+    },
+  };
+  const rows = await listUpcomingCaldevEvents(env, { todayIso: '2026-09-18', limit: 3 });
+  assert.match(sql, /start_date >= \?/);
+  assert.match(sql, /LIMIT \?/);
+  assert.doesNotMatch(sql, /SELECT \*/);
+  assert.deepEqual(binds, ['2026-09-18', 3]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, 'Home Game vs West Forsyth');
+  const none = await listUpcomingCaldevEvents(env, { todayIso: '2026-09-18', limit: 0 });
+  assert.deepEqual(none, []);
 });

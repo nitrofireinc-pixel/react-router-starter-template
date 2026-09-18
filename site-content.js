@@ -744,16 +744,57 @@ function initMonthCalendars(allEvents) {
   });
 }
 
+function highlightEventFromCaldev(event) {
+  if (!event || typeof event !== 'object') {
+    return { date_label: '', date_detail: '', title: '', description: '' };
+  }
+  if (event.date_label && event.date_detail) return event;
+  const iso = String(event.start_date || '').trim();
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return {
+      ...event,
+      date_label: String(event.date_label || ''),
+      date_detail: String(event.date_detail || ''),
+    };
+  }
+  const monthIndex = Number(match[2]) - 1;
+  return {
+    ...event,
+    date_label: MONTH_CALENDAR_LABELS[monthIndex] || '',
+    date_detail: match[3],
+    event_year: Number(match[1]),
+  };
+}
+
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
   const marqueePromise = loadSponsorMarquee();
+  ensureBoosterMeetingsContainers();
+  const highlightNodes = [...document.querySelectorAll('[data-events]')];
+  const needsHighlights = highlightNodes.length > 0;
+  const needsBoosterMeetings = Boolean(document.querySelector('[data-booster-meetings]'));
   const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
-  const [site, events, photos, calendarEvents] = await Promise.all([
+  const needsLegacyEvents = needsBoosterMeetings || needsMonthCalendar;
+  const highlightLimit = highlightNodes.reduce((max, node) => {
+    const raw = node.dataset.limit;
+    if (raw === undefined || raw === '') return Math.max(max, 3);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.max(max, n) : max;
+  }, 0) || 3;
+  const [site, events, photos, calendarEvents, highlightEvents] = await Promise.all([
     fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
-    fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    needsLegacyEvents
+      ? fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
     fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     needsMonthCalendar
       ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
+    needsHighlights
+      ? fetch(`/api/caldev/events?upcoming=1&limit=${Math.min(highlightLimit, 12)}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .catch(() => [])
       : Promise.resolve([]),
   ]);
 
@@ -795,10 +836,11 @@ async function loadPublicContent() {
 
   document.querySelectorAll('[data-events]').forEach(container => {
     const rawLimit = container.dataset.limit;
+    const source = Array.isArray(highlightEvents) ? highlightEvents : [];
     const limit = rawLimit === undefined || rawLimit === ''
-      ? events.length
+      ? source.length
       : Math.max(0, Number(rawLimit) || 0);
-    const visibleEvents = events.slice(0, limit || events.length);
+    const visibleEvents = source.slice(0, limit || source.length).map(highlightEventFromCaldev);
     if (!visibleEvents.length) {
       container.innerHTML = '<p class="draft">No upcoming events have been published yet.</p>';
       return;
@@ -813,7 +855,6 @@ async function loadPublicContent() {
 
   if (needsMonthCalendar) initMonthCalendars(calendarEvents);
 
-  ensureBoosterMeetingsContainers();
   const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => (
     Number(event.show_on_boosters) === 1
     && Number(event.repeat_enabled) !== 1

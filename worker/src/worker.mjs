@@ -18,20 +18,30 @@ import {
 } from './web-push-browser/index.js';
 import {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
+  caldevEventToHighlight,
   clearCaldevEvents,
   deleteCaldevEvent,
+  easternTodayIso,
   ensureCaldevSchema,
   getCaldevEventById,
   insertCaldevEvent,
   listCaldevEvents,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
   seedCaldevFromProduction,
   updateCaldevEvent,
 } from './caldev.mjs';
 
 export {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
+  caldevEventToHighlight,
+  easternTodayIso,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
   seedCaldevFromProduction,
 } from './caldev.mjs';
 
@@ -227,7 +237,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+const ASSET_VERSION = 'caldev-home-highlights-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -3840,6 +3850,78 @@ export function ensureCalendarMonthMount(html) {
   return `${next}${mount}`;
 }
 
+function findDataEventsRanges(source) {
+  const html = String(source || '');
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(html)) !== null) {
+    const start = match.index;
+    const openEnd = start + match[0].length;
+    let depth = 1;
+    let i = openEnd;
+    while (i < html.length && depth > 0) {
+      const nextOpen = html.toLowerCase().indexOf('<div', i);
+      const nextClose = html.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) {
+          ranges.push({
+            start,
+            openEnd,
+            closeStart: nextClose,
+            end: i,
+            openTag: match[0],
+          });
+        }
+      }
+    }
+  }
+  return ranges;
+}
+
+export function homeEventsLimitFromHtml(html, fallback = CALDEV_UPCOMING_LIMIT_DEFAULT) {
+  const ranges = findDataEventsRanges(html);
+  if (!ranges.length) return parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+  let max = 0;
+  for (const range of ranges) {
+    const match = String(range.openTag || '').match(/\bdata-limit=["']?(\d+)/i);
+    max = Math.max(max, parseCaldevUpcomingLimit(match?.[1], fallback));
+  }
+  return max || parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+}
+
+export function renderCalendarHighlightArticles(events = []) {
+  const items = (Array.isArray(events) ? events : []).map(caldevEventToHighlight);
+  if (!items.length) {
+    return '<p class="draft">No upcoming events have been published yet.</p>';
+  }
+  return items.map((event) => `
+      <article class="event">
+        <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+        <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
+      </article>`).join('');
+}
+
+/** Replace homepage [data-events] placeholders with Schedule Board highlights. */
+export function applyHomeCalendarHighlights(html, events = []) {
+  const source = String(html || '');
+  const ranges = findDataEventsRanges(source);
+  if (!ranges.length) return source;
+  const inner = renderCalendarHighlightArticles(events);
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index];
+    next = `${next.slice(0, range.openEnd)}${inner}${next.slice(range.closeStart)}`;
+  }
+  return next;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -6074,7 +6156,7 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
+function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
@@ -6099,7 +6181,13 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
-  if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
+  if (page.slug === 'home' || page.is_home) {
+    let html = ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
+    if (Array.isArray(extras.calendarHighlights)) {
+      html = applyHomeCalendarHighlights(html, extras.calendarHighlights);
+    }
+    return html;
+  }
   return page.body_html;
 }
 
@@ -7461,6 +7549,14 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
+    const upcoming = url.searchParams.get('upcoming') === '1' || url.searchParams.get('highlights') === '1';
+    if (upcoming) {
+      const events = await listUpcomingCaldevEvents(env, {
+        todayIso: easternTodayIso(),
+        limit: parseCaldevUpcomingLimit(url.searchParams.get('limit')),
+      });
+      return jsonResponse(events.map(caldevEventToHighlight));
+    }
     let events = await listCaldevEvents(env);
     if (!events.length) {
       try {
@@ -10089,9 +10185,9 @@ export function renderNav(pages, { loggedIn = false } = {}) {
   return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, calendarHighlights = null } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, { calendarHighlights });
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
@@ -10249,17 +10345,25 @@ async function serveStaticOrCms(request, env, url) {
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
     if (page) {
-      const [site, pages, allSponsors, staff, boosterMembers] = await Promise.all([
+      const isHome = Boolean(page.is_home) || page.slug === 'home';
+      const highlightLimit = isHome
+        ? homeEventsLimitFromHtml(page.body_html, CALDEV_UPCOMING_LIMIT_DEFAULT)
+        : 0;
+      const [site, pages, allSponsors, staff, boosterMembers, calendarHighlights] = await Promise.all([
         getSite(env),
         getPages(env),
         getSponsors(env),
         page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
+        isHome
+          ? listUpcomingCaldevEvents(env, { todayIso: easternTodayIso(), limit: highlightLimit }).catch(() => [])
+          : Promise.resolve(null),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
+        calendarHighlights: Array.isArray(calendarHighlights) ? calendarHighlights : null,
       }));
     }
   }
