@@ -2090,8 +2090,8 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
-  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=header-stadium-v2-20260918"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'header-stadium-v2-20260918'/);
+  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=header-stadium-fit-20260918"\)/);
+  assert.match(workerSrc, /ASSET_VERSION = 'header-stadium-fit-20260918'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2230,8 +2230,10 @@ test('public homepage stacks nav under a centered banner and hides the hero card
   assert.match(themeCss, /grid-template-areas:"brand" "nav"/);
   assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?justify-content:center/);
   assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-image:[\s\S]*?var\(--efhs-header-banner\)/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-size:cover/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-position:center/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:100% 100%,contain/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-position:center,center/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:148px/);
+  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:cover/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?background:#01244a/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:center/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:4px/);

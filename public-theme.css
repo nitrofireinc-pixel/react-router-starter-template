@@ -10,7 +10,7 @@
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
   --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918");
   /* Header wordmark row only — not the homepage hero. */
-  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=header-stadium-v2-20260918");
+  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=header-stadium-fit-20260918");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -106,17 +106,17 @@ body.efhs-theme .header-inner{
   grid-area:brand;
   width:100%;
   justify-content:center;
-  padding:28px 24px 26px;
-  min-height:120px;
+  padding:22px 24px 20px;
+  min-height:148px;
   box-sizing:border-box;
   column-gap:0;
   flex:0 0 auto;
-  background-color:#001018;
+  background-color:#01244a;
   background-image:
-    linear-gradient(180deg,rgba(0,10,22,.28) 0%,rgba(0,14,30,.40) 52%,rgba(0,10,22,.48) 100%),
+    linear-gradient(180deg,rgba(0,18,40,.46) 0%,rgba(0,20,44,.40) 48%,rgba(1,36,74,.52) 100%),
     var(--efhs-header-banner);
-  background-size:cover;
-  background-position:center 32%;
+  background-size:100% 100%,contain;
+  background-position:center,center;
   background-repeat:no-repeat;
 }
 body.efhs-theme .brand{
@@ -846,14 +846,14 @@ body.efhs-theme .footer h3{
   }
   body.efhs-theme .header-inner{
     justify-content:center;
-    padding:18px 12px 16px;
-    min-height:84px;
+    padding:16px 12px 14px;
+    min-height:100px;
     flex:0 0 auto;
     background-image:
-      linear-gradient(180deg,rgba(0,10,22,.36) 0%,rgba(0,12,28,.48) 100%),
+      linear-gradient(180deg,rgba(0,18,40,.50) 0%,rgba(1,36,74,.56) 100%),
       var(--efhs-header-banner);
-    background-size:cover;
-    background-position:center 34%;
+    background-size:100% 100%,contain;
+    background-position:center,center;
   }
   body.efhs-theme .brand{
     justify-content:center;
