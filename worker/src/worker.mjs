@@ -286,7 +286,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'home-hero-kids-20260918';
+const ASSET_VERSION = 'ensembles-theme-20260918';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -386,6 +386,26 @@ export function normalizeStaticPath(pathname) {
   if (pathname === '/') return '/index.html';
   if (pathname.includes('..')) return '/index.html';
   return pathname.startsWith('/') ? pathname : `/${pathname}`;
+}
+
+/** Map pretty URLs like /ensembles to the CMS path /ensembles.html without touching assets. */
+export function normalizePublicHtmlPath(pathname = '/') {
+  let path = String(pathname || '/').split('#')[0].split('?')[0];
+  if (!path || path === '/') return '/';
+  if (path.includes('..')) return '/';
+  if (!path.startsWith('/')) path = `/${path}`;
+  if (path.length > 1) path = path.replace(/\/+$/, '') || '/';
+  if (path === '/') return '/';
+  if (
+    path.startsWith('/admin')
+    || path.startsWith('/api/')
+    || path.startsWith('/uploads/')
+    || path.startsWith('/assets/')
+  ) {
+    return path;
+  }
+  if (!/\.[a-z0-9]+$/i.test(path)) path = `${path}.html`;
+  return path;
 }
 
 export function normalizePageSlug(value) {
@@ -2023,7 +2043,7 @@ export function isMaintenancePath(pathname = '/') {
 
 export function isPublicHtmlPath(pathname = '/') {
   if (pathname === '/') return true;
-  const path = normalizeStaticPath(pathname);
+  const path = normalizePublicHtmlPath(pathname);
   return path.endsWith('.html');
 }
 
@@ -2052,7 +2072,7 @@ export function sanitizeMaintenanceReturnPath(value = '/') {
     return '/';
   }
   if (pathPart !== '/' && !isPublicHtmlPath(pathPart)) return '/';
-  const normalized = pathPart === '/' ? '/' : normalizeStaticPath(pathPart);
+  const normalized = pathPart === '/' ? '/' : normalizePublicHtmlPath(pathPart);
   const query = raw.includes('?') ? `?${raw.split('?').slice(1).join('?')}` : '';
   const base = normalized === '/index.html' ? '/' : normalized;
   if (base === '/') return query ? `/${query}` : '/';
@@ -6810,8 +6830,11 @@ async function getPageBySlug(env, slug, includeInactive = false) {
   return env.DB.prepare(sql).bind(slug).first();
 }
 
-async function getPageByPath(env, path) {
-  return env.DB.prepare('SELECT * FROM cms_pages WHERE path = ? AND active = 1').bind(path).first();
+async function getPageByPath(env, path, includeInactive = false) {
+  const sql = includeInactive
+    ? 'SELECT * FROM cms_pages WHERE path = ?'
+    : 'SELECT * FROM cms_pages WHERE path = ? AND active = 1';
+  return env.DB.prepare(sql).bind(path).first();
 }
 
 async function getUserByUsername(env, username) {
@@ -11201,6 +11224,7 @@ export function pickPublicThemePhotoVars(photos = [], { slug = 'home' } = {}) {
   if (pageSlug === 'directors' || pageSlug === 'staff') page = find(/band 2024|band 2025|staff|director/i) || page;
   if (pageSlug === 'calendar') page = find(/game|rehearsal|calendar/i) || page;
   if (pageSlug === 'gallery') page = find(/gallery|photo|performance/i) || page;
+  if (pageSlug === 'ensembles') page = find(/ensemble|marching|concert|guard|jazz|percussion/i) || page;
   return {
     hero,
     page,
@@ -11380,9 +11404,11 @@ async function serveStaticOrCms(request, env, url) {
       },
     });
   }
-  const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
+  const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
-    const page = await getPageByPath(env, path);
+    // Include inactive rows so unpublished CMS pages (ensembles) still use renderCmsPage
+    // instead of falling through to the unthemed static HTML draft.
+    const page = await getPageByPath(env, path, true);
     if (page) {
       const isHome = Boolean(page.is_home) || page.slug === 'home';
       const highlightLimit = isHome
