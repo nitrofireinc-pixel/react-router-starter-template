@@ -905,6 +905,7 @@ async function loadPublicContent() {
     renderPhotoGallery(container, photos);
   });
   bindPhotoGalleries();
+  applyPublicThemePhotos(photos);
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
@@ -971,6 +972,32 @@ function sortPhotosByRecent(photos = []) {
 function isBrandGalleryPlaceholder(src = '') {
   const value = String(src || '').toLowerCase();
   return /efhs-photo-[12]\.png|efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/.test(value);
+}
+
+function safePublicThemePhotoUrl(url = '') {
+  const value = String(url || '').trim();
+  if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
+  if (/["');\s<>\\]/.test(value)) return '';
+  return value;
+}
+
+function applyPublicThemePhotos(photos = []) {
+  if (!document.body?.classList.contains('efhs-theme')) return;
+  const current = String(getComputedStyle(document.documentElement).getPropertyValue('--efhs-hero-photo') || '').trim();
+  if (current && current !== 'none') return;
+  const list = Array.isArray(photos) ? photos : [];
+  const urls = list.map((photo) => safePublicThemePhotoUrl(photo?.url)).filter(Boolean);
+  if (!urls.length) return;
+  const text = (photo) => `${photo.alt_text || ''} ${photo.caption || ''} ${photo.original_name || ''}`;
+  const matched = list.find((photo) => /march on|football|away game|field|game day/i.test(text(photo)));
+  const hero = safePublicThemePhotoUrl(matched?.url) || urls[0];
+  const at = (index) => urls[index % urls.length];
+  const root = document.documentElement;
+  root.style.setProperty('--efhs-hero-photo', `url("${hero}")`);
+  root.style.setProperty('--efhs-page-photo', `url("${at(1)}")`);
+  root.style.setProperty('--efhs-card-photo-1', `url("${at(0)}")`);
+  root.style.setProperty('--efhs-card-photo-2', `url("${at(1)}")`);
+  root.style.setProperty('--efhs-card-photo-3', `url("${at(2)}")`);
 }
 
 function renderPhotoGallery(container, photos = []) {

@@ -28,6 +28,7 @@ for (const name of [
   'directors.html',
   'ensembles.html',
   'styles.css',
+  'public-theme.css',
   'script.js',
   'site-content.js',
   'caldev.js',
