@@ -2076,6 +2076,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
   const homeHeroBytes = readFileSync(join(root, 'assets/efhs-home-hero.jpg'));
+  const headerBannerBytes = readFileSync(join(root, 'assets/efhs-header-banner.jpg'));
   assert.match(workerSrc, /href="\/public-theme\.css\?v=/);
   assert.match(workerSrc, /bodyClasses = \['efhs-theme'\]/);
   assert.match(workerSrc, /normalizePublicHtmlPath\(url\.pathname\)/);
@@ -2089,6 +2090,8 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
+  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=header-stadium-20260918"\)/);
+  assert.match(workerSrc, /ASSET_VERSION = 'header-stadium-20260918'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2107,6 +2110,10 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.equal(homeHeroBytes[0], 0xff);
   assert.equal(homeHeroBytes[1], 0xd8);
   assert.ok(homeHeroBytes.length > 50_000);
+  assert.equal(headerBannerBytes[0], 0xff);
+  assert.equal(headerBannerBytes[1], 0xd8);
+  assert.ok(headerBannerBytes.length > 20_000);
+  assert.ok(headerBannerBytes.length < 400_000);
   let heroWidth = 0;
   let heroHeight = 0;
   for (let i = 0; i < homeHeroBytes.length - 8; i++) {
@@ -2222,6 +2229,10 @@ test('public homepage stacks nav under a centered banner and hides the hero card
   assert.match(themeCss, /border-top:1px solid #fff/);
   assert.match(themeCss, /grid-template-areas:"brand" "nav"/);
   assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-image:[\s\S]*?var\(--efhs-header-banner\)/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-size:cover/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-position:center/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?background:#01244a/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:center/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:4px/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:center/);

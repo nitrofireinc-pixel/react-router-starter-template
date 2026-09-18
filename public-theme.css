@@ -9,6 +9,8 @@
   --efhs-silver:#c9d4e4;
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
   --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918");
+  /* Header wordmark row only — not the homepage hero. */
+  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=header-stadium-20260918");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -73,7 +75,7 @@ body.efhs-theme .utility a.utility-auth:focus-visible{
 
 /* ---------- Header / nav ---------- */
 body.efhs-theme header.site-header{
-  background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
+  background:#01244a;
   border-bottom:0;
   border-top:1px solid #fff;
   margin:0;
@@ -86,14 +88,14 @@ body.efhs-theme header.site-header{
   justify-items:center;
   column-gap:0;
   row-gap:0;
-  padding:0 18px 6px;
+  padding:0;
   overflow:visible;
 }
 body.efhs-theme .site-chrome{
   margin-top:0;
 }
 body.efhs-theme .site-chrome header.site-header{
-  background:linear-gradient(180deg,#01244a 0%,#001a36 100%);
+  background:#01244a;
   margin:0;
   top:auto;
 }
@@ -104,8 +106,15 @@ body.efhs-theme .header-inner{
   grid-area:brand;
   width:100%;
   justify-content:center;
-  padding:12px 0 2px;
+  padding:16px 20px 14px;
   column-gap:0;
+  background-color:#001326;
+  background-image:
+    linear-gradient(180deg,rgba(0,8,20,.52) 0%,rgba(0,14,32,.64) 48%,rgba(0,10,24,.74) 100%),
+    var(--efhs-header-banner);
+  background-size:cover;
+  background-position:center 46%;
+  background-repeat:no-repeat;
 }
 body.efhs-theme .brand{
   margin:0 auto;
@@ -118,6 +127,7 @@ body.efhs-theme .brand .brand-logo,
 body.efhs-theme .brand .brand-mark{
   width:48px;
   height:48px;
+  filter:drop-shadow(0 2px 8px rgba(0,0,0,.65));
 }
 body.efhs-theme .brand .brand-mark{
   background:transparent;
@@ -131,6 +141,7 @@ body.efhs-theme header.site-header .brand [data-site-field="title"]{
   letter-spacing:.08em;
   text-transform:uppercase;
   max-width:none;
+  text-shadow:0 1px 2px rgba(0,0,0,.82),0 0 16px rgba(0,8,20,.55);
 }
 body.efhs-theme header.site-header nav{
   grid-area:nav;
@@ -138,9 +149,10 @@ body.efhs-theme header.site-header nav{
   max-width:none;
   justify-content:center;
   border-top:0;
-  padding:2px 0 10px;
+  padding:2px 18px 12px;
   gap:2px;
   overflow:visible;
+  background:#01244a;
 }
 body.efhs-theme header.site-header nav a,
 body.efhs-theme header.site-header nav .nav-notify-me,
@@ -830,7 +842,12 @@ body.efhs-theme .footer h3{
   }
   body.efhs-theme .header-inner{
     justify-content:center;
-    padding:10px 12px;
+    padding:12px 12px 10px;
+    background-image:
+      linear-gradient(180deg,rgba(0,8,20,.62) 0%,rgba(0,12,28,.74) 100%),
+      var(--efhs-header-banner);
+    background-size:cover;
+    background-position:center 48%;
   }
   body.efhs-theme .brand{
     justify-content:center;
