@@ -61,7 +61,9 @@ import {
 } from './web-push-browser/index.js';
 import {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
   buildDeadlineBannerItems,
+  caldevEventToHighlight,
   clearCaldevEvents,
   deleteCaldevEvent,
   easternTodayIso,
@@ -70,7 +72,9 @@ import {
   insertCaldevEvent,
   listCaldevEvents,
   listDeadlineCaldevEvents,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
   renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
   updateCaldevEvent,
@@ -78,10 +82,14 @@ import {
 
 export {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
   buildDeadlineBannerItems,
+  caldevEventToHighlight,
   easternTodayIso,
   listDeadlineCaldevEvents,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
   renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
 } from './caldev.mjs';
@@ -278,7 +286,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'hero-card-keep-photo-20260918';
+const ASSET_VERSION = 'theme-caldev-highlights-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -4340,6 +4348,78 @@ export function ensureCalendarMonthMount(html) {
   return ensureCaldevLayoutClasses(`${next}${mount}`);
 }
 
+function findDataEventsRanges(source) {
+  const html = String(source || '');
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(html)) !== null) {
+    const start = match.index;
+    const openEnd = start + match[0].length;
+    let depth = 1;
+    let i = openEnd;
+    while (i < html.length && depth > 0) {
+      const nextOpen = html.toLowerCase().indexOf('<div', i);
+      const nextClose = html.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) {
+          ranges.push({
+            start,
+            openEnd,
+            closeStart: nextClose,
+            end: i,
+            openTag: match[0],
+          });
+        }
+      }
+    }
+  }
+  return ranges;
+}
+
+export function homeEventsLimitFromHtml(html, fallback = CALDEV_UPCOMING_LIMIT_DEFAULT) {
+  const ranges = findDataEventsRanges(html);
+  if (!ranges.length) return parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+  let max = 0;
+  for (const range of ranges) {
+    const match = String(range.openTag || '').match(/\bdata-limit=["']?(\d+)/i);
+    max = Math.max(max, parseCaldevUpcomingLimit(match?.[1], fallback));
+  }
+  return max || parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+}
+
+export function renderCalendarHighlightArticles(events = []) {
+  const items = (Array.isArray(events) ? events : []).map(caldevEventToHighlight);
+  if (!items.length) {
+    return '<p class="draft">No upcoming events have been published yet.</p>';
+  }
+  return items.map((event) => `
+      <article class="event">
+        <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+        <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
+      </article>`).join('');
+}
+
+/** Replace homepage [data-events] placeholders with Schedule Board highlights. */
+export function applyHomeCalendarHighlights(html, events = []) {
+  const source = String(html || '');
+  const ranges = findDataEventsRanges(source);
+  if (!ranges.length) return source;
+  const inner = renderCalendarHighlightArticles(events);
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index];
+    next = `${next.slice(0, range.openEnd)}${inner}${next.slice(range.closeStart)}`;
+  }
+  return next;
+}
+
 export function ensureBoosterMeetingsSlot(html) {
   const source = String(html || '');
   if (/data-booster-meetings/i.test(source)) return source;
@@ -6631,7 +6711,7 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
+function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -6660,7 +6740,11 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
   if (page.slug === 'home' || page.is_home) {
-    return ensureHomePhotoGallerySlot(restoreHomeHeroCardUploadSrc(page.body_html));
+    let html = ensureHomePhotoGallerySlot(restoreHomeHeroCardUploadSrc(page.body_html));
+    if (Array.isArray(extras.calendarHighlights)) {
+      html = applyHomeCalendarHighlights(html, extras.calendarHighlights);
+    }
+    return html;
   }
   return page.body_html;
 }
@@ -8054,6 +8138,14 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
+    const upcoming = url.searchParams.get('upcoming') === '1' || url.searchParams.get('highlights') === '1';
+    if (upcoming) {
+      const events = await listUpcomingCaldevEvents(env, {
+        todayIso: easternTodayIso(),
+        limit: parseCaldevUpcomingLimit(url.searchParams.get('limit')),
+      });
+      return jsonResponse(events.map(caldevEventToHighlight));
+    }
     let events = await listCaldevEvents(env);
     if (!events.length) {
       try {
@@ -11010,25 +11102,130 @@ export function renderStaffAuthNavLink(loggedIn = false) {
   return '<a href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
-export function renderNav(pages, { loggedIn = false } = {}) {
-  const pageLinks = pages
-      .filter((page) => page.slug !== 'become-a-sponsor' && page.slug !== 'in-kind' && !isCmsFormPage(page) && page.slug !== 'letterman-jacket')
-    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
-  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+const SUPPORT_NAV_SLUGS = ['boosters', 'fundraising', 'sponsors'];
+
+function isHiddenPublicNavPage(page = {}) {
+  return page.slug === 'become-a-sponsor'
+    || page.slug === 'in-kind'
+    || page.slug === 'letterman-jacket'
+    || isCmsFormPage(page);
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '' } = {}) {
+function publicNavPageLabel(page = {}) {
+  return String(page.title || '').replace(/\s*\|\s*East Forsyth Band$/, '');
+}
+
+function isCurrentPublicNavPath(page, currentPath = '') {
+  const href = String(page?.path || '');
+  const current = String(currentPath || '');
+  if (!href || !current) return false;
+  return href === current || (current === '/' && (page.slug === 'home' || page.is_home));
+}
+
+function renderPublicNavLink(page, currentPath = '') {
+  const href = String(page.path || '');
+  const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+  return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+}
+
+function renderSupportNavHtml(pages = [], currentPath = '') {
+  const items = (Array.isArray(pages) ? pages : []).filter((page) => page?.path);
+  if (!items.length) return '';
+  const childCurrent = items.some((page) => isCurrentPublicNavPath(page, currentPath));
+  const links = items.map((page) => {
+    const href = String(page.path || '');
+    const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+    return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+  }).join('');
+  return `<div class="nav-support${childCurrent ? ' is-current' : ''}" data-nav-support><button type="button" class="nav-support-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="nav-support-menu">Support the Band <span class="nav-support-caret" aria-hidden="true"></span></button><div id="nav-support-menu" class="nav-support-menu">${links}</div></div>`;
+}
+
+export function renderNav(pages, { loggedIn = false, currentPath = '' } = {}) {
+  const current = String(currentPath || '');
+  const visible = (Array.isArray(pages) ? pages : []).filter((page) => !isHiddenPublicNavPage(page));
+  const supportBySlug = new Map(
+    visible
+      .filter((page) => SUPPORT_NAV_SLUGS.includes(String(page.slug || '')))
+      .map((page) => [page.slug, page]),
+  );
+  const supportPages = SUPPORT_NAV_SLUGS.map((slug) => supportBySlug.get(slug)).filter(Boolean);
+  const parts = [];
+  let supportInserted = false;
+  for (const page of visible) {
+    if (SUPPORT_NAV_SLUGS.includes(String(page.slug || ''))) {
+      if (!supportInserted && supportPages.length) {
+        parts.push(renderSupportNavHtml(supportPages, current));
+        supportInserted = true;
+      }
+      continue;
+    }
+    parts.push(renderPublicNavLink(page, current));
+  }
+  if (!supportInserted && supportPages.length) parts.push(renderSupportNavHtml(supportPages, current));
+  return `${parts.join('')}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+}
+
+export function safePublicThemePhotoUrl(url = '') {
+  const value = String(url || '').trim();
+  if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
+  if (/["');\s<>\\]/.test(value)) return '';
+  return value;
+}
+
+function themePhotoSearchText(photo = {}) {
+  return `${photo.alt_text || ''} ${photo.caption || ''} ${photo.original_name || ''} ${photo.filename || ''}`;
+}
+
+function hashThemeSlug(slug = '') {
+  const source = String(slug || '');
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+export function pickPublicThemePhotoVars(photos = [], { slug = 'home' } = {}) {
+  const list = (Array.isArray(photos) ? photos : [])
+    .map((photo) => ({ ...photo, url: safePublicThemePhotoUrl(photo?.url) }))
+    .filter((photo) => photo.url);
+  const urls = list.map((photo) => photo.url);
+  const at = (index) => (urls.length ? urls[index % urls.length] : '');
+  const find = (pattern) => list.find((photo) => pattern.test(themePhotoSearchText(photo)))?.url || '';
+  const pageSlug = String(slug || 'home');
+  const hero = find(/march on|football|away game|field|game day/i) || at(0);
+  let page = at(hashThemeSlug(pageSlug));
+  if (pageSlug === 'directors' || pageSlug === 'staff') page = find(/band 2024|band 2025|staff|director/i) || page;
+  if (pageSlug === 'calendar') page = find(/game|rehearsal|calendar/i) || page;
+  if (pageSlug === 'gallery') page = find(/gallery|photo|performance/i) || page;
+  return {
+    hero,
+    page: page || hero,
+    cards: [at(0), at(1), at(2)],
+  };
+}
+
+export function renderPublicThemePhotoStyle(vars = {}) {
+  const cssUrl = (value) => {
+    const safe = safePublicThemePhotoUrl(value);
+    return safe ? `url("${safe}")` : 'none';
+  };
+  return `<style id="efhs-theme-photos">:root{--efhs-hero-photo:${cssUrl(vars.hero)};--efhs-page-photo:${cssUrl(vars.page)};--efhs-card-photo-1:${cssUrl(vars.cards?.[0])};--efhs-card-photo-2:${cssUrl(vars.cards?.[1])};--efhs-card-photo-3:${cssUrl(vars.cards?.[2])};}</style>`;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, { calendarHighlights });
   const marqueeHtml = renderSponsorMarqueeSection(
     Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
   );
   const deadlineHtml = deadlineBannersHtml || renderSiteDeadlineBannersHtml([]);
   const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
-  const bodyClasses = [];
+  const bodyClasses = ['efhs-theme'];
   if (maintenancePreview) bodyClasses.push('maintenance-preview');
   if (page.slug === 'calendar') bodyClasses.push('caldev-body');
-  const bodyClass = bodyClasses.length ? ` class="${bodyClasses.join(' ')}"` : '';
+  const bodyClass = ` class="${bodyClasses.join(' ')}"`;
+  const themePhotoStyle = renderPublicThemePhotoStyle(pickPublicThemePhotoVars(photos, { slug: page.slug || (page.is_home ? 'home' : '') }));
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -11045,14 +11242,16 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta name="apple-mobile-web-app-title" content="EFHS Band">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
+  <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
+  ${themePhotoStyle}
 </head>
 <body${bodyClass}>
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav>${renderLettermanDeadlineBanner()}</header>
+<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn, currentPath: page.path })}</nav>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
 ${deadlineHtml}
 <main id="main">${bodyHtml}</main>
@@ -11182,13 +11381,21 @@ async function serveStaticOrCms(request, env, url) {
   if (path === '/' || path.endsWith('.html')) {
     const page = await getPageByPath(env, path);
     if (page) {
-      const [site, pages, allSponsors, staff, boosterMembers, deadlineEvents] = await Promise.all([
+      const isHome = Boolean(page.is_home) || page.slug === 'home';
+      const highlightLimit = isHome
+        ? homeEventsLimitFromHtml(page.body_html, CALDEV_UPCOMING_LIMIT_DEFAULT)
+        : 0;
+      const [site, pages, allSponsors, staff, boosterMembers, deadlineEvents, photos, calendarHighlights] = await Promise.all([
         getSite(env),
         getPages(env),
         getSponsors(env),
         page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
         page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
         listDeadlineCaldevEvents(env).catch(() => []),
+        getPhotos(env).catch(() => []),
+        isHome
+          ? listUpcomingCaldevEvents(env, { todayIso: easternTodayIso(), limit: highlightLimit }).catch(() => [])
+          : Promise.resolve(null),
       ]);
       const sponsors = page.slug === 'sponsors' ? allSponsors : [];
       if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
@@ -11197,9 +11404,11 @@ async function serveStaticOrCms(request, env, url) {
       return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
+        photos,
         deadlineBannersHtml: renderSiteDeadlineBannersHtml(
           buildDeadlineBannerItems(deadlineEvents, easternTodayIso()),
         ),
+        calendarHighlights: Array.isArray(calendarHighlights) ? calendarHighlights : null,
       }));
     }
   }
@@ -11318,7 +11527,7 @@ export default {
 
 const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
 
-const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
+const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">
 <div class="admin-mobile-bar-top">
 <button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-mobile-menu">Menu</button>
