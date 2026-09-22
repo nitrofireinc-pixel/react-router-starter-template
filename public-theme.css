@@ -10,7 +10,7 @@
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
   --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918");
   /* Header wordmark row only — not the homepage hero. */
-  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=header-title-stretch-20260918");
+  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=mobile-menu-white-20260922");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -869,25 +869,37 @@ body.efhs-theme .footer h3{
   body.efhs-theme .mobile-nav-tray{
     display:flex;
   }
-  body.efhs-theme header.site-header nav{
+  /* Drawer list only: white panel + navy links. Keep the navy title tray/close button. */
+  body.efhs-theme header.site-header nav,
+  body.efhs-theme header.site-header #site-nav{
     width:100%;
     justify-content:flex-start;
     overflow:auto;
+    background:#fff;
+    color:var(--efhs-navy);
   }
   body.efhs-theme header.site-header nav a,
-  body.efhs-theme header.site-header nav .nav-support-toggle{
+  body.efhs-theme header.site-header nav .nav-support-toggle,
+  body.efhs-theme header.site-header #site-nav a,
+  body.efhs-theme header.site-header #site-nav .nav-support-toggle{
     color:var(--efhs-navy);
+    background:transparent;
     box-shadow:none;
   }
   body.efhs-theme header.site-header nav a:hover,
   body.efhs-theme header.site-header nav a:focus-visible,
   body.efhs-theme header.site-header nav .nav-support-toggle:hover,
-  body.efhs-theme header.site-header nav .nav-support-toggle:focus-visible{
+  body.efhs-theme header.site-header nav .nav-support-toggle:focus-visible,
+  body.efhs-theme header.site-header #site-nav a:hover,
+  body.efhs-theme header.site-header #site-nav a:focus-visible,
+  body.efhs-theme header.site-header #site-nav .nav-support-toggle:hover,
+  body.efhs-theme header.site-header #site-nav .nav-support-toggle:focus-visible{
     background:#eef3fa;
     color:var(--efhs-navy);
     box-shadow:none;
   }
   body.efhs-theme header.site-header nav a[aria-current="page"],
+  body.efhs-theme header.site-header #site-nav a[aria-current="page"],
   body.efhs-theme .nav-support.is-current > .nav-support-toggle{
     color:var(--efhs-navy);
     background:#eef3fa;
