@@ -1280,9 +1280,22 @@ function bindPhotoGalleries(root = document) {
       }
     });
     document.addEventListener('contextmenu', (event) => {
-      if (event.target?.closest?.('.gallery-item, .photo-lightbox')) {
+      if (event.target?.closest?.('.gallery-item, .photo-lightbox, [data-photo-open]')) {
         event.preventDefault();
       }
+    });
+    document.addEventListener('click', (event) => {
+      const trigger = event.target.closest?.('[data-photo-open]');
+      if (!trigger || trigger.closest('[data-photo-gallery]')) return;
+      const img = trigger.matches('img') ? trigger : trigger.querySelector('img');
+      const src = trigger.getAttribute('data-photo-src') || img?.currentSrc || img?.src;
+      if (!src) return;
+      event.preventDefault();
+      openPhotoLightbox({
+        src,
+        alt: img?.alt || trigger.getAttribute('aria-label') || '',
+        caption: trigger.getAttribute('aria-label') || img?.alt || '',
+      });
     });
   }
   root.querySelectorAll('[data-photo-gallery]').forEach((container) => {
