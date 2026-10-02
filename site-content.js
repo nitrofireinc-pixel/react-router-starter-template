@@ -135,6 +135,20 @@ function paragraphsFromText(value) {
     .join('') || (String(value || '').trim() ? `<p>${escapeHtml(decodeBasicHtmlEntities(String(value).trim()))}</p>` : '');
 }
 
+function formatHeaderBrandTitle(value) {
+  const plain = String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = plain.match(/^(East Forsyth)\s+(.+)$/i);
+  if (!match) return formatInlineRichText(value);
+  return `<small>${escapeHtml(match[1])}</small><span class="brand-title-rest">${escapeHtml(match[2])}</span>`;
+}
+
 function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
@@ -870,6 +884,10 @@ async function loadPublicContent() {
       const key = element.dataset.siteField;
       const value = site[key];
       if (!value) return;
+      if (key === 'title' && element.closest('a.brand')) {
+        element.innerHTML = formatHeaderBrandTitle(value);
+        return;
+      }
       if (key === 'hero_title' || key === 'title') {
         element.innerHTML = key === 'hero_title' && element.closest('.home-redesign')
           ? formatHomeHeroTitle(value)
