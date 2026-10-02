@@ -170,6 +170,36 @@ function isHomePage() {
   return path === '/' || path.endsWith('/index.html') || /(^|\/)index\.html$/i.test(path);
 }
 
+const SPONSOR_MARQUEE_FILES = new Set([
+  'calendar.html',
+  'fundraising.html',
+  'sponsors.html',
+  'coming-soon.html',
+  'join.html',
+  'volunteer.html',
+]);
+
+function publicPathShowsSponsorMarquee(pathname = '') {
+  const path = String(pathname || '/').replace(/\/+$/, '') || '/';
+  if (path === '/' || /(?:^|\/)index\.html$/i.test(path)) return true;
+  const file = path.split('/').pop() || '';
+  return SPONSOR_MARQUEE_FILES.has(file);
+}
+
+function sponsorMarqueeEnabled() {
+  if (document.body?.classList.contains('admin-body')) return false;
+  if (document.body?.classList.contains('maintenance-body')) return false;
+  if (document.querySelector('.cms-shell')) return false;
+  const flag = document.body?.dataset?.sponsorMarquee;
+  if (flag === 'off') return false;
+  if (flag === 'on') return true;
+  return publicPathShowsSponsorMarquee(location.pathname || '/');
+}
+
+function removeSponsorMarquee() {
+  document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => node.remove());
+}
+
 function pickRandomSponsor(sponsors) {
   if (!Array.isArray(sponsors) || !sponsors.length) return null;
   return sponsors[Math.floor(Math.random() * sponsors.length)];
@@ -371,6 +401,10 @@ function ensureSiteChrome(header, marquee, deadlineMount) {
 }
 
 function ensureSponsorMarqueeMount() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return null;
+  }
   const header = document.querySelector('header.site-header');
   if (!header) return document.querySelector('[data-sponsor-marquee]') || null;
 
@@ -390,6 +424,10 @@ function ensureSponsorMarqueeMount() {
 }
 
 function renderSponsorMarquee(sponsors = []) {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   const mount = ensureSponsorMarqueeMount();
   if (!mount) return;
   const markup = buildSponsorMarqueeMarkup(sponsors);
@@ -413,6 +451,10 @@ function renderSponsorMarquee(sponsors = []) {
 }
 
 function hydrateMarqueeFromCache() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   const mount = ensureSponsorMarqueeMount();
   if (mount && !mount.hidden && mount.querySelector('.sponsor-marquee-track')) {
     mount.dataset.marqueeReady = '1';
@@ -423,6 +465,10 @@ function hydrateMarqueeFromCache() {
 }
 
 async function loadSponsorMarquee() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   try {
     const bootstrap = readPublicBootstrap();
     const sponsors = Array.isArray(bootstrap?.sponsors)
@@ -452,7 +498,10 @@ function safeDeadlineBannerHref(value) {
 function ensureSiteDeadlineBannersMount() {
   if (!isPublicSiteDeadlineContext()) return document.querySelector('[data-site-deadline-banners]') || null;
   const header = document.querySelector('header.site-header');
-  const marquee = document.querySelector('[data-sponsor-marquee]') || ensureSponsorMarqueeMount();
+  const marquee = sponsorMarqueeEnabled()
+    ? (document.querySelector('[data-sponsor-marquee]') || ensureSponsorMarqueeMount())
+    : null;
+  if (!sponsorMarqueeEnabled()) removeSponsorMarquee();
   let mount = document.querySelector('[data-site-deadline-banners]');
   if (!mount) {
     mount = document.createElement('div');
@@ -878,7 +927,7 @@ function highlightEventFromCaldev(event) {
 
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
-  const marqueePromise = loadSponsorMarquee();
+  const marqueePromise = sponsorMarqueeEnabled() ? loadSponsorMarquee() : Promise.resolve(removeSponsorMarquee());
   const deadlinePromise = loadSiteDeadlineBanners();
   ensureBoosterMeetingsContainers();
   const highlightNodes = [...document.querySelectorAll('[data-events]')];
