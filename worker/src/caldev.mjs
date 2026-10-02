@@ -628,6 +628,21 @@ export async function listUpcomingCaldevEvents(env, {
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
 }
 
+/** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
+export async function listCaldevEventsFromDate(env, { todayIso = '', limit = 80 } = {}) {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  const rowLimit = Math.min(Math.max(Number(limit) || 80, 1), 120);
+  const rows = await env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE start_date != ''
+      AND start_date >= ?
+    ORDER BY start_date ASC, start_time ASC, id ASC
+    LIMIT ?
+  `).bind(today, rowLimit).all();
+  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
 export async function getCaldevEventById(env, id) {
   const row = await env.DB.prepare(`
     SELECT ${CALDEV_SELECT}

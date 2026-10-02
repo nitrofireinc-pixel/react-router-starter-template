@@ -871,7 +871,9 @@ async function loadPublicContent() {
       const value = site[key];
       if (!value) return;
       if (key === 'hero_title' || key === 'title') {
-        element.innerHTML = formatInlineRichText(value);
+        element.innerHTML = key === 'hero_title' && element.closest('.home-redesign')
+          ? formatHomeHeroTitle(value)
+          : formatInlineRichText(value);
         return;
       }
       if (key === 'hero_subtitle' || key === 'footer_note') {
@@ -1038,6 +1040,17 @@ function applyPublicThemePhotos(photos = []) {
   root.style.setProperty('--efhs-card-photo-3', `url("${at(2)}")`);
 }
 
+function formatHomeHeroTitle(value) {
+  const html = formatInlineRichText(value);
+  if (/<span\b/i.test(html)) return html;
+  const plain = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const parts = plain.split(/\.\s+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return html;
+  const last = parts.pop().replace(/\.$/, '');
+  const lead = `${parts.join('. ')}.`;
+  return `<span>${lead}</span> ${last}.`;
+}
+
 function renderPhotoGallery(container, photos = []) {
   if (!container) return;
   // Drop brand/logo placeholders immediately so they never flash on Gallery.
@@ -1055,6 +1068,7 @@ function renderPhotoGallery(container, photos = []) {
     list = list.slice(0, limit);
   }
   if (!list.length) {
+    if (container.dataset.keepFallback === '1' && container.querySelector('img')) return;
     container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }

@@ -10,6 +10,16 @@ import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
 } from '../worker/src/caldev.mjs';
+import {
+  APPROVED_HERO_SUBTITLE,
+  PREVIOUS_HERO_SUBTITLE,
+  buildHomeRedesignDocument,
+  comingSoonPageHtml,
+  decorateHomeRedesign,
+  injectComingSoonLogos,
+  plainHeroSubtitle,
+  upgradeHomeBody,
+} from '../worker/src/home-redesign.mjs';
 
 
 test('wrangler worker assets config must stay on worker/public', () => {
@@ -2161,8 +2171,8 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
-  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/efhs-header-banner\.jpg\?v=mobile-menu-white-20260922"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'sponsor-marquee-page-hidden-20261002'/);
+  assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
+  assert.match(workerSrc, /ASSET_VERSION = 'home-redesign-20261002'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2285,7 +2295,7 @@ test('staff auth lives in the utility bar, not the main public nav', () => {
   assert.match(styles, /body\.maintenance-preview \.site-chrome header\.site-header\{top:auto\}/);
 });
 
-test('public homepage stacks nav under a centered banner and hides the hero card', () => {
+test('public homepage uses a single-row cover banner and hides the hero card', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
@@ -2297,42 +2307,115 @@ test('public homepage stacks nav under a centered banner and hides the hero card
   assert.ok(headerHtml.indexOf('class="header-inner"') < headerHtml.indexOf('id="site-nav"'));
   assert.match(headerHtml, /class="brand-logo"/);
   assert.match(headerHtml, /class="brand-mark"/);
+  assert.match(headerHtml, /class="btn gold header-donate"/);
+  assert.match(headerHtml, /data-donate-open/);
   assert.match(themeCss, /border-top:1px solid #fff/);
-  assert.match(themeCss, /grid-template-areas:"brand" "nav"/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?justify-content:center/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?background-image:[\s\S]*?var\(--efhs-header-banner\)/);
-  assert.equal(
-    [...themeCss.matchAll(/body\.efhs-theme \.header-inner\{[^}]*background-size:100% 100%;/g)].length,
-    2,
-  );
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-position:center;/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-repeat:no-repeat;/);
-  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:120px/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?display:flex/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?min-height:84px/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?background-image:[\s\S]*?var\(--efhs-header-banner\)/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?background-size:cover/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?background-position:center 20%/);
+  assert.doesNotMatch(themeCss, /grid-template-areas:"brand" "nav"/);
+  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:100% 100%/);
+  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:120px/);
   assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:84px/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:148px/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:100px/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:[^;]*cover/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:[^;]*contain/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:[^;]*100% auto/);
-  assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*background-size:[^;]*auto 100%/);
-  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?background:#01244a/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?background:transparent/);
   assert.match(themeCss, /@media \(max-width:760px\)\{[\s\S]*?#site-nav\{[\s\S]*?background:#fff/);
   assert.match(themeCss, /@media \(max-width:760px\)\{[\s\S]*?#site-nav\{[\s\S]*?color:var\(--efhs-navy\)/);
   assert.match(themeCss, /@media \(max-width:760px\)\{[\s\S]*?#site-nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?color:var\(--efhs-navy\)/);
   assert.match(themeCss, /@media \(max-width:760px\)\{[\s\S]*?#site-nav a:hover,[\s\S]*?background:#eef3fa/);
   assert.match(themeCss, /@media \(max-width:760px\)\{[\s\S]*?#site-nav a\[aria-current="page"\],[\s\S]*?background:#eef3fa/);
-  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:center/);
-  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:4px/);
-  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
+  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:12px/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:flex-end/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
-  assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[\s\S]*?display:none/);
+  assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.hero h1::first-line/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
+});
+
+test('home redesign upgrades old CMS HTML and binds fundraisers without inventing a time', () => {
+  const old = '<section class="hero"><aside class="hero-card"><h2>Keep me</h2></aside></section>';
+  const upgraded = upgradeHomeBody(old);
+  assert.match(upgraded, /data-home-redesign/);
+  assert.match(upgraded, /<h2>Keep me<\/h2>/);
+  assert.match(upgraded, /data-home-slot="next-fund"/);
+  assert.match(upgraded, /data-home-deal/);
+  assert.doesNotMatch(upgraded, /class="amt"/);
+  assert.equal(upgradeHomeBody(upgraded), upgraded);
+  assert.equal(plainHeroSubtitle(`<p>${PREVIOUS_HERO_SUBTITLE}</p>`), PREVIOUS_HERO_SUBTITLE);
+  assert.equal(APPROVED_HERO_SUBTITLE.includes('Blue Regiment'), true);
+
+  const decorated = decorateHomeRedesign(buildHomeRedesignDocument(), {
+    events: [{
+      title: 'Fundraiser/Mattress Sale',
+      description: 'Fundraiser at Mattress Warehouse. Students must attend.',
+      location: '820 S Main St, Kernersville, NC 27284',
+      start_date: '2026-10-24',
+      track: 'deadline',
+      all_day: 1,
+    }, {
+      title: 'Band Practice',
+      description: 'Rehearsal',
+      start_date: '2026-10-05',
+      track: 'rehearsal',
+      all_day: 0,
+      start_time: '16:15',
+      end_time: '18:30',
+    }],
+    members: [{ name: 'Name TBD', role: 'President' }],
+    sponsors: [{ name: 'Placeholder Co', level: 'Bronze Sponsor', logo_url: '' }],
+  });
+  assert.match(decorated, /Mattress Sale/);
+  assert.doesNotMatch(decorated, /10 AM/);
+  assert.match(decorated, /Jamie Olsen/);
+  assert.match(decorated, /aireserv\.jpg/);
+  assert.match(decorated, /data-home-slot="events"/);
+  assert.match(decorated, /class="final"/);
+  const withTiers = decorateHomeRedesign(buildHomeRedesignDocument(), {
+    tiers: {
+      bronze_label: 'Bronze',
+      bronze_amount: '$250',
+      bronze_blurb: 'Online',
+      bronze_benefits: '<ul><li>Marquee</li></ul>',
+      silver_label: 'Silver',
+      silver_amount: '$500',
+      silver_blurb: 'Fly-in',
+      silver_benefits: '<ul><li>Fly-in</li></ul>',
+      gold_label: 'Gold',
+      gold_amount: '$1000',
+      gold_blurb: 'Game day',
+      gold_benefits: '<ul><li>Press box</li></ul>',
+    },
+  });
+  assert.match(withTiers, /Choose Bronze/);
+  assert.match(withTiers, /id="join"/);
+  assert.match(withTiers, /Be part of the sound/);
+  const soon = injectComingSoonLogos(comingSoonPageHtml({ heading: 'Join the Band', intro: 'Soon.' }));
+  assert.match(soon, /coming-soon-logos/);
+  assert.match(soon, /efhs-logo\.png/);
+  assert.match(soon, /efhs-blue-regiment-mark\.png/);
+  assert.match(soon, /data-cms-field="heading"/);
+});
+
+test('join, volunteer, and coming soon stay out of the public nav', () => {
+  const nav = renderNav([
+    { slug: 'home', path: '/', title: 'Home', is_home: 1 },
+    { slug: 'join', path: '/join.html', title: 'Join the Band' },
+    { slug: 'volunteer', path: '/volunteer.html', title: 'Volunteer' },
+    { slug: 'coming-soon', path: '/coming-soon.html', title: 'Coming Soon' },
+    { slug: 'contact', path: '/contact.html', title: 'Contact' },
+  ]);
+  assert.match(nav, /href="\/"/);
+  assert.match(nav, /href="\/contact\.html"/);
+  assert.doesNotMatch(nav, /join\.html/);
+  assert.doesNotMatch(nav, /volunteer\.html/);
+  assert.doesNotMatch(nav, /coming-soon\.html/);
 });
 
 test('admin sessions stay fresh for 24 hours and public nav reflects login state', () => {

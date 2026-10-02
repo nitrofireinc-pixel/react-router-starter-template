@@ -10,7 +10,7 @@
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
   --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918");
   /* Header wordmark row only — not the homepage hero. */
-  --efhs-header-banner:url("/assets/efhs-header-banner.jpg?v=mobile-menu-white-20260922");
+  --efhs-header-banner:url("/assets/header-banner-gen.jpg?v=home-redesign-20261002");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -73,23 +73,31 @@ body.efhs-theme .utility a.utility-auth:focus-visible{
   outline-offset:3px;
 }
 
-/* ---------- Header / nav ---------- */
+/* ---------- Header / nav: one row, generated night-stadium banner, cover (no stretch) ---------- */
 body.efhs-theme header.site-header{
-  background:#01244a;
+  background-color:#01244a;
   border-bottom:0;
   border-top:1px solid #fff;
   margin:0;
   backdrop-filter:none;
   color:#fff;
-  display:grid;
-  grid-template-columns:minmax(0,1fr);
-  grid-template-areas:"brand" "nav";
+  display:flex;
+  flex-direction:row;
+  flex-wrap:nowrap;
   align-items:center;
-  justify-items:center;
-  column-gap:0;
+  justify-content:flex-start;
+  column-gap:18px;
   row-gap:0;
-  padding:0;
+  padding:0 28px;
+  min-height:84px;
   overflow:visible;
+  box-shadow:0 8px 24px rgba(0,19,38,.35);
+  background-image:
+    linear-gradient(180deg,rgba(0,18,40,.30) 0%,rgba(0,20,44,.24) 48%,rgba(1,36,74,.36) 100%),
+    var(--efhs-header-banner);
+  background-size:cover;
+  background-position:center 20%;
+  background-repeat:no-repeat;
 }
 body.efhs-theme .site-chrome{
   margin-top:0;
@@ -103,59 +111,73 @@ body.maintenance-preview.efhs-theme .site-chrome header.site-header{
   top:auto;
 }
 body.efhs-theme .header-inner{
-  grid-area:brand;
-  width:100%;
-  justify-content:center;
-  padding:22px 24px 20px;
-  min-height:120px;
+  width:auto;
+  flex:0 0 auto;
+  justify-content:flex-start;
+  padding:0;
+  min-height:84px;
   box-sizing:border-box;
   column-gap:0;
-  flex:0 0 auto;
-  background-color:#01244a;
-  background-image:
-    linear-gradient(180deg,rgba(0,18,40,.46) 0%,rgba(0,20,44,.40) 48%,rgba(1,36,74,.52) 100%),
-    var(--efhs-header-banner);
-  background-size:100% 100%;
-  background-position:center;
-  background-repeat:no-repeat;
+  background:none;
 }
 body.efhs-theme .brand{
-  margin:0 auto;
-  justify-content:center;
-  gap:4px;
+  margin:0;
+  justify-content:flex-start;
+  gap:12px;
   color:#fff;
-  text-align:center;
+  text-align:left;
 }
-body.efhs-theme .brand .brand-logo,
+body.efhs-theme .brand .brand-logo{
+  width:auto;
+  height:44px;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));
+}
 body.efhs-theme .brand .brand-mark{
   width:48px;
   height:48px;
-  filter:drop-shadow(0 2px 8px rgba(0,0,0,.65));
-}
-body.efhs-theme .brand .brand-mark{
   background:transparent;
+  filter:drop-shadow(0 2px 8px rgba(0,0,0,.65));
 }
 body.efhs-theme header.site-header .brand span,
 body.efhs-theme header.site-header .brand [data-site-field="title"]{
-  font-size:clamp(1rem,2.1vw,1.45rem)!important;
-  line-height:1.1;
-  text-align:center;
+  font-family:var(--efhs-display);
+  font-size:1.12rem!important;
+  line-height:1.05;
+  text-align:left;
   color:#fff;
-  letter-spacing:.08em;
+  letter-spacing:.06em;
   text-transform:uppercase;
-  max-width:none;
+  max-width:14rem;
   text-shadow:0 1px 2px rgba(0,0,0,.82),0 0 16px rgba(0,8,20,.55);
 }
 body.efhs-theme header.site-header nav{
-  grid-area:nav;
-  width:100%;
+  flex:1 1 auto;
+  width:auto;
   max-width:none;
-  justify-content:center;
+  justify-content:flex-end;
   border-top:0;
-  padding:2px 18px 12px;
+  padding:0;
   gap:2px;
   overflow:visible;
-  background:#01244a;
+  background:transparent;
+}
+body.efhs-theme .header-donate{
+  display:inline-flex;
+  flex:0 0 auto;
+  align-items:center;
+  gap:8px;
+  min-height:40px;
+  padding:9px 16px;
+  border-radius:6px;
+  font-size:.74rem;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+  box-shadow:0 10px 26px rgba(253,215,3,.28);
+}
+body.efhs-theme .header-donate .ic{
+  width:1.05em;
+  height:1.05em;
+  fill:currentColor;
 }
 body.efhs-theme header.site-header nav a,
 body.efhs-theme header.site-header nav .nav-notify-me,
@@ -838,37 +860,53 @@ body.efhs-theme .footer h3{
   body.efhs-theme .site-chrome{
     position:relative;
     top:auto;
-    display:flex;
-    flex-direction:column;
-    align-items:stretch;
-    padding:0;
     margin:0;
   }
-  body.efhs-theme .header-inner{
-    justify-content:center;
-    padding:16px 12px 14px;
-    min-height:84px;
-    flex:0 0 auto;
+  body.efhs-theme header.site-header{
+    display:flex;
+    flex-direction:row;
+    flex-wrap:wrap;
+    align-items:center;
+    column-gap:8px;
+    min-height:66px;
+    padding:0 12px;
     background-image:
-      linear-gradient(180deg,rgba(0,18,40,.50) 0%,rgba(1,36,74,.56) 100%),
+      linear-gradient(180deg,rgba(0,18,40,.34) 0%,rgba(1,36,74,.40) 100%),
       var(--efhs-header-banner);
-    background-size:100% 100%;
-    background-position:center;
+    background-size:cover;
+    background-position:center 50%;
     background-repeat:no-repeat;
   }
-  body.efhs-theme .brand{
-    justify-content:center;
-    gap:4px;
+  body.efhs-theme .header-inner{
+    justify-content:flex-start;
+    padding:8px 0;
+    min-height:66px;
+    width:auto;
+    flex:1 1 auto;
+    background:none;
   }
+  body.efhs-theme .brand{
+    justify-content:flex-start;
+    gap:8px;
+  }
+  body.efhs-theme .brand .brand-logo{height:30px;width:auto}
+  body.efhs-theme .brand .brand-mark{height:34px;width:34px}
   body.efhs-theme header.site-header .brand span,
   body.efhs-theme header.site-header .brand [data-site-field="title"]{
-    text-align:center;
-    max-width:none;
-    font-size:.9rem!important;
+    text-align:left;
+    max-width:11rem;
+    font-size:.82rem!important;
   }
   body.efhs-theme .mobile-nav-tray{
     display:flex;
+    width:auto;
+    min-height:0;
+    margin-left:auto;
+    padding:0;
+    background:transparent;
+    border:0;
   }
+  body.efhs-theme .header-donate{display:none}
   /* Drawer list only: white panel + navy links. Keep the navy title tray/close button. */
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{

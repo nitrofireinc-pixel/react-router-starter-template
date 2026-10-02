@@ -29,6 +29,7 @@ for (const name of [
   'ensembles.html',
   'styles.css',
   'public-theme.css',
+  'home-redesign.css',
   'script.js',
   'site-content.js',
   'caldev.js',
