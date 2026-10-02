@@ -148,16 +148,22 @@ body.efhs-theme header.site-header .brand [data-site-field="title"]{
   color:#fff;
   letter-spacing:.06em;
   text-transform:uppercase;
-  max-width:14rem;
+  max-width:none;
+  width:max-content;
   flex:0 1 auto;
   min-width:0;
   text-shadow:0 1px 2px rgba(0,0,0,.82),0 0 16px rgba(0,8,20,.55);
 }
+body.efhs-theme header.site-header .brand [data-site-field="title"]{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+}
 body.efhs-theme header.site-header .brand .brand-title-rest::before{
-  content:" ";
+  content:none;
 }
 body.efhs-theme header.site-header .brand [data-site-field="title"] small{
-  display:inline;
+  display:block;
   font-size:inherit;
   font-weight:inherit;
   letter-spacing:inherit;
