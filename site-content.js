@@ -233,20 +233,18 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
 }
 
 function sponsorShowsFlyin(sponsor = {}) {
-  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_flyin === true || sponsor.show_flyin === 1) return true;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
   return /\b(silver|gold)\b/.test(tier) || Number(sponsor.homepage_ad) === 1;
 }
 
 function sponsorShowsMarquee(sponsor = {}) {
-  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
   return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
-const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v2';
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v3';
 
 function readMarqueeCache() {
   try {
