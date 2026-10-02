@@ -454,7 +454,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     gap:8px;
     width:auto;
     margin-left:0;
-    min-height:44px;
+    min-height:0;
     padding:0;
     box-sizing:border-box;
     background:transparent;

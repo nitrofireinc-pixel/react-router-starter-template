@@ -2395,6 +2395,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
+  assert.match(homeCss, /@media \(max-width:1024px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
+  assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);

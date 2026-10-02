@@ -872,6 +872,7 @@ body.efhs-theme .footer h3{
     display:inline-flex;
     grid-area:menu;
     justify-self:start;
+    align-self:center;
     margin:0;
     z-index:95;
     width:clamp(32px,8vw,40px);
@@ -881,6 +882,7 @@ body.efhs-theme .footer h3{
   body.efhs-theme .header-inner{
     grid-area:brand;
     justify-self:center;
+    align-self:center;
     justify-content:center;
     padding:0;
     height:auto;
@@ -974,6 +976,7 @@ body.efhs-theme .footer h3{
     display:flex;
     grid-area:actions;
     justify-self:end;
+    align-self:center;
     width:auto;
     min-height:0;
     margin-left:0;
@@ -982,7 +985,7 @@ body.efhs-theme .footer h3{
     border:0;
     justify-content:flex-end;
   }
-  body.efhs-theme .header-donate{display:none}
+  body.efhs-theme .header-donate{display:none!important}
   /* Drawer list only: white panel + navy links. Keep the navy title tray/close button. */
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
@@ -1064,6 +1067,7 @@ body.efhs-theme .footer h3{
     padding:0 4px;
     column-gap:2px;
   }
+  body.efhs-theme .header-quick-actions .nav-add-home{display:none!important}
   body.efhs-theme header.site-header .brand span,
   body.efhs-theme header.site-header .brand [data-site-field="title"],
   body.efhs-theme header.site-header .brand .brand-title-rest{

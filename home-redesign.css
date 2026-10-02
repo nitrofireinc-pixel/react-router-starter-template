@@ -844,6 +844,9 @@ body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(1){grid-column:sp
 body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(7){grid-column:span 2}
 body.home-page .footer{padding-bottom:120px}
 body.home-page .header-donate{display:inline-flex}
+@media (max-width:1024px){
+  body.home-page .header-donate{display:none}
+}
 .coming-soon-logos{display:flex;align-items:center;gap:16px;margin:0 0 18px}
 .coming-soon-logos img:first-child{height:58px;width:auto}
 .coming-soon-logos img:last-child{height:68px;width:68px}
@@ -865,7 +868,6 @@ body.efhs-theme.coming-soon-page .page-hero{text-align:left}
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(6),
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(7){grid-column:span 2}
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(8){display:none}
-  body.home-page .header-donate{display:none}
 }
 
 
