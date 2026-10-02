@@ -299,12 +299,33 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   `;
 }
 
+function readPublicBootstrap() {
+  if (Object.prototype.hasOwnProperty.call(readPublicBootstrap, 'value')) return readPublicBootstrap.value;
+  const node = document.getElementById('efhs-public-read');
+  if (!node) {
+    readPublicBootstrap.value = null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(node.textContent || 'null');
+    readPublicBootstrap.value = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    readPublicBootstrap.value = null;
+  }
+  return readPublicBootstrap.value;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
+    const bootstrap = readPublicBootstrap();
     const [sponsors, site] = await Promise.all([
-      fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
-      fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
+      Array.isArray(bootstrap?.sponsors)
+        ? bootstrap.sponsors
+        : fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
+      bootstrap?.site
+        ? bootstrap.site
+        : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
     ]);
     const eligible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsFlyin);
     if (!eligible.length) return;
@@ -403,7 +424,10 @@ function hydrateMarqueeFromCache() {
 
 async function loadSponsorMarquee() {
   try {
-    const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
+    const bootstrap = readPublicBootstrap();
+    const sponsors = Array.isArray(bootstrap?.sponsors)
+      ? bootstrap.sponsors
+      : await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
     const list = Array.isArray(sponsors) ? sponsors : [];
     writeMarqueeCache(list);
     renderSponsorMarquee(list);
@@ -466,6 +490,11 @@ function renderSiteDeadlineBanners(items = []) {
 async function loadSiteDeadlineBanners() {
   if (!isPublicSiteDeadlineContext()) return;
   ensureSiteDeadlineBannersMount();
+  const bootstrap = readPublicBootstrap();
+  if (Array.isArray(bootstrap?.deadlineBanners)) {
+    renderSiteDeadlineBanners(bootstrap.deadlineBanners);
+    return;
+  }
   try {
     const items = await fetch('/api/caldev/deadline-banners', { cache: 'no-store' })
       .then((response) => (response.ok ? response.json() : []));
@@ -863,12 +892,17 @@ async function loadPublicContent() {
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? Math.max(max, n) : max;
   }, 0) || 3;
+  const bootstrap = readPublicBootstrap();
   const [site, events, photos, calendarEvents, highlightEvents] = await Promise.all([
-    fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+    bootstrap?.site
+      ? bootstrap.site
+      : fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     needsLegacyEvents
       ? fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
       : Promise.resolve([]),
-    fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    Array.isArray(bootstrap?.photos)
+      ? bootstrap.photos
+      : fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     needsMonthCalendar
       ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
       : Promise.resolve([]),

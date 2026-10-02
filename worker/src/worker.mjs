@@ -64,8 +64,11 @@ import {
   CALDEV_UPCOMING_LIMIT_DEFAULT,
   buildDeadlineBannerItems,
   caldevEventToHighlight,
+  caldevEventsFromDateStatement,
   clearCaldevEvents,
+  deadlineCaldevStatement,
   deleteCaldevEvent,
+  mapCaldevRows,
   easternTodayIso,
   ensureCaldevSchema,
   getCaldevEventById,
@@ -91,6 +94,17 @@ import {
   renderHomeStickySupport,
   upgradeHomeBody,
 } from './home-redesign.mjs';
+import {
+  CMS_PAGE_READ_COLUMNS,
+  PUBLIC_READ_INDEX_SQL,
+  attachD1Bookmark,
+  cachedPublicRead,
+  invalidatePublicReadCache,
+  openD1Session,
+  readCachedQueryBatch,
+  renderPublicReadBootstrap,
+  resetPublicReadCache,
+} from './d1-read-policy.mjs';
 
 export {
   CALDEV_TRACKS,
@@ -1678,7 +1692,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-09-07.1';
+export const DB_SCHEMA_VERSION = '2026-10-02.1';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1688,6 +1702,7 @@ let dbInitPromise = null;
 export function resetDbInitCache() {
   dbInitVersion = null;
   dbInitPromise = null;
+  resetPublicReadCache();
 }
 
 async function readDbSchemaVersion(env) {
@@ -2065,6 +2080,14 @@ async function migrateAndSeedDb(env) {
     await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, 1)').bind(adminUsername(env), 'Site Administrator', passwordHash, 'admin', JSON.stringify(['all'])).run();
     await env.DB.prepare("INSERT INTO auth_settings (key, value) VALUES ('admin_password_hash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(passwordHash).run();
   }
+  // Public-read indexes. CREATE INDEX IF NOT EXISTS runs once per schema version,
+  // on the first request after deploy, not on every page view.
+  await env.DB.batch(PUBLIC_READ_INDEX_SQL.map((sql) => env.DB.prepare(sql)));
+  await env.DB.prepare(`
+    UPDATE caldev_events
+    SET track = lower(trim(track))
+    WHERE track != lower(trim(track))
+  `).run();
 }
 
 export function isMaintenanceMode(site = {}) {
@@ -2999,14 +3022,22 @@ export function publicSitePayload(site = {}) {
   return payload;
 }
 
-async function getSite(env) {
-  const rows = await env.DB.prepare('SELECT key, value FROM site_content').all();
+function siteFromContentRows(rows = []) {
   const payload = { ...DEFAULT_SITE };
   const allowed = new Set(PUBLIC_SITE_KEYS);
-  for (const row of rows.results || []) {
+  for (const row of rows || []) {
     if (allowed.has(row.key)) payload[row.key] = row.value;
   }
   return publicSitePayload(payload);
+}
+
+async function getSite(env) {
+  // Primary-key lookups for the public allowlist. Secret rows stay unread.
+  const placeholders = PUBLIC_SITE_KEYS.map(() => '?').join(', ');
+  const rows = await env.DB.prepare(
+    `SELECT key, value FROM site_content WHERE key IN (${placeholders})`,
+  ).bind(...PUBLIC_SITE_KEYS).all();
+  return siteFromContentRows(rows.results);
 }
 
 async function getSiteContentValue(env, key) {
@@ -6836,13 +6867,22 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
   return page.body_html;
 }
 
-async function getPhotos(env) {
+function photoListStatement(env) {
   // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
-  // Manual drag order uses sort_order; created_at breaks ties for older rows still at 0.
-  const rows = await env.DB.prepare(
-    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY sort_order ASC, datetime(created_at) DESC, id DESC',
-  ).all();
-  return (rows.results || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+  // sort_order, created_at, id matches idx_photos_gallery_sort. created_at is stored as
+  // sortable text, so the column is ordered directly and can use the index.
+  return env.DB.prepare(
+    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY sort_order ASC, created_at DESC, id DESC',
+  );
+}
+
+function mapPhotoRows(rows = []) {
+  return (rows || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+}
+
+async function getPhotos(env) {
+  const rows = await photoListStatement(env).all();
+  return mapPhotoRows(rows.results);
 }
 
 async function nextGalleryPhotoSortOrder(env) {
@@ -6880,25 +6920,177 @@ async function photoUsageLabels(env, filename) {
   return labels;
 }
 
+function mapCmsPage(page) {
+  if (!page) return page;
+  return {
+    ...page,
+    is_form: Number(page.is_form) === 1 || isCmsFormPage(page) || page.slug === 'letterman-jacket',
+  };
+}
+
 async function getPages(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, slug, path, title, body_html, nav_order, is_home, active, updated_at FROM cms_pages ${where} ORDER BY nav_order, id`).all();
-  return (rows.results || []).map((page) => ({
-    ...page,
-    is_form: isCmsFormPage(page) || page.slug === 'letterman-jacket',
-  }));
+  const rows = await env.DB.prepare(`SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages ${where} ORDER BY nav_order, id`).all();
+  return (rows.results || []).map((page) => mapCmsPage(page));
+}
+
+function navPagesStatement(env) {
+  // Nav does not need page bodies. instr() still visits each active row, but the
+  // Worker receives a 0/1 flag instead of every body_html string.
+  return env.DB.prepare(`
+    SELECT id, slug, path, title, nav_order, is_home, active, updated_at,
+           CASE WHEN instr(body_html, 'data-cms-form=') > 0 THEN 1 ELSE 0 END AS is_form
+    FROM cms_pages
+    WHERE active = 1
+    ORDER BY nav_order, id
+  `);
+}
+
+function pageByPathStatement(env, path) {
+  return env.DB.prepare(
+    `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ?`,
+  ).bind(path);
+}
+
+function homeSourcePagesStatement(env) {
+  return env.DB.prepare(
+    `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug IN ('fundraising', 'become-a-sponsor')`,
+  );
+}
+
+function sponsorsStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ORDER BY sort_order, id',
+  );
+}
+
+function activeBoosterMembersStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE active = 1 ORDER BY sort_order, id',
+  );
+}
+
+function activeStaffStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, role, bio, photo_url, sort_order, active FROM staff_members WHERE active = 1 ORDER BY sort_order, id',
+  );
 }
 
 async function getPageBySlug(env, slug, includeInactive = false) {
-  const sql = includeInactive ? 'SELECT * FROM cms_pages WHERE slug = ?' : 'SELECT * FROM cms_pages WHERE slug = ? AND active = 1';
+  const sql = includeInactive
+    ? `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug = ?`
+    : `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug = ? AND active = 1`;
   return env.DB.prepare(sql).bind(slug).first();
 }
 
 async function getPageByPath(env, path, includeInactive = false) {
   const sql = includeInactive
-    ? 'SELECT * FROM cms_pages WHERE path = ?'
-    : 'SELECT * FROM cms_pages WHERE path = ? AND active = 1';
+    ? `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ?`
+    : `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ? AND active = 1`;
   return env.DB.prepare(sql).bind(path).first();
+}
+
+function rowsOf(result) {
+  return result?.results || [];
+}
+
+function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false } = {}) {
+  const jobs = [
+    {
+      key: 'site',
+      statement: () => {
+        const placeholders = PUBLIC_SITE_KEYS.map(() => '?').join(', ');
+        return env.DB.prepare(
+          `SELECT key, value FROM site_content WHERE key IN (${placeholders})`,
+        ).bind(...PUBLIC_SITE_KEYS);
+      },
+      parse: (result) => siteFromContentRows(rowsOf(result)),
+    },
+    {
+      key: `page-path:${path}`,
+      statement: () => pageByPathStatement(env, path),
+      parse: (result) => mapCmsPage(rowsOf(result)[0] || null),
+    },
+    {
+      key: 'pages-nav',
+      statement: () => navPagesStatement(env),
+      parse: (result) => rowsOf(result).map((page) => mapCmsPage(page)),
+    },
+    {
+      key: 'sponsors',
+      statement: () => sponsorsStatement(env),
+      parse: (result) => rowsOf(result).map((row) => hydrateSponsor(row)),
+    },
+    {
+      key: 'photos',
+      optional: true,
+      fallback: [],
+      statement: () => photoListStatement(env),
+      parse: (result) => mapPhotoRows(rowsOf(result)),
+    },
+    {
+      key: `deadline-events:${today}`,
+      optional: true,
+      fallback: [],
+      statement: () => deadlineCaldevStatement(env),
+      parse: (result) => mapCaldevRows(result),
+    },
+  ];
+  if (needsBoosters) {
+    jobs.push({
+      key: 'booster-members',
+      statement: () => activeBoosterMembersStatement(env),
+      parse: (result) => rowsOf(result),
+    });
+  }
+  if (needsStaff) {
+    jobs.push({
+      key: 'staff-active',
+      statement: () => activeStaffStatement(env),
+      parse: (result) => rowsOf(result),
+    });
+  }
+  if (isHome) {
+    jobs.push({
+      key: `home-events:${today}`,
+      optional: true,
+      fallback: [],
+      statement: () => caldevEventsFromDateStatement(env, { todayIso: today, limit: 80 }),
+      parse: (result) => mapCaldevRows(result),
+    });
+    jobs.push({
+      key: 'home-source-pages',
+      optional: true,
+      fallback: { fundraising: null, sponsor: null },
+      statement: () => homeSourcePagesStatement(env),
+      parse: (result) => {
+        const bySlug = new Map(rowsOf(result).map((page) => [page.slug, page]));
+        return {
+          fundraising: bySlug.get('fundraising') || null,
+          sponsor: bySlug.get('become-a-sponsor') || null,
+        };
+      },
+    });
+  }
+  return jobs;
+}
+
+async function loadPublicCmsReads(env, options) {
+  const jobs = publicReadJobs(env, options);
+  const values = await readCachedQueryBatch(env, jobs);
+  const read = (key, fallback = null) => (values.has(key) ? values.get(key) : fallback);
+  return {
+    site: read('site', siteFromContentRows([])),
+    page: read(`page-path:${options.path}`, null),
+    pages: read('pages-nav', []),
+    sponsors: read('sponsors', []),
+    photos: read('photos', []),
+    deadlineEvents: read(`deadline-events:${options.today}`, []),
+    boosterMembers: read('booster-members', []),
+    staff: read('staff-active', []),
+    homeEvents: read(`home-events:${options.today}`, []),
+    homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
+  };
 }
 
 async function getUserByUsername(env, username) {
@@ -8072,6 +8264,11 @@ async function handleApi(request, env, url, ctx = null) {
     requestSummary,
     ctx,
   });
+  if (!['GET', 'HEAD'].includes(request.method) && response.ok) {
+    const cleared = invalidatePublicReadCache();
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cleared);
+    else await cleared;
+  }
   return response;
 }
 
@@ -8086,7 +8283,9 @@ async function routeApi(request, env, url, ctx = null) {
       editable: false,
     }, 405);
   }
-  if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+  if (url.pathname === '/api/site' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('site', () => getSite(env)));
+  }
 
   if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
     const state = await getCalendarPushState(env);
@@ -8212,16 +8411,18 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/events' && request.method === 'GET') {
-    return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+    const today = easternTodayIso();
+    return jsonResponse(await cachedPublicRead(`events-upcoming:${today}`, () => getEvents(env, { upcomingOnly: true, expandRepeats: true })));
   }
   if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
     // Full month view needs past and future months, not only upcoming rows.
-    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
+    return jsonResponse(await cachedPublicRead('events-all', () => getEvents(env, { upcomingOnly: false, expandRepeats: true })));
   }
   if (url.pathname === '/api/caldev/deadline-banners' && request.method === 'GET') {
     try {
-      const events = await listDeadlineCaldevEvents(env);
-      return jsonResponse(buildDeadlineBannerItems(events, easternTodayIso()));
+      const today = easternTodayIso();
+      const events = await cachedPublicRead(`deadline-events:${today}`, () => listDeadlineCaldevEvents(env));
+      return jsonResponse(buildDeadlineBannerItems(events, today));
     } catch {
       return jsonResponse([]);
     }
@@ -8230,10 +8431,12 @@ async function routeApi(request, env, url, ctx = null) {
     await ensureCaldevSchema(env);
     const upcoming = url.searchParams.get('upcoming') === '1' || url.searchParams.get('highlights') === '1';
     if (upcoming) {
-      const events = await listUpcomingCaldevEvents(env, {
-        todayIso: easternTodayIso(),
-        limit: parseCaldevUpcomingLimit(url.searchParams.get('limit')),
-      });
+      const today = easternTodayIso();
+      const limit = parseCaldevUpcomingLimit(url.searchParams.get('limit'));
+      const events = await cachedPublicRead(`caldev-upcoming:${today}:${limit}`, () => listUpcomingCaldevEvents(env, {
+        todayIso: today,
+        limit,
+      }));
       return jsonResponse(events.map(caldevEventToHighlight));
     }
     let events = await listCaldevEvents(env);
@@ -8250,7 +8453,9 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
     return jsonResponse(CALDEV_TRACKS);
   }
-  if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env, true));
+  if (url.pathname === '/api/sponsors' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('sponsors', () => getSponsors(env, true)));
+  }
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
     const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
     if (query.length < 3) {
@@ -9001,8 +9206,15 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/letterman-jacket' && request.method === 'POST') {
     return handleBuiltFormSubmit(request, env, 'letterman-jacket');
   }
-  if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
-  if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
+  if (url.pathname === '/api/photos' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('photos', () => getPhotos(env)));
+  }
+  if (url.pathname === '/api/pages' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('pages-nav', async () => {
+      const rows = await navPagesStatement(env).all();
+      return (rows.results || []).map((page) => mapCmsPage(page));
+    }));
+  }
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
   if (publicPageMatch && request.method === 'GET') {
     const page = await getPageBySlug(env, publicPageMatch[1]);
@@ -9648,7 +9860,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     const page = serializePagePayload(await request.json());
     const result = await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active).run();
-    return jsonResponse(await env.DB.prepare('SELECT * FROM cms_pages WHERE id = ?').bind(result.meta.last_row_id).first());
+    return jsonResponse(await env.DB.prepare(`SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE id = ?`).bind(result.meta.last_row_id).first());
   }
   const pageMatch = url.pathname.match(/^\/api\/admin\/pages\/([a-z0-9-]+)$/);
   if (pageMatch && request.method === 'PUT') {
@@ -11035,20 +11247,34 @@ async function routeApi(request, env, url, ctx = null) {
   return jsonResponse({ detail: 'Not found' }, 404);
 }
 
-async function handleUploadGet(env, url) {
+async function handleUploadGet(request, env, url, ctx = null) {
   await initDb(env);
+  const cacheKey = new Request(new URL(url.pathname, 'https://efhsband.internal'));
+  if (typeof caches !== 'undefined' && caches?.default) {
+    try {
+      const hit = await caches.default.match(cacheKey);
+      if (hit) return hit;
+    } catch {
+      // Fall through to the indexed filename lookup.
+    }
+  }
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
   const row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
   if (!row) return new Response('Not found', { status: 404 });
   try {
     const bytes = photoBytesFromStored(row.data_base64);
     if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404 });
-    return new Response(bytes, {
+    const response = new Response(bytes, {
       headers: {
         'content-type': row.content_type || 'application/octet-stream',
-        'cache-control': 'public, max-age=3600',
+        'cache-control': 'public, max-age=86400',
       },
     });
+    if (typeof caches !== 'undefined' && caches?.default) {
+      const stored = caches.default.put(cacheKey, response.clone()).catch(() => {});
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(stored);
+    }
+    return response;
   } catch (error) {
     return jsonResponse({
       detail: 'Could not read stored image bytes',
@@ -11201,6 +11427,7 @@ function isHiddenPublicNavPage(page = {}) {
     || page.slug === 'coming-soon'
     || page.slug === 'join'
     || page.slug === 'volunteer'
+    || page.is_form
     || isCmsFormPage(page);
 }
 
@@ -11307,7 +11534,7 @@ export function renderPublicThemePhotoStyle(vars = {}) {
   return `<style id="efhs-theme-photos">:root{--efhs-hero-photo:${cssUrl(vars.hero)};--efhs-page-photo:${cssUrl(vars.page)};--efhs-card-photo-1:${cssUrl(vars.cards?.[0])};--efhs-card-photo-2:${cssUrl(vars.cards?.[1])};--efhs-card-photo-3:${cssUrl(vars.cards?.[2])};}</style>`;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug);
@@ -11356,6 +11583,7 @@ ${deadlineHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
 ${isHomePage ? renderHomeStickySupport() : ''}
+${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
@@ -11435,7 +11663,7 @@ function renderMaintenancePage(site = {}) {
 
 async function serveStaticOrCms(request, env, url) {
   await initDb(env);
-  const site = await getSite(env);
+  const site = await cachedPublicRead('site', () => getSite(env));
   const maintenanceOn = isMaintenanceMode(site);
   const user = await currentUser(request, env);
   const loggedIn = Boolean(user);
@@ -11481,44 +11709,52 @@ async function serveStaticOrCms(request, env, url) {
   if (path === '/' || path.endsWith('.html')) {
     // Include inactive rows so unpublished CMS pages (ensembles) still use renderCmsPage
     // instead of falling through to the unthemed static HTML draft.
-    const page = await getPageByPath(env, path, true);
+    const today = easternTodayIso();
+    const page = await cachedPublicRead(`page-path:${path}`, async () => {
+      const result = await pageByPathStatement(env, path).all();
+      return mapCmsPage((result.results || [])[0] || null);
+    });
     if (page) {
       const isHome = Boolean(page.is_home) || page.slug === 'home';
-      const [site, pages, allSponsors, staff, boosterMembers, deadlineEvents, photos, homeEvents, fundraisingPage, sponsorPage] = await Promise.all([
-        getSite(env),
-        getPages(env),
-        getSponsors(env, true),
-        page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
-        (page.slug === 'boosters' || isHome) ? getBoosterMembers(env) : Promise.resolve([]),
-        listDeadlineCaldevEvents(env).catch(() => []),
-        getPhotos(env).catch(() => []),
-        isHome
-          ? listCaldevEventsFromDate(env, { todayIso: easternTodayIso(), limit: 80 }).catch(() => [])
-          : Promise.resolve([]),
-        isHome ? getPageBySlug(env, 'fundraising', true).catch(() => null) : Promise.resolve(null),
-        isHome ? getPageBySlug(env, 'become-a-sponsor', true).catch(() => null) : Promise.resolve(null),
-      ]);
+      const reads = await loadPublicCmsReads(env, {
+        path,
+        today,
+        isHome,
+        needsBoosters: page.slug === 'boosters' || isHome,
+        needsStaff: page.slug === 'directors',
+      });
+      const pages = reads.pages;
+      const allSponsors = reads.sponsors;
+      const staff = reads.staff;
+      const boosterMembers = reads.boosterMembers;
+      const photos = reads.photos;
+      const homeSources = reads.homeSources || {};
+      const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
       const sponsors = page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
       const home = isHome ? {
-        events: homeEvents,
+        events: reads.homeEvents,
         members: boosterMembers,
-        fundraisingHtml: fundraisingPage?.body_html || '',
-        tiers: extractSponsorTierFields(sponsorPage?.body_html || ''),
+        fundraisingHtml: homeSources.fundraising?.body_html || '',
+        tiers: extractSponsorTierFields(homeSources.sponsor?.body_html || ''),
         sponsors: allSponsors.filter((sponsor) => sponsorShowsMarquee(sponsor) || sponsorShowsOnPage(sponsor)),
-        instagramHref: normalizeSocialLinks(site.social_links).find((link) => link.platform === 'instagram')?.href || '',
+        instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
       } : null;
       if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
         page.letterman_copy = await getLettermanFormCopy(env);
       }
-      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
+      return htmlResponse(renderCmsPage(page, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
         photos,
-        deadlineBannersHtml: renderSiteDeadlineBannersHtml(
-          buildDeadlineBannerItems(deadlineEvents, easternTodayIso()),
-        ),
+        deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
         calendarHighlights: null,
         home,
+        publicRead: {
+          site: reads.site,
+          sponsors: allSponsors,
+          photos,
+          deadlineBanners,
+        },
       }));
     }
   }
@@ -11572,8 +11808,7 @@ export function renderPushServiceWorker() {
   return '';
 }
 
-export default {
-  async fetch(request, env, ctx) {
+async function dispatchWorker(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/push-sw.js') {
       const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
@@ -11630,8 +11865,15 @@ export default {
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
-    if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
+    if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
     return serveStaticOrCms(request, env, url);
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const opened = openD1Session(request, env);
+    const response = await dispatchWorker(request, opened.env, ctx);
+    return attachD1Bookmark(response, opened.session);
   },
 };
 

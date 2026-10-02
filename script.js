@@ -274,21 +274,43 @@ function applyStaffAuthNavState(loggedIn) {
     });
 })();
 
+function readBootstrapSite() {
+  const node = document.getElementById('efhs-public-read');
+  if (!node) return null;
+  try {
+    const parsed = JSON.parse(node.textContent || 'null');
+    return parsed && typeof parsed.site === 'object' ? parsed.site : null;
+  } catch {
+    return null;
+  }
+}
+
+function maintenanceModeEnabled(site) {
+  return Boolean(site) && (
+    site.maintenance_mode === true
+    || site.maintenance_mode === 1
+    || site.maintenance_mode === '1'
+  );
+}
+
 (function enforceMaintenanceMode() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   if (path === '/maintenance' || path.endsWith('/maintenance.html')) return;
 
-  Promise.all([
-    fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null),
-    fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null),
-  ]).then(([site, session]) => {
-    if (!site) return;
-    const enabled = site.maintenance_mode === true
-      || site.maintenance_mode === 1
-      || site.maintenance_mode === '1';
-    if (!enabled) return;
-    // Only Super Admins may preview public pages during maintenance.
-    if (session && session.is_super_admin) {
+  const embedded = readBootstrapSite();
+  const sitePromise = embedded
+    ? Promise.resolve(embedded)
+    : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null);
+  sitePromise.then((site) => {
+    if (!maintenanceModeEnabled(site)) return { enabled: false };
+    // Session is only needed when maintenance is on, to allow a Super Admin preview.
+    return fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then((session) => ({ enabled: true, session }));
+  }).then((state) => {
+    if (!state || !state.enabled) return;
+    if (state.session && state.session.is_super_admin) {
       ensureMaintenancePreviewBanner();
       return;
     }

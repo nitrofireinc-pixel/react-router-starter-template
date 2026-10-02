@@ -594,15 +594,26 @@ export async function listCaldevEvents(env) {
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
 }
 
-/** Read-only deadline rows for public banners. Never seeds or migrates. */
-export async function listDeadlineCaldevEvents(env) {
-  const rows = await env.DB.prepare(`
+/**
+ * Deadline rows for public banners. track is stored lowercase, and empty
+ * dates cannot become banners, so the filter matches idx_caldev_events_track_start.
+ * Never seeds or migrates.
+ */
+export function deadlineCaldevStatement(env) {
+  return env.DB.prepare(`
     SELECT ${CALDEV_SELECT}
     FROM caldev_events
-    WHERE lower(track) = 'deadline'
-    ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
-  `).all();
-  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+    WHERE track = 'deadline' AND start_date != ''
+    ORDER BY start_date ASC, start_time ASC, id ASC
+  `);
+}
+
+export function mapCaldevRows(result) {
+  return (result?.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+export async function listDeadlineCaldevEvents(env) {
+  return mapCaldevRows(await deadlineCaldevStatement(env).all());
 }
 
 /**
@@ -628,19 +639,22 @@ export async function listUpcomingCaldevEvents(env, {
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
 }
 
-/** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
-export async function listCaldevEventsFromDate(env, { todayIso = '', limit = 80 } = {}) {
+export function caldevEventsFromDateStatement(env, { todayIso = '', limit = 80 } = {}) {
   const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
   const rowLimit = Math.min(Math.max(Number(limit) || 80, 1), 120);
-  const rows = await env.DB.prepare(`
+  return env.DB.prepare(`
     SELECT ${CALDEV_SELECT}
     FROM caldev_events
     WHERE start_date != ''
       AND start_date >= ?
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
-  `).bind(today, rowLimit).all();
-  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+  `).bind(today, rowLimit);
+}
+
+/** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
+export async function listCaldevEventsFromDate(env, { todayIso = '', limit = 80 } = {}) {
+  return mapCaldevRows(await caldevEventsFromDateStatement(env, { todayIso, limit }).all());
 }
 
 export async function getCaldevEventById(env, id) {

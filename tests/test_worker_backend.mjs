@@ -113,7 +113,8 @@ test('public site payload is an allowlist and never includes secrets', () => {
 
 test('public /api/site is built from the public site allowlist', () => {
   const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../worker/src/worker.mjs'), 'utf8');
-  assert.match(workerSrc, /if \(url\.pathname === '\/api\/site' && request\.method === 'GET'\) return jsonResponse\(await getSite\(env\)\);/);
+  assert.match(workerSrc, /if \(url\.pathname === '\/api\/site' && request\.method === 'GET'\)/);
+  assert.match(workerSrc, /cachedPublicRead\('site', \(\) => getSite\(env\)\)/);
   assert.match(workerSrc, /const allowed = new Set\(PUBLIC_SITE_KEYS\);/);
   assert.match(workerSrc, /if \(allowed\.has\(row\.key\)\) payload\[row\.key\] = row\.value;/);
   assert.match(workerSrc, /return publicSitePayload\(payload\);/);
@@ -2161,7 +2162,8 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(workerSrc, /href="\/public-theme\.css\?v=/);
   assert.match(workerSrc, /bodyClasses = \['efhs-theme'\]/);
   assert.match(workerSrc, /normalizePublicHtmlPath\(url\.pathname\)/);
-  assert.match(workerSrc, /getPageByPath\(env, path, true\)/);
+  assert.match(workerSrc, /pageByPathStatement\(env, path\)/);
+  assert.match(workerSrc, /FROM cms_pages WHERE path = \?`/);
   assert.match(workerSrc, /pageSlug === 'ensembles'/);
   assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918'/);
   assert.match(syncSrc, /'public-theme\.css'/);
