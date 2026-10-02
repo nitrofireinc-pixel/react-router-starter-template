@@ -315,7 +315,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-white-fix-20261002';
+const ASSET_VERSION = 'square-logout-20261002';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2250,6 +2250,19 @@ export function squareAccessToken(env = {}) {
 
 export function squareApplicationId(env = {}) {
   return String(env.SQUARE_APPLICATION_ID || env.SQUARE_APP_ID || '').trim();
+}
+
+/** Public browser values only. Never reads D1 and never returns the access token. */
+export function publicSquarePublishableConfig(env = {}) {
+  const application_id = squareApplicationId(env);
+  const location_id = String(env.SQUARE_LOCATION_ID || '').trim();
+  const environment = normalizeSquareEnvironment(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production');
+  return {
+    application_id,
+    location_id,
+    environment,
+    web_payments: Boolean(application_id && location_id),
+  };
 }
 
 export function squareCheckoutConfigured(env = {}) {
@@ -6036,7 +6049,9 @@ export function renderSponsorTiersHtml(payload = {}) {
   const fields = normalizeSponsorTierFields(payload);
   const card = (id, labelKey, titleKey, blurbKey, benefitsKey, amountKey) => {
     const benefits = sponsorTierBenefitsHtml(fields[benefitsKey], SPONSOR_TIER_FIELD_DEFAULTS[benefitsKey]);
-    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}">
+    const amountCents = parseSponsorAmountCents(fields[amountKey]);
+    const amountAttr = amountCents ? ` data-amount-cents="${amountCents}"` : '';
+    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}"${amountAttr}>
       <span class="sponsor-tier-label" data-cms-field="${escapeAttr(labelKey)}">${formatInlineRichText(fields[labelKey])}</span>
       <h3 data-cms-field="${escapeAttr(titleKey)}">${formatInlineRichText(fields[titleKey])}</h3>
       <p data-cms-field="${escapeAttr(blurbKey)}">${formatInlineRichText(fields[blurbKey])}</p>
@@ -11727,6 +11742,7 @@ async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
       sponsors: chrome.sponsors,
       photos: [],
       deadlineBanners,
+      square: publicSquarePublishableConfig(env),
     },
   });
   return htmlResponse(html, 404);
@@ -11825,6 +11841,7 @@ async function serveStaticOrCms(request, env, url) {
           sponsors: allSponsors,
           photos,
           deadlineBanners,
+          square: publicSquarePublishableConfig(env),
         },
       }));
     }

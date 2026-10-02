@@ -135,6 +135,7 @@ test('bootstrap JSON cannot close the script tag', () => {
   const json = html.match(/<script type="application\/json" id="efhs-public-read">([\s\S]*)<\/script>/)[1];
   const parsed = JSON.parse(json);
   assert.equal(parsed.photos[0].caption, '</script><img src=x onerror=alert(1)>');
+  assert.equal(parsed.square, null);
 });
 
 test('worker source follows the public D1 read policy', () => {

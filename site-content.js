@@ -374,6 +374,116 @@ function readPublicBootstrap() {
   return readPublicBootstrap.value;
 }
 
+const SQUARE_SDK_TIMEOUT_MS = 15000;
+
+function squareSdkSrc(environment = 'production') {
+  return environment === 'sandbox'
+    ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+    : 'https://web.squarecdn.com/v1/square.js';
+}
+
+function readSquarePublishableConfig() {
+  const square = readPublicBootstrap()?.square;
+  if (!square || typeof square !== 'object') return null;
+  const application_id = String(square.application_id || '').trim();
+  const location_id = String(square.location_id || '').trim();
+  if (!application_id && !location_id) return null;
+  return {
+    application_id,
+    location_id,
+    environment: square.environment === 'sandbox' ? 'sandbox' : 'production',
+    web_payments: Boolean(square.web_payments || (application_id && location_id)),
+  };
+}
+
+async function fetchSquarePublishableConfig() {
+  const boot = readSquarePublishableConfig();
+  if (boot?.application_id && boot?.location_id) {
+    return { ...boot, web_payments: true };
+  }
+  const config = await fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+  if (!config || typeof config !== 'object') return boot;
+  const application_id = String(config.application_id || boot?.application_id || '').trim();
+  const location_id = String(config.location_id || boot?.location_id || '').trim();
+  return {
+    application_id,
+    location_id,
+    environment: config.environment === 'sandbox' || boot?.environment === 'sandbox' ? 'sandbox' : 'production',
+    web_payments: Boolean(config.web_payments || (application_id && location_id)),
+    mock_enabled: Boolean(config.mock_enabled),
+    detail: config.detail || '',
+  };
+}
+
+function loadSquareWebSdk(environment = 'production') {
+  if (typeof window !== 'undefined' && window.Square) return Promise.resolve(window.Square);
+  const existing = typeof document !== 'undefined'
+    ? document.querySelector('script[data-square-web-sdk]')
+    : null;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, sdk) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(sdk);
+    };
+    const waitForSquare = (script) => {
+      if (window.Square) {
+        finish(null, window.Square);
+        return;
+      }
+      const started = Date.now();
+      const timer = window.setInterval(() => {
+        if (window.Square) {
+          window.clearInterval(timer);
+          finish(null, window.Square);
+        } else if (Date.now() - started > SQUARE_SDK_TIMEOUT_MS) {
+          window.clearInterval(timer);
+          finish(new Error('Square.js failed to load'));
+        }
+      }, 50);
+      script?.addEventListener('error', () => {
+        window.clearInterval(timer);
+        finish(new Error('Could not load Square payment form'));
+      });
+    };
+    if (existing) {
+      waitForSquare(existing);
+      return;
+    }
+    if (typeof document === 'undefined' || !document.head) {
+      finish(new Error('Could not load Square payment form'));
+      return;
+    }
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = squareSdkSrc(environment);
+    script.onload = () => waitForSquare(script);
+    script.onerror = () => finish(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+function prefetchSquareWebSdk(environment = 'production') {
+  loadSquareWebSdk(environment).catch(() => {});
+}
+
+async function attachSquareCard(config, hostSelector) {
+  const applicationId = String(config?.application_id || '').trim();
+  const locationId = String(config?.location_id || '').trim();
+  if (!applicationId || !locationId) {
+    throw new Error('Square card form is not configured.');
+  }
+  const Square = await loadSquareWebSdk(config.environment || 'production');
+  const payments = Square.payments(applicationId, locationId);
+  const card = await payments.card();
+  await card.attach(hostSelector);
+  return card;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
@@ -1411,10 +1521,12 @@ function readTierPackageFromCard(card) {
   const title = (card.querySelector('[data-cms-field$="_title"], h3')?.textContent || `${tier} Sponsor`)
     .replace(/\s+/g, ' ')
     .trim();
-  const amountText = (card.querySelector('[data-cms-field$="_amount"], .sponsor-tier-amount')?.textContent || '')
+  const amountAttr = Number(card.dataset?.amountCents || card.getAttribute?.('data-amount-cents') || 0);
+  const amountNode = card.querySelector('[data-cms-field$="_amount"], .sponsor-tier-amount, [data-amount]');
+  const amountText = (amountNode?.textContent || String(card.textContent || '').match(/\$\s*[\d,]+(?:\.\d{2})?/)?.[0] || '')
     .replace(/\s+/g, ' ')
     .trim();
-  const amountCents = parseSponsorAmountCents(amountText);
+  const amountCents = amountAttr > 0 ? Math.round(amountAttr) : parseSponsorAmountCents(amountText);
   if (!amountCents) return null;
   return {
     tier,
@@ -1473,6 +1585,7 @@ function openSponsorSignupModal(pkg) {
   closeDuesModal({ immediate: true });
   closeSponsorSignupModal({ immediate: true });
   sponsorSignupState = { ...pkg, draft: null, application: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal';
@@ -1721,21 +1834,6 @@ function openSponsorSignupModal(pkg) {
     loadSponsorMarquee();
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(application, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -1762,10 +1860,14 @@ function openSponsorSignupModal(pkg) {
       payContinue.disabled = true;
       payContinue.textContent = `Pay ${pkg.amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#sponsor-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#sponsor-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -1961,21 +2063,25 @@ function openSponsorSignupModal(pkg) {
     try {
       const [result, config] = await Promise.all([
         ensureApplication(),
-        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
-          .then((response) => (response.ok ? response.json() : null))
-          .catch(() => null),
+        fetchSquarePublishableConfig(),
       ]);
       if (config?.web_payments) {
         await embedCardCheckout(result, config);
         return;
       }
-      if (statusEl) {
+      const live = modal.querySelector('[data-pay-status]');
+      if (live) {
+        live.textContent = result.detail
+          || 'Application saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      } else if (statusEl) {
         statusEl.textContent = result.detail
           || 'Application saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
       }
       if (payButton) payButton.disabled = false;
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
+      const live = modal.querySelector('[data-pay-status]');
+      if (live) live.textContent = error.message || 'Could not continue to payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
       if (payButton) payButton.disabled = false;
     }
   }
@@ -1988,25 +2094,39 @@ function openSponsorSignupModal(pkg) {
   form?.querySelector('input[name="business_name"]')?.focus();
 }
 
+let sponsorTierSignupDelegated = false;
+
+function sponsorTierCardFromEvent(event) {
+  const target = event?.target;
+  if (!target?.closest) return null;
+  const card = target.closest('.sponsor-tier[data-tier], .sponsor-tiers [data-tier].sponsor-tier');
+  if (!card) return null;
+  if (card.closest('#page-preview, .cms-shell, .admin-body')) return null;
+  return card;
+}
+
 function bindSponsorTierSignup(root = document) {
   if (isCmsAdminPreviewContext(root)) return;
   root.querySelectorAll('.sponsor-tiers [data-tier].sponsor-tier, .sponsor-tier[data-tier]').forEach((card) => {
-    if (card.dataset.signupBound === '1') return;
     if (card.closest('#page-preview, .cms-shell, .admin-body')) return;
-    card.dataset.signupBound = '1';
     card.classList.add('sponsor-tier-clickable');
     if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '0');
     if (!card.getAttribute('role')) card.setAttribute('role', 'button');
-    const open = (event) => {
-      event.preventDefault();
-      const pkg = readTierPackageFromCard(card);
-      if (!pkg) return;
-      openSponsorSignupModal(pkg);
-    };
-    card.addEventListener('click', open);
-    card.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') open(event);
-    });
+  });
+  if (sponsorTierSignupDelegated) return;
+  sponsorTierSignupDelegated = true;
+  const openFromEvent = (event) => {
+    const card = sponsorTierCardFromEvent(event);
+    if (!card) return;
+    const pkg = readTierPackageFromCard(card);
+    if (!pkg) return;
+    event.preventDefault();
+    openSponsorSignupModal(pkg);
+  };
+  document.addEventListener('click', openFromEvent);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    openFromEvent(event);
   });
 }
 
@@ -2074,6 +2194,7 @@ function openDonateModal() {
   closeDonateModal({ immediate: true });
   closeDuesModal({ immediate: true });
   donateModalState = { draft: null, donation: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal donate-modal';
@@ -2157,21 +2278,6 @@ function openDonateModal() {
     }, 4200);
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(donation, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -2197,10 +2303,14 @@ function openDonateModal() {
       payContinue.disabled = true;
       payContinue.textContent = `Donate ${amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#donate-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#donate-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -2353,9 +2463,7 @@ function openDonateModal() {
     try {
       const [result, config] = await Promise.all([
         ensureDonation(),
-        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
-          .then((response) => (response.ok ? response.json() : null))
-          .catch(() => null),
+        fetchSquarePublishableConfig(),
       ]);
       if (config?.web_payments) {
         await embedCardCheckout(result, config);
@@ -2371,13 +2479,19 @@ function openDonateModal() {
         finishDonateSuccess(paid.detail);
         return;
       }
-      if (statusEl) {
+      const live = modal.querySelector('[data-donate-pay-status]');
+      if (live) {
+        live.textContent = result.detail
+          || 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      } else if (statusEl) {
         statusEl.textContent = result.detail
           || 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
       }
       if (payButton) payButton.disabled = false;
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
+      const live = modal.querySelector('[data-donate-pay-status]');
+      if (live) live.textContent = error.message || 'Could not continue to payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
       if (payButton) payButton.disabled = false;
     }
   }
@@ -2646,6 +2760,7 @@ function openDuesModal() {
   closeDonateModal({ immediate: true });
   closeDuesModal({ immediate: true });
   duesModalState = { draft: null, dues: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal dues-modal';
@@ -2730,21 +2845,6 @@ function openDuesModal() {
     }, failed ? 5600 : 4200);
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(dues, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -2771,10 +2871,14 @@ function openDuesModal() {
       payContinue.disabled = true;
       payContinue.textContent = `Pay ${amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#dues-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#dues-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -2949,14 +3053,15 @@ function openDuesModal() {
     if (payButton) payButton.disabled = true;
     try {
       const dues = await ensureDuesPayment();
-      const configResponse = await fetch('/api/sponsor-checkout/config', { cache: 'no-store' });
-      const config = await configResponse.json().catch(() => ({}));
-      if (!configResponse.ok || !config.web_payments) {
-        throw new Error(config.detail || 'Square card payments are not ready yet.');
+      const config = await fetchSquarePublishableConfig();
+      if (!config?.web_payments) {
+        throw new Error(config?.detail || 'Square card payments are not ready yet.');
       }
       await embedCardCheckout(dues, config);
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not start payment.';
+      const live = modal.querySelector('[data-dues-pay-status]');
+      if (live) live.textContent = error.message || 'Could not start payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not start payment.';
       if (payButton) {
         payButton.disabled = false;
         payButton.textContent = 'Pay with Square';
@@ -2996,6 +3101,9 @@ function bootPublicSiteContent() {
     try { removeSponsorMarquee(); } catch { /* keep going */ }
   }
   bindSponsorChoiceButtons();
+  bindSponsorTierSignup();
+  bindDonateButtons();
+  bindDuesButtons();
   bindInKindForm();
   bindLettermanForm();
   bindCmsForms();
@@ -3013,6 +3121,12 @@ if (!globalThis.__EFHS_SKIP_SITE_CONTENT_BOOT) {
     ensureSiteChrome,
     ensureSponsorMarqueeMount,
     hydrateMarqueeFromCache,
+    readTierPackageFromCard,
+    bindSponsorTierSignup,
+    readSquarePublishableConfig,
+    fetchSquarePublishableConfig,
+    loadSquareWebSdk,
+    attachSquareCard,
   };
 }
 document.addEventListener('keydown', (event) => {

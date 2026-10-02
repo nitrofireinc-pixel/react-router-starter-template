@@ -246,12 +246,26 @@ export async function readCachedQueryBatch(env, jobs = []) {
   return values;
 }
 
+function publicSquareFromPayload(square) {
+  if (!square || typeof square !== 'object') return null;
+  const application_id = String(square.application_id || '').trim();
+  const location_id = String(square.location_id || '').trim();
+  const environment = String(square.environment || 'production').trim() || 'production';
+  return {
+    application_id,
+    location_id,
+    environment,
+    web_payments: Boolean(square.web_payments || (application_id && location_id)),
+  };
+}
+
 export function renderPublicReadBootstrap(payload = {}) {
   const body = JSON.stringify({
     site: payload.site || null,
     sponsors: Array.isArray(payload.sponsors) ? payload.sponsors : [],
     photos: Array.isArray(payload.photos) ? payload.photos : [],
     deadlineBanners: Array.isArray(payload.deadlineBanners) ? payload.deadlineBanners : [],
+    square: publicSquareFromPayload(payload.square),
   }).replace(/</g, '\\u003c');
   return `<script type="application/json" id="efhs-public-read">${body}</script>`;
 }
