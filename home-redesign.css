@@ -793,6 +793,14 @@ body.efhs-theme .home-redesign,
 #page-preview .home-redesign{font-family:var(--body,"Work Sans",system-ui,sans-serif)}
 body.efhs-theme main.home-redesign > section,
 #page-preview .home-redesign > section{padding:0}
+body.efhs-theme .home-redesign .sec,
+#page-preview .home-redesign .sec{padding:84px 0}
+body.efhs-theme .home-redesign .soft,
+#page-preview .home-redesign .soft{background:linear-gradient(180deg,#F3F6FB 0%,#fff 100%)}
+body.efhs-theme .home-redesign .kicker,
+#page-preview .home-redesign .kicker{color:#0B63D6;font-weight:900;font-size:.76rem;letter-spacing:.18em}
+body.efhs-theme .home-redesign .eyebrow,
+#page-preview .home-redesign .eyebrow{color:#cfe3ff;font-size:.74rem;font-weight:800;letter-spacing:.22em}
 body.efhs-theme .home-redesign .hero,
 #page-preview .home-redesign .hero{min-height:600px;background:#001326;padding:0}
 body.efhs-theme .home-redesign .hero:before,
@@ -800,11 +808,26 @@ body.efhs-theme .home-redesign .hero:before,
 body.efhs-theme .home-redesign .hero .wrap,
 #page-preview .home-redesign .hero .wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;max-width:1240px;padding:40px 28px 124px;text-align:left;align-items:center}
 body.efhs-theme .home-redesign .hero h1,
-#page-preview .home-redesign .hero h1{max-width:none;color:var(--blue-hero,#4da3ff);font-family:var(--display,"Oswald",sans-serif)}
+#page-preview .home-redesign .hero h1{max-width:none;margin:14px 0 20px;color:var(--blue-hero,#4da3ff);font-family:var(--display,"Oswald",sans-serif);font-size:clamp(3rem,6.4vw,5.7rem);font-weight:700;font-style:italic;line-height:.86;letter-spacing:-.01em;text-shadow:0 10px 28px rgba(0,8,24,.5)}
 body.efhs-theme .home-redesign .hero h1 span,
 #page-preview .home-redesign .hero h1 span{display:block;color:#fff}
 body.efhs-theme .home-redesign .hero h1::first-line,
 #page-preview .home-redesign .hero h1::first-line{color:#fff}
+body.efhs-theme .home-redesign .lead,
+body.efhs-theme .home-redesign .hero p.lead,
+#page-preview .home-redesign .lead{max-width:34rem;margin:0 0 26px;color:#e2ecf8;font-size:1.12rem;line-height:1.5}
+body.efhs-theme .home-redesign .btn,
+#page-preview .home-redesign .btn{border-radius:6px;letter-spacing:.09em;text-transform:uppercase;font-size:.8rem;font-weight:800;min-height:46px;padding:12px 22px;gap:9px}
+body.efhs-theme .home-redesign .btn-lg,
+#page-preview .home-redesign .btn-lg{min-height:56px;padding:16px 28px;font-size:.88rem}
+body.efhs-theme .home-redesign .btn-sm,
+#page-preview .home-redesign .btn-sm{min-height:40px;padding:9px 16px;font-size:.74rem}
+body.efhs-theme .home-redesign .btn-ghost-light,
+#page-preview .home-redesign .btn-ghost-light{background:rgba(255,255,255,.06);color:#fff;border-color:rgba(255,255,255,.6);box-shadow:none}
+body.efhs-theme .home-redesign .btn-outline,
+#page-preview .home-redesign .btn-outline{background:#fff;color:#002142;border-color:#002142}
+body.efhs-theme .home-redesign .btn-outline-light,
+#page-preview .home-redesign .btn-outline-light{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
 body.efhs-theme .home-redesign .btn::after,
 #page-preview .home-redesign .btn::after{content:none}
 body.efhs-theme .home-redesign .btn-gold,
@@ -827,9 +850,18 @@ body.home-page .header-donate{display:inline-flex}
 body.efhs-theme.coming-soon-page .page-hero{text-align:left}
 @media (max-width:760px){
   body.efhs-theme .home-redesign .hero,
-  #page-preview .home-redesign .hero{min-height:0}
+  #page-preview .home-redesign .hero{min-height:0;background:#001326}
   body.efhs-theme .home-redesign .hero .wrap,
   #page-preview .home-redesign .hero .wrap{grid-template-columns:1fr;padding:34px 18px 120px}
+  body.efhs-theme .home-redesign .eyebrow,
+  #page-preview .home-redesign .eyebrow{font-size:.6rem;letter-spacing:.12em}
+  body.efhs-theme .home-redesign .hero h1,
+  #page-preview .home-redesign .hero h1{font-size:3.3rem;max-width:none}
+  body.efhs-theme .home-redesign .lead,
+  body.efhs-theme .home-redesign .hero p.lead,
+  #page-preview .home-redesign .lead{font-size:1rem}
+  body.efhs-theme .home-redesign .sec,
+  #page-preview .home-redesign .sec{padding:60px 0}
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(6),
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(7){grid-column:span 2}
   body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(8){display:none}
