@@ -980,7 +980,10 @@ function syncAddToHomeButtonState(button) {
   document.querySelectorAll('[data-email-list-open]').forEach((button) => {
     if (button.dataset.boundEmailListOpen === '1') return;
     button.dataset.boundEmailListOpen = '1';
-    button.addEventListener('click', () => openEmailListModal(button));
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      openEmailListModal(button);
+    });
   });
 
   function shouldAutoOpenSubscribe() {

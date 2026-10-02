@@ -160,6 +160,7 @@ body.efhs-theme header.site-header nav{
   gap:2px;
   overflow:visible;
   background:transparent;
+  flex-wrap:nowrap;
 }
 body.efhs-theme .header-donate{
   display:inline-flex;
@@ -183,12 +184,13 @@ body.efhs-theme header.site-header nav a,
 body.efhs-theme header.site-header nav .nav-notify-me,
 body.efhs-theme header.site-header nav .nav-support-toggle{
   color:#eaf2ff;
-  font-size:.78rem;
+  font-size:.68rem;
   font-weight:800;
-  letter-spacing:.08em;
+  letter-spacing:.06em;
   text-transform:uppercase;
-  padding:8px 10px;
+  padding:8px 6px;
   border-radius:0;
+  white-space:nowrap;
 }
 body.efhs-theme header.site-header nav a:hover,
 body.efhs-theme header.site-header nav a:focus-visible,
@@ -865,7 +867,7 @@ body.efhs-theme .footer h3{
   body.efhs-theme header.site-header{
     display:flex;
     flex-direction:row;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
     align-items:center;
     column-gap:8px;
     min-height:66px;
@@ -882,6 +884,7 @@ body.efhs-theme .footer h3{
     padding:8px 0;
     min-height:66px;
     width:auto;
+    min-width:0;
     flex:1 1 auto;
     background:none;
   }

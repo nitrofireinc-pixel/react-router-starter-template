@@ -460,7 +460,7 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
         <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l-4 2-4-2-5 3 2 5 2-1v11h10V10l2 1 2-5-5-3z"/></svg>Uniforms</li>
         <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>Student opportunities</li>
       </ul>
-      <button type="button" class="btn btn-outline-light btn-sm" data-email-list-open>Get fundraising updates by email</button>
+      <a class="btn btn-outline-light btn-sm" href="#support" data-email-list-open>Get fundraising updates by email</a>
     </div>
   </div>
 </section>
