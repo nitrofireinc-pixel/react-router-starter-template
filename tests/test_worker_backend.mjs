@@ -1512,6 +1512,10 @@ test('sponsor marquee stays on named public pages and off generic CMS pages', ()
   assert.match(workerSrc, /data-sponsor-marquee="\$\{marqueeFlag\}"/);
   assert.match(siteContent, /function sponsorMarqueeEnabled\(/);
   assert.match(siteContent, /dataset\?\.sponsorMarquee/);
+  assert.match(siteContent, /function querySponsorMarqueeSlots\(/);
+  assert.match(siteContent, /\[data-sponsor-marquee\]:not\(html\):not\(body\)/);
+  assert.match(siteContent, /function canPlaceInSiteChrome\(/);
+  assert.doesNotMatch(siteContent, /querySelector(?:All)?\('\[data-sponsor-marquee\]'\)/);
   const maintenanceStart = workerSrc.indexOf('function renderMaintenancePage');
   const maintenanceEnd = workerSrc.indexOf('function isPublicDocumentRequest');
   assert.ok(maintenanceStart > 0 && maintenanceEnd > maintenanceStart);
@@ -2204,7 +2208,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'home-redesign-20261002'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-white-fix-20261002'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
