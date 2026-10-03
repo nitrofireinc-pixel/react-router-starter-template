@@ -17,10 +17,10 @@ body.visual-editor-body{
 .visual-edit-banner{
   flex:0 0 auto;
   display:flex;
-  flex-wrap:wrap;
-  gap:8px 12px;
+  flex-wrap:nowrap;
+  gap:8px 10px;
   align-items:center;
-  padding:8px 12px;
+  padding:6px 10px;
   background:#002142;
   color:#F3F6FB;
   border-bottom:3px solid #FDD703;
@@ -40,8 +40,9 @@ body.visual-editor-body{
   white-space:nowrap;
 }
 .visual-edit-banner-title{
-  flex:1 1 160px;
+  flex:0 1 auto;
   min-width:0;
+  max-width:18ch;
 }
 .visual-edit-banner-title strong{
   display:block;
@@ -50,19 +51,37 @@ body.visual-editor-body{
   text-transform:uppercase;
 }
 .visual-edit-banner-title small{
-  display:block;
+  display:none;
   color:#C9D4E4;
   font-size:.75rem;
 }
-.visual-edit-banner-tools,
-.visual-edit-devices{
+.visual-edit-banner-tools{
   display:flex;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
   gap:6px;
   min-width:0;
+  margin-left:auto;
+  align-items:center;
+}
+.visual-device-select{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:#F3F6FB;
+  font-size:.78rem;
+  font-weight:800;
+  white-space:nowrap;
+}
+.visual-device-select select{
+  min-height:32px;
+  border:0;
+  border-radius:6px;
+  padding:4px 8px;
+  background:#014990;
+  color:#fff;
+  font-weight:800;
 }
 .visual-banner-btn,
-.visual-edit-devices button,
 .visual-add-drawer-head button,
 .visual-modal-card button,
 .visual-history-drawer button[data-restore],
@@ -79,9 +98,10 @@ body.visual-editor-body{
   display:inline-flex;
   align-items:center;
   justify-content:center;
+  flex:0 0 auto;
+  white-space:nowrap;
 }
 .visual-banner-btn-primary{background:#FDD703;color:#111}
-.visual-edit-devices button.is-active{background:#FDD703;color:#111}
 .visual-editor-status{
   flex:0 0 auto;
   margin:0;
@@ -89,6 +109,8 @@ body.visual-editor-body{
   background:#0B63D6;
   color:#fff;
   min-width:0;
+  position:relative;
+  z-index:36;
 }
 .visual-editor-status.is-error{background:#E71321}
 .visual-editor-stage{
@@ -131,18 +153,29 @@ body.visual-editor-body{
   box-shadow:0 8px 24px rgba(0,33,66,.18);
 }
 .gjs-toolbar{
+  display:flex !important;
+  flex-wrap:nowrap;
+  align-items:stretch;
+  width:auto !important;
+  max-width:none !important;
+  height:auto !important;
   background:#fff;
   color:#10233C;
   border:1px solid #dbe4f0;
   border-radius:8px;
   box-shadow:0 6px 20px rgba(0,0,0,.18);
-  overflow:hidden;
+  overflow:visible;
 }
 .gjs-toolbar-item{
-  padding:8px 10px;
-  font-size:12px;
+  width:auto !important;
+  min-width:max-content !important;
+  height:auto !important;
+  padding:8px 12px !important;
+  font-size:12px !important;
+  line-height:1.2 !important;
   font-weight:800;
   color:#10233C;
+  white-space:nowrap !important;
   border-right:1px solid #dbe4f0;
 }
 .gjs-resizer-h{
@@ -151,17 +184,17 @@ body.visual-editor-body{
 }
 .visual-add-drawer,
 .visual-history-drawer{
-  position:fixed;
-  top:72px;
+  position:absolute;
+  top:12px;
   left:12px;
-  width:min(420px,calc(100vw - 24px));
-  max-height:calc(100dvh - 96px);
+  width:min(420px,calc(100% - 24px));
+  max-height:calc(100% - 24px);
   background:#fff;
   color:#10233C;
   border-radius:12px;
   box-shadow:0 12px 40px rgba(0,0,0,.28);
   overflow:auto;
-  z-index:25;
+  z-index:20;
 }
 .visual-add-drawer-head{
   display:flex;
@@ -295,11 +328,26 @@ body.visual-page-join main{
   max-width:100%;
   overflow-x:clip;
 }
-@media (max-width:760px){
-  .visual-edit-banner-tools{width:100%}
-  .visual-edit-banner{
-    max-height:none;
+body.coming-soon-page main *,
+body.visual-page-join main *{
+  max-width:100%;
+  box-sizing:border-box;
+}
+@media (min-width:1280px){
+  .visual-edit-banner-title{
+    max-width:28ch;
   }
+  .visual-edit-banner-title small{display:block}
+}
+@media (max-width:767px){
+  .visual-edit-banner,
+  .visual-edit-banner-tools{
+    flex-wrap:wrap;
+  }
+  .visual-edit-banner-tools{width:100%;margin-left:0}
+  .visual-edit-banner-title{max-width:none}
+  .visual-edit-banner-label{font-size:.65rem;padding:3px 6px}
+  .visual-banner-btn{padding:6px 8px;min-height:32px;font-size:.8rem}
   .visual-add-drawer,
   .visual-history-drawer{
     left:8px;
@@ -307,7 +355,7 @@ body.visual-page-join main{
     width:auto;
     top:auto;
     bottom:8px;
-    max-height:min(70dvh,560px);
+    max-height:min(70%,560px);
   }
 }
 @media (min-width:1920px){

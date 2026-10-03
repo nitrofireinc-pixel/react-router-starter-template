@@ -74,8 +74,9 @@ const STYLEABLE_TAGS = new Set([
   'img', 'a', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'details',
 ]);
 
-function sanitizeStyle(value = '') {
+function sanitizeStyle(value = '', tag = '') {
   const parts = [];
+  let sawMaxWidth = false;
   for (const declaration of String(value || '').split(';')) {
     const [rawProp, ...rest] = declaration.split(':');
     if (!rawProp || !rest.length) continue;
@@ -87,8 +88,19 @@ function sanitizeStyle(value = '') {
     if (prop === 'font-size' && SAFE_LENGTH.test(next)) parts.push(`font-size: ${next}`);
     if (prop === 'font-weight' && /^(normal|bold|[1-9]00)$/i.test(next)) parts.push(`font-weight: ${next}`);
     if (prop === 'text-align' && /^(left|right|center|justify)$/i.test(next)) parts.push(`text-align: ${next}`);
-    if (['width', 'height', 'min-width', 'min-height', 'max-width', 'max-height'].includes(prop)
+    if (prop === 'width' && (SAFE_LENGTH.test(next) || next === 'auto')) {
+      if (/px$/i.test(next) && next !== 'auto') {
+        if (!sawMaxWidth) {
+          parts.push(`max-width: ${next}`);
+          sawMaxWidth = true;
+        }
+        parts.push(tag === 'img' ? 'width: auto' : 'width: 100%');
+      } else {
+        parts.push(`width: ${next}`);
+      }
+    } else if (['height', 'min-width', 'min-height', 'max-width', 'max-height'].includes(prop)
       && (SAFE_LENGTH.test(next) || next === 'auto')) {
+      if (prop === 'max-width') sawMaxWidth = true;
       parts.push(`${prop}: ${next}`);
     }
     if (['margin', 'padding'].includes(prop) && SAFE_BOX.test(next)) parts.push(`${prop}: ${next}`);
@@ -131,7 +143,7 @@ function rewriteOpenTag(tag, rawAttrs) {
     const altMatch = attrs.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
     const alt = altMatch?.[1] || altMatch?.[2] || 'Photo';
     const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-    const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
+    const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '', 'img');
     return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${className ? attr('class', className) : ''}${style ? attr('style', style) : ''}>`;
   }
   let open = `<${tag}`;
@@ -148,7 +160,7 @@ function rewriteOpenTag(tag, rawAttrs) {
     const target = targetMatch?.[1] || targetMatch?.[2] || '';
     if (target === '_blank') open += ' target="_blank" rel="noopener noreferrer"';
   }
-  const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
+  const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '', tag);
   if (style && STYLEABLE_TAGS.has(tag)) {
     open += attr('style', style);
   }
@@ -177,6 +189,23 @@ export function sanitizeVisualPageHtml(dirty = '') {
 
 export function defaultJoinVisualHtml() {
   return `<section class="page-hero" data-visual-block="hero"><div class="page-title"><div class="coming-soon-logos"><img src="/assets/efhs-logo.png" alt="East Forsyth High School Eagles logo"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment logo"></div><div class="kicker">Join</div><h1>Join the Band</h1><p>New students and families start here. Interest forms, handbook, and fee details will live on this page.</p></div></section><section class="content"><div class="wrap visual-join-wrap"><aside class="hero-card" data-visual-block="hero-card"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"><h2>What to bring</h2><ul><li>Student name and grade</li><li>Instrument experience, if any</li><li>A parent or guardian contact</li></ul></aside><div class="card" data-visual-block="text"><h2>How to get started</h2><p>Call the band office at <a href="tel:3367036735">(336) 703-6735</a> or send a message through the contact form. We will help you find the right ensemble.</p><p><a class="btn gold" href="/contact.html">Contact the band</a></p></div><details class="visual-accordion" data-visual-block="accordion"><summary>Do I need my own instrument?</summary><div class="visual-accordion-body"><p>Ask the directors. The program can often help with school-owned instruments.</p></div></details></div></section>`;
+}
+
+export function formatVisualHistoryTime(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const iso = /Z|[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(date);
 }
 
 export function extractEditableJoinHtml(html = '') {
@@ -384,25 +413,25 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
       <button type="button" class="visual-banner-btn" data-visual-add>Add section</button>
       <button type="button" class="visual-banner-btn" data-visual-undo>Undo</button>
       <button type="button" class="visual-banner-btn" data-visual-redo>Redo</button>
-      <div class="visual-edit-devices" data-visual-devices>
-        <button type="button" data-device="Desktop">1920</button>
-        <button type="button" data-device="Laptop">1280</button>
-        <button type="button" data-device="Tablet">768</button>
-        <button type="button" data-device="Phone">390</button>
-        <button type="button" data-device="Small">320</button>
-      </div>
+      <label class="visual-device-select">Width
+        <select data-visual-device-select>
+          <option value="Desktop">1920</option>
+          <option value="Laptop">1280</option>
+          <option value="Tablet">768</option>
+          <option value="Phone">390</option>
+          <option value="Small">320</option>
+        </select>
+      </label>
       <button type="button" class="visual-banner-btn" data-visual-history>History</button>
       <button type="button" class="visual-banner-btn" data-visual-draft>Save draft</button>
       <button type="button" class="visual-banner-btn visual-banner-btn-primary" data-visual-publish>Publish</button>
-      <a class="visual-banner-btn" href="/admin">Exit</a>
+      <a class="visual-banner-btn" href="/admin" data-visual-exit>Exit</a>
     </div>
   </header>
   <p class="visual-editor-status" data-visual-status hidden></p>
   <div class="visual-editor-stage">
     <div id="gjs"></div>
-  </div>
-  <div id="visual-gjs-sink" hidden></div>
-  <aside class="visual-add-drawer" data-visual-add-drawer hidden>
+    <aside class="visual-add-drawer" data-visual-add-drawer hidden>
     <div class="visual-add-drawer-head">
       <h2>Add a section</h2>
       <button type="button" data-visual-add-close>Close</button>
@@ -410,6 +439,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
     <div class="visual-add-grid" data-visual-add-grid></div>
   </aside>
   <aside class="visual-history-drawer" data-visual-versions hidden></aside>
+  </div>
   <div class="visual-modal" data-visual-image-modal hidden>
     <div class="visual-modal-card">
       <h2>Change image</h2>

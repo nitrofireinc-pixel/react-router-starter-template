@@ -2494,7 +2494,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
   assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:inline-flex/);
   assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
-  assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
+  assert.match(themeCss, /body\.efhs-theme\.home-page \.hero-card,[\s\S]*?display:none!important/);
+  assert.match(themeCss, /body\.efhs-theme\.coming-soon-page \.hero-card,[\s\S]*?display:block!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);

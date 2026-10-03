@@ -371,9 +371,15 @@ body.efhs-theme .hero .button-row,
 #page-preview .hero .button-row{
   justify-content:flex-start;
 }
-/* Public homepage only: keep the CMS card in admin preview, hide it from visitors. */
-body.efhs-theme .hero-card{
+/* Public homepage only: keep the CMS card in admin preview, hide it from visitors.
+   Join / coming-soon pages reuse .hero-card as a visible content card. */
+body.efhs-theme.home-page .hero-card,
+body.efhs-theme .home-redesign .hero-card{
   display:none!important;
+}
+body.efhs-theme.coming-soon-page .hero-card,
+body.visual-page-join .hero-card{
+  display:block!important;
 }
 body.efhs-theme .eyebrow,
 #page-preview .eyebrow{

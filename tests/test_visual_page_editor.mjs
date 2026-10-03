@@ -11,6 +11,7 @@ import {
   canEditVisualPilot,
   defaultJoinVisualHtml,
   extractEditableJoinHtml,
+  formatVisualHistoryTime,
   isSafeVisualHref,
   isSafeVisualImageSrc,
   isVisualPilotSlug,
@@ -60,11 +61,13 @@ test('visual page HTML sanitizer strips scripts and unsafe sources', () => {
 test('visual sanitizer keeps on-page resize and move styles', () => {
   const dirty = `<section class="page-hero" style="width: 420px; height: 180px; margin-top: 12px; position: relative; top: 8px; transform: translate(10px, 4px); background: url(javascript:alert(1))"><h1 style="max-width: 80%">Join</h1><img src="/assets/efhs-logo.png" alt="Logo" class="gjs-selected" style="width: 160px; object-fit: contain"></section>`;
   const clean = sanitizeVisualPageHtml(dirty);
-  assert.match(clean, /width: 420px/);
+  assert.match(clean, /max-width: 420px/);
+  assert.match(clean, /width: 100%/);
+  assert.doesNotMatch(clean, /(?:^|[^-])width: 420px/);
   assert.match(clean, /height: 180px/);
   assert.match(clean, /margin-top: 12px/);
   assert.match(clean, /transform: translate\(10px, 4px\)/);
-  assert.match(clean, /width: 160px/);
+  assert.match(clean, /max-width: 160px/);
   assert.doesNotMatch(clean, /javascript/i);
   assert.doesNotMatch(clean, /gjs-selected/);
 });
@@ -83,6 +86,14 @@ test('visual save payload requires sanitized HTML and drops page chrome', () => 
   assert.match(wrapped.html, /<h2>Only this<\/h2>/);
   assert.doesNotMatch(wrapped.html, /site-header/);
   assert.doesNotMatch(wrapped.html, /<footer/);
+});
+
+test('history times render Eastern with a space after Draft', () => {
+  const stamp = formatVisualHistoryTime('2026-10-03 13:02:18');
+  assert.match(stamp, /Oct 3, 2026/);
+  assert.match(stamp, /9:02\sAM/);
+  assert.match(stamp, /EDT|EST/);
+  assert.doesNotMatch(stamp, /13:02/);
 });
 
 test('extractEditableJoinHtml reads only main', () => {
@@ -114,6 +125,7 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   const editorJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
   const editorCss = readFileSync(join(root, 'admin-visual.css'), 'utf8');
+  const themeSrc = readFileSync(join(root, 'public-theme.css'), 'utf8');
   const visualSrc = readFileSync(join(root, 'worker/src/visual-page-editor.mjs'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   const toml = readFileSync(join(root, 'wrangler.toml'), 'utf8');
@@ -134,10 +146,22 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /\/join\.html/);
   assert.match(editorJs, /exportEditableHtml/);
   assert.match(editorJs, /data-add-block/);
+  assert.match(editorJs, /visual-parent/);
+  assert.match(editorJs, /Select parent/);
+  assert.match(editorJs, /SITE_PHOTOS/);
+  assert.match(editorJs, /\/assets\/home\/mattress-flyer\.jpg/);
+  assert.match(editorJs, /unsaved changes/);
+  assert.match(editorJs, /visual-join-wrap/);
+  assert.match(editorJs, /America\/New_York/);
+  assert.match(editorJs, /makeWidthResponsive/);
   assert.match(editorCss, /visual-edit-banner/);
   assert.match(editorCss, /\.gjs-pn-panel/);
+  assert.match(editorCss, /min-width:max-content/);
   assert.match(page, /This page is being edited/);
   assert.match(page, /Add a section/);
+  assert.match(page, /data-visual-device-select/);
+  assert.match(page, /data-visual-exit/);
+  assert.match(themeSrc, /coming-soon-page \.hero-card/);
   assert.match(page, /type="text" name="href"/);
   assert.doesNotMatch(page, /type="url" name="href"/);
   assert.match(page, /\/vendor\/grapesjs\/grapes\.min\.js/);

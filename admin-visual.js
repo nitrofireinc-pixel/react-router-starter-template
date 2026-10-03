@@ -9,6 +9,37 @@
   const uploadInput = document.querySelector('[data-visual-upload]');
   const linkModal = document.querySelector('[data-visual-link-modal]');
   const linkForm = document.querySelector('[data-visual-link-form]');
+  const deviceSelect = document.querySelector('[data-visual-device-select]');
+
+  const SITE_PHOTOS = [
+    { url: '/assets/efhs-logo.png', alt_text: 'EFHS logo' },
+    { url: '/assets/efhs-blue-regiment-mark.png', alt_text: 'Blue Regiment mark' },
+    { url: '/assets/efhs-icon.png', alt_text: 'EFHS icon' },
+    { url: '/assets/efhs-header-banner.jpg', alt_text: 'Header banner' },
+    { url: '/assets/efhs-home-hero.jpg', alt_text: 'Home hero' },
+    { url: '/assets/efhs-hero.png', alt_text: 'Hero photo' },
+    { url: '/assets/efhs-photo-1.png', alt_text: 'Band photo 1' },
+    { url: '/assets/efhs-photo-2.png', alt_text: 'Band photo 2' },
+    { url: '/assets/home/band-2024-25.jpg', alt_text: 'Band 2024-25' },
+    { url: '/assets/home/mattress-flyer.jpg', alt_text: 'Mattress fundraiser flyer' },
+    { url: '/assets/home/aireserv.jpg', alt_text: 'Aire Serv' },
+    { url: '/assets/home/home2-13.jpg', alt_text: 'Band performance' },
+    { url: '/assets/home/home2-17.jpg', alt_text: 'Color guard' },
+    { url: '/assets/home/perf-5.jpg', alt_text: 'Marching band' },
+    { url: '/assets/home/perf-6.jpg', alt_text: 'Home game performance' },
+    { url: '/assets/home/woodwind-practice.jpg', alt_text: 'Woodwind practice' },
+    { url: '/assets/home/percussion-practice.png', alt_text: 'Percussion practice' },
+    { url: '/assets/home/brass-practice.jpg', alt_text: 'Brass practice' },
+    { url: '/assets/home/march-on.jpg', alt_text: 'March on' },
+    { url: '/assets/home/glenn-1.jpg', alt_text: 'Away game at Glenn' },
+    { url: '/assets/home/glenn-8.jpg', alt_text: 'Away game at Glenn' },
+    { url: '/assets/home/home1-1.jpg', alt_text: 'First home game' },
+    { url: '/assets/home/home1-4.jpg', alt_text: 'First home game' },
+    { url: '/assets/home/home1-5.jpg', alt_text: 'First home game' },
+    { url: '/assets/home/home1-6.jpg', alt_text: 'Home game' },
+    { url: '/assets/home/booster-president.jpg', alt_text: 'Booster president' },
+    { url: '/assets/home/booster-vp.jpg', alt_text: 'Booster vice president' },
+  ];
 
   const BLOCKS = [
     {
@@ -49,6 +80,18 @@
     },
   ];
 
+  let dirty = false;
+  let applyingResponsive = false;
+  let bootstrapped = false;
+
+  function markDirty() {
+    if (bootstrapped) dirty = true;
+  }
+
+  function clearDirty() {
+    dirty = false;
+  }
+
   function setStatus(message, isError) {
     if (!statusEl) return;
     statusEl.hidden = !message;
@@ -73,6 +116,23 @@
       throw error;
     }
     return data;
+  }
+
+  function formatHistoryTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const iso = /Z|[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`;
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return raw;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(date);
   }
 
   function fallbackChrome(draftHtml) {
@@ -200,7 +260,22 @@
 
   function makeEditable(comp) {
     const tag = String(comp.get('tagName') || '').toLowerCase();
-    const textTags = ['p', 'h1', 'h2', 'h3', 'h4', 'li', 'span', 'summary', 'figcaption', 'a'];
+    if (tag === 'summary') {
+      comp.set({
+        selectable: false,
+        hoverable: false,
+        highlightable: false,
+        draggable: false,
+        copyable: false,
+        removable: false,
+        editable: true,
+        resizable: false,
+        droppable: false,
+      });
+      return;
+    }
+    const textTags = ['p', 'h1', 'h2', 'h3', 'h4', 'li', 'span', 'figcaption', 'a'];
+    const isDetails = tag === 'details';
     comp.set({
       selectable: true,
       hoverable: true,
@@ -215,6 +290,12 @@
         minDim: 24,
       },
     });
+    if (isDetails) {
+      comp.set({
+        droppable: false,
+        editable: false,
+      });
+    }
   }
 
   function applyComponentRules(comp) {
@@ -240,10 +321,59 @@
     return wrapper.find('#main')[0] || wrapper.find('main')[0] || null;
   }
 
+  function findContentWrap() {
+    const main = findMain();
+    if (!main) return null;
+    return main.find('.visual-join-wrap')[0]
+      || main.find('section.content .wrap')[0]
+      || main.find('.content .wrap')[0]
+      || main.find('.content')[0]
+      || null;
+  }
+
+  function makeWidthResponsive(comp) {
+    if (!comp || applyingResponsive) return;
+    const style = comp.getStyle() || {};
+    const width = String(style.width || '');
+    if (!/^\s*\d+(\.\d+)?px\s*$/i.test(width)) return;
+    const max = width.trim();
+    const tag = String(comp.get('tagName') || '').toLowerCase();
+    applyingResponsive = true;
+    comp.addStyle({
+      width: tag === 'img' ? 'auto' : '100%',
+      'max-width': max,
+    });
+    applyingResponsive = false;
+  }
+
+  function walkResponsive(comp) {
+    makeWidthResponsive(comp);
+    (comp.components?.() || []).forEach(walkResponsive);
+  }
+
   function exportEditableHtml() {
     const main = findMain();
     if (!main) return editor.getHtml();
+    walkResponsive(main);
     return main.components().map((comp) => comp.toHTML()).join('');
+  }
+
+  function selectableParent(comp) {
+    let current = comp?.parent?.();
+    while (current && !isWrapper(current) && !isMain(current)) {
+      if (isInsideMain(current)) return current;
+      current = current.parent();
+    }
+    return null;
+  }
+
+  function detailsOf(comp) {
+    let current = comp;
+    while (current) {
+      if (String(current.get('tagName') || '').toLowerCase() === 'details') return current;
+      current = current.parent();
+    }
+    return null;
   }
 
   function renderVersions(versions) {
@@ -252,7 +382,7 @@
     historyDrawer.innerHTML = `<div class="visual-add-drawer-head"><h2>History</h2><button type="button" data-visual-history-close>Close</button></div>${
       rows.length
         ? rows.map((row) => (
-          `<button type="button" data-restore="${row.id}"><b>${row.kind === 'publish' ? 'Published' : 'Draft'}</b><small>${row.created_at || ''}${row.created_by_name ? ` · ${row.created_by_name}` : ''}</small></button>`
+          `<button type="button" data-restore="${row.id}"><b>${row.kind === 'publish' ? 'Published' : 'Draft'}</b> <small>${formatHistoryTime(row.created_at)}${row.created_by_name ? ` · ${row.created_by_name}` : ''}</small></button>`
         )).join('')
         : '<p>No versions yet.</p>'
     }`;
@@ -268,12 +398,36 @@
           await loadCanvas(state.draft_html || '');
           renderVersions(state.versions);
           setDrawer(historyDrawer, false);
+          markDirty();
           setStatus('Draft restored. Publish when you want it on the public join page.');
         } catch (error) {
           setStatus(error.message, true);
         }
       });
     });
+  }
+
+  function insertBlock(block) {
+    const main = findMain();
+    if (!main) {
+      editor.addComponents(block.html);
+      return;
+    }
+    if (block.id === 'hero') {
+      const content = main.find('section.content')[0] || main.find('.content')[0];
+      if (content?.parent?.()) {
+        content.parent().components().add(block.html, { at: content.index() });
+      } else {
+        main.append(block.html);
+      }
+      return;
+    }
+    let wrap = findContentWrap();
+    if (!wrap) {
+      main.append('<section class="content"><div class="wrap visual-join-wrap"></div></section>');
+      wrap = findContentWrap();
+    }
+    (wrap || main).append(block.html);
   }
 
   function renderAddGallery() {
@@ -289,10 +443,9 @@
       button.addEventListener('click', () => {
         const block = BLOCKS.find((item) => item.id === button.dataset.addBlock);
         if (!block) return;
-        const main = findMain();
-        if (main) main.append(block.html);
-        else editor.addComponents(block.html);
+        insertBlock(block);
         setDrawer(addDrawer, false);
+        markDirty();
         setStatus(`Added ${block.label}. Click it on the page to move, resize, or delete.`);
       });
     });
@@ -304,6 +457,7 @@
     const doc = editor.Canvas.getDocument();
     if (doc?.body) doc.body.className = frame.bodyClass;
     applyRulesTree(editor.getWrapper());
+    walkResponsive(editor.getWrapper());
   }
 
   editor.on('load', () => {
@@ -315,6 +469,14 @@
   editor.on('component:add', (comp) => {
     applyComponentRules(comp);
     (comp.components?.() || []).forEach(applyRulesTree);
+    markDirty();
+  });
+
+  editor.on('component:remove', () => markDirty());
+  editor.on('component:update', () => markDirty());
+  editor.on('component:styleUpdate', (comp) => {
+    makeWidthResponsive(comp);
+    markDirty();
   });
 
   editor.Commands.add('visual-image', {
@@ -336,16 +498,33 @@
     },
   });
 
+  editor.Commands.add('visual-parent', {
+    run() {
+      const selected = editor.getSelected();
+      const parent = selectableParent(selected);
+      if (parent) editor.select(parent);
+    },
+  });
+
   editor.on('component:selected', (comp) => {
     if (!comp || isWrapper(comp) || isMain(comp) || !isInsideMain(comp)) {
       editor.select(null);
       return;
     }
     const tag = String(comp.get('tagName') || '').toLowerCase();
-    const toolbar = [
-      { command: 'tlb-move', label: 'Move' },
-      { command: 'tlb-clone', label: 'Copy' },
-    ];
+    if (tag === 'summary') {
+      const details = detailsOf(comp);
+      if (details && details !== comp) {
+        editor.select(details);
+        return;
+      }
+    }
+    const toolbar = [];
+    if (selectableParent(comp)) {
+      toolbar.push({ command: 'visual-parent', label: 'Select parent' });
+    }
+    toolbar.push({ command: 'tlb-move', label: 'Move' });
+    toolbar.push({ command: 'tlb-clone', label: 'Copy' });
     if (tag === 'img' || (comp.find && comp.find('img').length)) {
       toolbar.push({ command: 'visual-image', label: 'Image' });
     }
@@ -354,13 +533,12 @@
     comp.set('toolbar', toolbar);
   });
 
-  document.querySelectorAll('[data-device]').forEach((button) => {
-    button.addEventListener('click', () => {
-      editor.setDevice(button.dataset.device);
-      document.querySelectorAll('[data-device]').forEach((node) => node.classList.toggle('is-active', node === button));
-    });
-  });
-  document.querySelector('[data-device="Desktop"]')?.classList.add('is-active');
+  function setActiveDevice(id) {
+    editor.setDevice(id);
+    if (deviceSelect) deviceSelect.value = id;
+  }
+  deviceSelect?.addEventListener('change', () => setActiveDevice(deviceSelect.value));
+  setActiveDevice('Desktop');
 
   document.querySelector('[data-visual-undo]')?.addEventListener('click', () => editor.UndoManager.undo());
   document.querySelector('[data-visual-redo]')?.addEventListener('click', () => editor.UndoManager.redo());
@@ -375,6 +553,15 @@
   });
   document.querySelector('[data-visual-image-close]')?.addEventListener('click', () => setDrawer(imageModal, false));
   document.querySelector('[data-visual-link-close]')?.addEventListener('click', () => setDrawer(linkModal, false));
+  document.querySelector('[data-visual-exit]')?.addEventListener('click', (event) => {
+    if (!dirty) return;
+    if (!window.confirm('You have unsaved changes. Leave anyway?')) event.preventDefault();
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   renderAddGallery();
 
@@ -386,6 +573,7 @@
         body: JSON.stringify({ action, html: exportEditableHtml() }),
       });
       renderVersions(state.versions);
+      clearDirty();
       setStatus(action === 'publish' ? 'Published to the preview site.' : 'Draft saved.');
     } catch (error) {
       setStatus(error.message, true);
@@ -407,18 +595,20 @@
     image.addAttributes({ src: url });
     image.set('src', url);
     setDrawer(imageModal, false);
+    markDirty();
     setStatus('Image updated.');
   }
 
   async function renderPhotos() {
     if (!photoGrid) return;
     const photos = await jsonFetch('/api/photos').catch(() => []);
-    const extras = [
-      { url: '/assets/efhs-logo.png', alt_text: 'EFHS logo' },
-      { url: '/assets/efhs-blue-regiment-mark.png', alt_text: 'Blue Regiment mark' },
-      { url: '/assets/home/band-2024-25.jpg', alt_text: 'Band photo' },
-    ];
-    const list = [...(Array.isArray(photos) ? photos : []), ...extras];
+    const seen = new Set();
+    const list = [];
+    [...(Array.isArray(photos) ? photos : []), ...SITE_PHOTOS].forEach((photo) => {
+      if (!photo?.url || seen.has(photo.url)) return;
+      seen.add(photo.url);
+      list.push(photo);
+    });
     photoGrid.innerHTML = list.map((photo) => (
       `<button type="button" data-photo-src="${photo.url}"><img src="${photo.url}" alt="${photo.alt_text || photo.filename || 'Photo'}"></button>`
     )).join('');
@@ -462,6 +652,7 @@
       else selected.replaceWith(`<a href="${href}">${selected.toHTML()}</a>`);
     }
     setDrawer(linkModal, false);
+    markDirty();
     setStatus('Link updated.');
   });
 
@@ -471,6 +662,8 @@
       await loadCanvas(state.draft_html || '');
       renderVersions(state.versions);
       await renderPhotos().catch(() => {});
+      clearDirty();
+      bootstrapped = true;
       setStatus('Click any part of the page to select it, then move, resize, add, or delete.');
     } catch (error) {
       if (error.status === 401) {
