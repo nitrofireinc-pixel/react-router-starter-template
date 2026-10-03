@@ -18,6 +18,7 @@
     selectedId: null,
     loading: true,
     error: '',
+    didAutoOpen: false,
   };
 
   function startOfMonth(date) {
@@ -71,7 +72,14 @@
   }
 
   function todayIso() {
-    return isoDate(new Date());
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const read = (type) => parts.find((part) => part.type === type)?.value;
+    return `${read('year')}-${read('month')}-${read('day')}`;
   }
 
   function eventsOnDate(iso) {
@@ -107,6 +115,55 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
+  function nextIsoDay(iso) {
+    const [year, month, day] = String(iso).split('-').map(Number);
+    return isoDate(new Date(year, month - 1, day + 1));
+  }
+
+  function findNextDayIsoWithEvents(fromIso = todayIso()) {
+    const dates = new Set();
+    for (const event of state.events) {
+      const start = String(event.start_date || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) continue;
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end_date || '')) && event.end_date >= start
+        ? event.end_date
+        : start;
+      let iso = start < fromIso ? fromIso : start;
+      while (iso <= end) {
+        dates.add(iso);
+        iso = nextIsoDay(iso);
+      }
+    }
+    return [...dates].sort()[0] || null;
+  }
+
+  function landingEventCopy(event) {
+    const bits = [eventTimeLabel(event)];
+    if (event.who) bits.push(event.who);
+    if (event.location) bits.push(event.location);
+    const head = bits.filter(Boolean).join(' · ');
+    const body = String(event.description || '').trim();
+    return [head, body].filter(Boolean).join('\n\n');
+  }
+
+  function autoOpenLandingEvents() {
+    if (state.didAutoOpen) return;
+    if (typeof showCalendarDayToast !== 'function') {
+      state.didAutoOpen = true;
+      return;
+    }
+    const iso = findNextDayIsoWithEvents();
+    const dayEvents = iso ? eventsOnDate(iso) : [];
+    state.didAutoOpen = true;
+    if (!dayEvents.length) return;
+    window.setTimeout(() => {
+      showCalendarDayToast(formatLongDate(iso), dayEvents.map((event) => ({
+        title: event.title,
+        description: landingEventCopy(event),
+      })));
+    }, 80);
+  }
+
   async function loadEvents() {
     state.loading = true;
     state.error = '';
@@ -121,6 +178,7 @@
     } finally {
       state.loading = false;
       render();
+      autoOpenLandingEvents();
     }
   }
 
@@ -187,7 +245,7 @@
     const month = state.cursor.getMonth();
     const firstDow = new Date(year, month, 1).getDay();
     const dim = new Date(year, month + 1, 0).getDate();
-    const todayIso = isoDate(new Date());
+    const today = todayIso();
     const compact = isCompactLayout();
     const cells = [];
     for (let i = 0; i < firstDow; i += 1) cells.push('<div class="caldev-day is-spacer" aria-hidden="true"></div>');
@@ -198,7 +256,7 @@
       const dayEvents = all.slice(0, compact ? 8 : 4);
       const extra = Math.max(0, all.length - dayEvents.length);
       cells.push(`
-        <div class="caldev-day${iso === todayIso ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
+        <div class="caldev-day${iso === today ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
           <div class="caldev-day-head"><span>${compact ? `${WEEKDAYS[date.getDay()]} ${day}` : day}</span></div>
           <div class="caldev-day-events">
             ${dayEvents.map((event) => eventChip(event)).join('')}
