@@ -216,25 +216,37 @@ body.efhs-theme .mobile-nav-tray{
 /* ---------- Hero ---------- */
 body.efhs-theme .hero,
 #page-preview .hero{
-  min-height:min(78vh,760px);
+  min-height:min(82vh,820px);
   color:#fff;
-  background:var(--efhs-navy-deep);
   isolation:isolate;
+  /* Navy / royal panel behind the left slash; photo is clipped in on the right. */
+  background:
+    radial-gradient(ellipse 48% 62% at 14% 42%,rgba(18,92,214,.48),transparent 68%),
+    radial-gradient(ellipse 28% 36% at 8% 16%,rgba(110,180,255,.2),transparent 62%),
+    linear-gradient(108deg,#00080f 0%,#00101f 30%,#001a38 40%,#073a86 46%,#1a6adf 50%,#0a4cb3 55%,#001326 100%);
 }
 body.efhs-theme .hero:before,
 #page-preview .hero:before{
   content:"";
   position:absolute;
   inset:0;
+  z-index:0;
   opacity:1;
-  background:
-    linear-gradient(180deg,rgba(0,19,38,.72) 0%,rgba(0,33,66,.52) 34%,rgba(11,99,214,.28) 58%,rgba(0,19,38,.66) 100%),
-    var(--efhs-hero-photo, none);
+  pointer-events:none;
   background-color:#001326;
+  background-image:
+    radial-gradient(ellipse 34% 40% at 78% 6%,rgba(220,236,255,.42),transparent 58%),
+    radial-gradient(ellipse 22% 30% at 94% 16%,rgba(255,255,255,.34),transparent 56%),
+    radial-gradient(ellipse 18% 24% at 68% 10%,rgba(140,196,255,.22),transparent 62%),
+    linear-gradient(108deg,rgba(0,10,22,.96) 0%,rgba(0,19,38,.9) 36%,rgba(7,58,134,.62) 45%,rgba(80,170,255,.28) 49%,transparent 58%),
+    linear-gradient(180deg,rgba(8,30,70,.14) 0%,transparent 28%,transparent 72%,rgba(0,16,36,.22) 100%),
+    var(--efhs-hero-photo, none);
   background-repeat:no-repeat;
-  background-size:cover;
-  background-position:center 46%;
+  background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover;
+  background-position:center,center,center,center,center,68% 38%;
   transform:none;
+  -webkit-mask-image:linear-gradient(108deg,transparent 0%,transparent 34%,rgba(0,0,0,.45) 44%,#000 52%,#000 100%);
+  mask-image:linear-gradient(108deg,transparent 0%,transparent 34%,rgba(0,0,0,.45) 44%,#000 52%,#000 100%);
 }
 body.efhs-theme .hero:after,
 #page-preview .hero:after{
@@ -243,46 +255,57 @@ body.efhs-theme .hero:after,
   left:0;
   right:0;
   bottom:-1px;
-  height:84px;
+  height:102px;
   z-index:1;
   pointer-events:none;
-  background:#fff;
-  clip-path:polygon(0 62%,6% 48%,12% 70%,19% 40%,27% 74%,36% 46%,46% 78%,56% 42%,66% 72%,76% 38%,86% 68%,94% 44%,100% 58%,100% 100%,0 100%);
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 120' preserveAspectRatio='none'><path fill='%23ffffff' d='M0 62c42-26 78 18 118 2 46-18 72 32 118 6 44-24 86 26 128 4 48-24 76 30 124 8 46-22 90 24 132 2 44-22 78 32 122 8 48-26 84 18 126 0 40-18 74 28 114 8 36-18 60 16 90 4 26-10 46 14 68 6V120H0z'/></svg>") center bottom / 100% 100% no-repeat;
 }
 body.efhs-theme .hero .wrap,
 #page-preview .hero .wrap{
   z-index:2;
   max-width:1240px;
-  padding:72px 20px 108px;
-  gap:32px;
+  padding:64px 20px 120px;
+  gap:28px;
   align-items:center;
 }
 body.efhs-theme .hero .wrap{
   display:flex;
   flex-direction:column;
-  align-items:center;
-  text-align:center;
+  align-items:flex-start;
+  text-align:left;
   grid-template-columns:none;
+}
+#page-preview .hero .wrap{
+  text-align:left;
+  justify-items:start;
 }
 body.efhs-theme .hero .wrap > div{
   display:flex;
   flex-direction:column;
-  align-items:center;
-  width:100%;
+  align-items:flex-start;
+  width:min(100%,46rem);
   max-width:46rem;
 }
-body.efhs-theme .hero .eyebrow{
-  justify-content:center;
+#page-preview .hero .wrap > div{
+  text-align:left;
 }
-body.efhs-theme .hero h1{
-  text-align:center;
+body.efhs-theme .hero .eyebrow,
+#page-preview .hero .eyebrow{
+  justify-content:flex-start;
 }
-body.efhs-theme .hero p{
-  margin-left:auto;
-  margin-right:auto;
+body.efhs-theme .hero h1,
+#page-preview .hero h1{
+  text-align:left;
 }
-body.efhs-theme .hero .button-row{
-  justify-content:center;
+body.efhs-theme .hero p,
+#page-preview .hero p{
+  margin-left:0;
+  margin-right:0;
+}
+body.efhs-theme .hero .button-row,
+#page-preview .hero .button-row{
+  justify-content:flex-start;
 }
 /* Public homepage only: keep the CMS card in admin preview, hide it from visitors. */
 body.efhs-theme .hero-card{
@@ -291,8 +314,9 @@ body.efhs-theme .hero-card{
 body.efhs-theme .eyebrow,
 #page-preview .eyebrow{
   color:#cfe3ff;
-  letter-spacing:.2em;
-  font-size:.72rem;
+  letter-spacing:.22em;
+  font-size:.7rem;
+  font-weight:700;
 }
 body.efhs-theme .eyebrow:before,
 #page-preview .eyebrow:before{
@@ -300,19 +324,31 @@ body.efhs-theme .eyebrow:before,
 }
 body.efhs-theme .hero h1,
 #page-preview .hero h1{
-  font-size:clamp(3rem,8vw,6.6rem);
-  line-height:.86;
-  letter-spacing:-.03em;
+  max-width:9.1em;
+  margin:10px 0 16px;
+  font-size:clamp(2.7rem,6.8vw,6.1rem);
+  font-weight:700;
+  font-style:italic;
+  line-height:.82;
+  letter-spacing:-.02em;
   text-transform:uppercase;
-  text-wrap:balance;
-  text-shadow:0 8px 30px rgba(0,0,0,.28);
+  text-wrap:wrap;
+  color:#4da3ff;
+  text-shadow:0 10px 28px rgba(0,8,24,.45);
+}
+body.efhs-theme .hero h1::first-line,
+#page-preview .hero h1::first-line{
+  color:#fff;
 }
 body.efhs-theme .hero p,
 #page-preview .hero p{
-  max-width:34rem;
-  color:#dce8f8;
+  max-width:28rem;
+  margin-left:0;
+  margin-right:0;
+  color:#d5e4f7;
   font-family:"Work Sans",system-ui,sans-serif;
-  font-size:clamp(1rem,1.6vw,1.18rem);
+  font-size:clamp(.98rem,1.5vw,1.12rem);
+  line-height:1.45;
 }
 body.efhs-theme .hero-card,
 #page-preview .hero-card{
@@ -351,15 +387,35 @@ body.efhs-theme .btn.primary:hover,
 #page-preview .btn.primary:hover{
   background:#094fb0;
 }
+body.efhs-theme .hero .btn.primary,
 body.efhs-theme .hero .btn.secondary,
-#page-preview .hero .btn.secondary{
+body.efhs-theme .hero .btn.gold,
+#page-preview .hero .btn.primary,
+#page-preview .hero .btn.secondary,
+#page-preview .hero .btn.gold{
   background:transparent;
   color:#fff;
-  border-color:rgba(255,255,255,.7);
+  border-color:rgba(255,255,255,.42);
+  box-shadow:none;
 }
+body.efhs-theme .hero .btn.primary:hover,
 body.efhs-theme .hero .btn.secondary:hover,
-#page-preview .hero .btn.secondary:hover{
+body.efhs-theme .hero .btn.gold:hover,
+#page-preview .hero .btn.primary:hover,
+#page-preview .hero .btn.secondary:hover,
+#page-preview .hero .btn.gold:hover{
   background:rgba(255,255,255,.1);
+  border-color:#fff;
+  color:#fff;
+}
+body.efhs-theme .hero .button-row .btn::after,
+#page-preview .hero .button-row .btn::after{
+  content:"";
+  width:.72em;
+  height:.72em;
+  background:currentColor;
+  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%23000' d='M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z'/></svg>") center / contain no-repeat;
+  mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%23000' d='M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z'/></svg>") center / contain no-repeat;
 }
 body.efhs-theme .btn.outline,
 #page-preview .btn.outline{
@@ -848,15 +904,33 @@ body.efhs-theme .footer h3{
   body.efhs-theme .hero .wrap,
   #page-preview .hero .wrap{
     grid-template-columns:1fr;
-    padding:48px 16px 88px;
+    padding:36px 16px 96px;
   }
   body.efhs-theme .hero .wrap{
-    align-items:center;
-    text-align:center;
+    align-items:flex-start;
+    text-align:left;
+  }
+  body.efhs-theme .hero .wrap > div,
+  #page-preview .hero .wrap > div{
+    max-width:100%;
+  }
+  body.efhs-theme .hero,
+  #page-preview .hero{
+    min-height:min(88vh,740px);
+    background:
+      radial-gradient(ellipse 70% 55% at 12% 28%,rgba(18,92,214,.42),transparent 70%),
+      linear-gradient(125deg,#00080f 0%,#001326 38%,#073a86 52%,#001326 72%);
+  }
+  body.efhs-theme .hero:before,
+  #page-preview .hero:before{
+    background-position:center,center,center,center,center,78% 32%;
+    -webkit-mask-image:linear-gradient(125deg,transparent 0%,transparent 12%,rgba(0,0,0,.4) 36%,#000 58%,#000 100%);
+    mask-image:linear-gradient(125deg,transparent 0%,transparent 12%,rgba(0,0,0,.4) 36%,#000 58%,#000 100%);
   }
   body.efhs-theme .hero h1,
   #page-preview .hero h1{
-    font-size:clamp(2.4rem,14vw,3.6rem);
+    max-width:10.5em;
+    font-size:clamp(2.35rem,12vw,3.5rem);
   }
   body.efhs-theme .page-hero,
   #page-preview .page-hero{

@@ -2066,7 +2066,11 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg"\)/);
-  assert.match(themeCss, /background-position:center 46%/);
+  assert.match(themeCss, /background-position:center,center,center,center,center,68% 38%/);
+  assert.match(themeCss, /mask-image:linear-gradient\(108deg/);
+  assert.match(themeCss, /radial-gradient\(ellipse 34% 40% at 78% 6%/);
+  assert.match(themeCss, /var\(--efhs-hero-photo, none\)/);
+  assert.doesNotMatch(themeCss, /DISCIPLINE|CHARACTER|OPPORTUNITY|COMMUNITY|ONE BAND A BRIGHTER TOMORROW|MUSIC BUILDS MORE THAN MUSICIANS/);
   assert.match(themeCss, /prefers-reduced-motion/);
   assert.match(themeCss, /\.nav-support/);
   assert.doesNotMatch(themeCss, /Jason Reynolds|Allison Carter|Mattress Warehouse/);
@@ -2178,8 +2182,9 @@ test('public homepage stacks nav under a centered banner and hides the hero card
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[\s\S]*?display:none/);
-  assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:center/);
-  assert.match(themeCss, /body\.efhs-theme \.hero \.button-row\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
+  assert.match(themeCss, /body\.efhs-theme \.hero h1::first-line/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
 });
