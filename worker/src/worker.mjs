@@ -5142,6 +5142,13 @@ export function sponsorShowsMarquee(sponsor = {}) {
   return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
+export function publicPageShowsSponsorMarquee(page = {}) {
+  const slug = String(page?.slug || '').trim();
+  if (page?.is_home || slug === 'home') return true;
+  if (slug === 'calendar' || slug === 'fundraising' || slug === 'sponsors') return true;
+  return COMING_SOON_PAGES.some((item) => item.slug === slug);
+}
+
 export function renderSponsorMarqueeSection(sponsors = []) {
   const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
   if (!items.length) {
@@ -7090,6 +7097,23 @@ async function loadPublicCmsReads(env, options) {
     staff: read('staff-active', []),
     homeEvents: read(`home-events:${options.today}`, []),
     homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
+  };
+}
+
+async function loadPublicChromeReads(env, today) {
+  // Reuse the public page cache keys. The marquee is the sponsors list from this batch.
+  const jobs = publicReadJobs(env, { path: '/', today, isHome: false }).filter((job) => (
+    job.key === 'site'
+    || job.key === 'pages-nav'
+    || job.key === 'sponsors'
+    || job.key === `deadline-events:${today}`
+  ));
+  const values = await readCachedQueryBatch(env, jobs);
+  return {
+    site: values.get('site') || siteFromContentRows([]),
+    pages: values.get('pages-nav') || [],
+    sponsors: values.get('sponsors') || [],
+    deadlineEvents: values.get(`deadline-events:${today}`) || [],
   };
 }
 
@@ -11534,14 +11558,17 @@ export function renderPublicThemePhotoStyle(vars = {}) {
   return `<style id="efhs-theme-photos">:root{--efhs-hero-photo:${cssUrl(vars.hero)};--efhs-page-photo:${cssUrl(vars.page)};--efhs-card-photo-1:${cssUrl(vars.cards?.[0])};--efhs-card-photo-2:${cssUrl(vars.cards?.[1])};--efhs-card-photo-3:${cssUrl(vars.cards?.[2])};}</style>`;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug);
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, { calendarHighlights, home });
-  const marqueeHtml = renderSponsorMarqueeSection(
-    Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
-  );
+  const showMarquee = showSponsorMarquee == null
+    ? publicPageShowsSponsorMarquee(page)
+    : Boolean(showSponsorMarquee);
+  const marqueeHtml = showMarquee
+    ? renderSponsorMarqueeSection(Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors)
+    : '';
   const deadlineHtml = deadlineBannersHtml || renderSiteDeadlineBannersHtml([]);
   const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
   const bodyClasses = ['efhs-theme'];
@@ -11549,7 +11576,9 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   if (page.slug === 'calendar') bodyClasses.push('caldev-body');
   if (isHomePage) bodyClasses.push('home-page');
   if (isComingSoonPage) bodyClasses.push('coming-soon-page');
+  if (page.slug === 'not-found') bodyClasses.push('not-found-page');
   const bodyClass = ` class="${bodyClasses.join(' ')}"`;
+  const marqueeFlag = showMarquee ? 'on' : 'off';
   const themePhotoStyle = renderPublicThemePhotoStyle(pickPublicThemePhotoVars(photos, { slug: page.slug || (page.is_home ? 'home' : '') }));
   return `<!doctype html>
 <html lang="en">
@@ -11557,6 +11586,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="${escapeAttr(site.title)} website.">
+  ${page.slug === 'not-found' ? '<meta name="robots" content="noindex">' : ''}
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
   <link rel="apple-touch-icon" href="${escapeAttr(PUBLIC_BRAND_MARK)}">
@@ -11573,7 +11603,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
   ${themePhotoStyle}
 </head>
-<body${bodyClass}>
+<body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="utility"><div class="wrap">${renderUtilityLinks(site, { loggedIn })}</div></div>
@@ -11659,6 +11689,47 @@ function renderMaintenancePage(site = {}) {
 </script>
 </body>
 </html>`;
+}
+
+function isPublicDocumentRequest(pathname = '/') {
+  const path = String(pathname || '/');
+  if (
+    path.startsWith('/api')
+    || path.startsWith('/admin')
+    || path.startsWith('/uploads')
+    || path.startsWith('/assets')
+    || path.startsWith('/vendor')
+  ) return false;
+  const leaf = path.split('/').filter(Boolean).pop() || '';
+  if (leaf.includes('.') && !leaf.endsWith('.html')) return false;
+  return true;
+}
+
+const PUBLIC_NOT_FOUND_BODY = `<section class="page-hero"><div class="page-title"><div class="kicker">404</div><h1>Page not found</h1><p>That address is not on the East Forsyth Band site.</p></div></section><section class="content"><div class="wrap"><p><a class="btn primary" href="/">Back to home</a></p></div></section>`;
+
+async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
+  const today = easternTodayIso();
+  const chrome = await loadPublicChromeReads(env, today);
+  const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents, today);
+  const html = renderCmsPage({
+    slug: 'not-found',
+    path: url.pathname,
+    title: 'Page not found',
+    is_home: 0,
+    body_html: PUBLIC_NOT_FOUND_BODY,
+  }, chrome.site, chrome.pages, [], [], [], chrome.sponsors, {
+    loggedIn,
+    photos: [],
+    showSponsorMarquee: true,
+    deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+    publicRead: {
+      site: chrome.site,
+      sponsors: chrome.sponsors,
+      photos: [],
+      deadlineBanners,
+    },
+  });
+  return htmlResponse(html, 404);
 }
 
 async function serveStaticOrCms(request, env, url) {
@@ -11786,6 +11857,9 @@ async function serveStaticOrCms(request, env, url) {
     return new Response(guideAsset.body, { status: guideAsset.status, statusText: guideAsset.statusText, headers });
   }
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+  if (assetResponse.status === 404 && isPublicDocumentRequest(url.pathname)) {
+    return renderPublicNotFound(env, url, { loggedIn });
+  }
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
   if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
