@@ -331,24 +331,77 @@
       || null;
   }
 
+  function currentMediaText() {
+    const em = editor.em || editor.getModel?.();
+    if (typeof em?.getCurrentMedia === 'function') return String(em.getCurrentMedia() || '');
+    const device = editor.Devices?.get?.(editor.getDevice());
+    const widthMedia = device?.get?.('widthMedia');
+    return widthMedia ? `(max-width: ${String(widthMedia).replace(/px$/i, '')}px)` : '';
+  }
+
+  function clearInlineBoxStyle(comp) {
+    if (!comp) return;
+    const stored = { ...(comp.get('style') || {}) };
+    ['width', 'max-width', 'min-width', 'height', 'max-height', 'min-height'].forEach((prop) => {
+      delete stored[prop];
+    });
+    comp.set('style', stored);
+    const el = comp.view?.el || comp.getEl?.();
+    if (el?.style) {
+      el.style.width = '';
+      el.style.maxWidth = '';
+      el.style.minWidth = '';
+      el.style.height = '';
+      el.style.maxHeight = '';
+    }
+  }
+
+  function writeDeviceBox(comp, box = {}) {
+    if (!comp) return;
+    const id = comp.getId();
+    const media = currentMediaText();
+    const tag = String(comp.get('tagName') || '').toLowerCase();
+    const next = {};
+    if (box.width && /^\s*\d+(\.\d+)?px\s*$/i.test(box.width)) {
+      next['max-width'] = box.width.trim();
+      next.width = tag === 'img' ? 'auto' : '100%';
+    }
+    if (box.height && /^\s*\d+(\.\d+)?px\s*$/i.test(box.height)) {
+      next.height = box.height.trim();
+    }
+    clearInlineBoxStyle(comp);
+    if (media) {
+      const base = editor.Css.getIdRule(id);
+      if (base) {
+        const baseStyle = { ...(base.getStyle() || {}) };
+        delete baseStyle.width;
+        delete baseStyle['max-width'];
+        delete baseStyle.height;
+        base.setStyle(baseStyle);
+      }
+    }
+    const existing = editor.Css.getIdRule(id, { mediaText: media });
+    editor.Css.setIdRule(id, { ...(existing?.getStyle?.() || {}), ...next }, { mediaText: media });
+  }
+
   function makeWidthResponsive(comp) {
-    if (!comp || applyingResponsive) return;
+    if (!comp || applyingResponsive || resizeSession) return;
     const style = comp.getStyle() || {};
     const width = String(style.width || '');
     if (!/^\s*\d+(\.\d+)?px\s*$/i.test(width)) return;
-    const max = width.trim();
-    const tag = String(comp.get('tagName') || '').toLowerCase();
     applyingResponsive = true;
-    comp.addStyle({
-      width: tag === 'img' ? 'auto' : '100%',
-      'max-width': max,
-    });
+    writeDeviceBox(comp, { width: width.trim(), height: style.height });
     applyingResponsive = false;
   }
 
   function walkResponsive(comp) {
     makeWidthResponsive(comp);
     (comp.components?.() || []).forEach(walkResponsive);
+  }
+
+  function stripLegacyInlineWidths(comp) {
+    clearInlineBoxStyle(comp);
+    (comp.components?.() || []).forEach(stripLegacyInlineWidths);
   }
 
   function splitVisualCss(html = '') {
@@ -470,7 +523,7 @@
     const doc = editor.Canvas.getDocument();
     if (doc?.body) doc.body.className = frame.bodyClass;
     applyRulesTree(editor.getWrapper());
-    walkResponsive(editor.getWrapper());
+    stripLegacyInlineWidths(findMain() || editor.getWrapper());
   }
 
   editor.on('load', () => {
@@ -502,24 +555,29 @@
   editor.on('component:resize', (opts = {}) => {
     const comp = opts.component || editor.getSelected();
     if (opts.type === 'start' && comp) {
-      resizeSession = { comp, before: cloneStyle(comp) };
+      resizeSession = {
+        comp,
+        media: currentMediaText(),
+        before: cloneStyle(comp),
+      };
       editor.UndoManager.stop();
       return;
     }
     if (opts.type === 'end' && resizeSession) {
       const target = resizeSession.comp || comp;
       const before = resizeSession.before || {};
+      const media = resizeSession.media || currentMediaText();
       const after = cloneStyle(target);
-      const width = String(after.width || '');
-      if (/^\s*\d+(\.\d+)?px\s*$/i.test(width)) {
-        after['max-width'] = width.trim();
-        after.width = String(target.get('tagName') || '').toLowerCase() === 'img' ? 'auto' : '100%';
-      }
       resizeSession = null;
       editor.UndoManager.start();
       if (!target) return;
-      editor.UndoManager.skip(() => target.setStyle(before));
-      target.setStyle(after);
+      editor.UndoManager.skip(() => {
+        const id = target.getId();
+        const existing = editor.Css.getIdRule(id, { mediaText: media });
+        if (existing) existing.setStyle(before);
+        clearInlineBoxStyle(target);
+      });
+      writeDeviceBox(target, after);
       markDirty();
       clampSelectionToolbarSoon();
     }

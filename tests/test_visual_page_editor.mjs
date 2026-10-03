@@ -171,6 +171,8 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /visual-join-wrap/);
   assert.match(editorJs, /America\/New_York/);
   assert.match(editorJs, /makeWidthResponsive/);
+  assert.match(editorJs, /writeDeviceBox/);
+  assert.match(editorJs, /setIdRule/);
   assert.match(editorJs, /avoidInlineStyle:\s*true/);
   assert.match(editorJs, /widthMedia:\s*'390px'/);
   assert.match(editorJs, /widthMedia:\s*'320px'/);
