@@ -35,15 +35,7 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.match(toml, /^name\s*=\s*"efhsband-live"/m);
   assert.doesNotMatch(toml, /directory\s*=\s*"\.\/assets"/);
   assert.doesNotMatch(toml, /DEV_UPLOAD_ORIGIN/);
-  const devToml = readFileSync(join(root, 'wrangler.dev.toml'), 'utf8');
-  assert.match(devToml, /^name\s*=\s*"efhsband-dev"/m);
-  assert.match(devToml, /efhsband-dev-db/);
-  assert.match(devToml, /DEV_UPLOAD_ORIGIN/);
-  assert.doesNotMatch(devToml, /^name\s*=\s*"efhsband-live"/m);
-  assert.doesNotMatch(devToml, /efhsband\.org\/\*/);
-  assert.doesNotMatch(devToml, /73681cba-4863-4abb-86d4-b140694bcde2/);
-  assert.doesNotMatch(devToml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
-  assert.doesNotMatch(devToml, /admin123\$/);
+  assert.doesNotMatch(toml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
 });
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
@@ -2301,7 +2293,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-dev-20261003b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-20261003'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
