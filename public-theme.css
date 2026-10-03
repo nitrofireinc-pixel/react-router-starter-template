@@ -8,7 +8,7 @@
   --efhs-blue-bright:#3c8bff;
   --efhs-silver:#c9d4e4;
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
-  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg");
+  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=hero-band-lights-20260918");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -236,19 +236,20 @@ body.efhs-theme .hero:before,
   pointer-events:none;
   background-color:#001326;
   background-image:
-    radial-gradient(ellipse 34% 40% at 78% 6%,rgba(220,236,255,.42),transparent 58%),
-    radial-gradient(ellipse 22% 30% at 94% 16%,rgba(255,255,255,.34),transparent 56%),
-    radial-gradient(ellipse 18% 24% at 68% 10%,rgba(140,196,255,.22),transparent 62%),
-    linear-gradient(108deg,rgba(0,10,22,.96) 0%,rgba(0,19,38,.88) 30%,rgba(7,58,134,.42) 40%,rgba(80,170,255,.14) 46%,transparent 52%),
+    radial-gradient(ellipse 36% 42% at 86% 6%,rgba(255,255,255,.58),transparent 60%),
+    radial-gradient(ellipse 24% 32% at 94% 12%,rgba(180,220,255,.5),transparent 58%),
+    radial-gradient(ellipse 18% 24% at 76% 5%,rgba(140,196,255,.34),transparent 62%),
+    radial-gradient(circle 90px at 82% 7%,rgba(255,255,255,.72),transparent 70%),
+    linear-gradient(108deg,rgba(0,10,22,.96) 0%,rgba(0,19,38,.9) 22%,rgba(7,58,134,.38) 32%,rgba(80,170,255,.12) 38%,transparent 44%),
     linear-gradient(180deg,rgba(8,30,70,.08) 0%,transparent 22%,transparent 80%,rgba(0,16,36,.12) 100%),
     var(--efhs-hero-photo, none);
   background-repeat:no-repeat;
-  /* 125% width zooms past empty foreground grass so the student group fills the slash opening. */
-  background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto;
-  background-position:center,center,center,center,center,46% 44%;
+  /* Smaller than cover: fill the slash height, pin right, keep the full band group in frame. */
+  background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,auto 100%;
+  background-position:center,center,center,center,center,center,100% 50%;
   transform:none;
-  -webkit-mask-image:linear-gradient(108deg,transparent 0%,transparent 34%,rgba(0,0,0,.45) 44%,#000 52%,#000 100%);
-  mask-image:linear-gradient(108deg,transparent 0%,transparent 34%,rgba(0,0,0,.45) 44%,#000 52%,#000 100%);
+  -webkit-mask-image:linear-gradient(108deg,transparent 0%,transparent 18%,rgba(0,0,0,.4) 30%,#000 40%,#000 100%);
+  mask-image:linear-gradient(108deg,transparent 0%,transparent 18%,rgba(0,0,0,.4) 30%,#000 40%,#000 100%);
 }
 body.efhs-theme .hero:after,
 #page-preview .hero:after{
@@ -925,11 +926,11 @@ body.efhs-theme .footer h3{
   }
   body.efhs-theme .hero:before,
   #page-preview .hero:before{
-    /* Cover the tall phone hero with the student cluster, not bleachers/sky. */
-    background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover;
-    background-position:center,center,center,center,center,50% 46%;
-    -webkit-mask-image:linear-gradient(125deg,transparent 0%,transparent 12%,rgba(0,0,0,.4) 36%,#000 58%,#000 100%);
-    mask-image:linear-gradient(125deg,transparent 0%,transparent 12%,rgba(0,0,0,.4) 36%,#000 58%,#000 100%);
+    /* Full photo width on phones so left/right students stay in frame. */
+    background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% auto;
+    background-position:center,center,center,center,center,center,50% 28%;
+    -webkit-mask-image:linear-gradient(125deg,transparent 0%,transparent 8%,rgba(0,0,0,.35) 28%,#000 48%,#000 100%);
+    mask-image:linear-gradient(125deg,transparent 0%,transparent 8%,rgba(0,0,0,.35) 28%,#000 48%,#000 100%);
   }
   body.efhs-theme .hero h1,
   #page-preview .hero h1{
