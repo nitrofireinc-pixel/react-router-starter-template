@@ -478,6 +478,47 @@ export function isSuperAdmin(user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
 }
 
+const PRIVILEGED_PERMISSIONS = new Set(['all']);
+
+/** Page slug, path, nav order, and home flag are Site Admin / Super Admin only. */
+export function canManagePageSettings(user) {
+  return isSuperAdmin(user) || hasPermission(user, 'pages');
+}
+
+export function lockPageSettingsToExisting(page, existing) {
+  if (!page || !existing) return page;
+  return {
+    ...page,
+    slug: existing.slug,
+    path: existing.is_home ? '/' : existing.path,
+    nav_order: Number(existing.nav_order),
+    is_home: existing.is_home ? 1 : 0,
+  };
+}
+
+export function requestedPrivilegedPermissions(permissions) {
+  return parsePermissions(permissions).filter((item) => (
+    PRIVILEGED_PERMISSIONS.has(String(item).trim().toLowerCase())
+  ));
+}
+
+export function sanitizeAssignablePermissions(actor, permissions) {
+  const parsed = parsePermissions(permissions);
+  if (isSuperAdmin(actor)) return parsed;
+  return parsed.filter((item) => String(item).trim().toLowerCase() !== 'all');
+}
+
+export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
+  if (isSuperAdmin(actor)) return { ok: true };
+  if (String(payload.role || '').trim().toLowerCase() === 'admin') {
+    return { ok: false, status: 403, detail: 'Only Super Admins can assign the Super Admin role' };
+  }
+  if (requestedPrivilegedPermissions(payload.permissions).length) {
+    return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
+  }
+  return { ok: true };
+}
+
 /** Security log is Super Admin only — never grantable via permissions. */
 export function canAccessSecurityLog(user) {
   return isSuperAdmin(user);
@@ -1375,8 +1416,20 @@ export function canAccessTreasurerLedger(user) {
   return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
 }
 
-/** Schedule Board: Super Admin, President, or Vice President. */
+/** Schedule Board: Super Admin, President, VP, or calendar/events editors. */
 export function canAccessScheduleBoard(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+    || hasPermission(user, 'events')
+    || hasPermission(user, 'events:manage')
+    || hasPermission(user, 'calendar')
+  );
+}
+
+/** Subscriber "Finished" mail stays limited to today's senders. */
+export function canNotifyCalendarSubscribers(user) {
   return (
     isSuperAdmin(user)
     || hasPermission(user, 'president')
@@ -1693,7 +1746,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-02.1';
+export const DB_SCHEMA_VERSION = '2026-10-03.1';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1991,87 +2044,19 @@ async function migrateAndSeedDb(env) {
     }
   }
   await seedCmsFormMaker(env);
-  const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
-  if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html))));
-    if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextSponsorsHtml, sponsorsPageRow.id)
-        .run();
-    }
-  }
-  const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
-  if (fundraisingPageRow?.body_html) {
-    const nextFundraisingHtml = ensureEmailListSignupSlot(
-      ensureFundraisingDonateSlot(fundraisingPageRow.body_html),
-      {
-        topics: ['fundraising', 'calendar'],
-        heading: 'Email fundraising updates',
-        detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextFundraisingHtml, fundraisingPageRow.id)
-        .run();
-    }
-  }
-  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
-  if (boostersPageRow?.body_html) {
-    const siteForDues = await getSite(env);
-    const nextBoostersHtml = applyBoostersDuesVisibility(
-      ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
-      isBoostersDuesEnabled(siteForDues),
-    );
-    if (nextBoostersHtml !== boostersPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextBoostersHtml, boostersPageRow.id)
-        .run();
-    }
-  }
-  const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
-  if (homePageRow?.body_html) {
-    const nextHomeHtml = upgradeHomeBody(homePageRow.body_html);
-    if (nextHomeHtml !== homePageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextHomeHtml, homePageRow.id)
-        .run();
-    }
-  }
+  // Never rewrite an existing cms_pages.body_html during schema/migration.
+  // Slot injectors still run at render time. Only insert a row when it is missing.
   const storedSubtitle = await getSiteContentValue(env, 'hero_subtitle');
   if (plainHeroSubtitle(storedSubtitle) === PREVIOUS_HERO_SUBTITLE) {
     await setSiteContentValue(env, 'hero_subtitle', APPROVED_HERO_SUBTITLE);
   }
   const galleryPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'gallery');
   if (galleryPage) {
-    const existingGallery = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'gallery'").first();
+    const existingGallery = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'gallery'").first();
     if (!existingGallery) {
       await env.DB.prepare('UPDATE cms_pages SET nav_order = nav_order + 1 WHERE nav_order >= ?').bind(galleryPage.nav_order).run();
       await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(galleryPage.slug, galleryPage.path, galleryPage.title, galleryPage.body_html, galleryPage.nav_order, galleryPage.is_home, galleryPage.active)
-        .run();
-    } else if (existingGallery.body_html) {
-      const nextGalleryHtml = ensureGalleryPageSlot(existingGallery.body_html);
-      if (nextGalleryHtml !== existingGallery.body_html) {
-        await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-          .bind(nextGalleryHtml, existingGallery.id)
-          .run();
-      }
-    }
-  }
-  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
-  if (calendarPageRow?.body_html) {
-    const nextCalendarHtml = ensureEmailListSignupSlot(
-      ensureCalendarMonthMount(calendarPageRow.body_html),
-      {
-        topics: ['calendar', 'fundraising'],
-        heading: 'Email calendar updates',
-        detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextCalendarHtml !== calendarPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextCalendarHtml, calendarPageRow.id)
         .run();
     }
   }
@@ -2526,8 +2511,8 @@ async function seedCmsFormMaker(env) {
   const recipients = JSON.stringify(await getLettermanRecipientUserIds(env));
   const body = renderCmsFormPageBody(LETTERMAN_CMS_PAGE, definition, 'letterman-jacket');
   if (page?.id) {
-    await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html = ? OR body_html NOT LIKE ?)')
-      .bind(body, page.id, '', '%data-cms-form=%')
+    await env.DB.prepare("UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html IS NULL OR trim(body_html) = '')")
+      .bind(body, page.id)
       .run();
   }
   if (existing?.id) return;
@@ -6834,6 +6819,34 @@ export function sanitizePageSectionHtml(dirty = '') {
     .trim();
 }
 
+/** Full-page save sanitizer: drop XSS vectors, keep forms/buttons/normal markup. */
+export function sanitizeCmsPageHtml(dirty = '') {
+  return String(dirty || '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/?script\b[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:href|src|action|xlink:href)\s*=\s*(['"])\s*javascript:[^'"]*\1/gi, '')
+    .replace(/\s(?:href|src|action|xlink:href)\s*=\s*javascript:[^\s>]+/gi, '')
+    .replace(/javascript:/gi, '')
+    .trim();
+}
+
+export function isPublicCmsPageActive(page) {
+  return Boolean(page) && Number(page.active) === 1;
+}
+
+export function publicCmsPageForRender(page) {
+  if (!page) return null;
+  if (isPublicCmsPageActive(page)) return page;
+  return {
+    ...page,
+    body_html: comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }),
+  };
+}
+
 export function extractEnsemblesBodyHtml(pageHtml = '') {
   const source = String(pageHtml || '');
   const marked = source.match(/<section\b[^>]*data-ensembles-body[^>]*>([\s\S]*?)<\/section>/i);
@@ -7815,7 +7828,7 @@ export async function requireScheduleBoardAccess(request, env) {
   if (auth.response) return auth;
   if (!canAccessScheduleBoard(auth.user)) {
     return {
-      response: jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403),
+      response: jsonResponse({ detail: 'Permission required: calendar or events' }, 403),
       user: auth.user,
     };
   }
@@ -8299,6 +8312,9 @@ export function serializePagePayload(payload, existing = null) {
   } else {
     body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
   }
+  if (slug !== 'home') {
+    body_html = sanitizeCmsPageHtml(body_html);
+  }
   return {
     slug,
     path: slug === 'home' ? '/' : path,
@@ -8503,15 +8519,7 @@ async function routeApi(request, env, url, ctx = null) {
       }));
       return jsonResponse(events.map(caldevEventToHighlight));
     }
-    let events = await listCaldevEvents(env);
-    if (!events.length) {
-      try {
-        await seedCaldevFromProduction(env, { getEvents, clear: true });
-        events = await listCaldevEvents(env);
-      } catch {
-        // Seeding is best-effort for the lab page.
-      }
-    }
+    const events = await cachedPublicRead('caldev-events', () => listCaldevEvents(env));
     return jsonResponse(events);
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
@@ -9858,12 +9866,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can create Super Admin accounts' }, 403);
-    }
+    const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       return jsonResponse(publicUser(created));
     } catch (error) {
@@ -9885,12 +9892,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can assign the Super Admin role' }, 403);
-    }
+    const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     const role = wantsAdmin ? 'admin' : 'editor';
-    const permissions = JSON.stringify(parsePermissions(payload.permissions));
+    const permissions = JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions));
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
@@ -9939,7 +9945,10 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
-    const page = serializePagePayload(rawPayload, existing);
+    let page = serializePagePayload(rawPayload, existing);
+    if (!canManagePageSettings(auth.user)) {
+      page = lockPageSettingsToExisting(page, existing);
+    }
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
     await env.DB.prepare('UPDATE cms_pages SET slug = ?, path = ?, title = ?, body_html = ?, nav_order = ?, is_home = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active, existing.id).run();
@@ -11092,8 +11101,11 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/caldev/notify-finished' && request.method === 'POST') {
-    const auth = await requireScheduleBoardAccess(request, env);
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    if (!canNotifyCalendarSubscribers(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403);
+    }
     let email_list = null;
     try {
       email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'finished' });
@@ -11848,15 +11860,17 @@ async function serveStaticOrCms(request, env, url) {
       return mapCmsPage((result.results || [])[0] || null);
     });
     if (page) {
-      const isHome = Boolean(page.is_home) || page.slug === 'home';
-      const isFundraising = page.slug === 'fundraising';
+      const livePage = publicCmsPageForRender(page);
+      const pageIsLive = isPublicCmsPageActive(page);
+      const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
+      const isFundraising = pageIsLive && page.slug === 'fundraising';
       const reads = await loadPublicCmsReads(env, {
         path,
         today,
         isHome,
         needsEvents: isHome || isFundraising,
-        needsBoosters: page.slug === 'boosters' || isHome,
-        needsStaff: page.slug === 'directors',
+        needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
+        needsStaff: pageIsLive && page.slug === 'directors',
       });
       const pages = reads.pages;
       const allSponsors = reads.sponsors;
@@ -11865,7 +11879,7 @@ async function serveStaticOrCms(request, env, url) {
       const photos = reads.photos;
       const homeSources = reads.homeSources || {};
       const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
-      const sponsors = page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
+      const sponsors = pageIsLive && page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
       const home = isHome ? {
         events: reads.homeEvents,
         members: boosterMembers,
@@ -11877,10 +11891,10 @@ async function serveStaticOrCms(request, env, url) {
       const fundraiserEvents = isFundraising
         ? mergePublicFundraiserEvents(reads.homeEvents, reads.deadlineEvents)
         : [];
-      if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
-        page.letterman_copy = await getLettermanFormCopy(env);
+      if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
+        livePage.letterman_copy = await getLettermanFormCopy(env);
       }
-      return htmlResponse(renderCmsPage(page, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
+      return htmlResponse(renderCmsPage(livePage, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
         photos,
