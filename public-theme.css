@@ -1196,8 +1196,9 @@ body.efhs-theme .footer h3{
   }
 }
 
-/* Short landscape (844x390, 740x360, 915x412): chrome scrolls away and the
-   mid-width two-row header stays compact. Portrait and tall desktop unchanged. */
+/* Short landscape (844x390, 740x360, 915x412, and short desktop windows):
+   hamburger + drawer so links are not clipped behind the logo. Tall 768+
+   desktops keep the full inline nav from the default rules. */
 @media (orientation:landscape) and (max-height:500px){
   body.efhs-theme .site-chrome,
   body.efhs-theme header.site-header{
@@ -1205,38 +1206,69 @@ body.efhs-theme .footer h3{
     top:auto;
   }
   body.efhs-theme header.site-header{
-    flex-direction:row;
-    flex-wrap:nowrap;
+    display:grid;
+    grid-template-columns:minmax(4.25rem,1fr) auto minmax(4.25rem,1fr);
+    grid-template-areas:"menu brand actions";
     align-items:center;
     min-height:48px;
     height:52px;
     max-height:52px;
     padding:0 12px;
-    column-gap:10px;
+    column-gap:8px;
     row-gap:0;
   }
+  body.efhs-theme .menu-button{
+    display:inline-flex;
+    grid-area:menu;
+    justify-self:start;
+    width:36px;
+    height:36px;
+    z-index:95;
+  }
   body.efhs-theme .header-inner{
+    grid-area:brand;
+    justify-self:center;
     min-height:0;
     width:auto;
-    flex:0 1 auto;
+    flex:0 0 auto;
+  }
+  body.efhs-theme .mobile-nav-tray{
+    display:flex;
+    grid-area:actions;
+    justify-self:end;
+    width:auto;
+    min-height:0;
+    padding:0;
+    background:transparent;
+    border:0;
   }
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
-    width:auto;
-    max-width:none;
-    flex:1 1 auto;
-    justify-content:flex-end;
-    padding:0;
-    overflow:hidden;
+    width:max-content;
+    max-width:min(92vw,20rem);
+    justify-content:flex-start;
+    overflow:auto;
+    background:#fff;
+    color:var(--efhs-navy);
   }
   body.efhs-theme header.site-header nav a,
-  body.efhs-theme header.site-header nav .nav-notify-me,
-  body.efhs-theme header.site-header nav .nav-support-toggle{
-    font-size:.58rem;
-    padding:4px 5px;
+  body.efhs-theme header.site-header nav .nav-support-toggle,
+  body.efhs-theme header.site-header #site-nav a,
+  body.efhs-theme header.site-header #site-nav .nav-support-toggle{
+    color:var(--efhs-navy);
+    background:transparent;
+    font-size:.95rem;
+    padding:12px 4px;
   }
   body.efhs-theme .header-donate{
     display:none!important;
+  }
+  body.efhs-theme header.site-header nav .header-donate,
+  body.efhs-theme header.site-header #site-nav .header-donate{
+    display:inline-flex!important;
+    margin:8px 4px 4px;
+    width:calc(100% - 8px);
+    justify-content:center;
   }
 }
 

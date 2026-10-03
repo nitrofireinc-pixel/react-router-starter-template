@@ -1,5 +1,7 @@
+const COMPACT_NAV_MEDIA = '(max-width: 767px), (orientation: landscape) and (max-height: 500px)';
+
 function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 767px)').matches);
+  return Boolean(window.matchMedia && window.matchMedia(COMPACT_NAV_MEDIA).matches);
 }
 
 function ensureNavBackdrop() {
@@ -97,16 +99,20 @@ function placeHeaderQuickActions() {
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
   const staffAuth = document.querySelector('[data-staff-auth-link]');
+  const donate = document.querySelector('.header-donate');
+  const header = document.querySelector('header.site-header');
   const utility = utilityAuthHost();
   if (isMobileNavViewport()) {
     if (staffAuth) actions.appendChild(staffAuth);
     if (notify) actions.appendChild(notify);
     if (addHome) actions.appendChild(addHome);
+    if (donate) nav.appendChild(donate);
   } else {
     setMobileNavOpen(false);
     if (staffAuth && utility) utility.appendChild(staffAuth);
     if (notify) nav.appendChild(notify);
     if (addHome) nav.appendChild(addHome);
+    if (donate && header && donate.parentElement !== header) header.appendChild(donate);
   }
   if (menuButton) enhanceMenuButton(menuButton);
 }
@@ -145,7 +151,7 @@ function placeHeaderQuickActions() {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 767px)');
+    const media = window.matchMedia(COMPACT_NAV_MEDIA);
     const onChange = () => placeHeaderQuickActions();
     if (media.addEventListener) media.addEventListener('change', onChange);
     else if (media.addListener) media.addListener(onChange);

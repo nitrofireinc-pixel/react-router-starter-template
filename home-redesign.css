@@ -1170,8 +1170,10 @@ body.coming-soon-page main{
     display:flex;
     align-items:center;
     justify-content:center;
-    max-height:80vh;
-    overflow:hidden;
+    max-height:none;
+    overflow:visible;
+    padding:6px;
+    box-sizing:border-box;
   }
   .fundraising-cards .ff-media img,
   body.efhs-theme .fundraising-cards .ff-media img,
