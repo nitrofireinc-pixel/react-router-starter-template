@@ -2486,6 +2486,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(scriptSrc, /orientation: landscape\) and \(max-height: 500px/);
   assert.match(scriptSrc, /placeDonateInDrawer\(nav, donate\)/);
   assert.match(scriptSrc, /nav\.insertBefore\(donate, nav\.firstChild\)/);
+  assert.match(scriptSrc, /placeUtilitiesInDrawer/);
+  assert.match(scriptSrc, /headerUtilityFits/);
   assert.match(scriptSrc, /MIN_NAV_FONT_PX = 12/);
   assert.match(scriptSrc, /nav-use-hamburger/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
@@ -2499,12 +2501,16 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
-  assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
+  assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}[\s\S]*?nav \.header-donate\{display:inline-flex!important\}/);
   assert.match(homeCss, /body\.home-page,[\s\S]*?overflow-x:clip/);
   assert.match(homeCss, /@media \(max-width:1100px\)\{[\s\S]*?quick-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
   assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:inline-flex/);
   assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme \.header-donate\{display:none!important\}/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?nav \.header-donate,[\s\S]*?display:inline-flex!important/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme header\.site-header nav a,[\s\S]*?text-shadow:none/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme header\.site-header nav \.utility-auth[\s\S]*?display:flex!important/);
+  assert.doesNotMatch(styles, /html\.nav-use-hamburger header\.site-header nav \.nav-notify-me,\s*html\.nav-use-hamburger header\.site-header nav \.nav-add-home\{display:none!important\}/);
   const midStart = themeCss.indexOf('@media (min-width:768px) and (max-width:1199px)');
   const midEnd = themeCss.indexOf('@media (min-width:1200px) and (max-width:1339px)');
   const midWidth = midStart >= 0 && midEnd > midStart ? themeCss.slice(midStart, midEnd) : '';

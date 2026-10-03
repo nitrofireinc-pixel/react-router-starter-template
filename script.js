@@ -14,6 +14,27 @@ function placeDonateInDrawer(nav, donate) {
   nav.insertBefore(donate, nav.firstChild);
 }
 
+function headerUtilityFits(el, header) {
+  if (!el || !header || el.hidden) return false;
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+    return false;
+  }
+  const box = el.getBoundingClientRect();
+  const headerBox = header.getBoundingClientRect();
+  if (box.width < 4 || box.height < 4) return false;
+  if (box.right > headerBox.right + 6 || box.left < headerBox.left - 6) return false;
+  if (box.bottom > headerBox.bottom + 10 || box.top < headerBox.top - 10) return false;
+  return true;
+}
+
+function placeUtilitiesInDrawer(nav, nodes) {
+  if (!nav) return;
+  nodes.forEach((node) => {
+    if (node) nav.appendChild(node);
+  });
+}
+
 function measureInlineNavFits() {
   const header = document.querySelector('header.site-header');
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
@@ -162,10 +183,11 @@ function placeHeaderQuickActions() {
   const header = document.querySelector('header.site-header');
   const utility = utilityAuthHost();
   if (isMobileNavViewport()) {
-    if (staffAuth) actions.appendChild(staffAuth);
-    if (notify) actions.appendChild(notify);
-    if (addHome) actions.appendChild(addHome);
     if (donate) placeDonateInDrawer(nav, donate);
+    const utilities = [staffAuth, notify, addHome].filter(Boolean);
+    utilities.forEach((el) => actions.appendChild(el));
+    if (header) void header.offsetWidth;
+    placeUtilitiesInDrawer(nav, utilities.filter((el) => !headerUtilityFits(el, header)));
   } else {
     setMobileNavOpen(false);
     if (staffAuth && utility) utility.appendChild(staffAuth);

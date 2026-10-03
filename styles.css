@@ -597,7 +597,10 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     box-sizing:border-box;
   }
   header.site-header nav.open{transform:translateX(0)}
-  header.site-header nav a{
+  header.site-header nav a,
+  header.site-header nav .nav-notify-me,
+  header.site-header nav .nav-add-home,
+  header.site-header nav .utility-auth{
     display:block;
     width:auto;
     box-sizing:border-box;
@@ -605,6 +608,7 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     border-radius:12px;
     color:var(--navy);
     text-shadow:none;
+    box-shadow:none;
     font-size:.95rem;
     white-space:nowrap;
   }
@@ -661,9 +665,26 @@ main section{padding:72px 20px}.wrap{max-width:var(--max);margin:auto}.section-h
     border-radius:10px;
     white-space:normal;
   }
-  /* Notify Me / Add to Home live in the navy tray under the title on mobile. */
+  header.site-header nav .header-donate{
+    display:inline-flex!important;
+    margin:4px 4px 8px;
+    width:calc(100% - 8px);
+    justify-content:center;
+    order:-1;
+    text-shadow:none;
+  }
   header.site-header nav .nav-notify-me,
-  header.site-header nav .nav-add-home{display:none!important}
+  header.site-header nav .nav-add-home,
+  header.site-header nav .utility-auth{
+    display:flex!important;
+    width:100%;
+    justify-content:flex-start;
+    align-items:center;
+    gap:10px;
+    text-shadow:none;
+  }
+  header.site-header nav .nav-notify-label{display:inline}
+  header.site-header nav .nav-add-home::after{content:attr(title)}
   body.nav-drawer-open{overflow:hidden}
   .site-chrome .sponsor-marquee-section,
   .sponsor-marquee-section{position:relative;z-index:1}
@@ -771,7 +792,10 @@ html.nav-use-hamburger header.site-header nav{
 }
 html.nav-use-hamburger header.site-header nav.open{transform:translateX(0)}
 html.nav-use-hamburger header.site-header nav a,
-html.nav-use-hamburger header.site-header nav .nav-support-toggle{
+html.nav-use-hamburger header.site-header nav .nav-support-toggle,
+html.nav-use-hamburger header.site-header nav .nav-notify-me,
+html.nav-use-hamburger header.site-header nav .nav-add-home,
+html.nav-use-hamburger header.site-header nav .utility-auth{
   display:block;
   width:auto;
   box-sizing:border-box;
@@ -779,6 +803,7 @@ html.nav-use-hamburger header.site-header nav .nav-support-toggle{
   border-radius:12px;
   color:var(--navy);
   text-shadow:none;
+  box-shadow:none;
   font-size:.95rem;
   white-space:nowrap;
 }
@@ -803,7 +828,17 @@ html.nav-use-hamburger .nav-support-menu{
 }
 html.nav-use-hamburger .nav-support.is-open .nav-support-menu{display:block}
 html.nav-use-hamburger header.site-header nav .nav-notify-me,
-html.nav-use-hamburger header.site-header nav .nav-add-home{display:none!important}
+html.nav-use-hamburger header.site-header nav .nav-add-home,
+html.nav-use-hamburger header.site-header nav .utility-auth{
+  display:flex!important;
+  width:100%;
+  justify-content:flex-start;
+  align-items:center;
+  gap:10px;
+  text-shadow:none;
+}
+html.nav-use-hamburger header.site-header nav .nav-notify-label{display:inline}
+html.nav-use-hamburger header.site-header nav .nav-add-home::after{content:attr(title)}
 html.nav-use-hamburger .header-donate{display:none}
 html.nav-use-hamburger header.site-header nav .header-donate{
   display:inline-flex!important;
@@ -811,6 +846,7 @@ html.nav-use-hamburger header.site-header nav .header-donate{
   width:calc(100% - 8px);
   justify-content:center;
   order:-1;
+  text-shadow:none;
 }
 html.nav-use-hamburger body.home-page header.site-header nav{
   max-height:calc(100dvh - 72px - 6.75rem);
@@ -919,7 +955,10 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
     box-sizing:border-box;
   }
   header.site-header nav.open{transform:translateX(0)}
-  header.site-header nav a{
+  header.site-header nav a,
+  header.site-header nav .nav-notify-me,
+  header.site-header nav .nav-add-home,
+  header.site-header nav .utility-auth{
     display:block;
     width:auto;
     box-sizing:border-box;
@@ -927,6 +966,7 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
     border-radius:12px;
     color:var(--navy);
     text-shadow:none;
+    box-shadow:none;
     font-size:.95rem;
     white-space:nowrap;
   }
@@ -951,7 +991,17 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
   }
   .nav-support.is-open .nav-support-menu{display:block}
   header.site-header nav .nav-notify-me,
-  header.site-header nav .nav-add-home{display:none!important}
+  header.site-header nav .nav-add-home,
+  header.site-header nav .utility-auth{
+    display:flex!important;
+    width:100%;
+    justify-content:flex-start;
+    align-items:center;
+    gap:10px;
+    text-shadow:none;
+  }
+  header.site-header nav .nav-notify-label{display:inline}
+  header.site-header nav .nav-add-home::after{content:attr(title)}
   header.site-header nav .header-donate{
     display:inline-flex!important;
     margin:4px 4px 8px;
