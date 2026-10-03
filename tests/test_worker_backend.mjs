@@ -34,6 +34,14 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.match(toml, /efhsband\.org\/\*/);
   assert.match(toml, /^name\s*=\s*"efhsband-live"/m);
   assert.doesNotMatch(toml, /directory\s*=\s*"\.\/assets"/);
+  assert.doesNotMatch(toml, /DEV_UPLOAD_ORIGIN/);
+  const devToml = readFileSync(join(root, 'wrangler.dev.toml'), 'utf8');
+  assert.match(devToml, /^name\s*=\s*"efhsband-dev"/m);
+  assert.match(devToml, /efhsband-dev-db/);
+  assert.match(devToml, /DEV_UPLOAD_ORIGIN/);
+  assert.doesNotMatch(devToml, /^name\s*=\s*"efhsband-live"/m);
+  assert.doesNotMatch(devToml, /efhsband\.org\/\*/);
+  assert.doesNotMatch(devToml, /73681cba-4863-4abb-86d4-b140694bcde2/);
 });
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
@@ -2626,6 +2634,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(siteContent, /\[data-photo-gallery\]/);
   assert.match(siteContent, /openPhotoLightbox/);
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(max-width:760px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /overflow-x:clip/);
   assert.match(styles, /@media \(max-width:420px\)/);

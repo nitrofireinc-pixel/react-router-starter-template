@@ -11315,6 +11315,17 @@ async function routeApi(request, env, url, ctx = null) {
 
 async function handleUploadGet(request, env, url, ctx = null) {
   await initDb(env);
+  const uploadOrigin = String(env.DEV_UPLOAD_ORIGIN || '').trim();
+  if (uploadOrigin) {
+    try {
+      const dest = new URL(url.pathname, uploadOrigin.endsWith('/') ? uploadOrigin : `${uploadOrigin}/`);
+      if (dest.origin !== new URL(request.url).origin) {
+        return Response.redirect(dest.toString(), 302);
+      }
+    } catch {
+      // Fall through to the local photo lookup.
+    }
+  }
   const cacheKey = new Request(new URL(url.pathname, 'https://efhsband.internal'));
   if (typeof caches !== 'undefined' && caches?.default) {
     try {
