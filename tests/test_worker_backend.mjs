@@ -2470,6 +2470,12 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
   assert.match(themeCss, /@media \(max-width:767px\) and \(max-height:500px\) and \(orientation:landscape\)/);
   assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?height:52px/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.menu-button\{[\s\S]*?display:inline-flex/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?nav \.header-donate/);
+  const scriptSrc = readFileSync(join(root, 'script.js'), 'utf8');
+  assert.match(scriptSrc, /COMPACT_NAV_MEDIA/);
+  assert.match(scriptSrc, /orientation: landscape\) and \(max-height: 500px/);
+  assert.match(scriptSrc, /if \(donate\) nav\.appendChild\(donate\)/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
@@ -2658,6 +2664,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
   assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh !important/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?overflow:visible/);
   assert.match(styles, /\.fundraising-card:not\(:has\(\.ff-media\)\)/);
   assert.match(styles, /object-fit:contain/);
   assert.doesNotMatch(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card[\s\S]*?grid-template-columns:1fr/);
