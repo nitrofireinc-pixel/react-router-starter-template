@@ -4730,7 +4730,7 @@ function renderSponsors() {
       <div>
         <b>${escapeHtml(sponsor.name)}</b>
         <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
-        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${sponsor.active ? 'Active' : 'Hidden'} · ${escapeHtml(benefits.join(' · '))}</small>
+        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${Number(sponsor.active) !== 0 ? 'On Sponsors page' : 'Hidden from Sponsors page'} · ${escapeHtml(benefits.join(' · '))}</small>
       </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
