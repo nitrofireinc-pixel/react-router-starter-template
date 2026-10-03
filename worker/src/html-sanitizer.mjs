@@ -190,12 +190,34 @@ export function isSafeSrc(value = '') {
   return isSafeLocalUrl(decodeHtmlEntities(raw).trim(), { allowMailto: false });
 }
 
+export function isSafeSameOriginPath(value = '') {
+  const decoded = decodeHtmlEntities(value).trim();
+  if (!decoded || decoded.includes('\\')) return false;
+  return /^\/(?![\/\\])/.test(decoded);
+}
+
+export function isSafeRelativeOrSameOriginUrl(value = '') {
+  const decoded = decodeHtmlEntities(value).trim();
+  if (!decoded || hasDangerousScheme(decoded) || decoded.includes('\\')) return false;
+  if (decoded.startsWith('//')) return false;
+  if (decoded.startsWith('/')) return isSafeSameOriginPath(decoded);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(decoded)) return false;
+  return true;
+}
+
 export function isSafeFormAction(value = '') {
   const raw = String(value || '').trim();
   if (!raw) return true;
   if (hasDangerousScheme(raw)) return false;
-  const decoded = decodeHtmlEntities(raw).trim();
-  return decoded.startsWith('/') || decoded.startsWith('#');
+  return isSafeSameOriginPath(raw);
+}
+
+function isSafeSvgPaint(value = '') {
+  const decoded = decodeHtmlEntities(value).trim();
+  if (!decoded || hasDangerousScheme(decoded)) return null;
+  if (!/url\s*\(/i.test(decoded)) return decoded;
+  const match = decoded.match(/^url\(\s*#([A-Za-z_][\w:.-]*)\s*\)$/i);
+  return match ? `url(#${match[1]})` : null;
 }
 
 function isSafeSvgUseHref(value = '') {
@@ -211,7 +233,13 @@ function escapeAttr(value) {
     .replace(/>/g, '&gt;');
 }
 
-export function sanitizeCssText(css = '', { allowUrls = false } = {}) {
+function cssUrlsAreSafe(value = '') {
+  const urls = [...String(value || '').matchAll(/url\s*\(\s*(?:['"]([^'"]+)['"]|([^'")]+))\s*\)/gi)];
+  if (!urls.length) return true;
+  return urls.every((match) => isSafeRelativeOrSameOriginUrl((match[1] || match[2] || '').trim()));
+}
+
+export function sanitizeCssText(css = '', { allowUrls = true } = {}) {
   const source = String(css || '');
   if (/expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:|@import/i.test(source)) {
     return '';
@@ -220,16 +248,21 @@ export function sanitizeCssText(css = '', { allowUrls = false } = {}) {
   for (const declaration of source.split(';')) {
     const split = declaration.split(':');
     if (split.length < 2) continue;
-    const prop = split[0].trim().toLowerCase();
+    const rawProp = split[0].trim();
+    const prop = rawProp.toLowerCase();
     const next = split.slice(1).join(':').trim();
-    if (!prop || !next || !SAFE_CSS_PROP.has(prop)) continue;
+    if (!prop || !next) continue;
+    const isCustom = prop.startsWith('--') && /^--[a-z0-9_-]+$/i.test(prop);
+    if (!isCustom && !SAFE_CSS_PROP.has(prop)) continue;
     if (/expression|javascript:|vbscript:|-moz-binding|behavior/i.test(next)) continue;
+    if (/image-set\s*\(|-webkit-image-set\s*\(/i.test(next)) continue;
     if (/url\s*\(/i.test(next)) {
-      if (!allowUrls) continue;
-      const urlMatch = next.match(/url\s*\(\s*['"]?([^'")]+)['"]?\s*\)/i);
-      if (!urlMatch || !isSafeSrc(urlMatch[1])) continue;
+      if (!allowUrls || !cssUrlsAreSafe(next)) continue;
+      if (isCustom && !/^url\s*\(/i.test(next)) continue;
+    } else if (isCustom) {
+      continue;
     }
-    parts.push(`${prop}: ${next}`);
+    parts.push(`${isCustom ? rawProp : prop}: ${next}`);
   }
   return parts.join('; ');
 }
@@ -268,8 +301,11 @@ function sanitizeAttrValue(tag, name, value) {
   }
   if (name === 'action') return isSafeFormAction(raw) ? decodeHtmlEntities(raw).trim() : null;
   if (name === 'style') {
-    const css = sanitizeCssText(raw, { allowUrls: false });
+    const css = sanitizeCssText(raw, { allowUrls: true });
     return css || null;
+  }
+  if (/url\s*\(/i.test(raw) && (name === 'fill' || name === 'stroke' || SVG_ATTRS.has(name))) {
+    return isSafeSvgPaint(raw);
   }
   if (name === 'target') {
     const next = raw.trim().toLowerCase();
@@ -402,6 +438,7 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
   let i = 0;
   let out = '';
   const skip = [];
+  const svgDepth = [];
 
   while (i < source.length) {
     if (source[i] !== '<') {
@@ -434,6 +471,7 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
         if (skip[skip.length - 1] === tag) skip.pop();
         continue;
       }
+      if (tag === 'svg' || tag === 'math') svgDepth.pop();
       if (allowed.has(tag) && !VOID_TAGS.has(tag)) out += `</${tag}>`;
       continue;
     }
@@ -464,12 +502,15 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
       continue;
     }
 
-    if (parsed.tag === 'style' && profile === 'cms') {
+    if (parsed.tag === 'style') {
       const closeTag = source.toLowerCase().indexOf('</style', parsed.end);
       const rawCss = closeTag === -1 ? '' : source.slice(parsed.end, closeTag);
       const visual = hasVisualCssFlag(parsed.attrs);
-      const css = visual ? sanitizeVisualCss(rawCss) : sanitizeCssText(rawCss, { allowUrls: false });
-      if (css) out += visual ? `<style data-visual-css>${css}</style>` : `<style>${css}</style>`;
+      const insideSvg = svgDepth.includes('svg') || svgDepth.includes('math');
+      if (visual && !insideSvg && profile === 'cms') {
+        const css = sanitizeVisualCss(rawCss);
+        if (css) out += `<style data-visual-css>${css}</style>`;
+      }
       if (closeTag === -1) {
         i = source.length;
       } else {
@@ -479,6 +520,7 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
       continue;
     }
 
+    if (parsed.tag === 'svg' || parsed.tag === 'math') svgDepth.push(parsed.tag);
     out += rewriteOpenTag(parsed.tag, parsed.attrs, profile);
     if (parsed.selfClosing && !VOID_TAGS.has(parsed.tag) && allowed.has(parsed.tag)) {
       out += `</${parsed.tag}>`;
