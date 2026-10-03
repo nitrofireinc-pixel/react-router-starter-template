@@ -5,10 +5,12 @@ import {
   compareCaldevEvents,
   inferCaldevTrack,
   isoToProductionDateParts,
+  normalizeCaldevLinkUrl,
   normalizeCaldevPayload,
   normalizeCaldevTrack,
   productionEventToCaldevPayload,
   productionEventToStartDate,
+  sanitizeCaldevDescriptionHtml,
   shiftCaldevEventToDate,
   stripSimpleHtml,
 } from '../worker/src/caldev.mjs';
@@ -41,6 +43,21 @@ test('caldev payload normalization strips html and validates dates', () => {
   assert.equal(parsed.track, 'trip');
   assert.equal(parsed.all_day, 0);
   assert.equal(stripSimpleHtml('<b>A</b>&nbsp;B'), 'A B');
+});
+
+test('caldev description keeps safe hyperlinks and drops unsafe markup', () => {
+  assert.equal(normalizeCaldevLinkUrl('efhsband.org/boosters.html'), 'https://efhsband.org/boosters.html');
+  assert.equal(normalizeCaldevLinkUrl('javascript:alert(1)'), '');
+  const parsed = normalizeCaldevPayload({
+    title: 'Boosters',
+    description: '<p>Details at <a href="https://efhsband.org/boosters.html">Boosters</a><script>alert(1)</script></p>',
+    start_date: '2026-10-09',
+  });
+  assert.match(parsed.description, /<a href="https:\/\/efhsband\.org\/boosters\.html" target="_blank" rel="noopener noreferrer">Boosters<\/a>/);
+  assert.doesNotMatch(parsed.description, /script|javascript/i);
+  const unsafe = sanitizeCaldevDescriptionHtml('Click <a href="javascript:alert(1)">here</a> and <a href="https://efhsband.org/">home</a>');
+  assert.doesNotMatch(unsafe, /javascript/i);
+  assert.match(unsafe, /<a href="https:\/\/efhsband\.org\/" target="_blank" rel="noopener noreferrer">home<\/a>/);
 });
 
 test('production events map into caldev seed payloads', () => {

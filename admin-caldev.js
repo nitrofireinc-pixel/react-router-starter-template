@@ -33,6 +33,7 @@
   let exceptionDates = [];
   let lastTap = { id: null, at: 0 };
   let longPress = { timer: null, id: null, active: false, startX: 0, startY: 0 };
+  let descLinkRange = null;
 
   function pad(n) {
     return String(n).padStart(2, "0");
@@ -282,19 +283,43 @@
     return out.length ? out : [startDate].filter(Boolean);
   }
 
+  function normalizeLinkUrl(raw) {
+    const url = String(raw || "").trim();
+    if (!url || /[\s<>]/.test(url)) return "";
+    if (/^(javascript:|data:|vbscript:)/i.test(url)) return "";
+    if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+    if (url.startsWith("/") && !url.startsWith("//")) return url;
+    if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+    return "";
+  }
+
+  function unwrapNode(node, child) {
+    while (child.firstChild) node.insertBefore(child.firstChild, child);
+    node.removeChild(child);
+  }
+
   function sanitizeDescHtml(html) {
-    const allowed = /^(?:#text|B|STRONG|I|EM|U|BR|SPAN|DIV|P)$/i;
+    const allowed = /^(?:#text|B|STRONG|I|EM|U|BR|SPAN|DIV|P|A)$/i;
     const wrap = document.createElement("div");
     wrap.innerHTML = String(html || "");
     const walk = (node) => {
       [...node.childNodes].forEach((child) => {
         if (child.nodeType === 3) return;
         if (child.nodeType !== 1 || !allowed.test(child.tagName)) {
-          while (child.firstChild) node.insertBefore(child.firstChild, child);
-          node.removeChild(child);
+          unwrapNode(node, child);
           return;
         }
-        if (child.tagName === "SPAN") {
+        if (child.tagName === "A") {
+          const href = normalizeLinkUrl(child.getAttribute("href") || "");
+          [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+          if (!href) {
+            unwrapNode(node, child);
+            return;
+          }
+          child.setAttribute("href", href);
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener noreferrer");
+        } else if (child.tagName === "SPAN") {
           const color = String(child.style.color || "").trim();
           const size = String(child.style.fontSize || "").trim();
           child.removeAttribute("style");
@@ -304,8 +329,7 @@
           if (size) styles.push(`font-size:${size}`);
           if (styles.length) child.setAttribute("style", styles.join(";"));
           else {
-            while (child.firstChild) node.insertBefore(child.firstChild, child);
-            node.removeChild(child);
+            unwrapNode(node, child);
             return;
           }
         } else {
@@ -392,6 +416,7 @@
     panel.dataset.who = form.who || "";
     panel.querySelector('[name="location"]').value = form.location || "";
     panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
+    closeDescLinkBar();
     panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
     panel.querySelector('[name="repeat_no"]').checked = !form.repeat;
     const yesRadio = panel.querySelector('[data-cms-caldev-repeat-yes]');
@@ -424,6 +449,7 @@
       panel.hidden = true;
       panel.dataset.eventId = "";
     }
+    closeDescLinkBar();
     document.body.classList.remove("cms-caldev-editor-open");
     renderBoardOnly();
   }
@@ -528,6 +554,124 @@
     document.execCommand(cmd, false, null);
   }
 
+  function findLinkInSelection(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let node = sel.anchorNode;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    while (node && node !== editor) {
+      if (node.tagName === "A") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function polishDescLinks(editor) {
+    editor.querySelectorAll("a").forEach((anchor) => {
+      const href = normalizeLinkUrl(anchor.getAttribute("href") || "");
+      if (!href) {
+        const parent = anchor.parentNode;
+        if (!parent) return;
+        while (anchor.firstChild) parent.insertBefore(anchor.firstChild, anchor);
+        parent.removeChild(anchor);
+        return;
+      }
+      anchor.setAttribute("href", href);
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    });
+  }
+
+  function selectedDescText(editor) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !editor.contains(sel.anchorNode)) return "";
+    return String(sel.toString() || "").replace(/\s+/g, " ").trim();
+  }
+
+  function restoreDescLinkSelection(editor) {
+    if (!descLinkRange || !editor) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(descLinkRange);
+    editor.focus();
+  }
+
+  function closeDescLinkBar() {
+    const bar = root?.querySelector("[data-cms-caldev-link-bar]");
+    if (bar) bar.hidden = true;
+    descLinkRange = null;
+  }
+
+  function openDescLinkBar() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    const bar = root.querySelector("[data-cms-caldev-link-bar]");
+    const textInput = root.querySelector("[data-cms-caldev-link-text]");
+    const urlInput = root.querySelector("[data-cms-caldev-link-url]");
+    if (!editor || !bar || !textInput || !urlInput) return;
+    const sel = window.getSelection();
+    descLinkRange = sel && sel.rangeCount && editor.contains(sel.anchorNode)
+      ? sel.getRangeAt(0).cloneRange()
+      : null;
+    const existing = findLinkInSelection(editor);
+    textInput.value = existing
+      ? String(existing.textContent || "").replace(/\s+/g, " ").trim()
+      : (selectedDescText(editor) || "Click Here");
+    urlInput.value = existing?.getAttribute("href") || "https://";
+    bar.hidden = false;
+    urlInput.focus();
+    urlInput.select();
+  }
+
+  function applyDescLink() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    const textInput = root.querySelector("[data-cms-caldev-link-text]");
+    const urlInput = root.querySelector("[data-cms-caldev-link-url]");
+    if (!editor) return;
+    const label = String(textInput?.value || "").replace(/\s+/g, " ").trim() || "Click Here";
+    const href = normalizeLinkUrl(urlInput?.value || "");
+    if (!href) {
+      showToast("Enter a web address like https://efhsband.org", true);
+      return;
+    }
+    restoreDescLinkSelection(editor);
+    const existing = findLinkInSelection(editor);
+    const html = `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+    if (existing) {
+      existing.setAttribute("href", href);
+      existing.setAttribute("target", "_blank");
+      existing.setAttribute("rel", "noopener noreferrer");
+      existing.textContent = label;
+    } else if (descLinkRange && !descLinkRange.collapsed) {
+      descLinkRange.deleteContents();
+      const wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      const node = wrap.firstChild;
+      descLinkRange.insertNode(node);
+    } else {
+      editor.focus();
+      document.execCommand("insertHTML", false, html);
+    }
+    polishDescLinks(editor);
+    closeDescLinkBar();
+  }
+
+  function removeDescLink() {
+    const editor = root.querySelector("[data-cms-caldev-desc]");
+    if (!editor) return;
+    restoreDescLinkSelection(editor);
+    const existing = findLinkInSelection(editor);
+    if (existing) {
+      const parent = existing.parentNode;
+      if (parent) {
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+      }
+    } else {
+      document.execCommand("unlink", false, null);
+    }
+    closeDescLinkBar();
+  }
+
   function renderShell() {
     root.innerHTML = `
       <div class="cms-caldev" data-cms-caldev-app>
@@ -630,6 +774,7 @@
                 <button type="button" data-cms-caldev-desc-cmd="bold" title="Bold"><b>B</b></button>
                 <button type="button" data-cms-caldev-desc-cmd="italic" title="Italic"><i>I</i></button>
                 <button type="button" data-cms-caldev-desc-cmd="underline" title="Underline"><u>U</u></button>
+                <button type="button" data-cms-caldev-desc-link title="Insert or edit a link">Link</button>
                 <label title="Color"><span>Color</span><input type="color" data-cms-caldev-desc-color value="#002142"></label>
                 <label title="Size"><span>Size</span>
                   <select data-cms-caldev-desc-size>
@@ -640,6 +785,19 @@
                     <option value="28px">Extra large</option>
                   </select>
                 </label>
+              </div>
+              <div class="cms-caldev-link-bar" data-cms-caldev-link-bar hidden>
+                <label>Text to click
+                  <input type="text" data-cms-caldev-link-text maxlength="200" placeholder="Click Here" />
+                </label>
+                <label>Goes to
+                  <input type="url" data-cms-caldev-link-url placeholder="https://example.org/page" />
+                </label>
+                <div class="cms-caldev-link-bar-actions">
+                  <button type="button" class="btn primary" data-cms-caldev-link-apply>Add link</button>
+                  <button type="button" class="btn outline" data-cms-caldev-link-remove>Remove</button>
+                  <button type="button" class="btn outline" data-cms-caldev-link-cancel>Cancel</button>
+                </div>
               </div>
               <div class="cms-caldev-desc" contenteditable="true" role="textbox" aria-multiline="true" data-cms-caldev-desc data-placeholder="Event details"></div>
             </label>
@@ -929,6 +1087,24 @@
     if (bound) return;
     bound = true;
 
+    root.addEventListener("mousedown", (e) => {
+      if (e.target.closest("[data-cms-caldev-desc-link], [data-cms-caldev-link-apply], [data-cms-caldev-link-remove], [data-cms-caldev-link-cancel]")) {
+        e.preventDefault();
+      }
+    });
+
+    root.addEventListener("keydown", (e) => {
+      if (!e.target.closest("[data-cms-caldev-link-bar]")) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyDescLink();
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeDescLinkBar();
+      }
+    });
+
     root.addEventListener("click", (e) => {
       const trackBtn = e.target.closest("[data-cms-caldev-track]");
       if (trackBtn && root.contains(trackBtn)) {
@@ -975,6 +1151,28 @@
       if (removeEx) {
         exceptionDates = exceptionDates.filter((d) => d !== removeEx.getAttribute("data-cms-caldev-remove-exception"));
         renderExceptions();
+        return;
+      }
+
+      const descLink = e.target.closest("[data-cms-caldev-desc-link]");
+      if (descLink) {
+        e.preventDefault();
+        openDescLinkBar();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-apply]")) {
+        e.preventDefault();
+        applyDescLink();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-remove]")) {
+        e.preventDefault();
+        removeDescLink();
+        return;
+      }
+      if (e.target.closest("[data-cms-caldev-link-cancel]")) {
+        e.preventDefault();
+        closeDescLinkBar();
         return;
       }
 

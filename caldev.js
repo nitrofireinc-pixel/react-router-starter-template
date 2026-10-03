@@ -67,6 +67,72 @@
       .replace(/"/g, '&quot;');
   }
 
+  function normalizeLinkUrl(raw) {
+    const url = String(raw || '').trim();
+    if (!url || /[\s<>]/.test(url)) return '';
+    if (/^(javascript:|data:|vbscript:)/i.test(url)) return '';
+    if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+    if (url.startsWith('/') && !url.startsWith('//')) return url;
+    if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+    return '';
+  }
+
+  function unwrapNode(node, child) {
+    while (child.firstChild) node.insertBefore(child.firstChild, child);
+    node.removeChild(child);
+  }
+
+  function formatDescHtml(html) {
+    const allowed = /^(?:B|STRONG|I|EM|U|BR|SPAN|DIV|P|A)$/i;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    const walk = (node) => {
+      [...node.childNodes].forEach((child) => {
+        if (child.nodeType === 3) return;
+        if (child.nodeType !== 1 || !allowed.test(child.tagName)) {
+          unwrapNode(node, child);
+          return;
+        }
+        if (child.tagName === 'A') {
+          const href = normalizeLinkUrl(child.getAttribute('href') || '');
+          [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+          if (!href) {
+            unwrapNode(node, child);
+            return;
+          }
+          child.setAttribute('href', href);
+          child.setAttribute('target', '_blank');
+          child.setAttribute('rel', 'noopener noreferrer');
+        } else if (child.tagName === 'SPAN') {
+          const color = String(child.style.color || '').trim();
+          const size = String(child.style.fontSize || '').trim();
+          child.removeAttribute('style');
+          child.removeAttribute('class');
+          const styles = [];
+          if (color && !/url\s*\(|expression/i.test(color)) styles.push(`color:${color}`);
+          if (size && /^\d+(\.\d+)?(px|pt|em|rem)$/i.test(size)) styles.push(`font-size:${size}`);
+          if (styles.length) child.setAttribute('style', styles.join(';'));
+          else {
+            unwrapNode(node, child);
+            return;
+          }
+        } else {
+          child.removeAttribute('style');
+          child.removeAttribute('class');
+        }
+        walk(child);
+      });
+    };
+    walk(wrap);
+    return wrap.innerHTML.trim();
+  }
+
+  function stripDescText(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    return String(wrap.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
   function visibleEvents() {
     return state.events;
   }
@@ -142,7 +208,7 @@
     if (event.who) bits.push(event.who);
     if (event.location) bits.push(event.location);
     const head = bits.filter(Boolean).join(' · ');
-    const body = String(event.description || '').trim();
+    const body = stripDescText(event.description);
     return [head, body].filter(Boolean).join('\n\n');
   }
 
@@ -337,14 +403,14 @@
             <ul>
               ${events.map((event) => `
                 <li>
-                  <button type="button" class="caldev-rundown-item" data-caldev-open="${event.id}">
+                  <article class="caldev-rundown-item" data-caldev-open="${event.id}" role="button" tabindex="0">
                     ${trackChip(event.track)}
                     <span class="caldev-rundown-copy">
                       <strong>${escapeHtml(event.title)}</strong>
                       <small>${escapeHtml(eventTimeLabel(event))}${event.who ? ` · ${escapeHtml(event.who)}` : ''}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
-                      ${event.description ? `<span>${escapeHtml(event.description)}</span>` : ''}
+                      ${event.description ? `<span>${formatDescHtml(event.description)}</span>` : ''}
                     </span>
-                  </button>
+                  </article>
                 </li>
               `).join('')}
             </ul>
@@ -367,7 +433,7 @@
           <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
           ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
           ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
-          ${event.description ? `<p class="caldev-detail-body">${escapeHtml(event.description)}</p>` : '<p class="draft">No details yet.</p>'}
+          ${event.description ? `<div class="caldev-detail-body">${formatDescHtml(event.description)}</div>` : '<p class="draft">No details yet.</p>'}
         </div>
       </div>
     `;
@@ -412,9 +478,20 @@
       render();
     });
     root.querySelectorAll('[data-caldev-open]').forEach((button) => {
-      button.addEventListener('click', () => {
+      const openEvent = () => {
         state.selectedId = Number(button.dataset.caldevOpen);
         render();
+      };
+      button.addEventListener('click', (event) => {
+        if (event.target.closest('a')) return;
+        openEvent();
+      });
+      button.addEventListener('keydown', (event) => {
+        if (event.target.closest('a')) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openEvent();
+        }
       });
     });
     root.querySelectorAll('[data-caldev-close]').forEach((node) => {
