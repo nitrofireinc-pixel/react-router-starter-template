@@ -193,7 +193,8 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorCss, /@media \(max-width:1024px\)/);
   assert.match(editorCss, /\.gjs-pn-panel/);
   assert.match(editorCss, /min-width:36px/);
-  assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?flex-wrap:wrap/);
+  assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?flex-wrap:nowrap/);
+  assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?min-width:240px/);
   assert.match(editorCss, /max-width:min\(100%,304px\)/);
   assert.match(page, /This page is being edited/);
   assert.match(page, /Add a section/);
@@ -224,6 +225,8 @@ test('visual editor action bar uses inline SVG icons', () => {
   assert.match(visualJs, /tlb-clone', 'Copy'/);
   assert.doesNotMatch(visualJs, /⧉/);
   assert.match(visualCss, /\.visual-tool-icon/);
+  assert.match(visualJs, /const minWidth = 240/);
+  assert.match(visualCss, /min-width:240px/);
 });
 
 test('published Join content stays on the existing public page read', () => {

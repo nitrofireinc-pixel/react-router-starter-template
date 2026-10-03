@@ -624,7 +624,11 @@
     if (!toolbar || !frame || toolbar.style.display === 'none') return;
     const limit = frame.getBoundingClientRect();
     if (!limit.width) return;
-    toolbar.style.maxWidth = `${Math.max(120, Math.floor(limit.width - 8))}px`;
+    const minWidth = 240;
+    const maxInside = Math.max(minWidth, Math.floor(limit.width - 8));
+    toolbar.style.minWidth = `${minWidth}px`;
+    toolbar.style.width = 'max-content';
+    toolbar.style.maxWidth = `${Math.min(304, maxInside)}px`;
     const box = toolbar.getBoundingClientRect();
     if (!box.width) return;
     let shift = 0;

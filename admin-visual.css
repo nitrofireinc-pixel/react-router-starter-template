@@ -168,9 +168,10 @@ a.visual-banner-btn,
 }
 .gjs-toolbar{
   display:flex !important;
-  flex-wrap:wrap !important;
+  flex-wrap:nowrap !important;
   align-items:stretch;
-  width:auto !important;
+  width:max-content !important;
+  min-width:240px !important;
   max-width:min(100%,304px) !important;
   height:auto !important;
   box-sizing:border-box;
@@ -179,7 +180,7 @@ a.visual-banner-btn,
   border:1px solid #dbe4f0;
   border-radius:8px;
   box-shadow:0 6px 20px rgba(0,0,0,.18);
-  overflow:hidden;
+  overflow:visible;
 }
 .gjs-toolbar-item{
   width:auto !important;
