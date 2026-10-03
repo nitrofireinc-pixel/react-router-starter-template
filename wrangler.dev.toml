@@ -1,11 +1,10 @@
-name = "efhsband-live"
+# Isolated preview only. Deploy with: npx wrangler deploy -c wrangler.dev.toml
+# This file must not use the production Worker name or production D1.
+name = "efhsband-dev"
 main = "worker/src/worker.mjs"
 compatibility_date = "2026-07-29"
 account_id = "d4e69b2379a7e3c86020154cf70a1d07"
 workers_dev = true
-routes = [
-  { pattern = "efhsband.org/*", zone_name = "efhsband.org" }
-]
 
 [assets]
 directory = "./worker/public"
@@ -19,8 +18,9 @@ CONTACT_FROM_EMAIL = "no-reply@efhsband.org"
 CONTACT_FROM_NAME = "East Forsyth Band Boosters"
 CONTACT_DEFAULT_EMAIL = ""
 CONTACT_EMAIL_PROVIDER = "none"
+DEV_UPLOAD_ORIGIN = "https://efhsband.org"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "efhsband-db"
-database_id = "73681cba-4863-4abb-86d4-b140694bcde2"
+database_name = "efhsband-dev-db"
+database_id = "e71387af-9198-48e6-b6e9-72729866bdae"

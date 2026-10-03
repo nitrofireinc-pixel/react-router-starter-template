@@ -891,6 +891,55 @@ body.efhs-theme .footer h3{
   body.efhs-theme .header-donate{display:none!important}
 }
 
+/* Extra nav items (dev has 9 vs live 7) clip Donate on the single-row header
+   between 1200 and 1339. Drop to brand-over-nav and keep Donate on the nav row. */
+@media (min-width:1200px) and (max-width:1339px){
+  body.efhs-theme header.site-header{
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:center;
+    min-height:0;
+    height:auto;
+    max-height:none;
+    padding:8px 16px 6px;
+    column-gap:8px;
+    row-gap:2px;
+  }
+  body.efhs-theme .header-inner{
+    flex:1 1 100%;
+    width:100%;
+    justify-content:center;
+    min-height:64px;
+  }
+  body.efhs-theme .brand{justify-content:center}
+  body.efhs-theme header.site-header nav,
+  body.efhs-theme header.site-header #site-nav{
+    flex:1 1 auto;
+    width:auto;
+    max-width:calc(100% - 8.5rem);
+    justify-content:center;
+    flex-wrap:nowrap;
+    padding:0 0 4px;
+    gap:0;
+    min-width:0;
+  }
+  body.efhs-theme header.site-header nav a,
+  body.efhs-theme header.site-header nav .nav-notify-me,
+  body.efhs-theme header.site-header nav .nav-support-toggle{
+    font-size:.62rem;
+    letter-spacing:.04em;
+    padding:6px 5px;
+  }
+  body.efhs-theme .header-donate{
+    display:inline-flex;
+    flex:0 0 auto;
+    margin:0 0 4px;
+    padding:8px 12px;
+    font-size:.66rem;
+    min-height:36px;
+  }
+}
+
 /* Compact header on real narrow widths: hamburger | page-centered title | login + bell */
 @media (max-width:767px){
   body.efhs-theme header.site-header,
