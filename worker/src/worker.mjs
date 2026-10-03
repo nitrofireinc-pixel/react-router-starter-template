@@ -134,6 +134,9 @@ export const DEFAULT_SITE = {
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
 };
 
+/** Public `/api/site` and SSR chrome may only use these CMS fields. Secrets stay in site_content, not JSON. */
+export const PUBLIC_SITE_KEYS = Object.freeze(Object.keys(DEFAULT_SITE));
+
 export const DEFAULT_EVENTS = [
   { date_label: 'Aug', date_detail: '01', event_year: 2026, title: 'Band Camp / Preseason Prep', description: 'Placeholder: add official summer band camp dates, times, and location.', sort_order: 1 },
   { date_label: 'Aug', date_detail: 'TBD', event_year: 2026, title: 'Parent Preview Night', description: 'Placeholder: add location and what families should bring.', sort_order: 2 },
@@ -2943,16 +2946,28 @@ export function applyHomeFeatureCards(html = '', cards = {}) {
   return `${source}\n${section}`;
 }
 
-async function getSite(env) {
-  const rows = await env.DB.prepare('SELECT key, value FROM site_content').all();
-  const payload = { ...DEFAULT_SITE };
-  for (const row of rows.results || []) payload[row.key] = row.value;
+export function publicSitePayload(site = {}) {
+  const source = site && typeof site === 'object' && !Array.isArray(site) ? site : {};
+  const payload = {};
+  for (const key of PUBLIC_SITE_KEYS) {
+    payload[key] = source[key] ?? DEFAULT_SITE[key];
+  }
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
   payload.boosters_dues_enabled = isBoostersDuesEnabled(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   return payload;
+}
+
+async function getSite(env) {
+  const rows = await env.DB.prepare('SELECT key, value FROM site_content').all();
+  const payload = { ...DEFAULT_SITE };
+  const allowed = new Set(PUBLIC_SITE_KEYS);
+  for (const row of rows.results || []) {
+    if (allowed.has(row.key)) payload[row.key] = row.value;
+  }
+  return publicSitePayload(payload);
 }
 
 async function getSiteContentValue(env, key) {
