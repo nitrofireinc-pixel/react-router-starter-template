@@ -88,6 +88,7 @@ import {
   COMING_SOON_PAGES,
   PREVIOUS_HERO_SUBTITLE,
   comingSoonPageHtml,
+  decorateFundraisingPage,
   decorateHomeRedesign,
   injectComingSoonLogos,
   plainHeroSubtitle,
@@ -315,7 +316,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'honorable-mention-dropdown-20261003';
+const ASSET_VERSION = 'fundraising-cards-20261003';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -6880,7 +6881,10 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'fundraising') {
-    return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(page.body_html), {
+    const decorated = decorateFundraisingPage(page.body_html, {
+      events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [],
+    });
+    return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(decorated), {
       topics: ['fundraising', 'calendar'],
       heading: 'Email fundraising updates',
       detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
@@ -7035,7 +7039,7 @@ function rowsOf(result) {
   return result?.results || [];
 }
 
-function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false } = {}) {
+function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false } = {}) {
   const jobs = [
     {
       key: 'site',
@@ -7091,7 +7095,7 @@ function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoos
       parse: (result) => rowsOf(result),
     });
   }
-  if (isHome) {
+  if (isHome || needsEvents) {
     jobs.push({
       key: `home-events:${today}`,
       optional: true,
@@ -7099,6 +7103,8 @@ function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoos
       statement: () => caldevEventsFromDateStatement(env, { todayIso: today, limit: 80 }),
       parse: (result) => mapCaldevRows(result),
     });
+  }
+  if (isHome) {
     jobs.push({
       key: 'home-source-pages',
       optional: true,
@@ -11594,11 +11600,29 @@ export function renderPublicThemePhotoStyle(vars = {}) {
   return `<style id="efhs-theme-photos">:root{--efhs-hero-photo:${cssUrl(vars.hero)};--efhs-page-photo:${cssUrl(vars.page)};--efhs-card-photo-1:${cssUrl(vars.cards?.[0])};--efhs-card-photo-2:${cssUrl(vars.cards?.[1])};--efhs-card-photo-3:${cssUrl(vars.cards?.[2])};}</style>`;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null } = {}) {
+function mergePublicFundraiserEvents(primary = [], fallback = []) {
+  const seen = new Set();
+  const merged = [];
+  for (const event of [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(fallback) ? fallback : [])]) {
+    if (!event) continue;
+    const key = event.id != null ? `id:${event.id}` : `t:${event.title || ''}|${event.start_date || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(event);
+  }
+  return merged;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [] } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug);
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, { calendarHighlights, home });
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
+    calendarHighlights,
+    home,
+    deadlineEvents,
+    fundraiserEvents,
+  });
   const showMarquee = showSponsorMarquee == null
     ? publicPageShowsSponsorMarquee(page)
     : Boolean(showSponsorMarquee);
@@ -11611,6 +11635,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   if (maintenancePreview) bodyClasses.push('maintenance-preview');
   if (page.slug === 'calendar') bodyClasses.push('caldev-body');
   if (isHomePage) bodyClasses.push('home-page');
+  if (page.slug === 'fundraising') bodyClasses.push('fundraising-page');
   if (isComingSoonPage) bodyClasses.push('coming-soon-page');
   if (page.slug === 'not-found') bodyClasses.push('not-found-page');
   const bodyClass = ` class="${bodyClasses.join(' ')}"`;
@@ -11824,10 +11849,12 @@ async function serveStaticOrCms(request, env, url) {
     });
     if (page) {
       const isHome = Boolean(page.is_home) || page.slug === 'home';
+      const isFundraising = page.slug === 'fundraising';
       const reads = await loadPublicCmsReads(env, {
         path,
         today,
         isHome,
+        needsEvents: isHome || isFundraising,
         needsBoosters: page.slug === 'boosters' || isHome,
         needsStaff: page.slug === 'directors',
       });
@@ -11847,6 +11874,9 @@ async function serveStaticOrCms(request, env, url) {
         sponsors: allSponsors.filter((sponsor) => sponsorShowsMarquee(sponsor) || sponsorShowsOnPage(sponsor)),
         instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
       } : null;
+      const fundraiserEvents = isFundraising
+        ? mergePublicFundraiserEvents(reads.homeEvents, reads.deadlineEvents)
+        : [];
       if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
         page.letterman_copy = await getLettermanFormCopy(env);
       }
@@ -11857,6 +11887,8 @@ async function serveStaticOrCms(request, env, url) {
         deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
         calendarHighlights: null,
         home,
+        deadlineEvents: reads.deadlineEvents,
+        fundraiserEvents,
         publicRead: {
           site: reads.site,
           sponsors: allSponsors,
