@@ -239,15 +239,33 @@ function escapeAttr(value) {
     .replace(/>/g, '&gt;');
 }
 
+function decodeCssEscapes(value = '') {
+  return String(value || '').replace(/\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|\\(.)/g, (_, hex, ch) => {
+    if (hex) {
+      const code = Number.parseInt(hex, 16);
+      if (!Number.isFinite(code) || code === 0) return '';
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return '';
+      }
+    }
+    return ch || '';
+  });
+}
+
 function cssUrlsAreSafe(value = '') {
   const urls = [...String(value || '').matchAll(/url\s*\(\s*(?:['"]([^'"]+)['"]|([^'")]+))\s*\)/gi)];
   if (!urls.length) return true;
   return urls.every((match) => isSafeRelativeOrSameOriginUrl((match[1] || match[2] || '').trim()));
 }
 
+const CSS_DANGEROUS = /expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:|@import/i;
+
 export function sanitizeCssText(css = '', { allowUrls = true } = {}) {
   const source = String(css || '');
-  if (/expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:|@import/i.test(source)) {
+  const decodedSource = decodeCssEscapes(source);
+  if (CSS_DANGEROUS.test(source) || CSS_DANGEROUS.test(decodedSource)) {
     return '';
   }
   const parts = [];
@@ -255,16 +273,21 @@ export function sanitizeCssText(css = '', { allowUrls = true } = {}) {
     const split = declaration.split(':');
     if (split.length < 2) continue;
     const rawProp = split[0].trim();
-    const prop = rawProp.toLowerCase();
     const next = split.slice(1).join(':').trim();
-    if (!prop || !next) continue;
+    if (!rawProp || !next) continue;
+    // CSS escapes (\75rl(, u\72 l(, \69mage-set() hide url()/image-set() from
+    // literal regexes. Reject any declaration that still contains a backslash
+    // after we decode escapes for the url / image-set checks.
+    if (rawProp.includes('\\') || next.includes('\\')) continue;
+    const prop = decodeCssEscapes(rawProp).toLowerCase();
+    const decoded = decodeCssEscapes(next);
     const isCustom = prop.startsWith('--') && /^--[a-z0-9_-]+$/i.test(prop);
     if (!isCustom && !SAFE_CSS_PROP.has(prop)) continue;
-    if (/expression|javascript:|vbscript:|-moz-binding|behavior/i.test(next)) continue;
-    if (/image-set\s*\(|-webkit-image-set\s*\(/i.test(next)) continue;
-    if (/url\s*\(/i.test(next)) {
-      if (!allowUrls || !cssUrlsAreSafe(next)) continue;
-      if (isCustom && !/^url\s*\(/i.test(next)) continue;
+    if (/expression|javascript:|vbscript:|-moz-binding|behavior/i.test(decoded)) continue;
+    if (/image-set\s*\(|-webkit-image-set\s*\(/i.test(decoded)) continue;
+    if (/url\s*\(/i.test(decoded)) {
+      if (!allowUrls || !cssUrlsAreSafe(decoded)) continue;
+      if (isCustom && !/^url\s*\(/i.test(decoded)) continue;
     } else if (isCustom) {
       continue;
     }

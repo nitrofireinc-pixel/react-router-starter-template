@@ -21,6 +21,7 @@ import worker, {
   sanitizeAssignablePermissions,
   sanitizeCmsPageHtml,
   sanitizeHomeBodyHtml,
+  sanitizePageSectionHtml,
   serializePagePayload,
 } from '../worker/src/worker.mjs';
 import { sanitizeAllowlistHtml, sanitizeHomeAllowlistHtml } from '../worker/src/html-sanitizer.mjs';
@@ -476,6 +477,34 @@ test('Phase 0 sanitizer drops SVG style foreign-content XSS and unsafe urls', as
   assert.match(homeKeep, /role="img"/);
   assert.match(homeKeep, /aria-label="Band on the field"/);
   assert.match(homeKeep, /--img: url\('\/assets\/home\/home2-13.jpg'\)/);
+});
+
+test('Phase 0 sanitizer rejects CSS-escape url() and image-set() bypasses', () => {
+  const payloads = [
+    'background-image:\\75rl(https://evil.example/x.jpg)',
+    'background-image:\\75 rl(\'//evil.example/x.jpg\')',
+    'background-image:u\\rl(https://evil.example/x.jpg)',
+    'background-image:u\\72 l(\'/\\\\evil\')',
+    'background-image:\\69mage-set(url(https://evil.example/x.jpg) 1x)',
+    'background-image:\\69 mage-set(\'http://evil.example/a.jpg\')',
+  ];
+  const sanitizers = [
+    ['page', sanitizeCmsPageHtml],
+    ['home', sanitizeHomeBodyHtml],
+    ['section', sanitizePageSectionHtml],
+  ];
+  for (const style of payloads) {
+    for (const [label, fn] of sanitizers) {
+      const out = fn(`<div style="${style}"></div><p>Safe</p>`);
+      assert.match(out, /<p>Safe<\/p>/, `${label} should keep safe text`);
+      assert.doesNotMatch(out, /evil/i, `${label} leaked CSS-escape url: ${style}`);
+      assert.doesNotMatch(out, /url\s*\(/i, `${label} kept url() after CSS escape: ${style}`);
+      assert.doesNotMatch(out, /image-set/i, `${label} kept image-set after CSS escape: ${style}`);
+      assert.doesNotMatch(out, /style="/i, `${label} kept escaped style: ${style}`);
+    }
+  }
+  const ok = sanitizeCmsPageHtml('<div style="background-image:url(\'/assets/home/x.jpg\')"></div>');
+  assert.match(ok, /background-image: url\('\/assets\/home\/x.jpg'\)/);
 });
 
 function pageRow(slug, { active = 1, id = 10, body_html = '<p>Hi</p>' } = {}) {
