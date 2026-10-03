@@ -1815,13 +1815,8 @@ test('formatUserLastLoginDisplay formats Eastern timestamps and empty values', (
   assert.match(label, /2026/);
 });
 
-test('letterman deadline banner is red-alert copy with a form link', () => {
-  const banner = renderLettermanDeadlineBanner();
-  assert.match(banner, /letterman-deadline-banner/);
-  assert.match(banner, /September 8th/);
-  assert.match(banner, /href="\/letterman-jacket.html"/);
-  assert.match(banner, />Click Here</);
-  assert.match(banner, /Forms and Payments/);
+test('letterman deadline banner is not rendered on public pages', () => {
+  assert.equal(renderLettermanDeadlineBanner(), '');
 });
 
 test('notify me nav control is rendered in public navigation', () => {

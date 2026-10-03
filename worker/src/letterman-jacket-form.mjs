@@ -509,7 +509,7 @@ export function renderLettermanPageBody(page = {}, copy = DEFAULT_LETTERMAN_FORM
 }
 
 export function renderLettermanDeadlineBanner() {
-  return `<div class="letterman-deadline-banner" data-letterman-deadline role="status">Deadline: Letterman Jacket Forms and Payments Due By September 8th! <a href="/letterman-jacket.html">Click Here</a> for order form!</div>`;
+  return '';
 }
 
 export const LETTERMAN_CMS_PAGE = {
