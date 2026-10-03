@@ -5023,6 +5023,24 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   margin:0;
 }
 .site-chrome .site-deadline-banners{position:relative;z-index:1}
+@media (orientation:landscape) and (max-height:500px){
+  .site-chrome,
+  header.site-header{
+    position:relative;
+    top:auto;
+  }
+  .sponsor-marquee-section,
+  .site-deadline-banners{
+    position:relative;
+  }
+  .sponsor-marquee-section{padding:3px 0}
+  .caldev-deadline-banner,
+  .site-deadline-banners .caldev-deadline-banner{
+    padding:6px 12px;
+    font-size:.86rem;
+    line-height:1.25;
+  }
+}
 .caldev-deadline-banner a,
 .caldev-deadline-banner button{
   color:#fff;
