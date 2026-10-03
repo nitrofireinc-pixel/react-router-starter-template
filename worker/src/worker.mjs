@@ -509,6 +509,10 @@ export function lockPageSettingsToExisting(page, existing) {
   };
 }
 
+export function isVisualPilotSlug(slug = '') {
+  return String(slug || '').trim().toLowerCase() === 'join';
+}
+
 export function requestedPrivilegedPermissions(permissions) {
   return parsePermissions(permissions).filter((item) => (
     PRIVILEGED_PERMISSIONS.has(String(item).trim().toLowerCase())
@@ -568,9 +572,12 @@ function samePermissionList(left, right) {
 export function assertSafeSelfPrivilegeEdit(actor, targetId, payload = {}, existing = {}) {
   if (isSuperAdmin(actor)) return { ok: true, payload };
   if (Number(actor?.id) !== Number(targetId)) return { ok: true, payload };
-  const requestedRole = String(payload.role || existing.role || 'editor').trim().toLowerCase();
+  const requestedRole = payload.role == null || payload.role === ''
+    ? String(existing.role || 'editor').trim().toLowerCase()
+    : String(payload.role).trim().toLowerCase();
   const existingRole = String(existing.role || 'editor').trim().toLowerCase();
-  if (requestedRole !== existingRole || !samePermissionList(payload.permissions, existing.permissions)) {
+  const permissionsProvided = Object.prototype.hasOwnProperty.call(payload, 'permissions');
+  if (requestedRole !== existingRole || (permissionsProvided && !samePermissionList(payload.permissions, existing.permissions))) {
     return { ok: false, status: 403, detail: 'You cannot change your own role or permissions' };
   }
   return {
@@ -1742,7 +1749,7 @@ async function hmacSign(value, secret) {
   return base64Url(await crypto.subtle.sign('HMAC', key, TEXT.encode(value)));
 }
 
-async function makeSession(user, env) {
+export async function makeSession(user, env) {
   const payload = base64Url(TEXT.encode(JSON.stringify({ uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) })));
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
@@ -2602,9 +2609,10 @@ async function resolveFormRecipientEmails(env, ids = []) {
 
 async function handleBuiltFormSubmit(request, env, slug) {
   const formSlug = String(slug || '').trim().toLowerCase();
-  if (formSlug === 'letterman-jacket' || formSlug === 'in-kind') {
-    const blocked = await rejectInactivePublicFormPage(env, formSlug);
-    if (blocked) return blocked;
+  const page = await getPageBySlug(env, formSlug, true);
+  if (formSlug === 'letterman-jacket' || formSlug === 'in-kind' || page) {
+    const blocked = publicFormSubmitGate(page);
+    if (!blocked.ok) return jsonResponse({ detail: blocked.detail }, blocked.status);
   }
   const payload = await request.json().catch(() => ({}));
   if (String(payload.company || '').trim()) return jsonResponse({ ok: true });
@@ -8345,7 +8353,7 @@ export function sanitizeHomeBodyHtml(html = '') {
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\scontenteditable\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:role|spellcheck|aria-label|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:spellcheck|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\sclass="([^"]*)"/gi, (_, classes) => {
       const cleaned = String(classes || '')
         .split(/\s+/)
@@ -8628,6 +8636,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(config);
   }
   if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'become-a-sponsor');
+    if (blocked) return blocked;
     const contentType = String(request.headers.get('content-type') || '');
     let businessName = '';
     let address = '';
@@ -8892,6 +8902,8 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
   if (url.pathname === '/api/donations' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'fundraising');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const donorName = String(payload.donor_name || payload.name || '').trim();
     const amountDisplay = String(payload.amount_display || '').trim();
@@ -9026,6 +9038,8 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/dues' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'boosters');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const studentName = String(payload.student_name || payload.child_name || payload.name || '').trim();
     const email = String(payload.email || '').trim().toLowerCase();
@@ -9226,6 +9240,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
   }
   if (url.pathname === '/api/contact' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'contact');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     if (String(payload.company || '').trim()) {
       return jsonResponse({ ok: true }); // honeypot
@@ -9976,7 +9992,10 @@ async function routeApi(request, env, url, ctx = null) {
     const selfEdit = assertSafeSelfPrivilegeEdit(auth.user, id, payload, existing);
     if (!selfEdit.ok) return jsonResponse({ detail: selfEdit.detail }, selfEdit.status);
     const nextPayload = selfEdit.payload;
-    const privilege = assertSafeUserPrivilegeGrant(auth.user, nextPayload);
+    const editingSelf = Number(auth.user.id) === id && !isSuperAdmin(auth.user);
+    const privilege = editingSelf
+      ? { ok: true }
+      : assertSafeUserPrivilegeGrant(auth.user, nextPayload);
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
     const wantsAdmin = nextPayload.role === 'admin' && isSuperAdmin(auth.user);
     const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
@@ -10035,7 +10054,7 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
-    if (String(existing.slug || '').trim().toLowerCase() === 'join') {
+    if (isVisualPilotSlug(existing.slug)) {
       return jsonResponse({
         detail: 'Join the Band is edited in the visual editor. Open the Join visual editor to save this page.',
       }, 409);
