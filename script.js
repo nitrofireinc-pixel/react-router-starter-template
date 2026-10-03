@@ -70,6 +70,17 @@ function syncStickyHeaderHeight() {
   );
 }
 
+let stickyStackObserver = null;
+function watchStickyStack() {
+  const chrome = document.querySelector('.site-chrome');
+  const header = document.querySelector('header.site-header');
+  const stack = chrome || header;
+  syncStickyHeaderHeight();
+  if (!stack || stickyStackObserver || typeof ResizeObserver !== 'function') return;
+  stickyStackObserver = new ResizeObserver(() => syncStickyHeaderHeight());
+  stickyStackObserver.observe(stack);
+}
+
 function syncNavMode() {
   const html = document.documentElement;
   if (mediaWantsCompactNav()) {
@@ -224,6 +235,7 @@ function placeHeaderQuickActions() {
   ensureNavBackdrop();
   ensureHeaderQuickActions();
   syncNavMode();
+  watchStickyStack();
   const button = document.querySelector('.menu-button');
   if (!button) return;
   enhanceMenuButton(button);
@@ -1190,5 +1202,8 @@ function syncAddToHomeButtonState(button) {
   }
 
   syncIcalButtons();
-  document.addEventListener('DOMContentLoaded', syncIcalButtons);
+  document.addEventListener('DOMContentLoaded', () => {
+    syncIcalButtons();
+    watchStickyStack();
+  });
 })();

@@ -2325,7 +2325,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261003c'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261003d'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2521,6 +2521,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(scriptSrc, /syncStickyHeaderHeight/);
   assert.match(scriptSrc, /querySelector\('\.site-chrome'\)/);
   assert.match(scriptSrc, /const stack = chrome \|\| header/);
+  assert.match(scriptSrc, /watchStickyStack/);
+  assert.match(scriptSrc, /ResizeObserver/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
