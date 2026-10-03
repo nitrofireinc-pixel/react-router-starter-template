@@ -51,7 +51,7 @@ export function isHomeRoutineRehearsal(event = {}) {
 export function homeEventTag(event = {}) {
   if (isHomeFundraiserEvent(event)) return { label: 'Fundraiser', className: 'ev-fund' };
   const track = String(event.track || '').toLowerCase();
-  if (track === 'deadline') return { label: 'Deadline', className: 'ev-deadline' };
+  if (track === 'deadline') return { label: 'IMPORTANT', className: 'ev-deadline' };
   if (track === 'game') return { label: 'Game', className: '' };
   if (track === 'meeting') return { label: 'Meeting', className: '' };
   if (/parade/i.test(event.title || '')) return { label: 'Parade', className: '' };
@@ -550,7 +550,7 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
     </div>
     <div class="events" data-home-slot="events" data-home-dynamic>
       <article class="ev"><div class="db">Oct<b>09</b></div><div><h3>Game Night</h3><p>Away Game at Parkland · Student Section Theme: Western Night</p></div><span class="ev-tag">Game</span></article>
-      <article class="ev ev-deadline"><div class="db">Oct<b>09</b></div><div><h3>Band Photos</h3><p>Taken after dinner, before departure · 4–5 PM</p></div><span class="ev-tag">Deadline</span></article>
+      <article class="ev ev-deadline"><div class="db">Oct<b>09</b></div><div><h3>Band Photos</h3><p>Taken after dinner, before departure · 4–5 PM</p></div><span class="ev-tag">IMPORTANT</span></article>
       <article class="ev ev-fund"><div class="db">Oct<b>24</b></div><div><h3>Fundraiser / Mattress Sale</h3><p>Mattress Warehouse, 820 S Main St, Kernersville · Students must attend</p></div><span class="ev-tag">Fundraiser</span></article>
     </div>
     <p class="note">Band Practice: Mon, Tue &amp; Thu, 4:15–6:30 PM. No practice on published no-school days. Dates come from the Schedule Board.</p>

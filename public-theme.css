@@ -848,8 +848,51 @@ body.efhs-theme .footer h3{
   }
 }
 
-/* Compact header through tablet: hamburger | page-centered title | login + bell */
-@media (max-width:1024px){
+/* Mid-width desktop, including phone "Desktop site" (~980px): brand row + full nav row.
+   Single-row title+links does not fit until ~1200px and would overflow. */
+@media (min-width:768px) and (max-width:1199px){
+  body.efhs-theme header.site-header{
+    flex-direction:column;
+    flex-wrap:nowrap;
+    align-items:stretch;
+    justify-content:center;
+    min-height:0;
+    height:auto;
+    max-height:none;
+    padding:8px 16px 6px;
+    column-gap:0;
+    row-gap:2px;
+  }
+  body.efhs-theme .header-inner{
+    width:100%;
+    justify-content:center;
+    min-height:64px;
+  }
+  body.efhs-theme .brand{
+    justify-content:center;
+  }
+  body.efhs-theme header.site-header nav,
+  body.efhs-theme header.site-header #site-nav{
+    width:100%;
+    max-width:100%;
+    justify-content:center;
+    flex-wrap:nowrap;
+    padding:0 0 4px;
+    gap:0;
+    overflow:visible;
+  }
+  body.efhs-theme header.site-header nav a,
+  body.efhs-theme header.site-header nav .nav-notify-me,
+  body.efhs-theme header.site-header nav .nav-support-toggle{
+    font-size:.62rem;
+    letter-spacing:.04em;
+    padding:6px 5px;
+  }
+  body.efhs-theme .header-donate{display:none!important}
+}
+
+/* Compact header on real narrow widths: hamburger | page-centered title | login + bell */
+@media (max-width:767px){
   body.efhs-theme header.site-header,
   body.efhs-theme .site-chrome{
     position:relative;
@@ -1082,7 +1125,7 @@ body.efhs-theme .footer h3{
 }
 
 /* Landscape phones: shorter header so the title row does not eat the viewport. */
-@media (max-width:1024px) and (max-height:500px) and (orientation:landscape){
+@media (max-width:767px) and (max-height:500px) and (orientation:landscape){
   body.efhs-theme header.site-header{
     height:clamp(48px,18vh,58px);
     min-height:48px;
@@ -1098,7 +1141,7 @@ body.efhs-theme .footer h3{
   }
 }
 
-/* Phone page/hero layout only. Header/drawer rules live in the 1024 block. */
+/* Phone page/hero layout only. Header/drawer rules live in the 767 compact block. */
 @media (max-width:760px){
   body.efhs-theme .photo-gallery,
   #page-preview .photo-gallery{

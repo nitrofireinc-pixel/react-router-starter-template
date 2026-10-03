@@ -3,7 +3,7 @@
     { id: 'game', label: 'Games', color: '#E71321' },
     { id: 'rehearsal', label: 'Rehearsals', color: '#014990' },
     { id: 'meeting', label: 'Meetings', color: '#002142' },
-    { id: 'deadline', label: 'Deadlines', color: '#FDD703', ink: '#002142' },
+    { id: 'deadline', label: 'IMPORTANT', color: '#FDD703', ink: '#002142' },
     { id: 'trip', label: 'Trips', color: '#7c3aed' },
     { id: 'other', label: 'Other', color: '#5b6472' },
   ];
@@ -199,7 +199,7 @@
     return items.map((event) => {
       const due = deadlineDueIso(event);
       const href = firstDescLink(event.description);
-      const text = `Deadline: ${escapeHtml(event.title || 'Deadline')} ${escapeHtml(formatDeadlineBannerDate(due))}!`;
+      const text = `IMPORTANT: ${escapeHtml(event.title || 'IMPORTANT')} ${escapeHtml(formatDeadlineBannerDate(due))}!`;
       const cta = href
         ? ` <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Click Here</a>`
         : ` <button type="button" data-caldev-open="${event.id}">View details</button>`;

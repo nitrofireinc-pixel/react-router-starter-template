@@ -1,5 +1,5 @@
 function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 767px)').matches);
 }
 
 function ensureNavBackdrop() {
@@ -145,7 +145,7 @@ function placeHeaderQuickActions() {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 1024px)');
+    const media = window.matchMedia('(max-width: 767px)');
     const onChange = () => placeHeaderQuickActions();
     if (media.addEventListener) media.addEventListener('change', onChange);
     else if (media.addListener) media.addListener(onChange);
@@ -794,7 +794,7 @@ function syncAddToHomeButtonState(button) {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 1024px)');
+    const media = window.matchMedia('(max-width: 767px)');
     const onChange = () => {
       syncAddToHomeButtonState(button);
       placeHeaderQuickActions();

@@ -19,6 +19,7 @@ import {
   injectComingSoonLogos,
   plainHeroSubtitle,
   upgradeHomeBody,
+  homeEventTag,
 } from '../worker/src/home-redesign.mjs';
 
 
@@ -2208,7 +2209,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'header-hero-tighten-20261002'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'deadline-important-nav-980-20261002'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2377,13 +2378,13 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.doesNotMatch(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:120px/);
   assert.match(themeCss, /body\.efhs-theme \.header-inner\{[^}]*min-height:84px/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?background:transparent/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?#site-nav\{[\s\S]*?background:#fff/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?#site-nav\{[\s\S]*?color:var\(--efhs-navy\)/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?#site-nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?color:var\(--efhs-navy\)/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?#site-nav a:hover,[\s\S]*?background:#eef3fa/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?#site-nav a\[aria-current="page"\],[\s\S]*?background:#eef3fa/);
-  assert.match(themeCss, /@media \(max-width:1024px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
-  assert.match(themeCss, /@media \(max-width:1024px\) and \(max-height:500px\) and \(orientation:landscape\)/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav\{[\s\S]*?background:#fff/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav\{[\s\S]*?color:var\(--efhs-navy\)/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?color:var\(--efhs-navy\)/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav a:hover,[\s\S]*?background:#eef3fa/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav a\[aria-current="page"\],[\s\S]*?background:#eef3fa/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
+  assert.match(themeCss, /@media \(max-width:767px\) and \(max-height:500px\) and \(orientation:landscape\)/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
@@ -2395,7 +2396,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
-  assert.match(homeCss, /@media \(max-width:1024px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
+  assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
   assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
@@ -2415,6 +2416,8 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.match(upgraded, /data-home-slot="next-fund"/);
   assert.match(upgraded, /data-home-deal/);
   assert.doesNotMatch(upgraded, /class="amt"/);
+  assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).label, 'IMPORTANT');
+  assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).className, 'ev-deadline');
   assert.equal(upgradeHomeBody(upgraded), upgraded);
   assert.equal(plainHeroSubtitle(`<p>${PREVIOUS_HERO_SUBTITLE}</p>`), PREVIOUS_HERO_SUBTITLE);
   assert.equal(APPROVED_HERO_SUBTITLE.includes('Blue Regiment'), true);
@@ -2561,9 +2564,13 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(script, /placeHeaderQuickActions|enhanceMenuButton/);
   assert.match(script, /function placeMenuButtonLeading/);
   assert.doesNotMatch(script, /placeMenuButtonInTray/);
-  assert.match(script, /window\.matchMedia\('\(max-width: 1024px\)'\)/);
-  assert.match(styles, /@media\(max-width:1024px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
-  assert.match(styles, /@media\(min-width:1025px\)\{[\s\S]*?header\.site-header nav\{/);
+  assert.match(script, /window\.matchMedia\('\(max-width: 767px\)'\)/);
+  assert.match(styles, /@media\(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
+  assert.match(styles, /@media\(min-width:768px\)\{[\s\S]*?header\.site-header nav\{/);
+  assert.match(styles, /html\{scroll-behavior:smooth;overflow-x:clip;max-width:100%\}/);
+  assert.match(styles, /\.site-chrome\{[\s\S]*?overflow-x:clip/);
+  const themeCssNav = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  assert.match(themeCssNav, /@media \(min-width:768px\) and \(max-width:1199px\)/);
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
   assert.match(styles, /\.photo-gallery\{/);
   assert.match(styles, /\.photo-lightbox/);
@@ -2573,6 +2580,7 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(siteContent, /\/api\/calendar-events/);
   assert.match(siteContent, /data-month-calendar/);
   const caldevSrc = readFileSync(join(root, 'caldev.js'), 'utf8');
+  assert.match(caldevSrc, /id: 'deadline', label: 'IMPORTANT'/);
   assert.match(caldevSrc, /autoOpenLandingEvents/);
   assert.match(caldevSrc, /findNextDayIsoWithEvents/);
   assert.match(caldevSrc, /showCalendarDayToast/);
@@ -3025,7 +3033,7 @@ test('mobile Schedule Board stays inside the phone viewport', () => {
 test('mobile public header and chrome scroll with the page instead of staying sticky', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const css = readFileSync(join(root, 'styles.css'), 'utf8');
-  const mobile = css.match(/@media\(max-width:1024px\)\{[\s\S]*?body\.nav-drawer-open\{overflow:hidden\}/);
+  const mobile = css.match(/@media\(max-width:767px\)\{[\s\S]*?body\.nav-drawer-open\{overflow:hidden\}/);
   assert.ok(mobile, 'expected the compact header/nav media query');
   assert.match(mobile[0], /header\.site-header,\s*\.site-chrome\{\s*position:relative;\s*top:auto;/);
   assert.doesNotMatch(mobile[0], /position:\s*sticky/);
