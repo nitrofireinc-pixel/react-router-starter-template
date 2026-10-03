@@ -135,6 +135,20 @@ function paragraphsFromText(value) {
     .join('') || (String(value || '').trim() ? `<p>${escapeHtml(decodeBasicHtmlEntities(String(value).trim()))}</p>` : '');
 }
 
+function formatHeaderBrandTitle(value) {
+  const plain = String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = plain.match(/^(East Forsyth)\s+(.+)$/i);
+  if (!match) return formatInlineRichText(value);
+  return `<small>${escapeHtml(match[1])}</small><span class="brand-title-rest">${escapeHtml(match[2])}</span>`;
+}
+
 function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
@@ -285,12 +299,33 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   `;
 }
 
+function readPublicBootstrap() {
+  if (Object.prototype.hasOwnProperty.call(readPublicBootstrap, 'value')) return readPublicBootstrap.value;
+  const node = document.getElementById('efhs-public-read');
+  if (!node) {
+    readPublicBootstrap.value = null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(node.textContent || 'null');
+    readPublicBootstrap.value = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    readPublicBootstrap.value = null;
+  }
+  return readPublicBootstrap.value;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
+    const bootstrap = readPublicBootstrap();
     const [sponsors, site] = await Promise.all([
-      fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
-      fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
+      Array.isArray(bootstrap?.sponsors)
+        ? bootstrap.sponsors
+        : fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
+      bootstrap?.site
+        ? bootstrap.site
+        : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
     ]);
     const eligible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsFlyin);
     if (!eligible.length) return;
@@ -389,7 +424,10 @@ function hydrateMarqueeFromCache() {
 
 async function loadSponsorMarquee() {
   try {
-    const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
+    const bootstrap = readPublicBootstrap();
+    const sponsors = Array.isArray(bootstrap?.sponsors)
+      ? bootstrap.sponsors
+      : await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
     const list = Array.isArray(sponsors) ? sponsors : [];
     writeMarqueeCache(list);
     renderSponsorMarquee(list);
@@ -452,6 +490,11 @@ function renderSiteDeadlineBanners(items = []) {
 async function loadSiteDeadlineBanners() {
   if (!isPublicSiteDeadlineContext()) return;
   ensureSiteDeadlineBannersMount();
+  const bootstrap = readPublicBootstrap();
+  if (Array.isArray(bootstrap?.deadlineBanners)) {
+    renderSiteDeadlineBanners(bootstrap.deadlineBanners);
+    return;
+  }
   try {
     const items = await fetch('/api/caldev/deadline-banners', { cache: 'no-store' })
       .then((response) => (response.ok ? response.json() : []));
@@ -849,12 +892,17 @@ async function loadPublicContent() {
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? Math.max(max, n) : max;
   }, 0) || 3;
+  const bootstrap = readPublicBootstrap();
   const [site, events, photos, calendarEvents, highlightEvents] = await Promise.all([
-    fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+    bootstrap?.site
+      ? bootstrap.site
+      : fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     needsLegacyEvents
       ? fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
       : Promise.resolve([]),
-    fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+    Array.isArray(bootstrap?.photos)
+      ? bootstrap.photos
+      : fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     needsMonthCalendar
       ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
       : Promise.resolve([]),
@@ -870,8 +918,14 @@ async function loadPublicContent() {
       const key = element.dataset.siteField;
       const value = site[key];
       if (!value) return;
+      if (key === 'title' && element.closest('a.brand')) {
+        element.innerHTML = formatHeaderBrandTitle(value);
+        return;
+      }
       if (key === 'hero_title' || key === 'title') {
-        element.innerHTML = formatInlineRichText(value);
+        element.innerHTML = key === 'hero_title' && element.closest('.home-redesign')
+          ? formatHomeHeroTitle(value)
+          : formatInlineRichText(value);
         return;
       }
       if (key === 'hero_subtitle' || key === 'footer_note') {
@@ -1038,6 +1092,17 @@ function applyPublicThemePhotos(photos = []) {
   root.style.setProperty('--efhs-card-photo-3', `url("${at(2)}")`);
 }
 
+function formatHomeHeroTitle(value) {
+  const html = formatInlineRichText(value);
+  if (/<span\b/i.test(html)) return html;
+  const plain = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const parts = plain.split(/\.\s+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return html;
+  const last = parts.pop().replace(/\.$/, '');
+  const lead = `${parts.join('. ')}.`;
+  return `<span>${lead}</span> ${last}.`;
+}
+
 function renderPhotoGallery(container, photos = []) {
   if (!container) return;
   // Drop brand/logo placeholders immediately so they never flash on Gallery.
@@ -1055,6 +1120,7 @@ function renderPhotoGallery(container, photos = []) {
     list = list.slice(0, limit);
   }
   if (!list.length) {
+    if (container.dataset.keepFallback === '1' && container.querySelector('img')) return;
     container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }
