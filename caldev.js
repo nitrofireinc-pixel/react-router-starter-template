@@ -257,7 +257,7 @@
       const extra = Math.max(0, all.length - dayEvents.length);
       cells.push(`
         <div class="caldev-day${iso === today ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
-          <div class="caldev-day-head"><span>${compact ? `${WEEKDAYS[date.getDay()]} ${day}` : day}</span></div>
+          <div class="caldev-day-head"><span>${day}</span></div>
           <div class="caldev-day-events">
             ${dayEvents.map((event) => eventChip(event)).join('')}
             ${extra ? `<span class="caldev-more">+${extra} more</span>` : ''}
@@ -283,7 +283,7 @@
           const iso = isoDate(date);
           const dayEvents = iso < today ? [] : eventsOnDate(iso);
           return `
-            <section class="caldev-week-col${iso === today ? ' is-today' : ''}">
+            <div class="caldev-week-col${iso === today ? ' is-today' : ''}">
               <header>
                 <span>${WEEKDAYS[date.getDay()]}</span>
                 <strong>${date.getDate()}</strong>
@@ -301,7 +301,7 @@
                   }).join('')
                   : '<p class="draft">No Event Today!</p>'}
               </div>
-            </section>
+            </div>
           `;
         }).join('')}
       </div>
