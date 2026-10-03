@@ -2293,7 +2293,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-landscape-20261003b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261003a'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2513,7 +2513,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /max-height:calc\(100dvh - 52px - 6\.75rem\)/);
   assert.match(styles, /html\.nav-use-hamburger/);
   assert.match(styles, /order:-1/);
-  assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
+  assert.match(themeCss, /body\.efhs-theme\.home-page \.hero-card,[\s\S]*?display:none!important/);
+  assert.match(themeCss, /body\.efhs-theme\.coming-soon-page \.hero-card,[\s\S]*?display:block!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
@@ -2694,7 +2695,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /width:100% !important/);
   assert.match(styles, /p:has\(> br:only-child\)/);
   assert.doesNotMatch(workerSrc, /DEV_UPLOAD_ORIGIN/);
-  assert.doesNotMatch(workerSrc, /\/admin\/visual/);
+  assert.match(workerSrc, /\/admin\/visual\/join/);
 });
 
 test('join, volunteer, and coming soon stay out of the public nav', () => {

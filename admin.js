@@ -3176,6 +3176,8 @@ function showAllowedPanels() {
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
+  const visualPilotLink = document.querySelector('[data-visual-pilot-link]');
+  if (visualPilotLink) visualPilotLink.hidden = !canEditPage('join');
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
