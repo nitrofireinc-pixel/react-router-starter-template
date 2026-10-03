@@ -217,6 +217,15 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(devToml, /efhsband-dev-db/);
 });
 
+test('visual editor action bar uses inline SVG icons', () => {
+  const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
+  const visualCss = readFileSync(join(root, 'admin-visual.css'), 'utf8');
+  assert.match(visualJs, /class="visual-tool-icon"/);
+  assert.match(visualJs, /tlb-clone', 'Copy'/);
+  assert.doesNotMatch(visualJs, /⧉/);
+  assert.match(visualCss, /\.visual-tool-icon/);
+});
+
 test('published Join content stays on the existing public page read', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const visualSrc = readFileSync(join(root, 'worker/src/visual-page-editor.mjs'), 'utf8');

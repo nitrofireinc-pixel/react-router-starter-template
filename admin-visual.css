@@ -193,6 +193,16 @@ a.visual-banner-btn,
   white-space:nowrap !important;
   border-right:1px solid #dbe4f0;
 }
+.gjs-toolbar-item span{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.gjs-toolbar-item .visual-tool-icon{
+  display:block;
+  width:14px;
+  height:14px;
+}
 .visual-banner-btn:disabled{
   opacity:.4;
   cursor:not-allowed;
