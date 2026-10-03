@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
+  assertSafeSelfPrivilegeEdit,
   assertSafeUserPrivilegeGrant,
   canAccessScheduleBoard,
   canManagePageSettings,
@@ -12,10 +13,13 @@ import {
   isPublicCmsPageActive,
   lockPageSettingsToExisting,
   publicCmsPageForRender,
+  renderPageBody,
   sanitizeAssignablePermissions,
   sanitizeCmsPageHtml,
+  sanitizeHomeBodyHtml,
   serializePagePayload,
 } from '../worker/src/worker.mjs';
+import { sanitizeAllowlistHtml } from '../worker/src/html-sanitizer.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
@@ -145,7 +149,14 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.equal(canNotifyCalendarSubscribers({ role: 'editor', permissions: ['president'] }), true);
 
   assert.match(adminSrc, /function isScheduleBoardOnlyUser/);
-  assert.match(adminSrc, /if \(name === 'caldev'\) \{\s*if \(!canAccessScheduleBoard\(\)\) return;/);
+  assert.match(adminSrc, /function canOpenAdminTab/);
+  assert.match(adminSrc, /if \(tab === 'users'\) return hasPermission\('users'\)/);
+  assert.match(adminSrc, /if \(tab === 'caldev'\) return canAccessScheduleBoard\(\)/);
+  assert.match(adminSrc, /if \(!canOpenAdminTab\(name\)\)/);
+  assert.match(adminSrc, /#caldev-finished-top, \[data-cms-caldev-finished\], \.cms-caldev-finished-bar/);
+  assert.match(adminSrc, /Add and edit events for the public Calendar/);
+  assert.match(workerSrc, /Add and edit events for the public Calendar/);
+  assert.doesNotMatch(workerSrc, /President, Vice President, and Super Admin editing for the public Calendar/);
   assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
   assert.match(workerSrc, /data-tab="events" hidden/);
   assert.match(workerSrc, /canNotifyCalendarSubscribers\(auth\.user\)/);
@@ -159,4 +170,82 @@ test('Phase 0.7 public calendar feed is cached and busted on writes', () => {
   assert.ok(publicGet, 'public caldev GET block not found');
   assert.match(publicGet[0], /cachedPublicRead\('caldev-events'/);
   assert.doesNotMatch(publicGet[0], /seedCaldevFromProduction/);
+});
+
+const XSS_BYPASSES = [
+  ['slash-separated img onerror', '<img/src=x/onerror=alert(1)>', /onerror|alert\(1\)/i],
+  ['slash-separated svg onload', '<svg/onload=alert(1)>', /svg|onload|alert\(1\)/i],
+  ['no-space quoted onerror', '<img src="x"onerror=alert(1)>', /onerror|alert\(1\)/i],
+  ['entity-encoded javascript href', '<a href="javascript&#58;alert(1)">x</a>', /javascript|alert\(1\)/i],
+  ['hex entity javascript src', '<img src="javascrip&#x74;:alert(1)">', /javascript|alert\(1\)/i],
+  ['iframe srcdoc', '<iframe srcdoc="<script>alert(1)</script>"></iframe>', /iframe|srcdoc|script|alert\(1\)/i],
+  ['object data URL', '<object data="data:text/html,<script>alert(1)</script>"></object>', /object|data:text\/html|script|alert\(1\)/i],
+  ['meta refresh', '<meta http-equiv="refresh" content="0;url=javascript:alert(1)">', /meta|refresh|javascript|alert\(1\)/i],
+  ['base href', '<base href="https://evil.example/">', /<base/i],
+  ['off-site form action', '<form action="https://evil.example/steal"><input name="x"><button>Go</button></form>', /evil\.example/i],
+];
+
+test('Phase 0 follow-up sanitizer blocks listed XSS bypasses on page and home HTML', () => {
+  for (const [label, dirty, banned] of XSS_BYPASSES) {
+    const page = sanitizeCmsPageHtml(`<section class="content"><p>Safe</p>${dirty}</section>`);
+    assert.match(page, /<section class="content">/, label);
+    assert.match(page, /<p>Safe<\/p>/, label);
+    assert.doesNotMatch(page, banned, `${label} leaked through page sanitizer`);
+
+    const home = sanitizeHomeBodyHtml(`<section class="hero"><h1>Home</h1>${dirty}</section>`);
+    assert.match(home, /<h1>Home<\/h1>/, label);
+    assert.doesNotMatch(home, banned, `${label} leaked through home sanitizer`);
+    assert.doesNotMatch(sanitizeAllowlistHtml(dirty, { profile: 'cms' }), banned, `${label} leaked through allowlist`);
+  }
+  const kept = sanitizeCmsPageHtml('<form action="/api/contact"><button type="submit">Send</button></form>');
+  assert.match(kept, /<form action="\/api\/contact">/);
+  assert.match(kept, /<button type="submit">Send<\/button>/);
+});
+
+test('Phase 0 follow-up users permission cannot edit own role or permissions', () => {
+  const self = { id: 7, role: 'editor', permissions: ['users'] };
+  const blocked = assertSafeSelfPrivilegeEdit(self, 7, {
+    role: 'editor',
+    permissions: ['users', 'pages', 'events'],
+  }, self);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 403);
+
+  const same = assertSafeSelfPrivilegeEdit(self, 7, {
+    role: 'editor',
+    permissions: ['users'],
+    display_name: 'Self',
+  }, self);
+  assert.equal(same.ok, true);
+
+  const other = assertSafeSelfPrivilegeEdit(self, 9, {
+    role: 'editor',
+    permissions: ['users', 'pages'],
+  }, { id: 9, role: 'editor', permissions: ['events'] });
+  assert.equal(other.ok, true);
+
+  const admin = assertSafeSelfPrivilegeEdit({ id: 1, role: 'admin' }, 1, {
+    role: 'admin',
+    permissions: ['all'],
+  }, { id: 1, role: 'admin', permissions: [] });
+  assert.equal(admin.ok, true);
+  assert.match(workerSrc, /assertSafeSelfPrivilegeEdit\(auth\.user, id, payload, existing\)/);
+  assert.match(adminSrc, /You cannot change your own role or permissions|lockOwnPrivileges|editingSelf && !isSuperAdmin/);
+});
+
+test('Phase 0 follow-up inactive built-in form pages render Coming Soon, not the form', () => {
+  const slugs = ['in-kind', 'letterman-jacket', 'become-a-sponsor', 'contact', 'directors', 'boosters', 'fundraising'];
+  for (const slug of slugs) {
+    const page = {
+      slug,
+      title: slug,
+      active: 0,
+      body_html: '<section><form action="/api/contact"><p>LIVE FORM</p><button>Send</button></form></section>',
+    };
+    const html = renderPageBody(page, [], [], [], { logo_url: '/assets/efhs-logo.png' });
+    assert.match(html, /Coming soon/i, slug);
+    assert.doesNotMatch(html, /LIVE FORM/, slug);
+    assert.doesNotMatch(html, /<form/i, slug);
+  }
+  assert.match(workerSrc, /if \(!isPublicCmsPageActive\(page\)\)/);
 });
