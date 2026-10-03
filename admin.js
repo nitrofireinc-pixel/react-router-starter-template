@@ -2857,17 +2857,41 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
   });
 }
 
+function canOpenAdminTab(name) {
+  const tab = String(name || '').trim();
+  const scheduleOnly = isScheduleBoardOnlyUser();
+  if (tab === 'dashboard' || tab === 'mail') return !scheduleOnly;
+  if (tab === 'pages') {
+    return (state.pages || []).some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage()));
+  }
+  if (tab === 'sponsors') return canEditSponsors();
+  if (tab === 'ledger') return canAccessLedger();
+  if (tab === 'checkout') return canAccessCheckout();
+  if (tab === 'staff') return canEditStaff();
+  if (tab === 'ensembles') return canEditPage('ensembles');
+  if (tab === 'booster-members') return canEditBoosterMembers();
+  if (tab === 'minutes') return canViewMinutes() && !scheduleOnly;
+  if (tab === 'badge-creator') return canAccessBadgeCreator();
+  if (tab === 'contact') return canEditContact();
+  if (tab === 'site' || tab === 'social') return hasPermission('site');
+  if (tab === 'users') return hasPermission('users');
+  if (tab === 'security-log') return isSuperAdmin();
+  if (tab === 'forms') return canAccessForms();
+  if (tab === 'caldev') return canAccessScheduleBoard();
+  if (tab === 'photos') return hasPermission('photos');
+  if (tab === 'events') return false;
+  return false;
+}
+
+function hideCalendarFinishedControls() {
+  const allow = canNotifyCalendarSubscribers();
+  document.querySelectorAll('#caldev-finished-top, [data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
+    el.hidden = !allow;
+  });
+}
+
 function activateTab(name) {
-    if (name === 'security-log' && !isSuperAdmin()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'forms' && !canAccessForms()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'caldev' && !canAccessScheduleBoard()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'badge-creator' && !canAccessBadgeCreator()) {
+  if (!canOpenAdminTab(name)) {
     return Promise.resolve(false);
   }
   const pagesPanel = document.querySelector('#tab-pages');
@@ -3192,6 +3216,7 @@ function showAllowedPanels() {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  hideCalendarFinishedControls();
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
@@ -3694,7 +3719,7 @@ function renderDashboard() {
     canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canAccessScheduleBoard() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab', 'caldev'],
+    canAccessScheduleBoard() && ['Schedule Board', 'Add and edit events for the public Calendar.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -5190,6 +5215,13 @@ async function loadUsers() {
       input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
     });
     form.elements.active.checked = Boolean(user.active);
+    const editingSelf = Number(user.id) === Number(state.me?.user?.id);
+    const lockOwnPrivileges = editingSelf && !isSuperAdmin();
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = lockOwnPrivileges;
+    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+      input.disabled = lockOwnPrivileges;
+    });
     const status = document.querySelector('#user-status');
     if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5458,9 +5490,7 @@ async function mountCaldevCmsBoard() {
   if (!mountEl || !canAccessScheduleBoard()) return;
   if (window.CaldevCmsBoard?.mount) {
     await window.CaldevCmsBoard.mount(mountEl);
-    document.querySelectorAll('[data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
-      el.hidden = !canNotifyCalendarSubscribers();
-    });
+    hideCalendarFinishedControls();
     return;
   }
   mountEl.innerHTML = '<p class="draft">Schedule Board editor failed to load. Refresh and try again.</p>';
@@ -8053,6 +8083,11 @@ function bindForms() {
       return;
     }
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
+    const editingSelf = Number(id) === Number(state.me?.user?.id);
+    if (editingSelf && !isSuperAdmin()) {
+      payload.role = state.me.user.role;
+      payload.permissions = Array.isArray(state.me.user.permissions) ? [...state.me.user.permissions] : [];
+    }
     delete payload.id;
     if (!payload.password) delete payload.password;
     status.textContent = 'Saving…';
@@ -8079,7 +8114,12 @@ function bindForms() {
     const form = document.querySelector('#user-form');
     form.reset();
     form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    form.querySelectorAll('input[name="permissions"]').forEach(input => {
+      input.checked = false;
+      input.disabled = false;
+    });
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = false;
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
