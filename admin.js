@@ -3510,7 +3510,7 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260816`;
+  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260907`;
   const cards = [
     isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
