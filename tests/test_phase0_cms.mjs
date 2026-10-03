@@ -154,6 +154,8 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.match(adminSrc, /if \(tab === 'caldev'\) return canAccessScheduleBoard\(\)/);
   assert.match(adminSrc, /if \(!canOpenAdminTab\(name\)\)/);
   assert.match(adminSrc, /#caldev-finished-top, \[data-cms-caldev-finished\], \.cms-caldev-finished-bar/);
+  const stylesSrc = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(stylesSrc, /#caldev-finished-top\[hidden\]/);
   assert.match(adminSrc, /Add and edit events for the public Calendar/);
   assert.match(workerSrc, /Add and edit events for the public Calendar/);
   assert.doesNotMatch(workerSrc, /President, Vice President, and Super Admin editing for the public Calendar/);

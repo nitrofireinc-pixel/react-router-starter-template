@@ -5475,6 +5475,11 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   display:flex;justify-content:center;padding:8px 0 4px;
 }
 .cms-caldev-finished-bar .btn{min-width:8.5rem}
+#caldev-finished-top[hidden],
+.cms-caldev-finished-bar[hidden],
+[data-cms-caldev-finished][hidden]{
+  display:none!important;
+}
 .cms-caldev-nav{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .cms-caldev-title{margin:0;color:var(--navy);font-size:1.2rem;font-weight:900;letter-spacing:-.02em}
 .cms-caldev-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px}

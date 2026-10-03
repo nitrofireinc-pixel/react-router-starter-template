@@ -2888,6 +2888,9 @@ function hideCalendarFinishedControls() {
   document.querySelectorAll('#caldev-finished-top, [data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
     el.hidden = !allow;
   });
+  const top = document.querySelector('#caldev-finished-top');
+  const actions = top?.closest('.panel-actions');
+  if (actions) actions.hidden = !allow;
 }
 
 function activateTab(name) {
