@@ -1,5 +1,87 @@
+const COMPACT_NAV_MEDIA = '(max-width: 767px), (orientation: landscape) and (max-height: 500px)';
+const MIN_NAV_FONT_PX = 12;
+
+function mediaWantsCompactNav() {
+  return Boolean(window.matchMedia && window.matchMedia(COMPACT_NAV_MEDIA).matches);
+}
+
 function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 767px)').matches);
+  return mediaWantsCompactNav() || document.documentElement.classList.contains('nav-use-hamburger');
+}
+
+function placeDonateInDrawer(nav, donate) {
+  if (!nav || !donate) return;
+  nav.insertBefore(donate, nav.firstChild);
+}
+
+function headerUtilityFits(el, header) {
+  if (!el || !header || el.hidden) return false;
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+    return false;
+  }
+  const box = el.getBoundingClientRect();
+  const headerBox = header.getBoundingClientRect();
+  if (box.width < 4 || box.height < 4) return false;
+  if (box.right > headerBox.right + 6 || box.left < headerBox.left - 6) return false;
+  if (box.bottom > headerBox.bottom + 10 || box.top < headerBox.top - 10) return false;
+  return true;
+}
+
+function placeUtilitiesInDrawer(nav, nodes) {
+  if (!nav) return;
+  nodes.forEach((node) => {
+    if (node) nav.appendChild(node);
+  });
+}
+
+function measureInlineNavFits() {
+  const header = document.querySelector('header.site-header');
+  const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+  const donate = document.querySelector('.header-donate');
+  if (!header || !nav) return true;
+  const link = nav.querySelector('a, .nav-support-toggle');
+  if (link) {
+    const size = parseFloat(window.getComputedStyle(link).fontSize) || 0;
+    if (size && size < MIN_NAV_FONT_PX - 0.15) return false;
+  }
+  if (nav.scrollWidth > nav.clientWidth + 2) return false;
+  if (header.scrollWidth > header.clientWidth + 2) return false;
+  if (donate) {
+    const style = window.getComputedStyle(donate);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const donateBox = donate.getBoundingClientRect();
+    const headerBox = header.getBoundingClientRect();
+    if (donateBox.width < 4 || donateBox.height < 4) return false;
+    if (donateBox.right > headerBox.right + 4 || donateBox.left < headerBox.left - 4) return false;
+    if (donateBox.bottom > headerBox.bottom + 14 || donateBox.top < headerBox.top - 8) return false;
+  }
+  return true;
+}
+
+function syncNavMode() {
+  const html = document.documentElement;
+  if (mediaWantsCompactNav()) {
+    html.classList.remove('nav-use-hamburger');
+    placeHeaderQuickActions();
+    return;
+  }
+  const donate = document.querySelector('.header-donate');
+  const header = document.querySelector('header.site-header');
+  html.classList.remove('nav-use-hamburger');
+  if (donate && header && donate.parentElement !== header) header.appendChild(donate);
+  if (header) void header.offsetWidth;
+  if (!measureInlineNavFits()) html.classList.add('nav-use-hamburger');
+  placeHeaderQuickActions();
+}
+
+let navModeRaf = 0;
+function scheduleNavMode() {
+  if (navModeRaf) cancelAnimationFrame(navModeRaf);
+  navModeRaf = requestAnimationFrame(() => {
+    navModeRaf = 0;
+    syncNavMode();
+  });
 }
 
 function ensureNavBackdrop() {
@@ -96,17 +178,29 @@ function placeHeaderQuickActions() {
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
-  const staffAuth = document.querySelector('[data-staff-auth-link]');
+  const staffAuth = document.querySelector('[data-staff-auth-link]') || document.querySelector('a.utility-auth');
+  const donate = document.querySelector('.header-donate');
+  const header = document.querySelector('header.site-header');
   const utility = utilityAuthHost();
   if (isMobileNavViewport()) {
-    if (staffAuth) actions.appendChild(staffAuth);
-    if (notify) actions.appendChild(notify);
-    if (addHome) actions.appendChild(addHome);
+    if (donate) placeDonateInDrawer(nav, donate);
+    const utilities = [staffAuth, notify, addHome].filter(Boolean);
+    utilities.forEach((el) => actions.appendChild(el));
+    if (header) void header.offsetWidth;
+    const trayHidden = (() => {
+      const style = window.getComputedStyle(actions);
+      return style.display === 'none' || style.visibility === 'hidden';
+    })();
+    const overflowed = utilities.filter((el) => trayHidden || !headerUtilityFits(el, header));
+    // Login/Notify/Add-to-Home must stay reachable whenever the hamburger is used.
+    if (staffAuth && !overflowed.includes(staffAuth)) overflowed.unshift(staffAuth);
+    placeUtilitiesInDrawer(nav, overflowed);
   } else {
     setMobileNavOpen(false);
     if (staffAuth && utility) utility.appendChild(staffAuth);
     if (notify) nav.appendChild(notify);
     if (addHome) nav.appendChild(addHome);
+    if (donate && header && donate.parentElement !== header) header.appendChild(donate);
   }
   if (menuButton) enhanceMenuButton(menuButton);
 }
@@ -116,7 +210,7 @@ function placeHeaderQuickActions() {
   if (!nav) return;
   ensureNavBackdrop();
   ensureHeaderQuickActions();
-  placeHeaderQuickActions();
+  syncNavMode();
   const button = document.querySelector('.menu-button');
   if (!button) return;
   enhanceMenuButton(button);
@@ -145,11 +239,12 @@ function placeHeaderQuickActions() {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 767px)');
-    const onChange = () => placeHeaderQuickActions();
+    const media = window.matchMedia(COMPACT_NAV_MEDIA);
+    const onChange = () => scheduleNavMode();
     if (media.addEventListener) media.addEventListener('change', onChange);
     else if (media.addListener) media.addListener(onChange);
   }
+  window.addEventListener('resize', scheduleNavMode);
 })();
 
 function setSupportNavOpen(root, open) {

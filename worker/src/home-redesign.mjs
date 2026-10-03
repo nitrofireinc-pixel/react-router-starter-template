@@ -246,10 +246,149 @@ export function renderHomeOfficers(members = []) {
 }
 
 function firstFundraisingImage(html = '') {
-  const match = String(html || '').match(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i);
-  const src = match?.[1] || '';
-  if (src.startsWith('/uploads/') || src.startsWith('/assets/')) return src;
-  return '';
+  return extractFundraisingMedia(html).images[0]?.src || '';
+}
+
+const SKIP_FUNDRAISING_IMAGE = /efhs-logo|blue-regiment-mark|sponsor-qr|donate-qr|admin-mark/i;
+const ADDRESS_IN_TEXT = /\b\d{2,6}\s+[A-Za-z0-9.#\s-]+?(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln)\.?(?:,\s*[A-Za-z .]+)?(?:,\s*[A-Z]{2}\s*\d{5})?/i;
+
+function fundraisingCopySource(html = '') {
+  const source = String(html || '');
+  const field = source.match(/<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>([\s\S]*?)<\/\1>/i);
+  if (field?.[2]) return field[2];
+  return source
+    .replace(/<section\b[^>]*page-hero[^>]*>[\s\S]*?<\/section>/i, ' ')
+    .replace(/<article\b[^>]*(?:data-square-donate|square-donate-card)[^>]*>[\s\S]*?<\/article>/gi, ' ')
+    .replace(/<(?:section|form|div)\b[^>]*(?:data-email-list-signup|email-list-signup)[^>]*>[\s\S]*?<\/(?:section|form|div)>/gi, ' ');
+}
+
+export function extractFundraisingMedia(html = '') {
+  const source = fundraisingCopySource(html);
+  const images = [];
+  const imgRe = /<img\b[^>]*>/gi;
+  let match;
+  while ((match = imgRe.exec(source))) {
+    const tag = match[0];
+    const src = (tag.match(/\bsrc\s*=\s*["']([^"']+)["']/i) || [])[1] || '';
+    const alt = (tag.match(/\balt\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
+    if (!src) continue;
+    if (!src.startsWith('/uploads/') && !src.startsWith('/assets/')) continue;
+    if (SKIP_FUNDRAISING_IMAGE.test(src)) continue;
+    images.push({ src, alt });
+  }
+  const text = plainText(source.replace(/<img\b[^>]*>/gi, ' '));
+  const mustAttend = /must\s+attend/i.test(text);
+  const description = text
+    .replace(/\b(?:band\s+members|students)\s+must\s+attend!?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { images, description, mustAttend, text };
+}
+
+function fundraiserPlace(event, leftoverDescription = '') {
+  const location = plainText(event?.location);
+  const raw = leftoverDescription || plainText(event?.description);
+  let description = raw;
+  let where = location;
+  if (!where && raw) {
+    const address = raw.match(ADDRESS_IN_TEXT);
+    if (address) {
+      where = address[0].replace(/\s+/g, ' ').trim();
+      description = raw.replace(address[0], ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+  description = description
+    .replace(/\b(?:band\s+members|students)\s+must\s+attend!?/gi, ' ')
+    .replace(/\blocation\s+tbd\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { description, where };
+}
+
+function addHtmlClass(openTag, className) {
+  const source = String(openTag || '');
+  if (new RegExp(`\\b${className}\\b`).test(source)) return source;
+  if (/\bclass\s*=\s*["']/.test(source)) {
+    return source.replace(/\bclass\s*=\s*["']([^"']*)["']/, (full, value) => `class="${value} ${className}"`);
+  }
+  return source.replace(/>$/, ` class="${className}">`);
+}
+
+function replaceFundraisingBody(html, cardsHtml) {
+  let next = String(html || '');
+  if (/data-cms-field=["']body_text["']/i.test(next)) {
+    next = next.replace(
+      /<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\1>/i,
+      `<div class="fundraising-card-list" data-fundraising-cards data-cms-field="body_text">${cardsHtml}</div>`,
+    );
+    next = next.replace(
+      /<section\b[^>]*\bcontent\b[^>]*>/i,
+      (open) => addHtmlClass(open, 'fundraising-cards'),
+    );
+    return next;
+  }
+  const block = `<section class="content fundraising-cards"><div class="wrap"><div class="fundraising-card-list" data-fundraising-cards>${cardsHtml}</div></div></section>`;
+  if (/<\/section>/i.test(next)) return next.replace(/<\/section>/i, `</section>${block}`);
+  return `${block}${next}`;
+}
+
+export function renderFundraisingCard(event, {
+  flyer = '',
+  flyerAlt = '',
+  description = '',
+  mustAttend = false,
+} = {}) {
+  const title = plainText(event?.title) || plainText(flyerAlt) || 'Current Fundraiser';
+  const when = event ? formatHomeEventWhen(event) : { long: '', short: '', time: '' };
+  const facts = fundraiserPlace(event, description);
+  const attend = mustAttend || /must\s+attend/i.test(`${event?.description || ''} ${description}`);
+  const sub = facts.description;
+  const whenLabel = when.long || when.short;
+  const timeLine = when.time ? `<br>${escapeHtml(when.time)}` : '';
+  const factsHtml = (whenLabel || facts.where)
+    ? `<dl class="ff-facts">${whenLabel ? `<div><dt>When</dt><dd>${escapeHtml(whenLabel)}${timeLine}</dd></div>` : ''}${facts.where ? `<div><dt>Where</dt><dd>${escapeHtml(facts.where)}</dd></div>` : ''}</dl>`
+    : '';
+  const media = flyer
+    ? `<button type="button" class="ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
+    : '';
+  return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
+    ${media}
+    <div class="ff-body">
+      <div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}</div>
+      <h3>${escapeHtml(title)}</h3>
+      ${sub ? `<p class="ff-sub">${escapeHtml(sub)}</p>` : ''}
+      ${factsHtml}
+      <div class="btn-row">
+        <a class="btn btn-gold" href="/fundraising.html" data-donate-open>Support</a>
+        <a class="btn btn-blue" href="/calendar.html">Details</a>
+      </div>
+    </div>
+  </article>`;
+}
+
+export function decorateFundraisingPage(html, data = {}) {
+  const source = String(html || '');
+  if (!source.trim() || /\bdata-fundraising-cards\b/.test(source)) return source;
+  const media = extractFundraisingMedia(source);
+  const events = selectHomeSchedule(data.events || []).fundraisers;
+  const count = Math.max(events.length, media.images.length, (events.length || media.images.length || media.description) ? 1 : 0);
+  if (!count) return source;
+  const cards = [];
+  for (let index = 0; index < count; index += 1) {
+    const event = events[index] || null;
+    const flyer = media.images[index] || (index === 0 ? media.images[0] : null);
+    const leftover = index === 0 ? media.description : '';
+    if (!event && !flyer?.src && !leftover) continue;
+    const rawAlt = flyer?.alt || '';
+    cards.push(renderFundraisingCard(event, {
+      flyer: flyer?.src || '',
+      flyerAlt: /^\d+$/.test(rawAlt) ? '' : rawAlt,
+      description: leftover,
+      mustAttend: index === 0 && media.mustAttend,
+    }));
+  }
+  if (!cards.length) return source;
+  return replaceFundraisingBody(source, cards.join(''));
 }
 
 function replaceSlot(html, name, inner) {
