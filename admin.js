@@ -1720,6 +1720,12 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
+  if (original === 'join' || payload.slug === 'join') {
+    if (status) {
+      status.innerHTML = 'Join the Band is edited in the visual editor. <a href="/admin/visual/join">Open the Join visual editor</a> to save this page.';
+    }
+    return false;
+  }
   const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
   if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
@@ -3789,6 +3795,20 @@ function editPage(slug, { skipGuard = false } = {}) {
       fundraisingNotify.hidden = page.slug !== 'fundraising';
       const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
       if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
+    }
+    let visualHint = form.querySelector('[data-visual-pilot-hint]');
+    if (!visualHint) {
+      visualHint = document.createElement('p');
+      visualHint.className = 'notice';
+      visualHint.setAttribute('data-visual-pilot-hint', '');
+      form.insertBefore(visualHint, form.querySelector('.form-grid, .page-meta-grid'));
+    }
+    if (page.slug === 'join') {
+      visualHint.hidden = false;
+      visualHint.innerHTML = 'Join the Band is managed in the visual editor. The old Pages editor cannot save this page. <a href="/admin/visual/join">Open the Join visual editor</a>';
+    } else {
+      visualHint.hidden = true;
+      visualHint.textContent = '';
     }
     syncPagePhotoToolbar();
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
