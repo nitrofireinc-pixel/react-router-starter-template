@@ -1425,6 +1425,7 @@ test('contact topics require labels and valid delivery emails', () => {
   assert.doesNotMatch(html, /value="3" selected/);
   assert.equal(isDefaultContactTopicLabel('General Questions'), true);
   assert.equal(defaultContactTopicId([{ id: 4, label: 'Volunteer interest' }, { id: 11, label: 'General Questions' }]), 11);
+  assert.equal(serializeContactTopic({ id: 7, label: 'Fundrasing', email: 'jamie@efhsband.org' }).label, 'Fundraising');
 });
 
 test('CMS View Site stays in the same window and Schedule Board uses What', () => {
@@ -1576,8 +1577,7 @@ test('Honorable Mention is CMS-only and keeps paid public packages unchanged', (
 
   const honorable = normalizeSponsorPayload({
     name: 'Thank You Shop',
-    level: 'Gold Sponsor',
-    honorable_mention: true,
+    level: 'Honorable Mention',
     homepage_ad: 1,
   });
   assert.equal(honorable.level, 'Honorable Mention');
@@ -1591,13 +1591,12 @@ test('Honorable Mention is CMS-only and keeps paid public packages unchanged', (
 
   const preserved = normalizeSponsorPayload({ name: 'Thank You Shop' }, { level: 'Honorable Mention', city: 'Kernersville' });
   assert.equal(preserved.level, 'Honorable Mention');
-  const unchecked = normalizeSponsorPayload({
+  const paidAgain = normalizeSponsorPayload({
     name: 'Thank You Shop',
     level: 'Silver Sponsor',
-    honorable_mention: false,
   }, { level: 'Honorable Mention' });
-  assert.equal(unchecked.level, 'Silver Sponsor');
-  assert.equal(unchecked.homepage_ad, 1);
+  assert.equal(paidAgain.level, 'Silver Sponsor');
+  assert.equal(paidAgain.homepage_ad, 1);
 
   const hydrated = hydrateSponsor({ name: 'Thank You Shop', level: 'Honorable Mention', homepage_ad: 1, city: 'Kernersville', state: 'NC' });
   assert.equal(hydrated.tier, 'honorable');
@@ -1635,11 +1634,10 @@ test('Honorable Mention is CMS-only and keeps paid public packages unchanged', (
   const adminStart = workerSrc.indexOf('const ADMIN_HTML');
   assert.ok(adminStart > 0);
   const adminHtml = workerSrc.slice(adminStart);
-  assert.match(adminHtml, /name="honorable_mention"/);
-  assert.match(adminHtml, /data-honorable-mention-field/);
-  assert.match(adminHtml, /<label class="checkline" data-honorable-mention-field>/);
-  assert.doesNotMatch(adminHtml, /<option value="Honorable Mention">/);
-  assert.match(adminJs, /payload\.honorable_mention = Boolean\(honorableMention\.checked\)/);
+  assert.match(adminHtml, /<option value="Honorable Mention">Honorable Mention<\/option>/);
+  assert.doesNotMatch(adminHtml, /name="honorable_mention"/);
+  assert.doesNotMatch(adminHtml, /data-honorable-mention-field/);
+  assert.doesNotMatch(adminJs, /name="honorable_mention"/);
   assert.match(siteContent, /honorable/);
   assert.match(siteContent, /efhs-sponsor-marquee-v4/);
   assert.doesNotMatch(becomeHtml, /Honorable Mention/i);
@@ -2291,7 +2289,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'honorable-mention-cms-20261003'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'honorable-mention-dropdown-20261003'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
