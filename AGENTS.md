@@ -2,12 +2,7 @@
 
 ## CMS login (Cursor agents)
 
-Use this account for live CMS checks on **https://efhsband.org/admin/login**. Do not commit other staff passwords.
-
-- Username: `agent@efhsband.org`
-- Password: `agent123$`
-
-The live user is Super Admin. Login is the singular `agent@` address, not `agents@`.
+Use the `agent@efhsband.org` Super Admin account for live CMS checks on **https://efhsband.org/admin/login**. Agent credentials are provided out of band and must never be committed. Login is the singular `agent@` address, not `agents@`. Do not commit other staff passwords.
 
 ## Source of truth
 
