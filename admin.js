@@ -3125,6 +3125,8 @@ function showAllowedPanels() {
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
+  const visualPilotLink = document.querySelector('[data-visual-pilot-link]');
+  if (visualPilotLink) visualPilotLink.hidden = !canEditPage('join');
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
@@ -3746,6 +3748,20 @@ function editPage(slug, { skipGuard = false } = {}) {
       fundraisingNotify.hidden = page.slug !== 'fundraising';
       const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
       if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
+    }
+    let visualHint = form.querySelector('[data-visual-pilot-hint]');
+    if (!visualHint) {
+      visualHint = document.createElement('p');
+      visualHint.className = 'notice';
+      visualHint.setAttribute('data-visual-pilot-hint', '');
+      form.insertBefore(visualHint, form.querySelector('.form-grid, .page-meta-grid'));
+    }
+    if (page.slug === 'join') {
+      visualHint.hidden = false;
+      visualHint.innerHTML = 'Join the Band has a drag-and-drop visual editor pilot. <a href="/admin/visual/join">Open visual editor</a>';
+    } else {
+      visualHint.hidden = true;
+      visualHint.textContent = '';
     }
     syncPagePhotoToolbar();
     form.querySelector('[data-home-hint]').hidden = !isHomePage;

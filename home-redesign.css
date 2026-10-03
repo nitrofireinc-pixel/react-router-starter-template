@@ -1119,6 +1119,35 @@ body.fundraising-page main{
   .fundraising-cards .ff-sub{font-size:.95rem}
   .fundraising-cards .btn-row{grid-template-columns:1fr}
 }
+.visual-accordion{
+  display:block;
+  margin:12px 0;
+  border:1px solid var(--line,#DBE4F0);
+  border-radius:12px;
+  background:#fff;
+  max-width:100%;
+}
+.visual-accordion summary{
+  cursor:pointer;
+  font-weight:800;
+  padding:14px 16px;
+  color:var(--navy,#002142);
+}
+.visual-accordion-body{padding:0 16px 16px}
+.visual-join-wrap{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  max-width:min(1100px,100%);
+  min-width:0;
+  box-sizing:border-box;
+}
+html:has(body.coming-soon-page),
+body.coming-soon-page,
+body.coming-soon-page main{
+  max-width:100%;
+  overflow-x:clip;
+}
 @media (orientation:landscape) and (max-height:500px){
   .fundraising-cards .fundraising-card,
   body.efhs-theme .fundraising-cards .fundraising-card,
