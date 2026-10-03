@@ -3252,6 +3252,11 @@ body.sponsor-signup-open{overflow:hidden}
   border-color:#e2c56a;
   color:#5a4500;
 }
+.sponsor-marquee-item.tier-honorable{
+  background:#fff;
+  border-color:#d5deea;
+  color:var(--navy);
+}
 .sponsor-marquee-item img{
   width:34px;
   height:24px;
@@ -3349,6 +3354,7 @@ body.sponsor-signup-open{overflow:hidden}
 .sponsor-tier-badge.tier-bronze{background:#f3e2d0;color:#7a4d28}
 .sponsor-tier-badge.tier-silver{background:#e7eef6;color:#334155}
 .sponsor-tier-badge.tier-gold{background:#ffe9a8;color:#6a5200}
+.sponsor-tier-badge.tier-honorable{background:#fff;color:var(--navy);border:1px solid #d5deea}
 .sponsor-tier-benefits{margin:0;grid-column:1/-1}
 .gold-sponsors-print-card h2{margin:0}
 .gold-sponsors-print-preview{

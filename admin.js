@@ -542,6 +542,8 @@ function formPayload(form) {
   if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
   const notifyEmail = formControl(form, 'notify_email_subscribers');
   if (notifyEmail) payload.notify_email_subscribers = Boolean(notifyEmail.checked);
+  const honorableMention = formControl(form, 'honorable_mention');
+  if (honorableMention) payload.honorable_mention = Boolean(honorableMention.checked);
   return payload;
 }
 
@@ -669,11 +671,13 @@ function sponsorTierFromLevel(level = '') {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return 'bronze';
 }
 
 function sponsorTierBenefitsText(level = '') {
   const tier = sponsorTierFromLevel(level);
+  if (tier === 'honorable') return 'Thank-you mention on the site-wide marquee (white chip). Not offered as a public package.';
   if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and public advertising.';
   if (tier === 'silver') return 'Includes website marquee and homepage fly-in ad.';
   return 'Includes website marquee logo feature.';
@@ -682,7 +686,8 @@ function sponsorTierBenefitsText(level = '') {
 function syncSponsorTierBenefits(form = document.querySelector('#sponsor-form')) {
   const hint = document.querySelector('#sponsor-tier-benefits');
   if (!hint) return;
-  const level = formControl(form, 'level')?.value || 'Bronze Sponsor';
+  const honorable = formControl(form, 'honorable_mention');
+  const level = honorable?.checked ? 'Honorable Mention' : (formControl(form, 'level')?.value || 'Bronze Sponsor');
   hint.textContent = sponsorTierBenefitsText(level);
 }
 
@@ -3114,6 +3119,9 @@ function showAllowedPanels() {
     if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
     const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
     if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
+    document.querySelectorAll('[data-honorable-mention-field]').forEach((field) => {
+      field.hidden = !canEditSponsors();
+    });
     const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
     if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
     const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
@@ -4357,6 +4365,7 @@ function resetSponsorForm(form) {
   setSelectValue(formControl(form, 'state'), 'NC');
   form.elements.active.checked = true;
   form.elements.level.value = 'Bronze Sponsor';
+  if (form.elements.honorable_mention) form.elements.honorable_mention.checked = false;
   const file = formControl(form, 'logo_file');
   if (file) file.value = '';
   syncSponsorLogoPreview(form, '');
@@ -4729,7 +4738,7 @@ function renderSponsors() {
   const ordered = orderedSponsors();
   list.innerHTML = ordered.map((sponsor) => {
     const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
-    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
+    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : tier === 'honorable' ? 'Honorable Mention' : 'Bronze');
     const benefits = [];
     if (sponsor.show_marquee !== false) benefits.push('Marquee');
     if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
@@ -4751,15 +4760,18 @@ function renderSponsors() {
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
+    const isHonorable = (sponsor.tier || sponsorTierFromLevel(sponsor.level)) === 'honorable';
     fillForm(form, {
       ...sponsor,
       city: sponsor.city || 'Kernersville',
       state: sponsor.state || 'NC',
+      level: isHonorable ? 'Bronze Sponsor' : sponsor.level,
+      honorable_mention: isHonorable,
     });
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     const levelSelect = formControl(form, 'level');
     if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
+      const level = isHonorable ? 'Bronze Sponsor' : (String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor');
       if (![...levelSelect.options].some((option) => option.value === level)) {
         const option = document.createElement('option');
         option.value = level;
@@ -4769,6 +4781,7 @@ function renderSponsors() {
       setSelectValue(levelSelect, level);
     }
     form.elements.active.checked = Boolean(Number(sponsor.active));
+    if (form.elements.honorable_mention) form.elements.honorable_mention.checked = isHonorable;
     const file = formControl(form, 'logo_file');
     if (file) file.value = '';
     syncSponsorLogoPreview(form, sponsor.logo_url || '');
@@ -7833,6 +7846,9 @@ function bindForms() {
     syncSponsorLogoPreview(form, objectUrl);
   });
   document.querySelector('#sponsor-form [name="level"]')?.addEventListener('change', (event) => {
+    syncSponsorTierBenefits(event.currentTarget.form);
+  });
+  document.querySelector('#sponsor-form [name="honorable_mention"]')?.addEventListener('change', (event) => {
     syncSponsorTierBenefits(event.currentTarget.form);
   });
   document.querySelector('#print-gold-sponsors')?.addEventListener('click', () => {

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -1563,6 +1563,88 @@ test('normalizeSponsorPayload derives fly-in eligibility from tier', () => {
   assert.equal(legacy.homepage_ad, 1);
 });
 
+test('Honorable Mention is CMS-only and keeps paid public packages unchanged', () => {
+  assert.equal(normalizeSponsorTier('Honorable Mention'), 'honorable');
+  assert.equal(normalizeSponsorTier('honorable-mention'), 'honorable');
+  assert.equal(normalizeSponsorLevel('Honorable Mention'), 'Honorable Mention');
+  assert.equal(normalizeSponsorLevel('navy partner'), 'Bronze Sponsor');
+  assert.equal(normalizeSponsorLevel('Community Sponsor', { homepageAd: 1 }), 'Silver Sponsor');
+  assert.equal(normalizeSponsorTierKey('Honorable Mention'), '');
+  assert.equal(normalizeSponsorTierKey('honorable'), '');
+  assert.equal(isPublicPurchasableSponsorTier('honorable'), false);
+  assert.equal(isPublicPurchasableSponsorTier('gold'), true);
+
+  const honorable = normalizeSponsorPayload({
+    name: 'Thank You Shop',
+    level: 'Gold Sponsor',
+    honorable_mention: true,
+    homepage_ad: 1,
+  });
+  assert.equal(honorable.level, 'Honorable Mention');
+  assert.equal(honorable.homepage_ad, 0);
+  const benefits = sponsorBenefitsFromLevel('Honorable Mention');
+  assert.equal(benefits.tier, 'honorable');
+  assert.equal(benefits.tier_label, 'Honorable Mention');
+  assert.equal(benefits.show_marquee, true);
+  assert.equal(benefits.show_flyin, false);
+  assert.equal(benefits.show_game_announcement, false);
+
+  const preserved = normalizeSponsorPayload({ name: 'Thank You Shop' }, { level: 'Honorable Mention', city: 'Kernersville' });
+  assert.equal(preserved.level, 'Honorable Mention');
+  const unchecked = normalizeSponsorPayload({
+    name: 'Thank You Shop',
+    level: 'Silver Sponsor',
+    honorable_mention: false,
+  }, { level: 'Honorable Mention' });
+  assert.equal(unchecked.level, 'Silver Sponsor');
+  assert.equal(unchecked.homepage_ad, 1);
+
+  const hydrated = hydrateSponsor({ name: 'Thank You Shop', level: 'Honorable Mention', homepage_ad: 1, city: 'Kernersville', state: 'NC' });
+  assert.equal(hydrated.tier, 'honorable');
+  assert.equal(hydrated.tier_label, 'Honorable Mention');
+  assert.equal(hydrated.homepage_ad, 0);
+
+  const marquee = renderSponsorMarqueeSection([
+    { name: 'Mention Co', level: 'Honorable Mention', active: 1 },
+    { name: 'Gold Co', level: 'Gold Sponsor', active: 1 },
+    { name: 'Bronze Co', level: 'Bronze Sponsor', active: 1 },
+  ]);
+  const goldAt = marquee.indexOf('Gold Co');
+  const mentionAt = marquee.indexOf('Mention Co');
+  assert.ok(goldAt > -1 && mentionAt > goldAt);
+  assert.match(marquee, /class="sponsor-marquee-item tier-honorable"[^>]*data-sponsor-tier="honorable"/);
+  assert.match(marquee, /class="sponsor-marquee-item tier-gold"[^>]*data-sponsor-tier="gold"/);
+
+  const directory = renderSponsorsDirectory([
+    { name: 'Mention Co', level: 'Honorable Mention', active: 1 },
+    { name: 'Gold Co', level: 'Gold Sponsor', active: 1 },
+  ]);
+  assert.match(directory, /sponsor-tier-badge tier-honorable/);
+  assert.match(directory, /Honorable Mention/);
+  assert.ok(directory.indexOf('Gold Co') < directory.indexOf('Mention Co'));
+
+  const publicTiers = renderSponsorTiersHtml();
+  assert.doesNotMatch(publicTiers, /Honorable Mention/i);
+  assert.doesNotMatch(publicTiers, /data-tier="honorable"/);
+
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
+  const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
+  const becomeHtml = readFileSync(join(root, 'become-a-sponsor.html'), 'utf8');
+  const adminStart = workerSrc.indexOf('const ADMIN_HTML');
+  assert.ok(adminStart > 0);
+  const adminHtml = workerSrc.slice(adminStart);
+  assert.match(adminHtml, /name="honorable_mention"/);
+  assert.match(adminHtml, /data-honorable-mention-field/);
+  assert.match(adminHtml, /<label class="checkline" data-honorable-mention-field>/);
+  assert.doesNotMatch(adminHtml, /<option value="Honorable Mention">/);
+  assert.match(adminJs, /payload\.honorable_mention = Boolean\(honorableMention\.checked\)/);
+  assert.match(siteContent, /honorable/);
+  assert.match(siteContent, /efhs-sponsor-marquee-v4/);
+  assert.doesNotMatch(becomeHtml, /Honorable Mention/i);
+});
+
 test('normalizeSponsorAdSeconds clamps homepage fly-in duration', () => {
   assert.equal(normalizeSponsorAdSeconds(6), 6);
   assert.equal(normalizeSponsorAdSeconds('9'), 9);
@@ -2209,7 +2291,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'deadline-important-nav-980-20261003'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'honorable-mention-cms-20261003'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
