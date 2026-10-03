@@ -503,6 +503,7 @@ export function lockPageSettingsToExisting(page, existing) {
     path: existing.is_home ? '/' : existing.path,
     nav_order: Number(existing.nav_order),
     is_home: existing.is_home ? 1 : 0,
+    active: Number(existing.active) === 1 ? 1 : 0,
   };
 }
 
