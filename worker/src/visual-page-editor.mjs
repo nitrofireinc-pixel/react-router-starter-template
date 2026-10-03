@@ -334,10 +334,26 @@ export function extractEditableJoinHtml(html = '') {
     .replace(/<div\b[^>]*class="[^"]*\butility\b[\s\S]*?<\/div>/gi, '');
 }
 
+export function visibleVisualText(html = '') {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function isNearEmptyVisualHtml(html = '') {
+  return !/[a-z0-9]/i.test(visibleVisualText(html));
+}
+
 export function normalizeVisualSavePayload(raw = {}, existingHtml = '') {
   const action = String(raw.action || raw.kind || 'draft').toLowerCase() === 'publish' ? 'publish' : 'draft';
   const html = sanitizeVisualPageHtml(extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml));
-  if (!html) return { ok: false, status: 422, detail: 'Page content is required' };
+  if (!html || isNearEmptyVisualHtml(html)) {
+    return { ok: false, status: 422, detail: 'Add some page content before saving.' };
+  }
   return { ok: true, action, html };
 }
 
@@ -437,7 +453,11 @@ export async function saveVisualPage(env, {
 } = {}) {
   await ensureVisualPagesSchema(env);
   const clean = sanitizeVisualPageHtml(html);
-  if (!clean) throw new Error('Page content is required');
+  if (!clean || isNearEmptyVisualHtml(clean)) {
+    const error = new Error('Add some page content before saving.');
+    error.status = 422;
+    throw error;
+  }
   const kind = action === 'publish' ? 'publish' : 'draft';
   const actorId = Number(user?.id) || null;
   const actorName = String(user?.display_name || user?.username || '').trim();

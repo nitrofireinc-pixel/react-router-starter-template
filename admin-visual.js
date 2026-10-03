@@ -86,6 +86,7 @@
 
   function markDirty() {
     if (bootstrapped) dirty = true;
+    syncHistoryButtons();
   }
 
   function clearDirty() {
@@ -515,7 +516,32 @@
     });
   }
 
+  function syncHistoryButtons() {
+    const undo = document.querySelector('[data-visual-undo]');
+    const redo = document.querySelector('[data-visual-redo]');
+    const canUndo = Boolean(editor.UndoManager?.hasUndo?.());
+    const canRedo = Boolean(editor.UndoManager?.hasRedo?.());
+    if (undo) undo.disabled = !canUndo;
+    if (redo) redo.disabled = !canRedo;
+  }
+
+  function clearLoadHistory() {
+    editor.UndoManager?.clear?.();
+    syncHistoryButtons();
+  }
+
+  function canvasIsNearEmpty() {
+    const text = String(exportEditableHtml() || '')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return !/[a-z0-9]/i.test(text);
+  }
+
   async function loadCanvas(draftHtml) {
+    editor.UndoManager?.stop?.();
     const split = splitVisualCss(draftHtml);
     const frame = await loadLiveCanvasHtml(split.html);
     editor.setComponents(frame.html);
@@ -524,6 +550,8 @@
     if (doc?.body) doc.body.className = frame.bodyClass;
     applyRulesTree(editor.getWrapper());
     stripLegacyInlineWidths(findMain() || editor.getWrapper());
+    editor.UndoManager?.start?.();
+    clearLoadHistory();
   }
 
   editor.on('load', () => {
@@ -594,9 +622,11 @@
     const toolbar = document.querySelector('.gjs-toolbar');
     const frame = document.querySelector('.gjs-frame-wrapper');
     if (!toolbar || !frame || toolbar.style.display === 'none') return;
-    const box = toolbar.getBoundingClientRect();
     const limit = frame.getBoundingClientRect();
-    if (!box.width || !limit.width) return;
+    if (!limit.width) return;
+    toolbar.style.maxWidth = `${Math.max(120, Math.floor(limit.width - 8))}px`;
+    const box = toolbar.getBoundingClientRect();
+    if (!box.width) return;
     let shift = 0;
     if (box.left < limit.left + 4) shift += (limit.left + 4) - box.left;
     if (box.right + shift > limit.right - 4) shift -= (box.right + shift) - (limit.right - 4);
@@ -646,16 +676,20 @@
       }
     }
     const toolbar = [];
+    const tool = (command, title, icon) => ({
+      command,
+      label: `<span title="${title}" aria-label="${title}">${icon}</span>`,
+    });
     if (selectableParent(comp)) {
-      toolbar.push({ command: 'visual-parent', label: 'Select parent' });
+      toolbar.push(tool('visual-parent', 'Select parent', '↑'));
     }
-    toolbar.push({ command: 'tlb-move', label: 'Move' });
-    toolbar.push({ command: 'tlb-clone', label: 'Copy' });
+    toolbar.push(tool('tlb-move', 'Move', '✥'));
+    toolbar.push(tool('tlb-clone', 'Copy', '⧉'));
     if (tag === 'img' || (comp.find && comp.find('img').length)) {
-      toolbar.push({ command: 'visual-image', label: 'Image' });
+      toolbar.push(tool('visual-image', 'Image', '▣'));
     }
-    toolbar.push({ command: 'visual-link', label: 'Link' });
-    toolbar.push({ command: 'tlb-delete', label: 'Delete' });
+    toolbar.push(tool('visual-link', 'Link', '↗'));
+    toolbar.push(tool('tlb-delete', 'Delete', '✕'));
     comp.set('toolbar', toolbar);
     clampSelectionToolbarSoon();
   });
@@ -668,8 +702,18 @@
   deviceSelect?.addEventListener('change', () => setActiveDevice(deviceSelect.value));
   setActiveDevice('Desktop');
 
-  document.querySelector('[data-visual-undo]')?.addEventListener('click', () => editor.UndoManager.undo());
-  document.querySelector('[data-visual-redo]')?.addEventListener('click', () => editor.UndoManager.redo());
+  document.querySelector('[data-visual-undo]')?.addEventListener('click', () => {
+    if (!editor.UndoManager.hasUndo()) return;
+    editor.UndoManager.undo();
+    syncHistoryButtons();
+  });
+  document.querySelector('[data-visual-redo]')?.addEventListener('click', () => {
+    if (!editor.UndoManager.hasRedo()) return;
+    editor.UndoManager.redo();
+    syncHistoryButtons();
+  });
+  editor.on('update', syncHistoryButtons);
+  syncHistoryButtons();
   document.querySelector('[data-visual-add]')?.addEventListener('click', () => {
     setDrawer(historyDrawer, false);
     setDrawer(addDrawer, Boolean(addDrawer?.hidden));
@@ -694,6 +738,10 @@
   renderAddGallery();
 
   async function save(action) {
+    if (canvasIsNearEmpty()) {
+      setStatus('Add some page content before saving.', true);
+      return;
+    }
     try {
       setStatus(action === 'publish' ? 'Publishing…' : 'Saving draft…');
       const state = await jsonFetch('/api/admin/visual-pages/join', {
@@ -791,6 +839,7 @@
       renderVersions(state.versions);
       await renderPhotos().catch(() => {});
       clearDirty();
+      clearLoadHistory();
       bootstrapped = true;
       setStatus('Click any part of the page to select it, then move, resize, add, or delete.');
     } catch (error) {

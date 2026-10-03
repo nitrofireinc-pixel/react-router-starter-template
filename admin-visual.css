@@ -168,29 +168,34 @@ a.visual-banner-btn,
 }
 .gjs-toolbar{
   display:flex !important;
-  flex-wrap:nowrap;
+  flex-wrap:wrap !important;
   align-items:stretch;
   width:auto !important;
-  max-width:none !important;
+  max-width:min(100%,304px) !important;
   height:auto !important;
+  box-sizing:border-box;
   background:#fff;
   color:#10233C;
   border:1px solid #dbe4f0;
   border-radius:8px;
   box-shadow:0 6px 20px rgba(0,0,0,.18);
-  overflow:visible;
+  overflow:hidden;
 }
 .gjs-toolbar-item{
   width:auto !important;
-  min-width:max-content !important;
+  min-width:36px !important;
   height:auto !important;
-  padding:8px 12px !important;
-  font-size:12px !important;
+  padding:8px 9px !important;
+  font-size:14px !important;
   line-height:1.2 !important;
   font-weight:800;
   color:#10233C;
   white-space:nowrap !important;
   border-right:1px solid #dbe4f0;
+}
+.visual-banner-btn:disabled{
+  opacity:.4;
+  cursor:not-allowed;
 }
 .gjs-resizer-h{
   border:2px solid #0B63D6;

@@ -92,6 +92,8 @@ test('visual sanitizer keeps on-page resize and move styles', () => {
 test('visual save payload requires sanitized HTML and drops page chrome', () => {
   const bad = normalizeVisualSavePayload({ html: '<script>x</script>' });
   assert.equal(bad.ok, false);
+  const empty = normalizeVisualSavePayload({ html: '<section><p><br></p></section>' });
+  assert.equal(empty.ok, false);
   const ok = normalizeVisualSavePayload({ html: '<h1>Join</h1><p>Hi</p>', action: 'publish' });
   assert.equal(ok.ok, true);
   assert.equal(ok.action, 'publish');
@@ -160,6 +162,10 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /panels:\s*\{\s*defaults:\s*\[\]/);
   assert.match(editorJs, /setDevice/);
   assert.match(editorJs, /UndoManager/);
+  assert.match(editorJs, /UndoManager\?\.clear|UndoManager\.clear/);
+  assert.match(editorJs, /hasUndo/);
+  assert.match(editorJs, /canvasIsNearEmpty/);
+  assert.match(editorJs, /Add some page content before saving/);
   assert.match(editorJs, /\/join\.html/);
   assert.match(editorJs, /exportEditableHtml/);
   assert.match(editorJs, /data-add-block/);
@@ -186,7 +192,9 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorCss, /flex-wrap:wrap/);
   assert.match(editorCss, /@media \(max-width:1024px\)/);
   assert.match(editorCss, /\.gjs-pn-panel/);
-  assert.match(editorCss, /min-width:max-content/);
+  assert.match(editorCss, /min-width:36px/);
+  assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?flex-wrap:wrap/);
+  assert.match(editorCss, /max-width:min\(100%,304px\)/);
   assert.match(page, /This page is being edited/);
   assert.match(page, /Add a section/);
   assert.match(page, /data-visual-device-select/);
