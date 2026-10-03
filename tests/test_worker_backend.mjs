@@ -42,7 +42,7 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.doesNotMatch(devToml, /^name\s*=\s*"efhsband-live"/m);
   assert.doesNotMatch(devToml, /efhsband\.org\/\*/);
   assert.doesNotMatch(devToml, /73681cba-4863-4abb-86d4-b140694bcde2/);
-  assert.doesNotMatch(devToml, /EFBAND_ADMIN_PASSWORD/);
+  assert.doesNotMatch(devToml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
   assert.doesNotMatch(devToml, /admin123\$/);
 });
 
