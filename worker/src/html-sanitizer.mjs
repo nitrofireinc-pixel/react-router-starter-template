@@ -3,7 +3,13 @@
  * Parses tags/attributes without requiring spaces, treats `/` as
  * attribute whitespace, decodes entities before URL scheme checks,
  * and drops event handlers plus iframe/object/embed/meta/base/script.
+ *
+ * Save-quality: safe SVG subset, relative URLs, fieldset/legend,
+ * valueless attrs stay valueless, attribute encode is idempotent,
+ * and style[data-visual-css] is preserved via the visual CSS sanitizer.
  */
+
+import { sanitizeVisualCss } from './visual-page-editor.mjs';
 
 const VOID_TAGS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
@@ -12,24 +18,30 @@ const VOID_TAGS = new Set([
 
 const DROP_WHOLE = new Set([
   'script', 'iframe', 'object', 'embed', 'meta', 'base', 'link',
-  'svg', 'math', 'applet', 'frame', 'frameset', 'template', 'noscript',
+  'math', 'applet', 'frame', 'frameset', 'template', 'noscript',
+  'foreignobject',
+]);
+
+const SVG_TAGS = new Set([
+  'svg', 'path', 'g', 'circle', 'rect', 'line', 'polyline', 'polygon', 'use', 'title',
 ]);
 
 const CMS_TAGS = new Set([
   'a', 'abbr', 'address', 'article', 'aside', 'audio', 'b', 'blockquote',
   'br', 'button', 'caption', 'cite', 'code', 'col', 'colgroup', 'dd',
-  'details', 'dfn', 'div', 'dl', 'dt', 'em', 'figcaption', 'figure',
+  'details', 'dfn', 'div', 'dl', 'dt', 'em', 'fieldset', 'figcaption', 'figure',
   'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr',
   'i', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'main',
   'mark', 'nav', 'ol', 'optgroup', 'option', 'p', 'picture', 'pre', 'q',
   's', 'samp', 'section', 'select', 'small', 'source', 'span', 'strong',
   'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'textarea',
   'tfoot', 'th', 'thead', 'time', 'tr', 'u', 'ul', 'video', 'wbr',
+  ...SVG_TAGS,
 ]);
 
 const HOME_EXTRA_DROP = new Set([
   'form', 'input', 'button', 'textarea', 'select', 'option', 'optgroup',
-  'label', 'fieldset', 'legend', 'style', 'audio', 'video', 'source',
+  'label', 'style', 'audio', 'video', 'source',
 ]);
 
 const BOOLEAN_ATTRS = new Set([
@@ -40,6 +52,15 @@ const BOOLEAN_ATTRS = new Set([
 const GLOBAL_ATTRS = new Set([
   'class', 'id', 'title', 'lang', 'dir', 'hidden', 'tabindex', 'role',
   'translate',
+]);
+
+const SVG_ATTRS = new Set([
+  'viewbox', 'fill', 'stroke', 'd', 'width', 'height', 'cx', 'cy', 'r', 'rx', 'ry',
+  'x', 'y', 'x1', 'y1', 'x2', 'y2', 'points', 'transform', 'opacity',
+  'fill-opacity', 'stroke-opacity', 'stroke-width', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-miterlimit', 'stroke-dasharray', 'stroke-dashoffset',
+  'fill-rule', 'clip-rule', 'preserveaspectratio', 'focusable',
+  'vector-effect', 'overflow', 'display', 'pointer-events',
 ]);
 
 const TAG_ATTRS = {
@@ -57,6 +78,8 @@ const TAG_ATTRS = {
   option: new Set(['value', 'selected', 'disabled']),
   optgroup: new Set(['label', 'disabled']),
   label: new Set(['for']),
+  fieldset: new Set(['name', 'disabled']),
+  legend: new Set([]),
   td: new Set(['colspan', 'rowspan', 'scope']),
   th: new Set(['colspan', 'rowspan', 'scope']),
   col: new Set(['span']),
@@ -69,6 +92,16 @@ const TAG_ATTRS = {
   ol: new Set(['start', 'type']),
   li: new Set(['value']),
   table: new Set(['cellpadding', 'cellspacing']),
+  svg: new Set(['width', 'height', 'viewbox', 'preserveaspectratio', 'focusable']),
+  path: new Set(['d']),
+  circle: new Set(['cx', 'cy', 'r']),
+  rect: new Set(['x', 'y', 'width', 'height', 'rx', 'ry']),
+  line: new Set(['x1', 'y1', 'x2', 'y2']),
+  polyline: new Set(['points']),
+  polygon: new Set(['points']),
+  use: new Set(['href', 'x', 'y', 'width', 'height']),
+  g: new Set(['transform']),
+  title: new Set([]),
 };
 
 const SAFE_CSS_PROP = new Set([
@@ -135,18 +168,26 @@ function hasDangerousScheme(value = '') {
     || compact.includes('vbscript:');
 }
 
+function isSafeLocalUrl(decoded = '', { allowMailto = false } = {}) {
+  const value = String(decoded || '').trim();
+  if (!value || hasDangerousScheme(value)) return false;
+  if (/^(https?:\/\/|\/|#)/i.test(value)) return true;
+  if (allowMailto && /^(mailto:|tel:)/i.test(value)) return true;
+  if (value.startsWith('//')) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  return true;
+}
+
 export function isSafeHref(value = '') {
   const raw = String(value || '').trim();
   if (!raw || hasDangerousScheme(raw)) return false;
-  const decoded = decodeHtmlEntities(raw).trim();
-  return /^(https?:\/\/|\/|#|mailto:|tel:)/i.test(decoded);
+  return isSafeLocalUrl(decodeHtmlEntities(raw).trim(), { allowMailto: true });
 }
 
 export function isSafeSrc(value = '') {
   const raw = String(value || '').trim();
   if (!raw || hasDangerousScheme(raw)) return false;
-  const decoded = decodeHtmlEntities(raw).trim();
-  return /^(https?:\/\/|\/)/i.test(decoded);
+  return isSafeLocalUrl(decodeHtmlEntities(raw).trim(), { allowMailto: false });
 }
 
 export function isSafeFormAction(value = '') {
@@ -155,6 +196,11 @@ export function isSafeFormAction(value = '') {
   if (hasDangerousScheme(raw)) return false;
   const decoded = decodeHtmlEntities(raw).trim();
   return decoded.startsWith('/') || decoded.startsWith('#');
+}
+
+function isSafeSvgUseHref(value = '') {
+  const decoded = decodeHtmlEntities(value).trim();
+  return /^#[A-Za-z_][\w:.-]*$/.test(decoded) ? decoded : null;
 }
 
 function escapeAttr(value) {
@@ -198,16 +244,19 @@ function allowedTagsFor(profile) {
 function isAllowedAttrName(tag, name) {
   if (!name) return false;
   if (name.startsWith('on')) return false;
-  if (name === 'srcdoc' || name === 'formaction' || name === 'xlink:href' || name === 'xmlns') return false;
+  if (name === 'srcdoc' || name === 'formaction') return false;
+  if (name === 'xlink:href' || name === 'xmlns') return false;
   if (GLOBAL_ATTRS.has(name)) return true;
   if (name.startsWith('aria-') && /^aria-[a-z0-9-]+$/.test(name)) return true;
   if (name.startsWith('data-') && /^data-[a-z0-9-]+$/.test(name)) return true;
   if (name === 'style') return true;
+  if (SVG_TAGS.has(tag) && SVG_ATTRS.has(name)) return true;
   return Boolean(TAG_ATTRS[tag]?.has(name));
 }
 
 function sanitizeAttrValue(tag, name, value) {
   const raw = String(value ?? '');
+  if (tag === 'use' && name === 'href') return isSafeSvgUseHref(raw);
   if (name === 'href' || name === 'poster') return isSafeHref(raw) ? decodeHtmlEntities(raw).trim() : null;
   if (name === 'src' || name === 'srcset') {
     if (name === 'srcset') {
@@ -234,7 +283,7 @@ function sanitizeAttrValue(tag, name, value) {
     return /^-?\d{1,3}$/.test(raw.trim()) ? raw.trim() : null;
   }
   if (hasDangerousScheme(raw)) return null;
-  return raw;
+  return decodeHtmlEntities(raw);
 }
 
 function skipAttrSep(source, index) {
@@ -275,7 +324,9 @@ function parseAttributes(source, start) {
     i += name.length;
     i = skipAttrSep(source, i);
     let value = '';
+    let valueless = true;
     if (source[i] === '=') {
+      valueless = false;
       i += 1;
       i = skipAttrSep(source, i);
       if (source[i] === '"' || source[i] === "'") {
@@ -290,10 +341,8 @@ function parseAttributes(source, start) {
         value = unquoted ? unquoted[1] : '';
         i += value.length;
       }
-    } else {
-      value = name;
     }
-    attrs.push({ name, value });
+    attrs.push({ name, value, valueless });
   }
   return { attrs, end: source.length, selfClosing: false };
 }
@@ -321,7 +370,7 @@ function rewriteOpenTag(tag, attrs, profile) {
   for (const attr of attrs) {
     const name = String(attr.name || '').trim().toLowerCase();
     if (!isAllowedAttrName(tag, name)) continue;
-    if (BOOLEAN_ATTRS.has(name)) {
+    if (BOOLEAN_ATTRS.has(name) || attr.valueless) {
       kept.push(name);
       continue;
     }
@@ -340,6 +389,10 @@ function rewriteOpenTag(tag, attrs, profile) {
   }
   if (profile === 'home' && tag === 'style') return '';
   return `<${tag}${kept.length ? ` ${kept.join(' ')}` : ''}>`;
+}
+
+function hasVisualCssFlag(attrs = []) {
+  return attrs.some((attr) => String(attr.name || '').trim().toLowerCase() === 'data-visual-css');
 }
 
 export function sanitizeAllowlistHtml(dirty = '', options = {}) {
@@ -414,8 +467,9 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
     if (parsed.tag === 'style' && profile === 'cms') {
       const closeTag = source.toLowerCase().indexOf('</style', parsed.end);
       const rawCss = closeTag === -1 ? '' : source.slice(parsed.end, closeTag);
-      const css = sanitizeCssText(rawCss, { allowUrls: false });
-      if (css) out += `<style>${css}</style>`;
+      const visual = hasVisualCssFlag(parsed.attrs);
+      const css = visual ? sanitizeVisualCss(rawCss) : sanitizeCssText(rawCss, { allowUrls: false });
+      if (css) out += visual ? `<style data-visual-css>${css}</style>` : `<style>${css}</style>`;
       if (closeTag === -1) {
         i = source.length;
       } else {

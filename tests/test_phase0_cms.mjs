@@ -13,13 +13,14 @@ import {
   isPublicCmsPageActive,
   lockPageSettingsToExisting,
   publicCmsPageForRender,
+  publicFormSubmitGate,
   renderPageBody,
   sanitizeAssignablePermissions,
   sanitizeCmsPageHtml,
   sanitizeHomeBodyHtml,
   serializePagePayload,
 } from '../worker/src/worker.mjs';
-import { sanitizeAllowlistHtml } from '../worker/src/html-sanitizer.mjs';
+import { sanitizeAllowlistHtml, sanitizeHomeAllowlistHtml } from '../worker/src/html-sanitizer.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
@@ -102,10 +103,10 @@ test('Phase 0.3 users permission cannot grant all or Super Admin', () => {
 
   assert.equal(assertSafeUserPrivilegeGrant(usersEditor, { role: 'admin' }).ok, false);
   assert.equal(assertSafeUserPrivilegeGrant(usersEditor, { role: 'editor', permissions: ['all'] }).ok, false);
-  assert.equal(assertSafeUserPrivilegeGrant(usersEditor, { role: 'editor', permissions: ['events'] }).ok, true);
+  assert.equal(assertSafeUserPrivilegeGrant(usersEditor, { role: 'editor', permissions: ['events'] }).ok, false);
   assert.equal(assertSafeUserPrivilegeGrant(superAdmin, { role: 'admin', permissions: ['all'] }).ok, true);
 
-  assert.deepEqual(sanitizeAssignablePermissions(usersEditor, ['events', 'all', 'page:home']), ['events', 'page:home']);
+  assert.deepEqual(sanitizeAssignablePermissions(usersEditor, ['events', 'all', 'page:home']), []);
   assert.deepEqual(sanitizeAssignablePermissions(superAdmin, ['all', 'events']), ['all', 'events']);
   assert.match(workerSrc, /assertSafeUserPrivilegeGrant\(auth\.user, payload\)/);
   assert.match(workerSrc, /sanitizeAssignablePermissions\(auth\.user, payload\.permissions\)/);
@@ -176,7 +177,7 @@ test('Phase 0.7 public calendar feed is cached and busted on writes', () => {
 
 const XSS_BYPASSES = [
   ['slash-separated img onerror', '<img/src=x/onerror=alert(1)>', /onerror|alert\(1\)/i],
-  ['slash-separated svg onload', '<svg/onload=alert(1)>', /svg|onload|alert\(1\)/i],
+  ['slash-separated svg onload', '<svg/onload=alert(1)>', /onload|alert\(1\)/i],
   ['no-space quoted onerror', '<img src="x"onerror=alert(1)>', /onerror|alert\(1\)/i],
   ['entity-encoded javascript href', '<a href="javascript&#58;alert(1)">x</a>', /javascript|alert\(1\)/i],
   ['hex entity javascript src', '<img src="javascrip&#x74;:alert(1)">', /javascript|alert\(1\)/i],
@@ -250,4 +251,145 @@ test('Phase 0 follow-up inactive built-in form pages render Coming Soon, not the
     assert.doesNotMatch(html, /<form/i, slug);
   }
   assert.match(workerSrc, /if \(!isPublicCmsPageActive\(page\)\)/);
+});
+
+test('Phase 0 users permission can only grant held flags and never Users', () => {
+  const usersOnly = { role: 'editor', permissions: ['users'] };
+  const usersAndMore = { role: 'editor', permissions: ['users', 'events', 'page:home', 'treasurer'] };
+  const superAdmin = { role: 'admin', permissions: [] };
+
+  assert.equal(assertSafeUserPrivilegeGrant(usersOnly, {
+    role: 'editor',
+    permissions: ['users', 'pages', 'president', 'treasurer', 'events'],
+  }).ok, false);
+  assert.equal(assertSafeUserPrivilegeGrant(usersAndMore, {
+    role: 'editor',
+    permissions: ['users'],
+  }).ok, false);
+  assert.equal(assertSafeUserPrivilegeGrant(usersAndMore, {
+    role: 'editor',
+    permissions: ['events', 'page:home'],
+  }).ok, true);
+  assert.equal(assertSafeUserPrivilegeGrant(usersAndMore, {
+    role: 'editor',
+    permissions: ['events', 'pages'],
+  }).ok, false);
+  assert.equal(assertSafeUserPrivilegeGrant(superAdmin, {
+    role: 'editor',
+    permissions: ['users', 'pages'],
+  }).ok, true);
+
+  assert.deepEqual(
+    sanitizeAssignablePermissions(usersAndMore, ['users', 'events', 'pages', 'all', 'treasurer']),
+    ['events', 'treasurer'],
+  );
+  assert.deepEqual(sanitizeAssignablePermissions(usersOnly, ['users', 'events']), []);
+});
+
+test('Phase 0 inactive in-kind and letterman submit endpoints follow Coming Soon', () => {
+  assert.deepEqual(publicFormSubmitGate({ slug: 'in-kind', active: 0 }), {
+    ok: false,
+    status: 403,
+    detail: 'Coming soon',
+  });
+  assert.deepEqual(publicFormSubmitGate({ slug: 'letterman-jacket', active: 0 }), {
+    ok: false,
+    status: 403,
+    detail: 'Coming soon',
+  });
+  assert.deepEqual(publicFormSubmitGate(null), {
+    ok: false,
+    status: 403,
+    detail: 'Coming soon',
+  });
+  assert.equal(publicFormSubmitGate({ slug: 'in-kind', active: 1 }).ok, true);
+  assert.match(workerSrc, /rejectInactivePublicFormPage\(env, 'in-kind'\)/);
+  assert.match(workerSrc, /formSlug === 'letterman-jacket' \|\| formSlug === 'in-kind'/);
+  assert.match(workerSrc, /rejectInactivePublicFormPage\(env, formSlug\)/);
+});
+
+test('Phase 0 sanitizer keeps SVG, relative URLs, fieldsets, visual CSS, and stays idempotent', () => {
+  const svg = sanitizeHomeAllowlistHtml(
+    '<a class="btn" href="/join.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" onload="alert(1)"><path d="M12 21s-7"/><foreignObject><iframe src="javascript:alert(1)"></iframe></foreignObject><use href="#ok"></use><use href="https://evil.example/x"></use></svg></a>',
+  );
+  assert.match(svg, /<svg class="ic" viewbox="0 0 24 24" aria-hidden="true">/);
+  assert.match(svg, /<path d="M12 21s-7">/);
+  assert.match(svg, /<use href="#ok">/);
+  assert.doesNotMatch(svg, /onload|foreignObject|iframe|evil\.example|javascript/i);
+
+  const urls = sanitizeCmsPageHtml(
+    '<a href="contact.html">C</a><a href="./x">D</a><a href="../x">E</a><img src="assets/x.png" alt="A &amp; B"><a href="javascript:alert(1)">bad</a><img src="data:text/html,x">',
+  );
+  assert.match(urls, /href="contact.html"/);
+  assert.match(urls, /href="\.\/x"/);
+  assert.match(urls, /href="\.\.\/x"/);
+  assert.match(urls, /src="assets\/x.png"/);
+  assert.match(urls, /alt="A &amp; B"/);
+  assert.doesNotMatch(urls, /javascript|data:text/);
+  assert.equal(sanitizeCmsPageHtml(urls), urls);
+  assert.doesNotMatch(urls, /&amp;amp;/);
+
+  const fields = sanitizeCmsPageHtml(
+    '<form action="/api/letterman-jacket"><fieldset data-x class="full"><legend>Size</legend><p>M</p></fieldset></form>',
+  );
+  assert.match(fields, /<fieldset data-x class="full">/);
+  assert.match(fields, /<legend>Size<\/legend>/);
+  assert.doesNotMatch(fields, /data-x="data-x"/);
+
+  const visual = sanitizeCmsPageHtml(
+    '<style data-visual-css>@media (max-width: 390px){#ih1{width:238px;height:80px}} #idesktop{max-width:720px;width:100%}</style><h1 id="ih1">Join</h1>',
+  );
+  assert.match(visual, /<style data-visual-css>/);
+  assert.match(visual, /@media \(max-width: 390px\)/);
+  assert.match(visual, /#ih1\{/);
+  assert.match(visual, /#idesktop\{/);
+  assert.doesNotMatch(visual, /width: 238px; height: 80px/);
+});
+
+test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
+  const fixture = JSON.parse(readFileSync(join(root, 'tests/fixtures/dev-cms-page-bodies.json'), 'utf8'));
+  const slugs = [
+    'become-a-sponsor', 'boosters', 'calendar', 'coming-soon', 'contact', 'directors',
+    'ensembles', 'fundraising', 'gallery', 'home', 'in-kind', 'join', 'letterman-jacket',
+    'sponsors', 'student-resources', 'volunteer',
+  ];
+  assert.deepEqual(Object.keys(fixture).sort(), [...slugs].sort());
+
+  for (const slug of slugs) {
+    const raw = String(fixture[slug].body_html || '');
+    const once = slug === 'home' ? sanitizeHomeBodyHtml(raw) : sanitizeCmsPageHtml(raw);
+    const twice = slug === 'home' ? sanitizeHomeBodyHtml(once) : sanitizeCmsPageHtml(once);
+    assert.equal(once, twice, `${slug} is not idempotent`);
+    assert.doesNotMatch(once, /&amp;amp;/, `${slug} double-encoded &amp;`);
+
+    const rawSvgs = (raw.match(/<svg\b/gi) || []).length;
+    const cleanSvgs = (once.match(/<svg\b/gi) || []).length;
+    assert.equal(cleanSvgs, rawSvgs, `${slug} lost SVG icons (${rawSvgs} -> ${cleanSvgs})`);
+
+    const rawFields = (raw.match(/<fieldset\b/gi) || []).length;
+    const cleanFields = (once.match(/<fieldset\b/gi) || []).length;
+    assert.equal(cleanFields, rawFields, `${slug} lost fieldsets (${rawFields} -> ${cleanFields})`);
+  }
+
+  const home = sanitizeHomeBodyHtml(fixture.home.body_html);
+  assert.equal((home.match(/<svg\b/gi) || []).length, 17);
+  assert.match(home, /Support the Band/);
+  assert.match(home, /Join the Band/);
+
+  const letterman = sanitizeCmsPageHtml(fixture['letterman-jacket'].body_html);
+  assert.equal((letterman.match(/<fieldset\b/gi) || []).length, 2);
+  assert.match(letterman, /<legend>/);
+
+  const joinSample = sanitizeCmsPageHtml(
+    `${fixture.join.body_html}<style data-visual-css>@media (max-width: 390px){#ih1{width:238px}}</style>`,
+  );
+  assert.match(joinSample, /<style data-visual-css>/);
+  assert.match(joinSample, /#ih1\{/);
+});
+
+test('Phase 0 old Pages editor cannot save visual-managed Join', () => {
+  assert.match(workerSrc, /isVisualPilotSlug\(existing\.slug\)/);
+  assert.match(workerSrc, /Join the Band is edited in the visual editor/);
+  assert.match(adminSrc, /original === 'join' \|\| payload\.slug === 'join'/);
+  assert.match(adminSrc, /Open the Join visual editor/);
 });

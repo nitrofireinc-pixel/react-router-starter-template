@@ -1720,6 +1720,12 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
+  if (original === 'join' || payload.slug === 'join') {
+    if (status) {
+      status.innerHTML = 'Join the Band is edited in the visual editor. <a href="/admin/visual/join">Open the Join visual editor</a> to save this page.';
+    }
+    return false;
+  }
   const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
   if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
@@ -3801,7 +3807,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     }
     if (page.slug === 'join') {
       visualHint.hidden = false;
-      visualHint.innerHTML = 'Join the Band has a drag-and-drop visual editor pilot. <a href="/admin/visual/join">Open visual editor</a>';
+      visualHint.innerHTML = 'Join the Band is managed in the visual editor. The old Pages editor cannot save this page. <a href="/admin/visual/join">Open the Join visual editor</a>';
     } else {
       visualHint.hidden = true;
       visualHint.textContent = '';
