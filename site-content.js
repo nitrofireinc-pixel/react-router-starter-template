@@ -254,6 +254,7 @@ function resolveSponsorTierKey(sponsor = {}) {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return '';
 }
 
@@ -314,10 +315,10 @@ function sponsorShowsFlyin(sponsor = {}) {
 function sponsorShowsMarquee(sponsor = {}) {
   if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
-  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+  return /\b(bronze|silver|gold|honorable)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
-const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v3';
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v4';
 
 function readMarqueeCache() {
   try {
@@ -337,8 +338,19 @@ function writeMarqueeCache(sponsors = []) {
   }
 }
 
+function paidSponsorsFirst(sponsors = []) {
+  const list = Array.isArray(sponsors) ? sponsors : [];
+  const paid = [];
+  const mention = [];
+  for (const sponsor of list) {
+    if (resolveSponsorTierKey(sponsor) === 'honorable') mention.push(sponsor);
+    else paid.push(sponsor);
+  }
+  return [...paid, ...mention];
+}
+
 function buildSponsorMarqueeMarkup(sponsors = []) {
-  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  const items = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee));
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
     const tier = resolveSponsorTierKey(sponsor);

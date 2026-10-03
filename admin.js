@@ -669,11 +669,13 @@ function sponsorTierFromLevel(level = '') {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return 'bronze';
 }
 
 function sponsorTierBenefitsText(level = '') {
   const tier = sponsorTierFromLevel(level);
+  if (tier === 'honorable') return 'Thank-you mention on the site-wide marquee (white chip). Not offered as a public package.';
   if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and public advertising.';
   if (tier === 'silver') return 'Includes website marquee and homepage fly-in ad.';
   return 'Includes website marquee logo feature.';
@@ -4729,7 +4731,7 @@ function renderSponsors() {
   const ordered = orderedSponsors();
   list.innerHTML = ordered.map((sponsor) => {
     const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
-    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
+    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : tier === 'honorable' ? 'Honorable Mention' : 'Bronze');
     const benefits = [];
     if (sponsor.show_marquee !== false) benefits.push('Marquee');
     if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
@@ -4759,7 +4761,8 @@ function renderSponsors() {
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     const levelSelect = formControl(form, 'level');
     if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
+      const isHonorable = (sponsor.tier || sponsorTierFromLevel(sponsor.level)) === 'honorable';
+      const level = isHonorable ? 'Honorable Mention' : (String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor');
       if (![...levelSelect.options].some((option) => option.value === level)) {
         const option = document.createElement('option');
         option.value = level;

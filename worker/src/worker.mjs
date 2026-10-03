@@ -315,7 +315,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'deadline-important-nav-980-20261003';
+const ASSET_VERSION = 'honorable-mention-dropdown-20261003';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1955,6 +1955,7 @@ async function migrateAndSeedDb(env) {
     const fallbackEmail = String(env.CONTACT_DEFAULT_EMAIL || '').trim();
     await env.DB.batch(DEFAULT_CONTACT_TOPICS.map((topic) => env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email || fallbackEmail, topic.sort_order, topic.active)));
   }
+  await env.DB.prepare("UPDATE contact_topics SET label = 'Fundraising' WHERE label = 'Fundrasing'").run();
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
     await env.DB.batch(DEFAULT_CMS_PAGES.map((page) => env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active)));
@@ -2204,6 +2205,10 @@ export function normalizeSponsorTierKey(value) {
   const tier = String(value || '').trim().toLowerCase();
   if (tier === 'bronze' || tier === 'silver' || tier === 'gold') return tier;
   return '';
+}
+
+export function isPublicPurchasableSponsorTier(value) {
+  return Boolean(normalizeSponsorTierKey(value));
 }
 
 export const SQUARE_SETTINGS_KEY = 'square_settings';
@@ -5117,6 +5122,7 @@ export function normalizeSponsorTier(level = '') {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return '';
 }
 
@@ -5124,6 +5130,7 @@ export function sponsorTierLabel(tier = '') {
   if (tier === 'gold') return 'Gold';
   if (tier === 'silver') return 'Silver';
   if (tier === 'bronze') return 'Bronze';
+  if (tier === 'honorable') return 'Honorable Mention';
   return 'Sponsor';
 }
 
@@ -5131,6 +5138,7 @@ export function normalizeSponsorLevel(level = '', { homepageAd } = {}) {
   let tier = normalizeSponsorTier(level);
   if (!tier && (homepageAd === true || homepageAd === 1 || homepageAd === '1')) tier = 'silver';
   if (!tier) tier = 'bronze';
+  if (tier === 'honorable') return 'Honorable Mention';
   return `${sponsorTierLabel(tier)} Sponsor`;
 }
 
@@ -5145,6 +5153,17 @@ export function sponsorBenefitsFromLevel(level = '') {
   };
 }
 
+export function paidSponsorsFirst(sponsors = []) {
+  const list = Array.isArray(sponsors) ? sponsors : [];
+  const paid = [];
+  const mention = [];
+  for (const sponsor of list) {
+    if (normalizeSponsorTier(sponsor?.tier || sponsor?.level) === 'honorable') mention.push(sponsor);
+    else paid.push(sponsor);
+  }
+  return [...paid, ...mention];
+}
+
 export function sponsorShowsOnPage(sponsor = {}) {
   return Number(sponsor.active) !== 0;
 }
@@ -5152,7 +5171,7 @@ export function sponsorShowsOnPage(sponsor = {}) {
 export function sponsorShowsMarquee(sponsor = {}) {
   if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
-  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+  return /\b(bronze|silver|gold|honorable)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
 export function publicPageShowsSponsorMarquee(page = {}) {
@@ -5163,7 +5182,7 @@ export function publicPageShowsSponsorMarquee(page = {}) {
 }
 
 export function renderSponsorMarqueeSection(sponsors = []) {
-  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  const items = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee));
   if (!items.length) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
@@ -6028,7 +6047,7 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
 }
 
 export function renderSponsorsDirectory(sponsors = []) {
-  const visible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsOnPage);
+  const visible = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsOnPage));
   if (!visible.length) {
     return '<div class="sponsor-empty"><h3>Sponsor spots are available.</h3><p>Use the admin Sponsors page to add businesses, logos, and addresses.</p></div>';
   }
@@ -6389,7 +6408,7 @@ export function serializeContactTopic(row = {}, recipientInfo = null) {
   const recipients = recipientInfo?.recipients || [];
   return {
     id: row.id,
-    label: row.label,
+    label: String(row.label || '').trim() === 'Fundrasing' ? 'Fundraising' : row.label,
     email: emails.join(', '),
     emails,
     recipient_user_ids: recipientInfo?.recipient_user_ids || recipient_user_ids,
@@ -8532,6 +8551,7 @@ async function routeApi(request, env, url, ctx = null) {
       phone = String(form.get('phone') || '').trim();
       email = String(form.get('email') || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(form.get('tier'));
+      if (/honorable/.test(String(form.get('tier') || '').toLowerCase())) tier = '';
       amountDisplay = String(form.get('amount_display') || '').trim();
       amountCents = resolveSponsorAmountCents({
         amountCents: form.get('amount_cents'),
@@ -8546,6 +8566,7 @@ async function routeApi(request, env, url, ctx = null) {
       phone = String(payload.phone || '').trim();
       email = String(payload.email || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(payload.tier);
+      if (/honorable/.test(String(payload.tier || '').toLowerCase())) tier = '';
       amountDisplay = String(payload.amount_display || '').trim();
       amountCents = resolveSponsorAmountCents({
         amountCents: payload.amount_cents,
@@ -11995,7 +12016,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
-<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><p class="muted">Uncheck to hide the directory card only. Bronze, Silver, and Gold still appear on the site-wide marquee.</p></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div></div></div></section>
+<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option><option value="Honorable Mention">Honorable Mention</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><p class="muted">Uncheck to hide the directory card only. Bronze, Silver, Gold, and Honorable Mention still appear on the site-wide marquee.</p></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div></div></div></section>
 <section id="tab-ledger" class="cms-panel ledger-panel" hidden><div class="panel-head"><div><p class="kicker">Treasurer</p><h1>Ledger</h1><p>Accountant view for donors, sponsors, fundraisers, dues, and expenses. Cash and in-kind entries update the downloadable Excel ledger.</p></div><div class="panel-actions"><a class="btn outline" id="download-ledger-excel" href="/api/admin/ledger.xls">Download Excel</a><button class="btn outline" type="button" id="refresh-ledger">Refresh</button><button class="btn primary" type="button" id="new-ledger-entry">Add entry</button></div></div>
 <div class="ledger-summary-grid" id="ledger-summary" aria-live="polite"></div>
 <div class="admin-card stack ledger-table-card">
