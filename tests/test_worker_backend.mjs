@@ -1885,7 +1885,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['president'] }), true);
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['vice-president'] }), true);
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['treasurer'] }), false);
-  assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), false);
+  assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), true);
 
   assert.equal(canAccessBadgeCreator({ role: 'admin', permissions: [] }), true);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), true);
@@ -2781,7 +2781,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(siteContent, /bindPhotoGalleries/);
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminSrc, /function canViewEvents/);
-  assert.match(adminSrc, /Browse calendar events by month \(view only\)/);
+  assert.match(adminSrc, /function canAccessScheduleBoard/);
+  assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
   assert.match(adminSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(adminSrc, /sandbox\.web\.squarecdn\.com\/v1\/square\.js/);
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
