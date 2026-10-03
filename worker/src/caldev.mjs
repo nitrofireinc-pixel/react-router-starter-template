@@ -167,8 +167,20 @@ export function compareCaldevEvents(a, b) {
   return String(a?.title || '').localeCompare(String(b?.title || ''));
 }
 
+let caldevSchemaReady = false;
+let caldevSchemaPromise = null;
+
+/** Test helper — clears the in-isolate caldev schema memo. */
+export function resetCaldevSchemaCache() {
+  caldevSchemaReady = false;
+  caldevSchemaPromise = null;
+}
+
 export async function ensureCaldevSchema(env) {
-  await env.DB.prepare(`
+  if (caldevSchemaReady) return;
+  if (!caldevSchemaPromise) {
+    caldevSchemaPromise = (async () => {
+      await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS caldev_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -187,17 +199,28 @@ export async function ensureCaldevSchema(env) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
-  for (const sql of [
-    "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
-    'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
-    'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
-  ]) {
-    try {
-      await env.DB.prepare(sql).run();
-    } catch {
-      // Column already exists.
-    }
+      for (const sql of [
+        "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
+        'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
+        'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
+      ]) {
+        try {
+          await env.DB.prepare(sql).run();
+        } catch {
+          // Column already exists.
+        }
+      }
+      caldevSchemaReady = true;
+    })()
+      .catch((error) => {
+        caldevSchemaReady = false;
+        throw error;
+      })
+      .finally(() => {
+        caldevSchemaPromise = null;
+      });
   }
+  await caldevSchemaPromise;
 }
 
 const CALDEV_SELECT = `
