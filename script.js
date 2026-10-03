@@ -85,6 +85,10 @@ function placeMenuButtonInTray() {
   return button;
 }
 
+function utilityAuthHost() {
+  return document.querySelector('.utility .wrap') || document.querySelector('.utility');
+}
+
 function placeHeaderQuickActions() {
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
   const actions = ensureHeaderQuickActions();
@@ -92,11 +96,15 @@ function placeHeaderQuickActions() {
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
+  const staffAuth = document.querySelector('[data-staff-auth-link]');
+  const utility = utilityAuthHost();
   if (isMobileNavViewport()) {
+    if (staffAuth) actions.appendChild(staffAuth);
     if (notify) actions.appendChild(notify);
     if (addHome) actions.appendChild(addHome);
   } else {
     setMobileNavOpen(false);
+    if (staffAuth && utility) utility.appendChild(staffAuth);
     if (notify) nav.appendChild(notify);
     if (addHome) nav.appendChild(addHome);
   }
@@ -222,17 +230,22 @@ function closeOpenSupportNav() {
 })();
 
 function ensureStaffAuthNavLink() {
-  const siteNav = document.querySelector('#site-nav');
-  if (!siteNav) return null;
-  let link = siteNav.querySelector('[data-staff-auth-link]');
+  let link = document.querySelector('[data-staff-auth-link]');
+  const utility = utilityAuthHost();
+  const actions = document.querySelector('[data-header-quick-actions]');
+  const host = isMobileNavViewport() ? (actions || utility) : (utility || actions);
   if (!link) {
+    if (!host) return null;
     link = document.createElement('a');
+    link.className = 'utility-auth';
     link.setAttribute('data-staff-auth-link', '');
     link.href = '/admin/login';
     link.textContent = 'Login';
-    const before = siteNav.querySelector('[data-notify-me], [data-add-home]');
-    if (before) siteNav.insertBefore(link, before);
-    else siteNav.appendChild(link);
+    host.appendChild(link);
+  } else {
+    link.classList.add('utility-auth');
+    const siteNav = document.querySelector('#site-nav');
+    if (siteNav && siteNav.contains(link) && host) host.appendChild(link);
   }
   return link;
 }
