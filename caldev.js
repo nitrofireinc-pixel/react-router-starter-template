@@ -148,6 +148,65 @@
     return `${read('year')}-${read('month')}-${read('day')}`;
   }
 
+  const DEADLINE_BANNER_LEAD_DAYS = 7;
+
+  function shiftIsoDate(iso, days) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return '';
+    const [year, month, day] = String(iso).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  function deadlineDueIso(event) {
+    const start = String(event?.start_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return '';
+    const end = String(event?.end_date || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(end) && end >= start) return end;
+    return start;
+  }
+
+  function activeDeadlineEvents(events, today) {
+    return (events || []).filter((event) => {
+      if (String(event?.track || '').toLowerCase() !== 'deadline') return false;
+      const due = deadlineDueIso(event);
+      if (!due) return false;
+      const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
+      return today >= windowStart && today <= due;
+    }).sort((a, b) => deadlineDueIso(a).localeCompare(deadlineDueIso(b))
+      || String(a.title || '').localeCompare(String(b.title || '')));
+  }
+
+  function formatDeadlineBannerDate(iso) {
+    const date = parseIso(iso);
+    if (!date) return '';
+    const day = date.getDate();
+    const suffix = (day % 100 >= 11 && day % 100 <= 13)
+      ? 'th'
+      : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
+    return `${MONTHS[date.getMonth()]} ${day}${suffix}, ${date.getFullYear()}`;
+  }
+
+  function firstDescLink(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    const anchor = wrap.querySelector('a[href]');
+    return normalizeLinkUrl(anchor?.getAttribute('href') || '');
+  }
+
+  function renderDeadlineBanners() {
+    const items = activeDeadlineEvents(state.events, todayIso());
+    if (!items.length) return '';
+    return items.map((event) => {
+      const due = deadlineDueIso(event);
+      const href = firstDescLink(event.description);
+      const text = `Deadline: ${escapeHtml(event.title || 'Deadline')} due ${escapeHtml(formatDeadlineBannerDate(due))}!`;
+      const cta = href
+        ? ` <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Click Here</a>`
+        : ` <button type="button" data-caldev-open="${event.id}">View details</button>`;
+      return `<div class="caldev-deadline-banner" role="status">${text}${cta}</div>`;
+    }).join('');
+  }
+
   function eventsOnDate(iso) {
     return visibleEvents().filter((event) => {
       if (!event.start_date) return false;
@@ -445,6 +504,7 @@
     const board = state.view === 'week' ? renderWeek() : state.view === 'rundown' ? renderRundown() : renderMonth();
     root.classList.toggle('is-compact', isCompactLayout());
     root.innerHTML = `
+      ${renderDeadlineBanners()}
       ${renderToolbar()}
       ${renderLegend()}
       <div class="caldev-board">

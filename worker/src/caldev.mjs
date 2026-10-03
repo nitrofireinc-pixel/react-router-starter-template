@@ -250,6 +250,93 @@ export function compareCaldevEvents(a, b) {
   return String(a?.title || '').localeCompare(String(b?.title || ''));
 }
 
+/** Banner shows from 7 days before the due date through the due date (Eastern). */
+export const DEADLINE_BANNER_LEAD_DAYS = 7;
+const DEADLINE_BANNER_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+export function easternTodayIso(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const read = (type) => parts.find((part) => part.type === type)?.value;
+  return `${read('year')}-${read('month')}-${read('day')}`;
+}
+
+export function shiftIsoDate(iso, days = 0) {
+  if (!isIsoDate(iso)) return '';
+  const [year, month, day] = String(iso).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+/** Last calendar day the deadline is still due — start_date, or end_date when later. */
+export function deadlineDueIso(event) {
+  const start = String(event?.start_date || '').trim();
+  if (!isIsoDate(start)) return '';
+  const end = String(event?.end_date || '').trim();
+  if (isIsoDate(end) && end >= start) return end;
+  return start;
+}
+
+export function isDeadlineBannerActive(event, todayIso = '') {
+  if (normalizeCaldevTrack(event?.track) !== 'deadline') return false;
+  const due = deadlineDueIso(event);
+  if (!due || !isIsoDate(todayIso)) return false;
+  const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
+  return todayIso >= windowStart && todayIso <= due;
+}
+
+/**
+ * Upcoming deadline banners from already-loaded Schedule Board rows.
+ * Read-only: no extra D1 table, column, write, or cron. D1 has no cheap
+ * scheduled cleanup, and public GET handlers stay read-only.
+ */
+export function activeDeadlineBannerEvents(events = [], todayIso = '') {
+  return (Array.isArray(events) ? events : [])
+    .filter((event) => isDeadlineBannerActive(event, todayIso))
+    .sort((a, b) => {
+      const dueCmp = deadlineDueIso(a).localeCompare(deadlineDueIso(b));
+      if (dueCmp) return dueCmp;
+      return compareCaldevEvents(a, b);
+    });
+}
+
+export function formatDeadlineBannerDate(iso) {
+  if (!isIsoDate(iso)) return '';
+  const [year, month, day] = String(iso).split('-').map(Number);
+  const monthName = DEADLINE_BANNER_MONTHS[month - 1];
+  if (!monthName || day < 1 || day > 31) return '';
+  const suffix = (day % 100 >= 11 && day % 100 <= 13)
+    ? 'th'
+    : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
+  return `${monthName} ${day}${suffix}, ${year}`;
+}
+
+export function firstCaldevDescriptionLink(html = '') {
+  const match = String(html || '').match(/<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/i);
+  if (!match) return '';
+  return normalizeCaldevLinkUrl(match[1] || match[2] || match[3] || '');
+}
+
+export function deadlineBannerCopy(event) {
+  const due = deadlineDueIso(event);
+  const title = stripSimpleHtml(event?.title || '').slice(0, 200) || 'Deadline';
+  const dateLabel = formatDeadlineBannerDate(due);
+  return {
+    title,
+    due,
+    dateLabel,
+    text: dateLabel ? `Deadline: ${title} due ${dateLabel}!` : `Deadline: ${title}!`,
+    href: firstCaldevDescriptionLink(event?.description || ''),
+  };
+}
+
 let caldevSchemaReady = false;
 let caldevSchemaPromise = null;
 

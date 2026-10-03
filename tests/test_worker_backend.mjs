@@ -1289,6 +1289,8 @@ test('CMS View Site stays in the same window and Schedule Board uses What', () =
   assert.match(adminCaldev, /data-cms-caldev-link-text/);
   assert.match(adminCaldev, /function applyDescLink/);
   assert.match(adminCaldev, /Click Here/);
+  assert.match(adminCaldev, /data-cms-caldev-deadline-banners/);
+  assert.match(adminCaldev, /function renderDeadlineBanners/);
   assert.match(siteContent, /isDefaultContactTopicLabel/);
   assert.match(siteContent, /selectedId/);
 });
@@ -1934,6 +1936,9 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(caldevSrc, /findNextDayIsoWithEvents/);
   assert.match(caldevSrc, /showCalendarDayToast/);
   assert.match(caldevSrc, /America\/New_York/);
+  assert.match(caldevSrc, /function renderDeadlineBanners/);
+  assert.match(caldevSrc, /DEADLINE_BANNER_LEAD_DAYS = 7/);
+  assert.match(caldevSrc, /caldev-deadline-banner/);
   assert.match(siteContent, /renderPhotoGallery/);
   assert.match(siteContent, /openPhotoLightbox/);
   assert.match(siteContent, /bindPhotoGalleries/);
@@ -2357,6 +2362,7 @@ test('styles.css brace balance stays closed so public Schedule Board CSS applies
   assert.equal(open - close, 0, `styles.css brace delta should be 0, got ${open - close}`);
   assert.match(css, /\.cms-managed-body-note\{[\s\S]*?background:#f5f9ff;\s*\}/);
   assert.match(css, /\.caldev-board\{/);
+  assert.match(css, /\.caldev-deadline-banner,/);
   assert.match(css, /\.cms-caldev-editor-overlay\{/);
   assert.match(css, /\.cms-caldev-editor-toast\[hidden\]\{display:none!important\}/);
 });
