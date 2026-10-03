@@ -755,7 +755,7 @@
       });
       renderVersions(state.versions);
       clearDirty();
-      setStatus(action === 'publish' ? 'Published to the preview site.' : 'Draft saved.');
+      setStatus(action === 'publish' ? 'Published to the live page.' : 'Draft saved.');
     } catch (error) {
       setStatus(error.message, true);
     }

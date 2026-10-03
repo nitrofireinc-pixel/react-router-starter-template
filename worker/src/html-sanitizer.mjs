@@ -9,12 +9,35 @@
  * and style[data-visual-css] is preserved via the visual CSS sanitizer.
  */
 
+function cssImportOrUrlIsLocal(value = '') {
+  const url = String(value || '').trim();
+  if (!url) return false;
+  if (url.startsWith('#')) return true;
+  return isSafeRelativeOrSameOriginUrl(url);
+}
+
+function stripExternalCssDownloads(css = '') {
+  let next = String(css || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/<\/style/gi, '');
+  next = next.replace(/@import\b[^;{]*;?/gi, (rule) => {
+    const urls = [
+      ...rule.matchAll(/url\s*\(\s*(?:['"]([^'"]+)['"]|([^'")]+))\s*\)/gi),
+      ...rule.matchAll(/['"]([^'"]+)['"]/g),
+    ].map((match) => String(match[1] || match[2] || '').trim()).filter(Boolean);
+    if (!urls.length) return '';
+    return urls.every((url) => cssImportOrUrlIsLocal(url)) ? rule : '';
+  });
+  next = next.replace(/url\s*\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (full, _quote, raw) => (
+    cssImportOrUrlIsLocal(raw) ? full : 'none'
+  ));
+  return next.trim();
+}
+
 function sanitizeVisualCss(css = '') {
-  const source = String(css || '').replace(/\/\*[\s\S]*?\*\//g, '');
-  if (/expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:|@import/i.test(source)) {
+  const source = stripExternalCssDownloads(css);
+  if (/expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:/i.test(source)) {
     return '';
   }
-  return source.replace(/<\/style/gi, '').trim();
+  return source;
 }
 
 const VOID_TAGS = new Set([
@@ -536,9 +559,9 @@ export function sanitizeAllowlistHtml(dirty = '', options = {}) {
       const rawCss = closeTag === -1 ? '' : source.slice(parsed.end, closeTag);
       const visual = hasVisualCssFlag(parsed.attrs);
       const insideSvg = svgDepth.includes('svg') || svgDepth.includes('math');
-      if (visual && !insideSvg && profile === 'cms') {
+      if (!insideSvg && profile === 'cms') {
         const css = sanitizeVisualCss(rawCss);
-        if (css) out += `<style data-visual-css>${css}</style>`;
+        if (css) out += visual ? `<style data-visual-css>${css}</style>` : `<style>${css}</style>`;
       }
       if (closeTag === -1) {
         i = source.length;

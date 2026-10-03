@@ -340,7 +340,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-rc-20261003b';
+const ASSET_VERSION = 'cms-rc-20261003c';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -455,6 +455,22 @@ export function normalizeStaticPath(pathname) {
   if (pathname === '/') return '/index.html';
   if (pathname.includes('..')) return '/index.html';
   return pathname.startsWith('/') ? pathname : `/${pathname}`;
+}
+
+const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
+const NO_STORE_STATIC_ASSETS = new Set([
+  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'caldev.js', 'site-content.js',
+  'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css',
+  'push-sw.js', 'manifest.webmanifest',
+]);
+
+/** CSS/JS/images/fonts must not open D1 or run migrateAndSeedDb. */
+export function isWorkerStaticAssetPath(pathname = '') {
+  const path = String(pathname || '').split('#')[0].split('?')[0];
+  if (!path || path === '/') return false;
+  if (path.startsWith('/admin') || path.startsWith('/api/') || path.startsWith('/uploads/')) return false;
+  if (isCmsWebsiteGuidePath(path)) return false;
+  return WORKER_STATIC_ASSET_EXT.test(path);
 }
 
 /** Map pretty URLs like /ensembles to the CMS path /ensembles.html without touching assets. */
@@ -1838,15 +1854,22 @@ export function resetDbInitCache() {
   resetPublicReadCache();
 }
 
+function isMissingSchemaTableError(error) {
+  return /no such table/i.test(String(error?.message || error || ''));
+}
+
 async function readDbSchemaVersion(env) {
   try {
     const row = await env.DB.prepare(
       'SELECT value FROM site_content WHERE key = ?',
     ).bind(DB_SCHEMA_VERSION_KEY).first();
-    return row?.value == null ? null : String(row.value);
-  } catch {
-    // site_content may not exist yet on a fresh database.
-    return null;
+    return { ok: true, value: row?.value == null ? null : String(row.value) };
+  } catch (error) {
+    // Fresh databases have no site_content table. Transient D1 errors must not
+    // look like "needs migrate" or a cold burst will run migrateAndSeedDb in
+    // every new isolate and throw 1101s.
+    if (isMissingSchemaTableError(error)) return { ok: true, value: null };
+    return { ok: false, error };
   }
 }
 
@@ -1866,16 +1889,22 @@ export async function initDb(env) {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
       const current = await readDbSchemaVersion(env);
-      if (current === DB_SCHEMA_VERSION) {
+      if (!current.ok) {
+        console.warn('initDb_schema_read_failed', String(current.error?.message || current.error || 'd1 read failed'));
+        return;
+      }
+      if (current.value === DB_SCHEMA_VERSION) {
         dbInitVersion = DB_SCHEMA_VERSION;
         return;
       }
+      console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION });
       await migrateAndSeedDb(env);
       await writeDbSchemaVersion(env);
       dbInitVersion = DB_SCHEMA_VERSION;
     })()
       .catch((error) => {
         dbInitVersion = null;
+        console.error('initDb_failed', String(error?.stack || error?.message || error));
         throw error;
       })
       .finally(() => {
@@ -7985,10 +8014,13 @@ function base64ToArrayBuffer(value) {
 function photoBytesFromStored(value) {
   if (value == null || value === '') return null;
   if (typeof value === 'string') {
+    const trimmed = value.trim();
     try {
-      return new Uint8Array(base64ToArrayBuffer(value));
+      return new Uint8Array(base64ToArrayBuffer(trimmed));
     } catch {
-      // Older/odd rows may store raw binary in a text field.
+      // Older/odd rows may store raw binary in a text field. Do not walk
+      // multi-megabyte non-base64 strings — that burns isolate CPU (1101).
+      if (value.length > 64 * 1024) return null;
       const bytes = new Uint8Array(value.length);
       for (let i = 0; i < value.length; i += 1) bytes[i] = value.charCodeAt(i) & 0xff;
       return bytes;
@@ -11978,7 +12010,49 @@ async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
   return htmlResponse(html, 404);
 }
 
+async function serveBundledStaticAsset(request, env, url) {
+  if (url.pathname === '/push-sw.js') {
+    const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
+    if (asset.ok) {
+      const headers = new Headers(asset.headers);
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('cache-control', 'no-store');
+      headers.set('service-worker-allowed', '/');
+      return new Response(asset.body, { status: 200, headers });
+    }
+  }
+  if (url.pathname === '/manifest.webmanifest') {
+    const asset = await env.ASSETS.fetch(new Request(new URL('/manifest.webmanifest', request.url), request));
+    if (asset.ok) {
+      const headers = new Headers(asset.headers);
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
+      headers.set('cache-control', 'no-store');
+      return new Response(asset.body, { status: 200, headers });
+    }
+  }
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = normalizeStaticPath(url.pathname);
+  const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+  const assetName = assetUrl.pathname.split('/').pop() || '';
+  if (NO_STORE_STATIC_ASSETS.has(assetName)) {
+    const headers = new Headers(assetResponse.headers);
+    headers.set('cache-control', 'no-store');
+    if (assetName === 'push-sw.js') {
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('service-worker-allowed', '/');
+    }
+    if (assetName === 'manifest.webmanifest') {
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
+    }
+    return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
+  }
+  return assetResponse;
+}
+
 async function serveStaticOrCms(request, env, url) {
+  if (isWorkerStaticAssetPath(url.pathname)) {
+    return serveBundledStaticAsset(request, env, url);
+  }
   await initDb(env);
   const site = await cachedPublicRead('site', () => getSite(env));
   const maintenanceOn = isMaintenanceMode(site);
@@ -12204,9 +12278,18 @@ async function dispatchWorker(request, env, ctx) {
 
 export default {
   async fetch(request, env, ctx) {
-    const opened = openD1Session(request, env);
-    const response = await dispatchWorker(request, opened.env, ctx);
-    return attachD1Bookmark(response, opened.session);
+    try {
+      const url = new URL(request.url);
+      if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
+        return serveBundledStaticAsset(request, env, url);
+      }
+      const opened = openD1Session(request, env);
+      const response = await dispatchWorker(request, opened.env, ctx);
+      return attachD1Bookmark(response, opened.session);
+    } catch (error) {
+      console.error('worker_exception', String(error?.stack || error?.message || error));
+      throw error;
+    }
   },
 };
 

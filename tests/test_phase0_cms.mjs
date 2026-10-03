@@ -507,6 +507,36 @@ test('Phase 0 sanitizer rejects CSS-escape url() and image-set() bypasses', () =
   assert.match(ok, /background-image: url\('\/assets\/home\/x.jpg'\)/);
 });
 
+test('Phase 0 sanitizer strips external url() and @import from style blocks', () => {
+  const dirty = [
+    '<style>',
+    '@import url("https://evil.example/x.css");',
+    '@import url("/assets/ok.css");',
+    '.ok { color: navy; background: url(/assets/home/x.jpg); }',
+    '.local { background: url(#hero); }',
+    '.bad { background: url(https://evil.example/y.jpg); }',
+    '</style>',
+    '<p>Safe</p>',
+  ].join('');
+  const clean = sanitizeCmsPageHtml(dirty);
+  assert.match(clean, /<p>Safe<\/p>/);
+  assert.match(clean, /<style>/);
+  assert.match(clean, /url\(\/assets\/home\/x\.jpg\)/);
+  assert.match(clean, /url\(#hero\)/);
+  assert.doesNotMatch(clean, /evil\.example/);
+  assert.doesNotMatch(clean, /@import url\("https:/i);
+  assert.match(clean, /@import url\("\/assets\/ok\.css"\)/);
+
+  const visual = sanitizeCmsPageHtml(
+    '<style data-visual-css>@import url(https://evil.example/x.css); #box{background:url(https://evil.example/y.jpg);color:navy} #ok{background:url(/uploads/a.jpg)}</style><h1>Join</h1>',
+  );
+  assert.match(visual, /<style data-visual-css>/);
+  assert.match(visual, /#ok\{/);
+  assert.match(visual, /url\(\/uploads\/a\.jpg\)/);
+  assert.doesNotMatch(visual, /evil\.example/);
+  assert.doesNotMatch(visual, /#box\{[^}]*url\(https:/);
+});
+
 function pageRow(slug, { active = 1, id = 10, body_html = '<p>Hi</p>' } = {}) {
   return {
     id,

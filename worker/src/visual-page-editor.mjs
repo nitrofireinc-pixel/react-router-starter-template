@@ -543,7 +543,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
     <p class="visual-edit-banner-label">This page is being edited</p>
     <div class="visual-edit-banner-title">
       <strong>Join the Band</strong>
-      <small>Preview Worker only · visitors still see the published page until you publish</small>
+      <small>Visitors still see the published page until you publish</small>
     </div>
     <div class="visual-edit-banner-tools">
       <button type="button" class="visual-banner-btn" data-visual-add>Add section</button>

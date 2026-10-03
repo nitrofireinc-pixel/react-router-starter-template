@@ -60,8 +60,10 @@ function measureInlineNavFits() {
 }
 
 function syncStickyHeaderHeight() {
+  const chrome = document.querySelector('.site-chrome');
   const header = document.querySelector('header.site-header');
-  const height = header ? Math.ceil(header.getBoundingClientRect().height) : 0;
+  const stack = chrome || header;
+  const height = stack ? Math.ceil(stack.getBoundingClientRect().height) : 0;
   document.documentElement.style.setProperty(
     '--efhs-sticky-header-height',
     `${height || 84}px`,

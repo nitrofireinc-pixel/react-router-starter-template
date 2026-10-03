@@ -150,6 +150,10 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   const toml = readFileSync(join(root, 'wrangler.toml'), 'utf8');
   const devToml = readFileSync(join(root, 'wrangler.dev.toml'), 'utf8');
   const page = renderVisualEditorHtml('test');
+  assert.match(page, /Visitors still see the published page until you publish/);
+  assert.doesNotMatch(page, /Preview Worker only/);
+  assert.match(editorJs, /Published to the live page\./);
+  assert.doesNotMatch(editorJs, /Published to the preview site/);
   assert.match(workerSrc, /\/api\/admin\/visual-pages\/join/);
   assert.match(workerSrc, /handleVisualEditorPage/);
   assert.match(workerSrc, /VISUAL_EDITOR_PATH/);
