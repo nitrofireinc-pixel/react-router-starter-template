@@ -178,7 +178,7 @@
     noticeOnUnload: false,
     showDevices: false,
     showOffsets: true,
-    avoidInlineStyle: false,
+    avoidInlineStyle: true,
     forceClass: false,
     panels: { defaults: [] },
     blockManager: { blocks: [] },
@@ -191,8 +191,8 @@
         { id: 'Desktop', name: '1920', width: '' },
         { id: 'Laptop', name: '1280', width: '1280px', widthMedia: '1280px' },
         { id: 'Tablet', name: '768', width: '768px', widthMedia: '768px' },
-        { id: 'Phone', name: '390', width: '390px', widthMedia: '420px' },
-        { id: 'Small', name: '320', width: '320px', widthMedia: '360px' },
+        { id: 'Phone', name: '390', width: '390px', widthMedia: '390px' },
+        { id: 'Small', name: '320', width: '320px', widthMedia: '320px' },
       ],
     },
     canvas: {
@@ -351,11 +351,22 @@
     (comp.components?.() || []).forEach(walkResponsive);
   }
 
+  function splitVisualCss(html = '') {
+    const source = String(html || '');
+    const match = source.match(/<style\b[^>]*data-visual-css[^>]*>([\s\S]*?)<\/style>/i);
+    return {
+      css: match?.[1] || '',
+      html: source.replace(/<style\b[^>]*data-visual-css[^>]*>[\s\S]*?<\/style>/gi, ''),
+    };
+  }
+
   function exportEditableHtml() {
     const main = findMain();
     if (!main) return editor.getHtml();
     walkResponsive(main);
-    return main.components().map((comp) => comp.toHTML()).join('');
+    const html = main.components().map((comp) => comp.toHTML()).join('');
+    const css = String(editor.getCss({ clearStyles: false }) || '').trim();
+    return css ? `<style data-visual-css>${css}</style>${html}` : html;
   }
 
   function selectableParent(comp) {
@@ -452,8 +463,10 @@
   }
 
   async function loadCanvas(draftHtml) {
-    const frame = await loadLiveCanvasHtml(draftHtml);
+    const split = splitVisualCss(draftHtml);
+    const frame = await loadLiveCanvasHtml(split.html);
     editor.setComponents(frame.html);
+    if (split.css) editor.setStyle(split.css);
     const doc = editor.Canvas.getDocument();
     if (doc?.body) doc.body.className = frame.bodyClass;
     applyRulesTree(editor.getWrapper());
@@ -475,9 +488,64 @@
   editor.on('component:remove', () => markDirty());
   editor.on('component:update', () => markDirty());
   editor.on('component:styleUpdate', (comp) => {
+    if (resizeSession) return;
     makeWidthResponsive(comp);
     markDirty();
   });
+
+  let resizeSession = null;
+
+  function cloneStyle(comp) {
+    return { ...(comp?.getStyle?.() || {}) };
+  }
+
+  editor.on('component:resize', (opts = {}) => {
+    const comp = opts.component || editor.getSelected();
+    if (opts.type === 'start' && comp) {
+      resizeSession = { comp, before: cloneStyle(comp) };
+      editor.UndoManager.stop();
+      return;
+    }
+    if (opts.type === 'end' && resizeSession) {
+      const target = resizeSession.comp || comp;
+      const before = resizeSession.before || {};
+      const after = cloneStyle(target);
+      const width = String(after.width || '');
+      if (/^\s*\d+(\.\d+)?px\s*$/i.test(width)) {
+        after['max-width'] = width.trim();
+        after.width = String(target.get('tagName') || '').toLowerCase() === 'img' ? 'auto' : '100%';
+      }
+      resizeSession = null;
+      editor.UndoManager.start();
+      if (!target) return;
+      editor.UndoManager.skip(() => target.setStyle(before));
+      target.setStyle(after);
+      markDirty();
+      clampSelectionToolbarSoon();
+    }
+  });
+
+  function clampSelectionToolbarSoon() {
+    requestAnimationFrame(() => {
+      clampSelectionToolbar();
+      requestAnimationFrame(clampSelectionToolbar);
+    });
+  }
+
+  function clampSelectionToolbar() {
+    const toolbar = document.querySelector('.gjs-toolbar');
+    const frame = document.querySelector('.gjs-frame-wrapper');
+    if (!toolbar || !frame || toolbar.style.display === 'none') return;
+    const box = toolbar.getBoundingClientRect();
+    const limit = frame.getBoundingClientRect();
+    if (!box.width || !limit.width) return;
+    let shift = 0;
+    if (box.left < limit.left + 4) shift += (limit.left + 4) - box.left;
+    if (box.right + shift > limit.right - 4) shift -= (box.right + shift) - (limit.right - 4);
+    if (!shift) return;
+    const left = Number.parseFloat(toolbar.style.left || '0') || 0;
+    toolbar.style.left = `${left + shift}px`;
+  }
 
   editor.Commands.add('visual-image', {
     run() {
@@ -531,11 +599,13 @@
     toolbar.push({ command: 'visual-link', label: 'Link' });
     toolbar.push({ command: 'tlb-delete', label: 'Delete' });
     comp.set('toolbar', toolbar);
+    clampSelectionToolbarSoon();
   });
 
   function setActiveDevice(id) {
     editor.setDevice(id);
     if (deviceSelect) deviceSelect.value = id;
+    clampSelectionToolbarSoon();
   }
   deviceSelect?.addEventListener('change', () => setActiveDevice(deviceSelect.value));
   setActiveDevice('Desktop');

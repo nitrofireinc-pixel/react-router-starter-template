@@ -66,6 +66,18 @@ function sanitizeClassName(value = '') {
     .join(' ');
 }
 
+function sanitizeVisualId(value = '') {
+  const id = String(value || '').trim();
+  return /^[a-zA-Z][a-zA-Z0-9_-]{0,60}$/.test(id) ? id : '';
+}
+
+function isSafeVisualSelector(selector = '') {
+  const value = String(selector || '').trim();
+  if (!value || value.length > 180) return false;
+  if (/[>:@*[\]=+"'`\\]|url\s*\(|expression|javascript:/i.test(value)) return false;
+  return /^[#.]?[a-zA-Z][a-zA-Z0-9#.\s_-]*$/.test(value);
+}
+
 const SAFE_LENGTH = /^[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw)$/i;
 const SAFE_BOX = /^(0|auto|[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw))(\s+(0|auto|[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw))){0,3}$/i;
 const SAFE_COLOR = /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i;
@@ -129,8 +141,99 @@ function sanitizeStyle(value = '', tag = '') {
   return parts.join('; ');
 }
 
+export function sanitizeVisualCss(css = '') {
+  const source = String(css || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  let index = 0;
+  const out = [];
+
+  function skipSpace() {
+    while (index < source.length && /\s/.test(source[index])) index += 1;
+  }
+
+  function readUntil(char) {
+    const start = index;
+    while (index < source.length && source[index] !== char) index += 1;
+    return source.slice(start, index);
+  }
+
+  function readBlock() {
+    if (source[index] !== '{') return '';
+    index += 1;
+    let depth = 1;
+    const start = index;
+    while (index < source.length && depth) {
+      if (source[index] === '{') depth += 1;
+      else if (source[index] === '}') depth -= 1;
+      if (depth) index += 1;
+    }
+    const body = source.slice(start, index);
+    if (source[index] === '}') index += 1;
+    return body;
+  }
+
+  function sanitizeRuleList(body = '') {
+    const rules = [];
+    let cursor = 0;
+    const text = String(body || '');
+    while (cursor < text.length) {
+      while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+      if (cursor >= text.length) break;
+      const selStart = cursor;
+      while (cursor < text.length && text[cursor] !== '{') cursor += 1;
+      const selector = text.slice(selStart, cursor).trim();
+      if (text[cursor] !== '{') break;
+      cursor += 1;
+      const bodyStart = cursor;
+      let depth = 1;
+      while (cursor < text.length && depth) {
+        if (text[cursor] === '{') depth += 1;
+        else if (text[cursor] === '}') depth -= 1;
+        if (depth) cursor += 1;
+      }
+      const decls = text.slice(bodyStart, cursor);
+      if (text[cursor] === '}') cursor += 1;
+      if (!isSafeVisualSelector(selector)) continue;
+      const tag = (selector.match(/(?:^|\s)([a-z][a-z0-9-]{0,16})(?:$|[#.\s])/i) || [])[1] || '';
+      const clean = sanitizeStyle(decls.replace(/[{}]/g, ''), tag);
+      if (clean) rules.push(`${selector}{${clean}}`);
+    }
+    return rules.join('');
+  }
+
+  while (index < source.length) {
+    skipSpace();
+    if (index >= source.length) break;
+    if (source.slice(index, index + 6).toLowerCase() === '@media') {
+      const header = readUntil('{');
+      const max = header.match(/max-width\s*:\s*(\d{2,4})\s*px/i);
+      const body = readBlock();
+      if (!max) continue;
+      const rules = sanitizeRuleList(body);
+      if (rules) out.push(`@media (max-width: ${max[1]}px){${rules}}`);
+      continue;
+    }
+    if (source[index] === '@') {
+      readUntil('{');
+      readBlock();
+      continue;
+    }
+    const selector = readUntil('{').trim();
+    const body = readBlock();
+    if (!isSafeVisualSelector(selector)) continue;
+    const tag = (selector.match(/(?:^|\s)([a-z][a-z0-9-]{0,16})(?:$|[#.\s])/i) || [])[1] || '';
+    const clean = sanitizeStyle(body.replace(/[{}]/g, ''), tag);
+    if (clean) out.push(`${selector}{${clean}}`);
+  }
+  return out.join('');
+}
+
 function attr(name, value) {
   return ` ${name}="${escapeAttr(value)}"`;
+}
+
+function quotedAttr(attrs, name) {
+  const match = String(attrs || '').match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
+  return match?.[1] || match?.[2] || '';
 }
 
 function rewriteOpenTag(tag, rawAttrs) {
@@ -142,11 +245,14 @@ function rewriteOpenTag(tag, rawAttrs) {
     if (!isSafeVisualImageSrc(src)) return '';
     const altMatch = attrs.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
     const alt = altMatch?.[1] || altMatch?.[2] || 'Photo';
-    const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-    const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '', 'img');
-    return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${className ? attr('class', className) : ''}${style ? attr('style', style) : ''}>`;
+    const className = sanitizeClassName(quotedAttr(attrs, 'class'));
+    const id = sanitizeVisualId(quotedAttr(attrs, 'id'));
+    const style = sanitizeStyle(quotedAttr(attrs, 'style'), 'img');
+    return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${id ? attr('id', id) : ''}${className ? attr('class', className) : ''}${style ? attr('style', style) : ''}>`;
   }
   let open = `<${tag}`;
+  const id = sanitizeVisualId(quotedAttr(attrs, 'id'));
+  if (id) open += attr('id', id);
   const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
   if (className) open += attr('class', className);
   const block = String((attrs.match(/\bdata-visual-block\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
@@ -169,7 +275,16 @@ function rewriteOpenTag(tag, rawAttrs) {
 }
 
 export function sanitizeVisualPageHtml(dirty = '') {
-  let html = String(dirty || '')
+  const styles = [];
+  let html = String(dirty || '').replace(
+    /<style\b[^>]*\bdata-visual-css\b[^>]*>([\s\S]*?)<\/style>/gi,
+    (_, css) => {
+      const clean = sanitizeVisualCss(css);
+      if (clean) styles.push(clean);
+      return '';
+    },
+  );
+  html = html
     .replace(/<(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select|svg)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select|svg)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
@@ -184,7 +299,8 @@ export function sanitizeVisualPageHtml(dirty = '') {
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .replace(/\u0000/g, '')
     .trim();
-  return html;
+  const css = sanitizeVisualCss(styles.join('\n'));
+  return css ? `<style data-visual-css>${css}</style>${html}` : html;
 }
 
 export function defaultJoinVisualHtml() {

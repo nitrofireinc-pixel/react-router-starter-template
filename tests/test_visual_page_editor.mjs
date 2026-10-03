@@ -17,6 +17,7 @@ import {
   isVisualPilotSlug,
   normalizeVisualSavePayload,
   renderVisualEditorHtml,
+  sanitizeVisualCss,
   sanitizeVisualPageHtml,
   trimVisualVersions,
 } from '../worker/src/visual-page-editor.mjs';
@@ -56,6 +57,22 @@ test('visual page HTML sanitizer strips scripts and unsafe sources', () => {
   assert.match(clean, /src="\/assets\/efhs-logo.png"/);
   assert.match(clean, /<details class="visual-accordion" open>/);
   assert.match(clean, /data-visual-block="hero"/);
+});
+
+test('visual sanitizer keeps per-device CSS and element ids', () => {
+  const dirty = `<style data-visual-css>@media (max-width: 390px){#ih1{width: 238px; height: 80px}} body{background:url(javascript:alert(1))}</style><h1 id="ih1" style="color: #002142">Join</h1><p>Hello</p>`;
+  const clean = sanitizeVisualPageHtml(dirty);
+  assert.match(clean, /<style data-visual-css>/);
+  assert.match(clean, /@media \(max-width: 390px\)/);
+  assert.match(clean, /#ih1\{/);
+  assert.match(clean, /max-width: 238px/);
+  assert.match(clean, /width: 100%/);
+  assert.match(clean, /id="ih1"/);
+  assert.doesNotMatch(clean, /javascript/i);
+  assert.doesNotMatch(clean, /body\{/);
+  const css = sanitizeVisualCss('@media (max-width: 390px){#ih1{width:238px}} #idesktop{max-width:720px;width:100%}');
+  assert.match(css, /@media \(max-width: 390px\)/);
+  assert.match(css, /#idesktop\{/);
 });
 
 test('visual sanitizer keeps on-page resize and move styles', () => {
@@ -154,7 +171,18 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /visual-join-wrap/);
   assert.match(editorJs, /America\/New_York/);
   assert.match(editorJs, /makeWidthResponsive/);
+  assert.match(editorJs, /avoidInlineStyle:\s*true/);
+  assert.match(editorJs, /widthMedia:\s*'390px'/);
+  assert.match(editorJs, /widthMedia:\s*'320px'/);
+  assert.match(editorJs, /type === 'start'/);
+  assert.match(editorJs, /UndoManager\.skip/);
+  assert.match(editorJs, /clampSelectionToolbar/);
+  assert.match(editorJs, /data-visual-css/);
   assert.match(editorCss, /visual-edit-banner/);
+  assert.match(editorCss, /a\.visual-banner-btn/);
+  assert.match(editorCss, /font-size:13px/);
+  assert.match(editorCss, /flex-wrap:wrap/);
+  assert.match(editorCss, /@media \(max-width:1024px\)/);
   assert.match(editorCss, /\.gjs-pn-panel/);
   assert.match(editorCss, /min-width:max-content/);
   assert.match(page, /This page is being edited/);
