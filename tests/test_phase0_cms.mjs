@@ -68,6 +68,7 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
     path: '/resources.html',
     nav_order: 8,
     is_home: 0,
+    active: 0,
     title: 'Student Resources',
     body_html: '<section><p>Keep</p></section>',
   };
@@ -76,6 +77,7 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
     path: '/hacked.html',
     nav_order: 1,
     is_home: 1,
+    active: 1,
     title: 'Student Resources',
     body_html: '<section><p>Edited</p></section>',
   }, existing);
@@ -84,6 +86,7 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
   assert.equal(locked.path, '/resources.html');
   assert.equal(locked.nav_order, 8);
   assert.equal(locked.is_home, 0);
+  assert.equal(locked.active, 0);
   assert.match(locked.body_html, /Edited/);
   assert.match(workerSrc, /if \(!canManagePageSettings\(auth\.user\)\)/);
   assert.match(workerSrc, /page = lockPageSettingsToExisting\(page, existing\)/);
