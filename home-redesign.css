@@ -1074,6 +1074,7 @@ body.efhs-theme .fundraising-cards .btn-blue,
 }
 .fundraising-cards .btn::after{content:none}
 .fundraising-cards .square-donate-card{margin-top:0;max-width:100%}
+html:has(body.fundraising-page),
 body.fundraising-page,
 body.fundraising-page main{
   max-width:100%;

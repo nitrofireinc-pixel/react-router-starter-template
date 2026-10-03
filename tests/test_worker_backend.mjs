@@ -2299,7 +2299,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-dev-20261003'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-dev-20261003b'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2637,6 +2637,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(max-width:760px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /overflow-x:clip/);
+  assert.match(styles, /html:has\(body\.fundraising-page\)/);
   assert.match(styles, /@media \(max-width:420px\)/);
 });
 
