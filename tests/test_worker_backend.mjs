@@ -15,7 +15,9 @@ import {
   PREVIOUS_HERO_SUBTITLE,
   buildHomeRedesignDocument,
   comingSoonPageHtml,
+  decorateFundraisingPage,
   decorateHomeRedesign,
+  extractFundraisingMedia,
   injectComingSoonLogos,
   plainHeroSubtitle,
   upgradeHomeBody,
@@ -2208,7 +2210,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-white-fix-20261002'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-20261002'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2457,6 +2459,74 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.match(soon, /efhs-logo\.png/);
   assert.match(soon, /efhs-blue-regiment-mark\.png/);
   assert.match(soon, /data-cms-field="heading"/);
+});
+
+test('fundraising page cards use CMS flyer and event data without inventing a time', () => {
+  const liveStyle = `<section class="page-hero" data-cms-layout="standard"><div class="page-title"><h1>Fundraising</h1></div></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p><img src="/uploads/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6.jpg" alt="14599" class="cms-body-photo cms-body-photo-left" style="width: 280px; height: auto;" data-photo-width="280"><br></p><p><br></p><p><br></p><p>Band members <u>MUST</u> attend!</p></div></div></section>`;
+  const media = extractFundraisingMedia(liveStyle);
+  assert.equal(media.images[0].src, '/uploads/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6.jpg');
+  assert.equal(media.mustAttend, true);
+  assert.equal(media.description, '');
+
+  const html = decorateFundraisingPage(liveStyle, {
+    events: [{
+      id: 51,
+      title: 'Fundraiser/Mattress Sale',
+      description: 'Fundraiser at Mattress Warehouse Students must attend 820 S Main St, Kernersville, NC 27284',
+      location: '',
+      start_date: '2026-10-24',
+      track: 'deadline',
+      all_day: 1,
+    }, {
+      id: 61,
+      title: 'Fundraiser/Silent Auction',
+      description: 'Silent Auction Students and Parents Help Needed Location TBD',
+      location: '',
+      start_date: '2026-11-07',
+      track: 'other',
+      all_day: 1,
+    }, {
+      title: 'Band Practice',
+      start_date: '2026-10-05',
+      track: 'rehearsal',
+    }],
+  });
+  assert.match(html, /data-fundraising-cards/);
+  assert.match(html, /class="content fundraising-cards"/);
+  assert.match(html, /Fundraiser\/Mattress Sale/);
+  assert.match(html, /Fundraiser\/Silent Auction/);
+  assert.match(html, /Sat, Oct 24, 2026/);
+  assert.match(html, /820 S Main St, Kernersville, NC 27284/);
+  assert.match(html, /Fundraiser at Mattress Warehouse/);
+  assert.match(html, /data-photo-open/);
+  assert.match(html, /data-donate-open/);
+  assert.match(html, />Support</);
+  assert.match(html, />Details</);
+  assert.match(html, /Band members must attend/);
+  assert.doesNotMatch(html, /10 AM/);
+  assert.doesNotMatch(html, /cms-body-photo-left/);
+  assert.doesNotMatch(html, /<p><br><\/p>/);
+  assert.equal(decorateFundraisingPage(html, { events: [] }), html);
+
+  const withDonate = ensureFundraisingDonateSlot(html);
+  assert.match(withDonate, /data-square-donate|Direct Support/);
+  assert.match(withDonate, /data-fundraising-cards/);
+  assert.match(withDonate, /Mattress Sale/);
+
+  const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
+  const siteContent = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'site-content.js'), 'utf8');
+  const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'home-redesign.css'), 'utf8');
+  assert.match(workerSrc, /decorateFundraisingPage\(page\.body_html/);
+  assert.match(workerSrc, /needsEvents: isHome \|\| isFundraising/);
+  assert.match(workerSrc, /if \(isHome \|\| needsEvents\)/);
+  assert.match(workerSrc, /key: `home-events:\${today}`/);
+  assert.doesNotMatch(workerSrc, /fundraising-events/);
+  assert.match(workerSrc, /fundraising-page/);
+  assert.match(siteContent, /\[data-photo-open\]/);
+  assert.match(siteContent, /\[data-photo-gallery\]/);
+  assert.match(siteContent, /openPhotoLightbox/);
+  assert.match(styles, /\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /@media \(max-width:760px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
 });
 
 test('join, volunteer, and coming soon stay out of the public nav', () => {
