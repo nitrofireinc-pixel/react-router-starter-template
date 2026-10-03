@@ -61,9 +61,18 @@ function sanitizeClassName(value = '') {
   return String(value || '')
     .split(/\s+/)
     .filter((part) => /^[a-zA-Z][a-zA-Z0-9_-]{0,60}$/.test(part))
+    .filter((part) => !/^gjs-/i.test(part))
     .slice(0, 16)
     .join(' ');
 }
+
+const SAFE_LENGTH = /^[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw)$/i;
+const SAFE_BOX = /^(0|auto|[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw))(\s+(0|auto|[-+]?\d*\.?\d+\s*(px|em|rem|%|vh|vw))){0,3}$/i;
+const SAFE_COLOR = /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i;
+const STYLEABLE_TAGS = new Set([
+  'section', 'article', 'aside', 'div', 'p', 'span', 'header', 'figure',
+  'img', 'a', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'details',
+]);
 
 function sanitizeStyle(value = '') {
   const parts = [];
@@ -72,13 +81,38 @@ function sanitizeStyle(value = '') {
     if (!rawProp || !rest.length) continue;
     const prop = rawProp.trim().toLowerCase();
     const next = rest.join(':').trim();
-    if (prop === 'color' && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i.test(next)) {
-      parts.push(`color: ${next}`);
-    }
-    if (prop === 'font-size' && /^[\d.]+\s*(px|em|rem|%)$/i.test(next)) parts.push(`font-size: ${next}`);
+    if (!next || /expression|javascript:|url\s*\(/i.test(next)) continue;
+    if (prop === 'color' && SAFE_COLOR.test(next)) parts.push(`color: ${next}`);
+    if (prop === 'background-color' && SAFE_COLOR.test(next)) parts.push(`background-color: ${next}`);
+    if (prop === 'font-size' && SAFE_LENGTH.test(next)) parts.push(`font-size: ${next}`);
     if (prop === 'font-weight' && /^(normal|bold|[1-9]00)$/i.test(next)) parts.push(`font-weight: ${next}`);
     if (prop === 'text-align' && /^(left|right|center|justify)$/i.test(next)) parts.push(`text-align: ${next}`);
-    if (prop === 'max-width' && /^[\d.]+\s*(px|em|rem|%)$/i.test(next)) parts.push(`max-width: ${next}`);
+    if (['width', 'height', 'min-width', 'min-height', 'max-width', 'max-height'].includes(prop)
+      && (SAFE_LENGTH.test(next) || next === 'auto')) {
+      parts.push(`${prop}: ${next}`);
+    }
+    if (['margin', 'padding'].includes(prop) && SAFE_BOX.test(next)) parts.push(`${prop}: ${next}`);
+    if (/^(margin|padding)-(top|right|bottom|left)$/.test(prop)
+      && (SAFE_LENGTH.test(next) || next === 'auto' || next === '0')) {
+      parts.push(`${prop}: ${next}`);
+    }
+    if (['top', 'right', 'bottom', 'left'].includes(prop)
+      && (SAFE_LENGTH.test(next) || next === 'auto')) {
+      parts.push(`${prop}: ${next}`);
+    }
+    if (prop === 'position' && /^(static|relative|absolute)$/i.test(next)) parts.push(`position: ${next}`);
+    if (prop === 'display' && /^(block|inline|inline-block|flex|none)$/i.test(next)) parts.push(`display: ${next}`);
+    if (prop === 'flex-direction' && /^(row|column)$/i.test(next)) parts.push(`flex-direction: ${next}`);
+    if (prop === 'justify-content' && /^(flex-start|flex-end|center|space-between|space-around)$/i.test(next)) {
+      parts.push(`justify-content: ${next}`);
+    }
+    if (prop === 'align-items' && /^(stretch|flex-start|flex-end|center)$/i.test(next)) parts.push(`align-items: ${next}`);
+    if (prop === 'gap' && SAFE_LENGTH.test(next)) parts.push(`gap: ${next}`);
+    if (prop === 'object-fit' && /^(contain|cover|fill|none)$/i.test(next)) parts.push(`object-fit: ${next}`);
+    if (prop === 'border-radius' && SAFE_BOX.test(next)) parts.push(`border-radius: ${next}`);
+    if (prop === 'transform' && /^translate\(\s*[-+]?\d*\.?\d+(px|%)\s*,\s*[-+]?\d*\.?\d+(px|%)\s*\)$/i.test(next)) {
+      parts.push(`transform: ${next}`);
+    }
   }
   return parts.join('; ');
 }
@@ -97,7 +131,8 @@ function rewriteOpenTag(tag, rawAttrs) {
     const altMatch = attrs.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
     const alt = altMatch?.[1] || altMatch?.[2] || 'Photo';
     const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-    return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${className ? attr('class', className) : ''}>`;
+    const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
+    return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${className ? attr('class', className) : ''}${style ? attr('style', style) : ''}>`;
   }
   let open = `<${tag}`;
   const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
@@ -114,7 +149,7 @@ function rewriteOpenTag(tag, rawAttrs) {
     if (target === '_blank') open += ' target="_blank" rel="noopener noreferrer"';
   }
   const style = sanitizeStyle((attrs.match(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-  if (style && (tag === 'span' || tag === 'p' || tag === 'div' || tag === 'h1' || tag === 'h2' || tag === 'h3')) {
+  if (style && STYLEABLE_TAGS.has(tag)) {
     open += attr('style', style);
   }
   if (tag === 'details' && /\bopen\b/i.test(attrs)) open += ' open';
@@ -144,9 +179,19 @@ export function defaultJoinVisualHtml() {
   return `<section class="page-hero" data-visual-block="hero"><div class="page-title"><div class="coming-soon-logos"><img src="/assets/efhs-logo.png" alt="East Forsyth High School Eagles logo"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment logo"></div><div class="kicker">Join</div><h1>Join the Band</h1><p>New students and families start here. Interest forms, handbook, and fee details will live on this page.</p></div></section><section class="content"><div class="wrap visual-join-wrap"><aside class="hero-card" data-visual-block="hero-card"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"><h2>What to bring</h2><ul><li>Student name and grade</li><li>Instrument experience, if any</li><li>A parent or guardian contact</li></ul></aside><div class="card" data-visual-block="text"><h2>How to get started</h2><p>Call the band office at <a href="tel:3367036735">(336) 703-6735</a> or send a message through the contact form. We will help you find the right ensemble.</p><p><a class="btn gold" href="/contact.html">Contact the band</a></p></div><details class="visual-accordion" data-visual-block="accordion"><summary>Do I need my own instrument?</summary><div class="visual-accordion-body"><p>Ask the directors. The program can often help with school-owned instruments.</p></div></details></div></section>`;
 }
 
+export function extractEditableJoinHtml(html = '') {
+  const source = String(html || '');
+  const mainMatch = source.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  if (mainMatch) return mainMatch[1];
+  return source
+    .replace(/<header\b[^>]*class="[^"]*\bsite-header\b[\s\S]*?<\/header>/gi, '')
+    .replace(/<footer\b[^>]*class="[^"]*\bfooter\b[\s\S]*?<\/footer>/gi, '')
+    .replace(/<div\b[^>]*class="[^"]*\butility\b[\s\S]*?<\/div>/gi, '');
+}
+
 export function normalizeVisualSavePayload(raw = {}, existingHtml = '') {
   const action = String(raw.action || raw.kind || 'draft').toLowerCase() === 'publish' ? 'publish' : 'draft';
-  const html = sanitizeVisualPageHtml(raw.html ?? raw.body_html ?? existingHtml);
+  const html = sanitizeVisualPageHtml(extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml));
   if (!html) return { ok: false, status: 422, detail: 'Page content is required' };
   return { ok: true, action, html };
 }
@@ -324,36 +369,70 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Visual editor · Join the Band</title>
-  <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.13/dist/css/grapes.min.css">
-  <link rel="stylesheet" href="/styles.css?v=${v}">
+  <title>Editing Join the Band</title>
+  <link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css?v=${v}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
 <body class="visual-editor-body">
-  <header class="visual-editor-bar">
-    <a class="visual-editor-back" href="/admin">← CMS</a>
-    <div class="visual-editor-title">
+  <header class="visual-edit-banner" data-visual-banner>
+    <p class="visual-edit-banner-label">This page is being edited</p>
+    <div class="visual-edit-banner-title">
       <strong>Join the Band</strong>
-      <small>Visual editor pilot · GrapesJS · publishes to this preview Worker only</small>
+      <small>Preview Worker only · visitors still see the published page until you publish</small>
     </div>
-    <div class="visual-editor-devices" data-visual-devices>
-      <button type="button" data-device="Desktop">Desktop</button>
-      <button type="button" data-device="Tablet">Tablet</button>
-      <button type="button" data-device="Phone">Phone</button>
-    </div>
-    <div class="visual-editor-actions">
-      <button type="button" class="btn outline" data-visual-undo>Undo</button>
-      <button type="button" class="btn outline" data-visual-redo>Redo</button>
-      <button type="button" class="btn outline" data-visual-draft>Save draft</button>
-      <button type="button" class="btn primary" data-visual-publish>Publish</button>
+    <div class="visual-edit-banner-tools">
+      <button type="button" class="visual-banner-btn" data-visual-add>Add section</button>
+      <button type="button" class="visual-banner-btn" data-visual-undo>Undo</button>
+      <button type="button" class="visual-banner-btn" data-visual-redo>Redo</button>
+      <div class="visual-edit-devices" data-visual-devices>
+        <button type="button" data-device="Desktop">1920</button>
+        <button type="button" data-device="Laptop">1280</button>
+        <button type="button" data-device="Tablet">768</button>
+        <button type="button" data-device="Phone">390</button>
+        <button type="button" data-device="Small">320</button>
+      </div>
+      <button type="button" class="visual-banner-btn" data-visual-history>History</button>
+      <button type="button" class="visual-banner-btn" data-visual-draft>Save draft</button>
+      <button type="button" class="visual-banner-btn visual-banner-btn-primary" data-visual-publish>Publish</button>
+      <a class="visual-banner-btn" href="/admin">Exit</a>
     </div>
   </header>
   <p class="visual-editor-status" data-visual-status hidden></p>
-  <div class="visual-editor-shell">
-    <aside class="visual-editor-versions" data-visual-versions></aside>
+  <div class="visual-editor-stage">
     <div id="gjs"></div>
   </div>
-  <script src="https://unpkg.com/grapesjs@0.21.13/dist/grapes.min.js"></script>
+  <div id="visual-gjs-sink" hidden></div>
+  <aside class="visual-add-drawer" data-visual-add-drawer hidden>
+    <div class="visual-add-drawer-head">
+      <h2>Add a section</h2>
+      <button type="button" data-visual-add-close>Close</button>
+    </div>
+    <div class="visual-add-grid" data-visual-add-grid></div>
+  </aside>
+  <aside class="visual-history-drawer" data-visual-versions hidden></aside>
+  <div class="visual-modal" data-visual-image-modal hidden>
+    <div class="visual-modal-card">
+      <h2>Change image</h2>
+      <div class="visual-photo-grid" data-visual-photo-grid></div>
+      <label class="visual-upload-label">Upload a site photo
+        <input type="file" accept="image/*" data-visual-upload hidden>
+      </label>
+      <button type="button" data-visual-image-close>Cancel</button>
+    </div>
+  </div>
+  <div class="visual-modal" data-visual-link-modal hidden>
+    <form class="visual-modal-card" data-visual-link-form>
+      <h2>Add a link</h2>
+      <label>Address
+        <input type="url" name="href" placeholder="https:// or /page.html" required>
+      </label>
+      <div class="visual-modal-actions">
+        <button type="submit">Apply</button>
+        <button type="button" data-visual-link-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+  <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>
 </body>
 </html>`;
