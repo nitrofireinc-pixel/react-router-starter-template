@@ -1416,7 +1416,7 @@ function bindPhotoGalleries(root = document) {
       openPhotoLightbox({
         src,
         alt: img?.alt || trigger.getAttribute('aria-label') || '',
-        caption: trigger.getAttribute('aria-label') || img?.alt || '',
+        caption: trigger.getAttribute('data-photo-caption') || trigger.getAttribute('aria-label') || img?.alt || '',
       });
     });
   }
