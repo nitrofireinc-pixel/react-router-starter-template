@@ -856,6 +856,7 @@ body.home-page .footer{padding-bottom:120px}
 body.home-page .header-donate{display:inline-flex}
 @media (max-width:767px){
   body.home-page .header-donate{display:none}
+  body.home-page header.site-header nav .header-donate{display:inline-flex!important}
 }
 html.nav-use-hamburger body.home-page .header-donate{display:none}
 html.nav-use-hamburger body.home-page header.site-header nav .header-donate{display:inline-flex!important}
