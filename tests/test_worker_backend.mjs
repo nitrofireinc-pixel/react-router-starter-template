@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -36,6 +38,39 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.doesNotMatch(toml, /directory\s*=\s*"\.\/assets"/);
   assert.doesNotMatch(toml, /DEV_UPLOAD_ORIGIN/);
   assert.doesNotMatch(toml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
+});
+
+test('production deploy refuses leftover editor files in the assets dir', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const pkg = readFileSync(join(root, 'package.json'), 'utf8');
+  const script = readFileSync(join(root, 'worker/scripts/check-worker-public.mjs'), 'utf8');
+  assert.match(pkg, /"check:worker-public": "node worker\/scripts\/check-worker-public\.mjs"/);
+  assert.match(pkg, /sync:worker-assets && npm run check:worker-public && wrangler deploy/);
+  assert.match(script, /admin-visual/);
+  assert.match(script, /grapesjs/);
+  assert.match(script, /untracked file/);
+
+  const dirty = mkdtempSync(join(tmpdir(), 'efhs-public-'));
+  writeFileSync(join(dirty, 'admin-visual.js'), 'leftover');
+  mkdirSync(join(dirty, 'vendor', 'grapesjs'), { recursive: true });
+  writeFileSync(join(dirty, 'vendor/grapesjs/grapes.min.js'), 'leftover');
+  const blocked = spawnSync(process.execPath, [join(root, 'worker/scripts/check-worker-public.mjs')], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, WORKER_PUBLIC_DIR: dirty },
+  });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /admin-visual/);
+  assert.match(blocked.stderr, /grapesjs/);
+
+  const clean = mkdtempSync(join(tmpdir(), 'efhs-public-'));
+  writeFileSync(join(clean, 'styles.css'), 'ok');
+  const allowed = spawnSync(process.execPath, [join(root, 'worker/scripts/check-worker-public.mjs')], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, WORKER_PUBLIC_DIR: clean },
+  });
+  assert.equal(allowed.status, 0, allowed.stderr);
 });
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
