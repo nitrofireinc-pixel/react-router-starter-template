@@ -349,7 +349,7 @@ export function renderFundraisingCard(event, {
     ? `<dl class="ff-facts">${whenLabel ? `<div><dt>When</dt><dd>${escapeHtml(whenLabel)}${timeLine}</dd></div>` : ''}${facts.where ? `<div><dt>Where</dt><dd>${escapeHtml(facts.where)}</dd></div>` : ''}</dl>`
     : '';
   const media = flyer
-    ? `<button type="button" class="ff-media" data-photo-open aria-label="Open ${escapeAttr(title)} flyer"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
+    ? `<button type="button" class="ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
     : '';
   return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
     ${media}

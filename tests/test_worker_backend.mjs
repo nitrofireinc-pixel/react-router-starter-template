@@ -2490,6 +2490,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(homeCss, /body\.home-page,[\s\S]*?overflow-x:clip/);
   assert.match(homeCss, /@media \(max-width:1100px\)\{[\s\S]*?quick-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
+  assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:inline-flex/);
   assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
@@ -2607,6 +2608,9 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(html, /820 S Main St, Kernersville, NC 27284/);
   assert.match(html, /Fundraiser at Mattress Warehouse/);
   assert.match(html, /data-photo-open/);
+  assert.match(html, /data-photo-caption="Fundraiser\/Mattress Sale"/);
+  assert.match(html, /aria-label="Fundraiser\/Mattress Sale"/);
+  assert.doesNotMatch(html, /Open Fundraiser\/Mattress Sale flyer/);
   assert.match(html, /data-donate-open/);
   assert.match(html, />Support</);
   assert.match(html, />Details</);
@@ -2633,9 +2637,12 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(siteContent, /\[data-photo-open\]/);
   assert.match(siteContent, /\[data-photo-gallery\]/);
   assert.match(siteContent, /openPhotoLightbox/);
+  assert.match(siteContent, /data-photo-caption/);
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
-  assert.match(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
-  assert.match(styles, /@media \(max-width:760px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh/);
+  assert.doesNotMatch(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card[\s\S]*?grid-template-columns:1fr/);
   assert.match(styles, /overflow-x:clip/);
   assert.match(styles, /html:has\(body\.fundraising-page\)/);
   assert.match(styles, /@media \(max-width:420px\)/);
