@@ -231,6 +231,9 @@ header.site-header nav .nav-notify-me:focus-visible{background:#eef3fa;outline:n
   gap:2px;
   flex:0 0 auto;
 }
+html.nav-use-hamburger .header-quick-actions{
+  display:inline-flex;
+}
 .mobile-nav-tray{display:none}
 .nav-backdrop{display:none}
 .nav-support{
@@ -882,6 +885,7 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
     min-width:0;
   }
   header.site-header .menu-button{grid-area:menu;justify-self:start}
+  .header-quick-actions{display:inline-flex}
   .mobile-nav-tray{
     grid-area:actions;
     display:flex;

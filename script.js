@@ -178,7 +178,7 @@ function placeHeaderQuickActions() {
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
-  const staffAuth = document.querySelector('[data-staff-auth-link]');
+  const staffAuth = document.querySelector('[data-staff-auth-link]') || document.querySelector('a.utility-auth');
   const donate = document.querySelector('.header-donate');
   const header = document.querySelector('header.site-header');
   const utility = utilityAuthHost();
@@ -187,7 +187,14 @@ function placeHeaderQuickActions() {
     const utilities = [staffAuth, notify, addHome].filter(Boolean);
     utilities.forEach((el) => actions.appendChild(el));
     if (header) void header.offsetWidth;
-    placeUtilitiesInDrawer(nav, utilities.filter((el) => !headerUtilityFits(el, header)));
+    const trayHidden = (() => {
+      const style = window.getComputedStyle(actions);
+      return style.display === 'none' || style.visibility === 'hidden';
+    })();
+    const overflowed = utilities.filter((el) => trayHidden || !headerUtilityFits(el, header));
+    // Login/Notify/Add-to-Home must stay reachable whenever the hamburger is used.
+    if (staffAuth && !overflowed.includes(staffAuth)) overflowed.unshift(staffAuth);
+    placeUtilitiesInDrawer(nav, overflowed);
   } else {
     setMobileNavOpen(false);
     if (staffAuth && utility) utility.appendChild(staffAuth);

@@ -1277,6 +1277,7 @@ body.efhs-theme .footer h3{
     background:transparent;
     border:0;
   }
+  body.efhs-theme .header-quick-actions{display:inline-flex}
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
     width:max-content;
@@ -1428,6 +1429,9 @@ html.nav-use-hamburger body.efhs-theme .mobile-nav-tray{
   display:flex;
   grid-area:actions;
   justify-self:end;
+}
+html.nav-use-hamburger body.efhs-theme .header-quick-actions{
+  display:inline-flex;
 }
 html.nav-use-hamburger body.efhs-theme .header-donate{display:none!important}
 html.nav-use-hamburger body.efhs-theme header.site-header nav,
