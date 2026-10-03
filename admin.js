@@ -381,7 +381,23 @@ function canAccessLedger() {
 }
 
 function canAccessScheduleBoard() {
+  return isSuperAdmin()
+    || hasPermission('president')
+    || hasPermission('vice-president')
+    || hasPermission('events')
+    || hasPermission('events:manage')
+    || hasPermission('calendar');
+}
+
+function canNotifyCalendarSubscribers() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
+function isScheduleBoardOnlyUser() {
+  if (isSuperAdmin() || !canAccessScheduleBoard()) return false;
+  const perms = (state.me?.user?.permissions || []).map((item) => String(item).trim().toLowerCase());
+  if (!perms.length) return false;
+  return perms.every((item) => item === 'events' || item === 'events:manage' || item === 'calendar');
 }
 
 function canAccessBadgeCreator() {
@@ -2902,7 +2918,7 @@ function activateTab(name) {
       loadSecurityLog({ resetPage: true }).catch(() => {});
     }
     if (name === 'caldev') {
-      if (!isSuperAdmin()) return;
+      if (!canAccessScheduleBoard()) return;
       loadCaldevEvents().catch(() => {});
     }
     if (name === 'events') {
@@ -3059,9 +3075,10 @@ function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
   document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
 
+  const scheduleOnly = isScheduleBoardOnlyUser();
   const panels = {
-    dashboard: true,
-    mail: true,
+    dashboard: !scheduleOnly,
+    mail: !scheduleOnly,
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
@@ -3070,7 +3087,7 @@ function showAllowedPanels() {
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
-    minutes: canViewMinutes(),
+    minutes: canViewMinutes() && !scheduleOnly,
     'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
@@ -3088,12 +3105,13 @@ function showAllowedPanels() {
     // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
     if (button.dataset.tab === 'events') allowed = false;
     if (button.dataset.tab === 'caldev') allowed = canAccessScheduleBoard();
+    if (scheduleOnly && (button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail')) allowed = false;
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
   const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
+  const boostersAccess = !scheduleOnly && canAccessBoostersMenu();
   if (boostersMenu) {
     boostersMenu.hidden = !boostersAccess;
     if (boostersAccess) manageVisible = true;
@@ -3180,7 +3198,7 @@ function showAllowedPanels() {
   renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
-  activateTab('dashboard');
+  activateTab(scheduleOnly ? 'caldev' : 'dashboard');
 }
 
 function bindAdminNavToggle() {
@@ -3678,9 +3696,6 @@ function renderDashboard() {
     canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canCreateEvents() && !isSuperAdmin()
-      ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
-      : !isSuperAdmin() && canViewEvents() && ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
     canAccessScheduleBoard() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
@@ -5459,6 +5474,9 @@ async function mountCaldevCmsBoard() {
   if (!mountEl || !canAccessScheduleBoard()) return;
   if (window.CaldevCmsBoard?.mount) {
     await window.CaldevCmsBoard.mount(mountEl);
+    document.querySelectorAll('[data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
+      el.hidden = !canNotifyCalendarSubscribers();
+    });
     return;
   }
   mountEl.innerHTML = '<p class="draft">Schedule Board editor failed to load. Refresh and try again.</p>';
@@ -5474,7 +5492,7 @@ function bindCaldevPanel() {
   window.__caldevPanelBound = true;
 
   async function notifyCalendarFinished() {
-    if (!canAccessScheduleBoard()) return;
+    if (!canNotifyCalendarSubscribers()) return;
     if (!confirm('Email calendar subscribers that the schedule board is finished/updated? Fundraising subscribers are not included.')) return;
     try {
       const result = await jsonFetch('/api/admin/caldev/notify-finished', {
