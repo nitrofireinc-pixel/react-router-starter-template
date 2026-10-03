@@ -138,6 +138,8 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorCss, /\.gjs-pn-panel/);
   assert.match(page, /This page is being edited/);
   assert.match(page, /Add a section/);
+  assert.match(page, /type="text" name="href"/);
+  assert.doesNotMatch(page, /type="url" name="href"/);
   assert.match(page, /\/vendor\/grapesjs\/grapes\.min\.js/);
   assert.match(page, /\/vendor\/grapesjs\/grapes\.min\.css/);
   assert.doesNotMatch(page, /unpkg\.com/);

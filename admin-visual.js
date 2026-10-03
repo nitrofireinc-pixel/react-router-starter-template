@@ -450,6 +450,10 @@
     const href = String(new FormData(linkForm).get('href') || '').trim();
     const selected = editor.getSelected();
     if (!selected || !href) return;
+    if (/^(javascript:|data:|blob:)/i.test(href) || !/^(https?:\/\/|\/|#|mailto:|tel:)/i.test(href)) {
+      setStatus('Use a page path like /contact.html, or https://, mailto:, tel:, or #.', true);
+      return;
+    }
     if (String(selected.get('tagName') || '').toLowerCase() === 'a') {
       selected.addAttributes({ href });
     } else {

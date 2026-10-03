@@ -424,7 +424,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
     <form class="visual-modal-card" data-visual-link-form>
       <h2>Add a link</h2>
       <label>Address
-        <input type="url" name="href" placeholder="https:// or /page.html" required>
+        <input type="text" name="href" placeholder="/contact.html or https://" required>
       </label>
       <div class="visual-modal-actions">
         <button type="submit">Apply</button>

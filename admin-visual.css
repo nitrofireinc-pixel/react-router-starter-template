@@ -139,10 +139,11 @@ body.visual-editor-body{
   overflow:hidden;
 }
 .gjs-toolbar-item{
-  padding:6px 8px;
+  padding:8px 10px;
   font-size:12px;
   font-weight:800;
   color:#10233C;
+  border-right:1px solid #dbe4f0;
 }
 .gjs-resizer-h{
   border:2px solid #0B63D6;
@@ -151,14 +152,14 @@ body.visual-editor-body{
 .visual-add-drawer,
 .visual-history-drawer{
   position:fixed;
-  top:0;
-  left:0;
-  width:min(360px,100vw);
-  height:100dvh;
-  padding-top:64px;
+  top:72px;
+  left:12px;
+  width:min(420px,calc(100vw - 24px));
+  max-height:calc(100dvh - 96px);
   background:#fff;
   color:#10233C;
-  box-shadow:8px 0 24px rgba(0,0,0,.18);
+  border-radius:12px;
+  box-shadow:0 12px 40px rgba(0,0,0,.28);
   overflow:auto;
   z-index:25;
 }
@@ -206,7 +207,7 @@ body.visual-editor-body{
 .visual-add-card-preview[data-preview="photo"]{background:linear-gradient(135deg,#014990,#7aa7d9)}
 .visual-add-card-preview[data-preview="button"]{background:linear-gradient(135deg,#FDD703,#fff3a3)}
 .visual-add-card-preview[data-preview="accordion"]{background:linear-gradient(135deg,#fff,#dbe4f0)}
-.visual-history-drawer{left:auto;right:0;box-shadow:-8px 0 24px rgba(0,0,0,.18)}
+.visual-history-drawer{left:auto;right:12px}
 .visual-history-drawer button[data-restore]{
   display:block;
   width:calc(100% - 24px);
@@ -296,10 +297,17 @@ body.visual-page-join main{
 }
 @media (max-width:760px){
   .visual-edit-banner-tools{width:100%}
+  .visual-edit-banner{
+    max-height:none;
+  }
   .visual-add-drawer,
   .visual-history-drawer{
-    width:100vw;
-    padding-top:88px;
+    left:8px;
+    right:8px;
+    width:auto;
+    top:auto;
+    bottom:8px;
+    max-height:min(70dvh,560px);
   }
 }
 @media (min-width:1920px){
