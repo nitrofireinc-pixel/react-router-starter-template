@@ -2209,7 +2209,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'deadline-important-nav-980-20261002'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'deadline-important-nav-980-20261003'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2397,6 +2397,9 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
   assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
+  assert.match(homeCss, /body\.home-page,[\s\S]*?overflow-x:clip/);
+  assert.match(homeCss, /@media \(max-width:1100px\)\{[\s\S]*?quick-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
   assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
@@ -2567,8 +2570,6 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(script, /window\.matchMedia\('\(max-width: 767px\)'\)/);
   assert.match(styles, /@media\(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
   assert.match(styles, /@media\(min-width:768px\)\{[\s\S]*?header\.site-header nav\{/);
-  assert.match(styles, /html\{scroll-behavior:smooth;overflow-x:clip;max-width:100%\}/);
-  assert.match(styles, /\.site-chrome\{[\s\S]*?overflow-x:clip/);
   const themeCssNav = readFileSync(join(root, 'public-theme.css'), 'utf8');
   assert.match(themeCssNav, /@media \(min-width:768px\) and \(max-width:1199px\)/);
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
