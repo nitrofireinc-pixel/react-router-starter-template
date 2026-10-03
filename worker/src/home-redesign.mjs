@@ -274,8 +274,12 @@ function replaceSlot(html, name, inner) {
   return source;
 }
 
+export function stripHomeHeroLogoLockup(html) {
+  return String(html || '').replace(/<div\b[^>]*\blogo-lockup\b[^>]*>[\s\S]*?<\/div>\s*/gi, '');
+}
+
 export function decorateHomeRedesign(html, data = {}) {
-  let next = String(html || '');
+  let next = stripHomeHeroLogoLockup(html);
   if (!next.includes(HOME_REDESIGN_MARKER) && !next.includes('data-home-slot')) return next;
   const schedule = selectHomeSchedule(data.events || []);
   const deal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
@@ -312,7 +316,9 @@ export function decorateHomeRedesign(html, data = {}) {
 export function upgradeHomeBody(html) {
   const source = String(html || '');
   if (!source.trim()) return buildHomeRedesignDocument();
-  if (source.includes(HOME_REDESIGN_MARKER) || source.includes('data-home-slot="next-fund"')) return source;
+  if (source.includes(HOME_REDESIGN_MARKER) || source.includes('data-home-slot="next-fund"')) {
+    return stripHomeHeroLogoLockup(source);
+  }
   const heroCard = source.match(/<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>/i)?.[0] || DEFAULT_HERO_CARD;
   return buildHomeRedesignDocument({ heroCardHtml: heroCard });
 }
@@ -368,11 +374,6 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
   <div class="hero-glow"></div>
   <div class="wrap hero-inner">
     <div class="hero-copy">
-      <div class="logo-lockup">
-        <img src="/assets/efhs-logo.png" alt="East Forsyth High School Eagles logo" class="lock-eagle">
-        <span class="lock-divider"></span>
-        <img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment logo" class="lock-mark">
-      </div>
       <div class="eyebrow">East Forsyth High School · Kernersville, NC</div>
       <h1 data-site-field="hero_title"><span>Sound. Spirit.</span> Eagle Pride.</h1>
       <p class="lead" data-site-field="hero_subtitle">${escapeHtml(APPROVED_HERO_SUBTITLE)}</p>
