@@ -7,7 +7,7 @@
   --efhs-blue:#0b63d6;
   --efhs-blue-bright:#3c8bff;
   --efhs-silver:#c9d4e4;
-  --efhs-hero-photo:none;
+  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg");
   --efhs-page-photo:none;
   --efhs-card-photo-1:none;
   --efhs-card-photo-2:none;
@@ -228,12 +228,12 @@ body.efhs-theme .hero:before,
   inset:0;
   opacity:1;
   background:
-    linear-gradient(115deg,rgba(0,19,38,.96) 0%,rgba(0,33,66,.88) 34%,rgba(11,99,214,.28) 58%,rgba(0,19,38,.18) 100%),
+    linear-gradient(180deg,rgba(0,19,38,.72) 0%,rgba(0,33,66,.52) 34%,rgba(11,99,214,.28) 58%,rgba(0,19,38,.66) 100%),
     var(--efhs-hero-photo, none);
   background-color:#001326;
   background-repeat:no-repeat;
   background-size:cover;
-  background-position:center right;
+  background-position:center 46%;
   transform:none;
 }
 body.efhs-theme .hero:after,

@@ -286,7 +286,8 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'home-header-nav-banner-20260918c';
+const ASSET_VERSION = 'home-hero-field-20260918';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -11194,14 +11195,14 @@ export function pickPublicThemePhotoVars(photos = [], { slug = 'home' } = {}) {
   const at = (index) => (urls.length ? urls[index % urls.length] : '');
   const find = (pattern) => list.find((photo) => pattern.test(themePhotoSearchText(photo)))?.url || '';
   const pageSlug = String(slug || 'home');
-  const hero = find(/march on|football|away game|field|game day/i) || at(0);
+  const hero = HOME_HERO_PHOTO;
   let page = at(hashThemeSlug(pageSlug));
   if (pageSlug === 'directors' || pageSlug === 'staff') page = find(/band 2024|band 2025|staff|director/i) || page;
   if (pageSlug === 'calendar') page = find(/game|rehearsal|calendar/i) || page;
   if (pageSlug === 'gallery') page = find(/gallery|photo|performance/i) || page;
   return {
     hero,
-    page: page || hero,
+    page,
     cards: [at(0), at(1), at(2)],
   };
 }
