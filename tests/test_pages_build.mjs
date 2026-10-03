@@ -23,6 +23,7 @@ test('pages build contains advanced worker and runtime module', () => {
   assert.equal(existsSync(join(OUTPUT, 'form-builder.mjs')), true);
   assert.equal(existsSync(join(OUTPUT, 'admin.js')), true);
   assert.equal(existsSync(join(OUTPUT, 'styles.css')), true);
+  assert.equal(existsSync(join(OUTPUT, 'public-theme.css')), true);
   assert.equal(existsSync(join(OUTPUT, 'push-sw.js')), true);
   assert.equal(existsSync(join(OUTPUT, 'manifest.webmanifest')), true);
   assert.equal(existsSync(join(OUTPUT, 'web-push-browser/index.js')), true);

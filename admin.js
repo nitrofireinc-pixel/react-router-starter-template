@@ -1170,7 +1170,7 @@ function markHomeHtmlEditable(html = '') {
   const root = template.content;
   root.querySelectorAll('[data-events]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
-    node.setAttribute('data-cms-dynamic-label', 'Managed in Calendar Events');
+    node.setAttribute('data-cms-dynamic-label', 'Managed in Schedule Board');
   });
   root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
