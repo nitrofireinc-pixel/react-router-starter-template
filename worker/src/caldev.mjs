@@ -4,7 +4,7 @@ export const CALDEV_TRACKS = [
   { id: 'game', label: 'Games', color: '#E71321' },
   { id: 'rehearsal', label: 'Rehearsals', color: '#014990' },
   { id: 'meeting', label: 'Meetings', color: '#002142' },
-  { id: 'deadline', label: 'Deadlines', color: '#FDD703' },
+  { id: 'deadline', label: 'IMPORTANT', color: '#FDD703' },
   { id: 'trip', label: 'Trips', color: '#7c3aed' },
   { id: 'other', label: 'Other', color: '#5b6472' },
 ];
@@ -367,13 +367,13 @@ export function firstCaldevDescriptionLink(html = '') {
 
 export function deadlineBannerCopy(event) {
   const due = deadlineDueIso(event);
-  const title = stripSimpleHtml(event?.title || '').slice(0, 200) || 'Deadline';
+  const title = stripSimpleHtml(event?.title || '').slice(0, 200) || 'IMPORTANT';
   const dateLabel = formatDeadlineBannerDate(due);
   return {
     title,
     due,
     dateLabel,
-    text: dateLabel ? `Deadline: ${title} ${dateLabel}!` : `Deadline: ${title}!`,
+    text: dateLabel ? `IMPORTANT: ${title} ${dateLabel}!` : `IMPORTANT: ${title}!`,
     href: firstCaldevDescriptionLink(event?.description || ''),
   };
 }

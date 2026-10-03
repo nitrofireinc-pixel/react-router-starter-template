@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  CALDEV_TRACKS,
   activeDeadlineBannerEvents,
   buildDeadlineBannerItems,
   compareCaldevEvents,
@@ -139,8 +140,9 @@ test('deadline banner window is one week through due day, then gone', () => {
   assert.equal(deadlineDueIso(ranged), '2026-10-20');
   assert.equal(isDeadlineBannerActive(ranged, '2026-10-13'), true);
   assert.equal(isDeadlineBannerActive(ranged, '2026-10-21'), false);
+  assert.equal(CALDEV_TRACKS.find((track) => track.id === 'deadline')?.label, 'IMPORTANT');
   const copy = deadlineBannerCopy(deadline);
-  assert.equal(copy.text, 'Deadline: Letterman Jacket Forms October 20th, 2026!');
+  assert.equal(copy.text, 'IMPORTANT: Letterman Jacket Forms October 20th, 2026!');
   assert.equal(copy.href, 'https://efhsband.org/letterman-jacket.html');
   assert.equal(formatDeadlineBannerDate('2026-10-21'), 'October 21st, 2026');
   const active = activeDeadlineBannerEvents([
