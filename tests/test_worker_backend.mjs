@@ -2293,7 +2293,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-20261003'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-landscape-20261003'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2469,6 +2469,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav a\[aria-current="page"\],[\s\S]*?background:#eef3fa/);
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
   assert.match(themeCss, /@media \(max-width:767px\) and \(max-height:500px\) and \(orientation:landscape\)/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?height:52px/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
@@ -2615,6 +2616,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(html, /class="content fundraising-cards"/);
   assert.match(html, /Fundraiser\/Mattress Sale/);
   assert.match(html, /Fundraiser\/Silent Auction/);
+  assert.match(html, /fundraising-card no-flyer/);
   assert.match(html, /Sat, Oct 24, 2026/);
   assert.match(html, /820 S Main St, Kernersville, NC 27284/);
   assert.match(html, /Fundraiser at Mattress Warehouse/);
@@ -2655,7 +2657,9 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
-  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh !important/);
+  assert.match(styles, /\.fundraising-card:not\(:has\(\.ff-media\)\)/);
+  assert.match(styles, /object-fit:contain/);
   assert.doesNotMatch(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card[\s\S]*?grid-template-columns:1fr/);
   assert.match(styles, /overflow-x:clip/);
   assert.match(styles, /html:has\(body\.fundraising-page\)/);
@@ -3227,6 +3231,7 @@ test('mobile public header and chrome scroll with the page instead of staying st
   assert.doesNotMatch(mobile[0], /position:\s*sticky/);
   assert.match(css, /header\.site-header\{position:sticky;top:0;/);
   assert.match(css, /\.site-chrome\{\s*position:sticky;/);
+  assert.match(css, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.site-chrome,[\s\S]*?position:relative;/);
 });
 
 test('initDb skips heavy migrate work when schema_version matches', async () => {

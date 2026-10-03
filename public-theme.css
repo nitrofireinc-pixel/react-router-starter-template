@@ -1190,6 +1190,50 @@ body.efhs-theme .footer h3{
   }
 }
 
+/* Short landscape (844x390, 740x360, 915x412): chrome scrolls away and the
+   mid-width two-row header stays compact. Portrait and tall desktop unchanged. */
+@media (orientation:landscape) and (max-height:500px){
+  body.efhs-theme .site-chrome,
+  body.efhs-theme header.site-header{
+    position:relative;
+    top:auto;
+  }
+  body.efhs-theme header.site-header{
+    flex-direction:row;
+    flex-wrap:nowrap;
+    align-items:center;
+    min-height:48px;
+    height:52px;
+    max-height:52px;
+    padding:0 12px;
+    column-gap:10px;
+    row-gap:0;
+  }
+  body.efhs-theme .header-inner{
+    min-height:0;
+    width:auto;
+    flex:0 1 auto;
+  }
+  body.efhs-theme header.site-header nav,
+  body.efhs-theme header.site-header #site-nav{
+    width:auto;
+    max-width:none;
+    flex:1 1 auto;
+    justify-content:flex-end;
+    padding:0;
+    overflow:hidden;
+  }
+  body.efhs-theme header.site-header nav a,
+  body.efhs-theme header.site-header nav .nav-notify-me,
+  body.efhs-theme header.site-header nav .nav-support-toggle{
+    font-size:.58rem;
+    padding:4px 5px;
+  }
+  body.efhs-theme .header-donate{
+    display:none!important;
+  }
+}
+
 /* Phone page/hero layout only. Header/drawer rules live in the 767 compact block. */
 @media (max-width:760px){
   body.efhs-theme .photo-gallery,
