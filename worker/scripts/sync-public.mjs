@@ -35,6 +35,8 @@ for (const name of [
   'caldev.js',
   'admin-caldev.js',
   'admin.js',
+  'admin-visual.js',
+  'admin-visual.css',
   'badge-creator.js',
   'badge-creator-admin.js',
   'push-sw.js',
@@ -50,5 +52,9 @@ cpSync(join(ROOT, 'assets'), assetsDest, { recursive: true });
 const vendorDest = join(PUBLIC, 'vendor');
 mkdirSync(vendorDest, { recursive: true });
 cpSync(join(ROOT, 'vendor/jspdf.umd.min.js'), join(vendorDest, 'jspdf.umd.min.js'));
+const grapesDest = join(vendorDest, 'grapesjs');
+mkdirSync(grapesDest, { recursive: true });
+cpSync(join(ROOT, 'vendor/grapesjs/grapes.min.js'), join(grapesDest, 'grapes.min.js'));
+cpSync(join(ROOT, 'vendor/grapesjs/grapes.min.css'), join(grapesDest, 'grapes.min.css'));
 
 console.log(`Synced static assets to ${PUBLIC}`);

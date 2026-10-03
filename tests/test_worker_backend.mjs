@@ -44,6 +44,7 @@ test('wrangler worker assets config must stay on worker/public', () => {
   assert.doesNotMatch(devToml, /73681cba-4863-4abb-86d4-b140694bcde2/);
   assert.doesNotMatch(devToml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
   assert.doesNotMatch(devToml, /admin123\$/);
+  assert.doesNotMatch(toml, /^\s*EFBAND_ADMIN_PASSWORD\s*=/m);
 });
 
 test('escapeHtml escapes user-provided values used in admin templates', () => {
@@ -1893,7 +1894,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['president'] }), true);
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['vice-president'] }), true);
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['treasurer'] }), false);
-  assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), false);
+  assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), true);
 
   assert.equal(canAccessBadgeCreator({ role: 'admin', permissions: [] }), true);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), true);
@@ -2301,7 +2302,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'fundraising-cards-dev-20261003b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'visual-join-editor-20261003g'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2477,6 +2478,18 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?#site-nav a\[aria-current="page"\],[\s\S]*?background:#eef3fa/);
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?grid-template-areas:"menu brand actions"/);
   assert.match(themeCss, /@media \(max-width:767px\) and \(max-height:500px\) and \(orientation:landscape\)/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?height:52px/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.menu-button\{[\s\S]*?display:inline-flex/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?nav \.header-donate/);
+  const scriptSrc = readFileSync(join(root, 'script.js'), 'utf8');
+  assert.match(scriptSrc, /COMPACT_NAV_MEDIA/);
+  assert.match(scriptSrc, /orientation: landscape\) and \(max-height: 500px/);
+  assert.match(scriptSrc, /placeDonateInDrawer\(nav, donate\)/);
+  assert.match(scriptSrc, /nav\.insertBefore\(donate, nav\.firstChild\)/);
+  assert.match(scriptSrc, /placeUtilitiesInDrawer/);
+  assert.match(scriptSrc, /headerUtilityFits/);
+  assert.match(scriptSrc, /MIN_NAV_FONT_PX = 12/);
+  assert.match(scriptSrc, /nav-use-hamburger/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
@@ -2488,13 +2501,29 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
-  assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}/);
+  assert.match(homeCss, /@media \(max-width:767px\)\{[\s\S]*?body\.home-page \.header-donate\{display:none\}[\s\S]*?nav \.header-donate\{display:inline-flex!important\}/);
   assert.match(homeCss, /body\.home-page,[\s\S]*?overflow-x:clip/);
   assert.match(homeCss, /@media \(max-width:1100px\)\{[\s\S]*?quick-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
   assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:inline-flex/);
-  assert.match(themeCss, /body\.efhs-theme \.header-donate\{display:none!important\}/);
-  assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme \.header-donate\{display:none!important\}/);
+  assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?nav \.header-donate,[\s\S]*?display:inline-flex!important/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme header\.site-header nav a,[\s\S]*?text-shadow:none/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme header\.site-header nav \.utility-auth[\s\S]*?display:flex!important/);
+  assert.doesNotMatch(styles, /html\.nav-use-hamburger header\.site-header nav \.nav-notify-me,\s*html\.nav-use-hamburger header\.site-header nav \.nav-add-home\{display:none!important\}/);
+  const midStart = themeCss.indexOf('@media (min-width:768px) and (max-width:1199px)');
+  const midEnd = themeCss.indexOf('@media (min-width:1200px) and (max-width:1339px)');
+  const midWidth = midStart >= 0 && midEnd > midStart ? themeCss.slice(midStart, midEnd) : '';
+  assert.ok(midWidth, '768-1199 header breakpoint missing');
+  assert.match(midWidth, /font-size:12px/);
+  assert.match(midWidth, /body\.efhs-theme \.header-donate\{[\s\S]*?display:inline-flex/);
+  assert.doesNotMatch(midWidth, /header-donate\{display:none/);
+  assert.match(themeCss, /nav \.header-donate,[\s\S]*?order:-1/);
+  assert.match(themeCss, /max-height:calc\(100dvh - 52px - 6\.75rem\)/);
+  assert.match(styles, /html\.nav-use-hamburger/);
+  assert.match(styles, /order:-1/);
+  assert.match(themeCss, /body\.efhs-theme\.home-page \.hero-card,[\s\S]*?display:none!important/);
+  assert.match(themeCss, /body\.efhs-theme\.coming-soon-page \.hero-card,[\s\S]*?display:block!important/);
   assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[^}]*display:none/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
@@ -2606,6 +2635,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(html, /class="content fundraising-cards"/);
   assert.match(html, /Fundraiser\/Mattress Sale/);
   assert.match(html, /Fundraiser\/Silent Auction/);
+  assert.match(html, /fundraising-card no-flyer/);
   assert.match(html, /Sat, Oct 24, 2026/);
   assert.match(html, /820 S Main St, Kernersville, NC 27284/);
   assert.match(html, /Fundraiser at Mattress Warehouse/);
@@ -2643,11 +2673,16 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
-  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh !important/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?overflow:visible/);
+  assert.match(styles, /\.fundraising-card:not\(:has\(\.ff-media\)\)/);
+  assert.match(styles, /object-fit:contain/);
   assert.doesNotMatch(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card[\s\S]*?grid-template-columns:1fr/);
   assert.match(styles, /overflow-x:clip/);
   assert.match(styles, /html:has\(body\.fundraising-page\)/);
   assert.match(styles, /@media \(max-width:420px\)/);
+  assert.match(styles, /width:100% !important/);
+  assert.match(styles, /p:has\(> br:only-child\)/);
 });
 
 test('join, volunteer, and coming soon stay out of the public nav', () => {
@@ -2765,7 +2800,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(siteContent, /bindPhotoGalleries/);
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminSrc, /function canViewEvents/);
-  assert.match(adminSrc, /Browse calendar events by month \(view only\)/);
+  assert.match(adminSrc, /function canAccessScheduleBoard/);
+  assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
   assert.match(adminSrc, /\/api\/admin\/checkout\/settings/);
   assert.match(adminSrc, /sandbox\.web\.squarecdn\.com\/v1\/square\.js/);
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
@@ -3211,6 +3247,7 @@ test('mobile public header and chrome scroll with the page instead of staying st
   assert.doesNotMatch(mobile[0], /position:\s*sticky/);
   assert.match(css, /header\.site-header\{position:sticky;top:0;/);
   assert.match(css, /\.site-chrome\{\s*position:sticky;/);
+  assert.match(css, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.site-chrome,[\s\S]*?position:relative;/);
 });
 
 test('initDb skips heavy migrate work when schema_version matches', async () => {

@@ -106,6 +106,29 @@ import {
   renderPublicReadBootstrap,
   resetPublicReadCache,
 } from './d1-read-policy.mjs';
+import {
+  VISUAL_EDITOR_PATH,
+  VISUAL_PILOT_SLUG,
+  canEditVisualPilot,
+  isVisualPilotSlug,
+  loadVisualPageState,
+  normalizeVisualSavePayload,
+  renderVisualEditorHtml,
+  restoreVisualVersion,
+  saveVisualPage,
+} from './visual-page-editor.mjs';
+import {
+  sanitizeCmsPageHtml as sanitizeCmsPageHtmlAllowlist,
+  sanitizeHomeAllowlistHtml,
+  sanitizePageSectionHtml as sanitizePageSectionHtmlAllowlist,
+} from './html-sanitizer.mjs';
+
+export {
+  sanitizeAllowlistHtml,
+  isSafeFormAction,
+  isSafeHref,
+  isSafeSrc,
+} from './html-sanitizer.mjs';
 
 export {
   CALDEV_TRACKS,
@@ -316,7 +339,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cards-dev-20261003b';
+const ASSET_VERSION = 'visual-join-editor-20261003g';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -476,6 +499,102 @@ export function parsePermissions(value) {
 
 export function isSuperAdmin(user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
+}
+
+const PRIVILEGED_PERMISSIONS = new Set(['all']);
+
+/** Page slug, path, nav order, and home flag are Site Admin / Super Admin only. */
+export function canManagePageSettings(user) {
+  return isSuperAdmin(user) || hasPermission(user, 'pages');
+}
+
+export function lockPageSettingsToExisting(page, existing) {
+  if (!page || !existing) return page;
+  return {
+    ...page,
+    slug: existing.slug,
+    path: existing.is_home ? '/' : existing.path,
+    nav_order: Number(existing.nav_order),
+    is_home: existing.is_home ? 1 : 0,
+    active: Number(existing.active) === 1 ? 1 : 0,
+  };
+}
+
+export function requestedPrivilegedPermissions(permissions) {
+  return parsePermissions(permissions).filter((item) => (
+    PRIVILEGED_PERMISSIONS.has(String(item).trim().toLowerCase())
+  ));
+}
+
+function permissionKey(item) {
+  return String(item || '').trim().toLowerCase();
+}
+
+export function actorHeldPermissionKeys(actor) {
+  return new Set(parsePermissions(actor?.permissions).map(permissionKey));
+}
+
+export function sanitizeAssignablePermissions(actor, permissions) {
+  const parsed = parsePermissions(permissions);
+  if (isSuperAdmin(actor)) return parsed;
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  return parsed.filter((item) => {
+    const key = permissionKey(item);
+    if (!key || key === 'all' || key === 'users') return false;
+    return holdsAll || held.has(key);
+  });
+}
+
+export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
+  if (isSuperAdmin(actor)) return { ok: true };
+  if (String(payload.role || '').trim().toLowerCase() === 'admin') {
+    return { ok: false, status: 403, detail: 'Only Super Admins can assign the Super Admin role' };
+  }
+  const requested = parsePermissions(payload.permissions);
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  for (const item of requested) {
+    const key = permissionKey(item);
+    if (key === 'all' || requestedPrivilegedPermissions([item]).length) {
+      return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
+    }
+    if (key === 'users') {
+      return { ok: false, status: 403, detail: 'You cannot grant the Users permission' };
+    }
+    if (key && !holdsAll && !held.has(key)) {
+      return { ok: false, status: 403, detail: 'You can only grant permissions you already have' };
+    }
+  }
+  return { ok: true };
+}
+
+function samePermissionList(left, right) {
+  const a = parsePermissions(left).map((item) => String(item).trim().toLowerCase()).sort();
+  const b = parsePermissions(right).map((item) => String(item).trim().toLowerCase()).sort();
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+/** Users-permission holders cannot change their own role or permissions. */
+export function assertSafeSelfPrivilegeEdit(actor, targetId, payload = {}, existing = {}) {
+  if (isSuperAdmin(actor)) return { ok: true, payload };
+  if (Number(actor?.id) !== Number(targetId)) return { ok: true, payload };
+  const requestedRole = payload.role == null || payload.role === ''
+    ? String(existing.role || 'editor').trim().toLowerCase()
+    : String(payload.role).trim().toLowerCase();
+  const existingRole = String(existing.role || 'editor').trim().toLowerCase();
+  const permissionsProvided = Object.prototype.hasOwnProperty.call(payload, 'permissions');
+  if (requestedRole !== existingRole || (permissionsProvided && !samePermissionList(payload.permissions, existing.permissions))) {
+    return { ok: false, status: 403, detail: 'You cannot change your own role or permissions' };
+  }
+  return {
+    ok: true,
+    payload: {
+      ...payload,
+      role: existing.role,
+      permissions: parsePermissions(existing.permissions),
+    },
+  };
 }
 
 /** Security log is Super Admin only — never grantable via permissions. */
@@ -1375,8 +1494,20 @@ export function canAccessTreasurerLedger(user) {
   return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
 }
 
-/** Schedule Board: Super Admin, President, or Vice President. */
+/** Schedule Board: Super Admin, President, VP, or calendar/events editors. */
 export function canAccessScheduleBoard(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+    || hasPermission(user, 'events')
+    || hasPermission(user, 'events:manage')
+    || hasPermission(user, 'calendar')
+  );
+}
+
+/** Subscriber "Finished" mail stays limited to today's senders. */
+export function canNotifyCalendarSubscribers(user) {
   return (
     isSuperAdmin(user)
     || hasPermission(user, 'president')
@@ -1625,7 +1756,7 @@ async function hmacSign(value, secret) {
   return base64Url(await crypto.subtle.sign('HMAC', key, TEXT.encode(value)));
 }
 
-async function makeSession(user, env) {
+export async function makeSession(user, env) {
   const payload = base64Url(TEXT.encode(JSON.stringify({ uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) })));
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
@@ -1693,7 +1824,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-02.1';
+export const DB_SCHEMA_VERSION = '2026-10-03.1';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1991,87 +2122,19 @@ async function migrateAndSeedDb(env) {
     }
   }
   await seedCmsFormMaker(env);
-  const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
-  if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html))));
-    if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextSponsorsHtml, sponsorsPageRow.id)
-        .run();
-    }
-  }
-  const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
-  if (fundraisingPageRow?.body_html) {
-    const nextFundraisingHtml = ensureEmailListSignupSlot(
-      ensureFundraisingDonateSlot(fundraisingPageRow.body_html),
-      {
-        topics: ['fundraising', 'calendar'],
-        heading: 'Email fundraising updates',
-        detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextFundraisingHtml, fundraisingPageRow.id)
-        .run();
-    }
-  }
-  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
-  if (boostersPageRow?.body_html) {
-    const siteForDues = await getSite(env);
-    const nextBoostersHtml = applyBoostersDuesVisibility(
-      ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
-      isBoostersDuesEnabled(siteForDues),
-    );
-    if (nextBoostersHtml !== boostersPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextBoostersHtml, boostersPageRow.id)
-        .run();
-    }
-  }
-  const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
-  if (homePageRow?.body_html) {
-    const nextHomeHtml = upgradeHomeBody(homePageRow.body_html);
-    if (nextHomeHtml !== homePageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextHomeHtml, homePageRow.id)
-        .run();
-    }
-  }
+  // Never rewrite an existing cms_pages.body_html during schema/migration.
+  // Slot injectors still run at render time. Only insert a row when it is missing.
   const storedSubtitle = await getSiteContentValue(env, 'hero_subtitle');
   if (plainHeroSubtitle(storedSubtitle) === PREVIOUS_HERO_SUBTITLE) {
     await setSiteContentValue(env, 'hero_subtitle', APPROVED_HERO_SUBTITLE);
   }
   const galleryPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'gallery');
   if (galleryPage) {
-    const existingGallery = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'gallery'").first();
+    const existingGallery = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'gallery'").first();
     if (!existingGallery) {
       await env.DB.prepare('UPDATE cms_pages SET nav_order = nav_order + 1 WHERE nav_order >= ?').bind(galleryPage.nav_order).run();
       await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(galleryPage.slug, galleryPage.path, galleryPage.title, galleryPage.body_html, galleryPage.nav_order, galleryPage.is_home, galleryPage.active)
-        .run();
-    } else if (existingGallery.body_html) {
-      const nextGalleryHtml = ensureGalleryPageSlot(existingGallery.body_html);
-      if (nextGalleryHtml !== existingGallery.body_html) {
-        await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-          .bind(nextGalleryHtml, existingGallery.id)
-          .run();
-      }
-    }
-  }
-  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
-  if (calendarPageRow?.body_html) {
-    const nextCalendarHtml = ensureEmailListSignupSlot(
-      ensureCalendarMonthMount(calendarPageRow.body_html),
-      {
-        topics: ['calendar', 'fundraising'],
-        heading: 'Email calendar updates',
-        detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextCalendarHtml !== calendarPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextCalendarHtml, calendarPageRow.id)
         .run();
     }
   }
@@ -2526,8 +2589,8 @@ async function seedCmsFormMaker(env) {
   const recipients = JSON.stringify(await getLettermanRecipientUserIds(env));
   const body = renderCmsFormPageBody(LETTERMAN_CMS_PAGE, definition, 'letterman-jacket');
   if (page?.id) {
-    await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html = ? OR body_html NOT LIKE ?)')
-      .bind(body, page.id, '', '%data-cms-form=%')
+    await env.DB.prepare("UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html IS NULL OR trim(body_html) = '')")
+      .bind(body, page.id)
       .run();
   }
   if (existing?.id) return;
@@ -2552,6 +2615,12 @@ async function resolveFormRecipientEmails(env, ids = []) {
 }
 
 async function handleBuiltFormSubmit(request, env, slug) {
+  const formSlug = String(slug || '').trim().toLowerCase();
+  const page = await getPageBySlug(env, formSlug, true);
+  if (formSlug === 'letterman-jacket' || formSlug === 'in-kind' || page) {
+    const blocked = publicFormSubmitGate(page);
+    if (!blocked.ok) return jsonResponse({ detail: blocked.detail }, blocked.status);
+  }
   const payload = await request.json().catch(() => ({}));
   if (String(payload.company || '').trim()) return jsonResponse({ ok: true });
   const record = await getFormBySlug(env, slug);
@@ -6826,12 +6895,41 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
 }
 
 export function sanitizePageSectionHtml(dirty = '') {
-  return String(dirty || '')
-    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '')
-    .trim();
+  return sanitizePageSectionHtmlAllowlist(dirty);
+}
+
+/** Full-page save sanitizer: allowlist tags/attrs only, after entity decode. */
+export function sanitizeCmsPageHtml(dirty = '') {
+  return sanitizeCmsPageHtmlAllowlist(dirty);
+}
+
+export function isPublicCmsPageActive(page) {
+  return Boolean(page) && Number(page.active) === 1;
+}
+
+/** Public form POST must follow Coming Soon when the CMS page is inactive. */
+export function publicFormSubmitGate(page) {
+  if (page && isPublicCmsPageActive(page)) return { ok: true };
+  return { ok: false, status: 403, detail: 'Coming soon' };
+}
+
+async function rejectInactivePublicFormPage(env, slug) {
+  const page = await getPageBySlug(env, slug, true);
+  const gate = publicFormSubmitGate(page);
+  if (gate.ok) return null;
+  return jsonResponse({ detail: gate.detail }, gate.status);
+}
+
+export function publicCmsPageForRender(page) {
+  if (!page) return null;
+  if (isPublicCmsPageActive(page)) return page;
+  return {
+    ...page,
+    body_html: comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }),
+  };
 }
 
 export function extractEnsemblesBodyHtml(pageHtml = '') {
@@ -6867,7 +6965,16 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+export function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+  if (!isPublicCmsPageActive(page)) {
+    return injectComingSoonLogos(comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }), {
+      logo: site?.logo_url || '/assets/efhs-logo.png',
+      mark: PUBLIC_BRAND_MARK,
+    });
+  }
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -7815,7 +7922,7 @@ export async function requireScheduleBoardAccess(request, env) {
   if (auth.response) return auth;
   if (!canAccessScheduleBoard(auth.user)) {
     return {
-      response: jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403),
+      response: jsonResponse({ detail: 'Permission required: calendar or events' }, 403),
       user: auth.user,
     };
   }
@@ -8253,7 +8360,7 @@ export function sanitizeHomeBodyHtml(html = '') {
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\scontenteditable\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:role|spellcheck|aria-label|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:spellcheck|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\sclass="([^"]*)"/gi, (_, classes) => {
       const cleaned = String(classes || '')
         .split(/\s+/)
@@ -8275,7 +8382,7 @@ export function sanitizeHomeBodyHtml(html = '') {
       }
       return next;
     });
-  return source.trim();
+  return sanitizeHomeAllowlistHtml(source);
 }
 
 export function serializePagePayload(payload, existing = null) {
@@ -8298,6 +8405,9 @@ export function serializePagePayload(payload, existing = null) {
     body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
   } else {
     body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+  }
+  if (slug !== 'home') {
+    body_html = sanitizeCmsPageHtml(body_html);
   }
   return {
     slug,
@@ -8503,15 +8613,7 @@ async function routeApi(request, env, url, ctx = null) {
       }));
       return jsonResponse(events.map(caldevEventToHighlight));
     }
-    let events = await listCaldevEvents(env);
-    if (!events.length) {
-      try {
-        await seedCaldevFromProduction(env, { getEvents, clear: true });
-        events = await listCaldevEvents(env);
-      } catch {
-        // Seeding is best-effort for the lab page.
-      }
-    }
+    const events = await cachedPublicRead('caldev-events', () => listCaldevEvents(env));
     return jsonResponse(events);
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
@@ -8541,6 +8643,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(config);
   }
   if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'become-a-sponsor');
+    if (blocked) return blocked;
     const contentType = String(request.headers.get('content-type') || '');
     let businessName = '';
     let address = '';
@@ -8805,6 +8909,8 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
   if (url.pathname === '/api/donations' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'fundraising');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const donorName = String(payload.donor_name || payload.name || '').trim();
     const amountDisplay = String(payload.amount_display || '').trim();
@@ -8939,6 +9045,8 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/dues' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'boosters');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const studentName = String(payload.student_name || payload.child_name || payload.name || '').trim();
     const email = String(payload.email || '').trim().toLowerCase();
@@ -9139,6 +9247,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
   }
   if (url.pathname === '/api/contact' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'contact');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     if (String(payload.company || '').trim()) {
       return jsonResponse({ ok: true }); // honeypot
@@ -9190,6 +9300,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true, delivered: true, detail: 'Message sent. Thank you!' });
   }
   if (url.pathname === '/api/inkind' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'in-kind');
+    if (blocked) return blocked;
     const { payload, files } = await readInKindRequest(request);
     if (String(payload.company || '').trim()) {
       return jsonResponse({ ok: true });
@@ -9858,12 +9970,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can create Super Admin accounts' }, 403);
-    }
+    const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       return jsonResponse(publicUser(created));
     } catch (error) {
@@ -9885,16 +9996,27 @@ async function routeApi(request, env, url, ctx = null) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can assign the Super Admin role' }, 403);
-    }
-    const role = wantsAdmin ? 'admin' : 'editor';
-    const permissions = JSON.stringify(parsePermissions(payload.permissions));
+    const selfEdit = assertSafeSelfPrivilegeEdit(auth.user, id, payload, existing);
+    if (!selfEdit.ok) return jsonResponse({ detail: selfEdit.detail }, selfEdit.status);
+    const nextPayload = selfEdit.payload;
+    const editingSelf = Number(auth.user.id) === id && !isSuperAdmin(auth.user);
+    const privilege = editingSelf
+      ? { ok: true }
+      : assertSafeUserPrivilegeGrant(auth.user, nextPayload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = nextPayload.role === 'admin' && isSuperAdmin(auth.user);
+    const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+      ? (existing.role === 'admin' ? 'admin' : 'editor')
+      : (wantsAdmin ? 'admin' : 'editor');
+    const permissions = JSON.stringify(
+      Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+        ? parsePermissions(existing.permissions)
+        : sanitizeAssignablePermissions(auth.user, nextPayload.permissions),
+    );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password);
+    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
+    if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
     return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
@@ -9908,6 +10030,44 @@ async function routeApi(request, env, url, ctx = null) {
     }
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
     return jsonResponse({ ok: true });
+  }
+
+  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    return jsonResponse(await loadVisualPageState(env));
+  }
+  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'PUT') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = normalizeVisualSavePayload(raw);
+    if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
+    const state = await saveVisualPage(env, {
+      html: parsed.html,
+      action: parsed.action,
+      user: auth.user,
+    });
+    return jsonResponse(state);
+  }
+  if (url.pathname === '/api/admin/visual-pages/join/restore' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    const raw = await request.json().catch(() => ({}));
+    try {
+      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Restore failed' }, Number(error.status) || 400);
+    }
   }
 
   if (url.pathname === '/api/admin/pages' && request.method === 'GET') {
@@ -9939,7 +10099,15 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
-    const page = serializePagePayload(rawPayload, existing);
+    if (isVisualPilotSlug(existing.slug)) {
+      return jsonResponse({
+        detail: 'Join the Band is edited in the visual editor. Open the Join visual editor to save this page.',
+      }, 409);
+    }
+    let page = serializePagePayload(rawPayload, existing);
+    if (!canManagePageSettings(auth.user)) {
+      page = lockPageSettingsToExisting(page, existing);
+    }
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
     await env.DB.prepare('UPDATE cms_pages SET slug = ?, path = ?, title = ?, body_html = ?, nav_order = ?, is_home = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active, existing.id).run();
@@ -11092,8 +11260,11 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/caldev/notify-finished' && request.method === 'POST') {
-    const auth = await requireScheduleBoardAccess(request, env);
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    if (!canNotifyCalendarSubscribers(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403);
+    }
     let email_list = null;
     try {
       email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'finished' });
@@ -11234,6 +11405,7 @@ async function routeApi(request, env, url, ctx = null) {
       || hasPermission(auth.user, 'boosters')
       || canEditPage(auth.user, 'boosters')
       || canEditPage(auth.user, 'fundraising')
+      || canEditPage(auth.user, 'join')
       || hasPermission(auth.user, 'pages')
       || hasPermission(auth.user, 'site');
     if (!canUpload) return jsonResponse({ detail: 'Permission required: photos' }, 403);
@@ -11459,6 +11631,16 @@ async function handleAdmin(request, env) {
   return htmlResponse(ADMIN_HTML);
 }
 
+async function handleVisualEditorPage(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!canEditVisualPilot(user, canEditPage)) {
+    return htmlResponse('<!doctype html><title>Not allowed</title><p>Permission required: page:join</p>', 403);
+  }
+  return htmlResponse(renderVisualEditorHtml(ASSET_VERSION));
+}
+
 async function logout(request, env) {
   const user = await currentUser(request, env);
   if (user) {
@@ -11627,7 +11809,8 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [] } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
-  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug);
+  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
+    || !isPublicCmsPageActive(page);
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
     calendarHighlights,
     home,
@@ -11859,15 +12042,17 @@ async function serveStaticOrCms(request, env, url) {
       return mapCmsPage((result.results || [])[0] || null);
     });
     if (page) {
-      const isHome = Boolean(page.is_home) || page.slug === 'home';
-      const isFundraising = page.slug === 'fundraising';
+      const livePage = publicCmsPageForRender(page);
+      const pageIsLive = isPublicCmsPageActive(page);
+      const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
+      const isFundraising = pageIsLive && page.slug === 'fundraising';
       const reads = await loadPublicCmsReads(env, {
         path,
         today,
         isHome,
         needsEvents: isHome || isFundraising,
-        needsBoosters: page.slug === 'boosters' || isHome,
-        needsStaff: page.slug === 'directors',
+        needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
+        needsStaff: pageIsLive && page.slug === 'directors',
       });
       const pages = reads.pages;
       const allSponsors = reads.sponsors;
@@ -11876,7 +12061,7 @@ async function serveStaticOrCms(request, env, url) {
       const photos = reads.photos;
       const homeSources = reads.homeSources || {};
       const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
-      const sponsors = page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
+      const sponsors = pageIsLive && page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
       const home = isHome ? {
         events: reads.homeEvents,
         members: boosterMembers,
@@ -11888,10 +12073,10 @@ async function serveStaticOrCms(request, env, url) {
       const fundraiserEvents = isFundraising
         ? mergePublicFundraiserEvents(reads.homeEvents, reads.deadlineEvents)
         : [];
-      if (page.slug === 'letterman-jacket' && !isCmsFormPage(page)) {
-        page.letterman_copy = await getLettermanFormCopy(env);
+      if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
+        livePage.letterman_copy = await getLettermanFormCopy(env);
       }
-      return htmlResponse(renderCmsPage(page, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
+      return htmlResponse(renderCmsPage(livePage, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
         photos,
@@ -12019,6 +12204,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
+    if (url.pathname === VISUAL_EDITOR_PATH || url.pathname === `${VISUAL_EDITOR_PATH}/`) {
+      return handleVisualEditorPage(request, env);
+    }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
     return serveStaticOrCms(request, env, url);
@@ -12044,7 +12232,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><a class="admin-visual-pilot-link" href="/admin/visual/join" data-visual-pilot-link hidden>Join visual editor</a><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich="insertUnorderedList" title="Bulleted list">• List</button><button type="button" data-rich-insert-photo title="Insert a photo at the cursor">Photo</button></div><small class="rich-text-hint">Select text, then apply formatting. Use List to add or remove bullets. Click Photo to insert an image, then drag a corner to resize or Delete photo to remove it.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -12504,7 +12692,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>President, Vice President, and Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
