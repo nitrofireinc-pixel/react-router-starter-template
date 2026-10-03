@@ -515,10 +515,24 @@ export function requestedPrivilegedPermissions(permissions) {
   ));
 }
 
+function permissionKey(item) {
+  return String(item || '').trim().toLowerCase();
+}
+
+export function actorHeldPermissionKeys(actor) {
+  return new Set(parsePermissions(actor?.permissions).map(permissionKey));
+}
+
 export function sanitizeAssignablePermissions(actor, permissions) {
   const parsed = parsePermissions(permissions);
   if (isSuperAdmin(actor)) return parsed;
-  return parsed.filter((item) => String(item).trim().toLowerCase() !== 'all');
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  return parsed.filter((item) => {
+    const key = permissionKey(item);
+    if (!key || key === 'all' || key === 'users') return false;
+    return holdsAll || held.has(key);
+  });
 }
 
 export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
@@ -526,8 +540,20 @@ export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
   if (String(payload.role || '').trim().toLowerCase() === 'admin') {
     return { ok: false, status: 403, detail: 'Only Super Admins can assign the Super Admin role' };
   }
-  if (requestedPrivilegedPermissions(payload.permissions).length) {
-    return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
+  const requested = parsePermissions(payload.permissions);
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  for (const item of requested) {
+    const key = permissionKey(item);
+    if (key === 'all' || requestedPrivilegedPermissions([item]).length) {
+      return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
+    }
+    if (key === 'users') {
+      return { ok: false, status: 403, detail: 'You cannot grant the Users permission' };
+    }
+    if (key && !holdsAll && !held.has(key)) {
+      return { ok: false, status: 403, detail: 'You can only grant permissions you already have' };
+    }
   }
   return { ok: true };
 }
@@ -2575,6 +2601,11 @@ async function resolveFormRecipientEmails(env, ids = []) {
 }
 
 async function handleBuiltFormSubmit(request, env, slug) {
+  const formSlug = String(slug || '').trim().toLowerCase();
+  if (formSlug === 'letterman-jacket' || formSlug === 'in-kind') {
+    const blocked = await rejectInactivePublicFormPage(env, formSlug);
+    if (blocked) return blocked;
+  }
   const payload = await request.json().catch(() => ({}));
   if (String(payload.company || '').trim()) return jsonResponse({ ok: true });
   const record = await getFormBySlug(env, slug);
@@ -6861,6 +6892,19 @@ export function isPublicCmsPageActive(page) {
   return Boolean(page) && Number(page.active) === 1;
 }
 
+/** Public form POST must follow Coming Soon when the CMS page is inactive. */
+export function publicFormSubmitGate(page) {
+  if (page && isPublicCmsPageActive(page)) return { ok: true };
+  return { ok: false, status: 403, detail: 'Coming soon' };
+}
+
+async function rejectInactivePublicFormPage(env, slug) {
+  const page = await getPageBySlug(env, slug, true);
+  const gate = publicFormSubmitGate(page);
+  if (gate.ok) return null;
+  return jsonResponse({ detail: gate.detail }, gate.status);
+}
+
 export function publicCmsPageForRender(page) {
   if (!page) return null;
   if (isPublicCmsPageActive(page)) return page;
@@ -9233,6 +9277,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true, delivered: true, detail: 'Message sent. Thank you!' });
   }
   if (url.pathname === '/api/inkind' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'in-kind');
+    if (blocked) return blocked;
     const { payload, files } = await readInKindRequest(request);
     if (String(payload.company || '').trim()) {
       return jsonResponse({ ok: true });
@@ -9989,6 +10035,11 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
+    if (String(existing.slug || '').trim().toLowerCase() === 'join') {
+      return jsonResponse({
+        detail: 'Join the Band is edited in the visual editor. Open the Join visual editor to save this page.',
+      }, 409);
+    }
     let page = serializePagePayload(rawPayload, existing);
     if (!canManagePageSettings(auth.user)) {
       page = lockPageSettingsToExisting(page, existing);
