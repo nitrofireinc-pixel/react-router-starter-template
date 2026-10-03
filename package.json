@@ -3,15 +3,16 @@
   "private": true,
   "scripts": {
     "build": "npm run build:pages",
-    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs",
+    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs tests/test_d1_read_policy.mjs tests/test_site_marquee_chrome.mjs tests/test_public_square_sponsor_logout.mjs tests/test_visual_page_editor.mjs tests/test_phase0_cms.mjs",
     "test:pages-build": "node --test tests/test_pages_build.mjs",
     "test:cms-guide-pdf": "node --test tests/test_cms_guide_pdf.mjs",
     "build:cms-guide-pdf": "node worker/scripts/build-cms-guide-pdf.mjs",
     "check:worker-assets": "node worker/scripts/check-worker-assets.mjs",
+    "check:worker-public": "node worker/scripts/check-worker-public.mjs",
     "sync:worker-assets": "node worker/scripts/sync-public.mjs",
     "build:pages": "npm run sync:worker-assets && node worker/scripts/build-pages.mjs",
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name=efhsband",
-    "deploy:worker": "npm run check:worker-assets && npm run sync:worker-assets && wrangler deploy"
+    "deploy:worker": "npm run check:worker-assets && npm run sync:worker-assets && npm run check:worker-public && wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "4.118.0"

@@ -17,6 +17,9 @@ if (!/directory\s*=\s*"\.\/worker\/public"/.test(toml)) {
 if (!/run_worker_first\s*=\s*true/.test(toml)) {
   fail('wrangler.toml must set run_worker_first = true so the Worker serves CMS HTML ahead of static assets.');
 }
+if (!/html_handling\s*=\s*"none"/.test(toml)) {
+  fail('wrangler.toml must set html_handling = "none" so /ensembles.html is not redirected to the static /ensembles draft.');
+}
 if (!/efhsband\.org\/\*/.test(toml)) {
   fail('wrangler.toml must keep the efhsband.org/* route so Worker deploys continue serving the live domain.');
 }
