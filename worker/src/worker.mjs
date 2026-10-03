@@ -11518,9 +11518,11 @@ async function routeApi(request, env, url, ctx = null) {
   return jsonResponse({ detail: 'Not found' }, 404);
 }
 
+const PHOTO_BYTE_CACHE_VERSION = 'blob-1';
+
 async function handleUploadGet(request, env, url, ctx = null) {
   await initDb(env);
-  const cacheKey = new Request(new URL(url.pathname, 'https://efhsband.internal'));
+  const cacheKey = new Request(new URL(`${url.pathname}?pcv=${PHOTO_BYTE_CACHE_VERSION}`, 'https://efhsband.internal'));
   if (typeof caches !== 'undefined' && caches?.default) {
     try {
       const hit = await caches.default.match(cacheKey);

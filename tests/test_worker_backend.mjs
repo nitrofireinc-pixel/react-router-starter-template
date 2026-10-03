@@ -3558,6 +3558,7 @@ test('worker source gates initDb behind schema_version', () => {
   assert.match(workerSrc, /resetDbInitCache/);
   assert.match(workerSrc, /isMissingSchemaTableError/);
   assert.match(workerSrc, /isWorkerStaticAssetPath\(url\.pathname\)/);
+  assert.match(workerSrc, /PHOTO_BYTE_CACHE_VERSION/);
   const caldevSrc = readFileSync(join(root, 'worker/src/caldev.mjs'), 'utf8');
   assert.match(caldevSrc, /resetCaldevSchemaCache/);
   assert.match(caldevSrc, /caldevSchemaReady/);
