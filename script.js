@@ -59,11 +59,21 @@ function measureInlineNavFits() {
   return true;
 }
 
+function syncStickyHeaderHeight() {
+  const header = document.querySelector('header.site-header');
+  const height = header ? Math.ceil(header.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty(
+    '--efhs-sticky-header-height',
+    `${height || 84}px`,
+  );
+}
+
 function syncNavMode() {
   const html = document.documentElement;
   if (mediaWantsCompactNav()) {
     html.classList.remove('nav-use-hamburger');
     placeHeaderQuickActions();
+    syncStickyHeaderHeight();
     return;
   }
   const donate = document.querySelector('.header-donate');
@@ -73,6 +83,7 @@ function syncNavMode() {
   if (header) void header.offsetWidth;
   if (!measureInlineNavFits()) html.classList.add('nav-use-hamburger');
   placeHeaderQuickActions();
+  syncStickyHeaderHeight();
 }
 
 let navModeRaf = 0;

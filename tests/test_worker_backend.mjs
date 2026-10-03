@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -2325,7 +2325,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261003a'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261003b'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2504,6 +2504,10 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?height:52px/);
   assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.menu-button\{[\s\S]*?display:inline-flex/);
   assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?nav \.header-donate/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.header-quick-actions \.utility-auth\{[\s\S]*?text-transform:uppercase/);
+  assert.match(themeCss, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?\.header-quick-actions \.utility-auth\{[\s\S]*?text-transform:uppercase/);
+  assert.match(styles, /html\.nav-use-hamburger \.header-quick-actions \.utility-auth\{[\s\S]*?text-transform:uppercase/);
+  assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme \.header-quick-actions \.utility-auth\{[\s\S]*?text-transform:uppercase/);
   const scriptSrc = readFileSync(join(root, 'script.js'), 'utf8');
   assert.match(scriptSrc, /COMPACT_NAV_MEDIA/);
   assert.match(scriptSrc, /orientation: landscape\) and \(max-height: 500px/);
@@ -2513,6 +2517,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(scriptSrc, /headerUtilityFits/);
   assert.match(scriptSrc, /MIN_NAV_FONT_PX = 12/);
   assert.match(scriptSrc, /nav-use-hamburger/);
+  assert.match(scriptSrc, /--efhs-sticky-header-height/);
+  assert.match(scriptSrc, /syncStickyHeaderHeight/);
   assert.match(themeCss, /@media \(max-width:360px\)\{[\s\S]*?grid-template-columns:minmax\(3\.75rem,1fr\)/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:8px/);
@@ -2716,7 +2722,8 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
-  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:80vh !important/);
+  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:calc\(100dvh - var\(--efhs-sticky-header-height, 52px\)\) !important/);
+  assert.match(styles, /max-height:calc\(100dvh - var\(--efhs-sticky-header-height, 84px\)\)/);
   assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?overflow:visible/);
   assert.match(styles, /\.fundraising-card:not\(:has\(\.ff-media\)\)/);
   assert.match(styles, /object-fit:contain/);

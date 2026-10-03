@@ -1283,7 +1283,30 @@ body.efhs-theme .footer h3{
     background:transparent;
     border:0;
   }
-  body.efhs-theme .header-quick-actions{display:inline-flex}
+  body.efhs-theme .header-quick-actions{display:inline-flex;gap:0}
+  body.efhs-theme .header-quick-actions .nav-notify-me,
+  body.efhs-theme .header-quick-actions .nav-add-home{
+    width:clamp(32px,8vw,40px);
+    height:clamp(32px,8vw,40px);
+    flex:0 0 auto;
+  }
+  body.efhs-theme .header-quick-actions .utility-auth{
+    color:#eaf2ff;
+    height:clamp(32px,8vw,40px);
+    padding:0 clamp(2px,.8vw,8px);
+    font-family:"Work Sans",system-ui,sans-serif;
+    letter-spacing:.04em;
+    font-size:clamp(.52rem,2vw,.68rem);
+    font-weight:800;
+    text-transform:uppercase;
+  }
+  body.efhs-theme .header-quick-actions .utility-auth:hover,
+  body.efhs-theme .header-quick-actions .utility-auth:focus-visible{
+    color:#fff;
+    background:rgba(255,255,255,.12);
+    outline:2px solid #fff;
+    outline-offset:2px;
+  }
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
     width:max-content;
@@ -1438,6 +1461,30 @@ html.nav-use-hamburger body.efhs-theme .mobile-nav-tray{
 }
 html.nav-use-hamburger body.efhs-theme .header-quick-actions{
   display:inline-flex;
+  gap:0;
+}
+html.nav-use-hamburger body.efhs-theme .header-quick-actions .nav-notify-me,
+html.nav-use-hamburger body.efhs-theme .header-quick-actions .nav-add-home{
+  width:clamp(32px,8vw,40px);
+  height:clamp(32px,8vw,40px);
+  flex:0 0 auto;
+}
+html.nav-use-hamburger body.efhs-theme .header-quick-actions .utility-auth{
+  color:#eaf2ff;
+  height:clamp(32px,8vw,40px);
+  padding:0 clamp(2px,.8vw,8px);
+  font-family:"Work Sans",system-ui,sans-serif;
+  letter-spacing:.04em;
+  font-size:clamp(.52rem,2vw,.68rem);
+  font-weight:800;
+  text-transform:uppercase;
+}
+html.nav-use-hamburger body.efhs-theme .header-quick-actions .utility-auth:hover,
+html.nav-use-hamburger body.efhs-theme .header-quick-actions .utility-auth:focus-visible{
+  color:#fff;
+  background:rgba(255,255,255,.12);
+  outline:2px solid #fff;
+  outline-offset:2px;
 }
 html.nav-use-hamburger body.efhs-theme .header-donate{display:none!important}
 html.nav-use-hamburger body.efhs-theme header.site-header nav,
