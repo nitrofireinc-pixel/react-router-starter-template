@@ -1871,6 +1871,27 @@ test('letterman deadline banner is not rendered on public pages', () => {
   assert.equal(renderLettermanDeadlineBanner(), '');
 });
 
+test('calendar deadline banners mount under the public sponsor marquee', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  const caldevSrc = readFileSync(join(root, 'caldev.js'), 'utf8');
+  assert.match(workerSrc, /deadlineHtml/);
+  assert.match(workerSrc, /renderSiteDeadlineBannersHtml/);
+  assert.match(workerSrc, /\/api\/caldev\/deadline-banners/);
+  assert.match(workerSrc, /listDeadlineCaldevEvents/);
+  assert.match(siteContent, /function loadSiteDeadlineBanners/);
+  assert.match(siteContent, /\/api\/caldev\/deadline-banners/);
+  assert.match(siteContent, /ensureSiteDeadlineBannersMount/);
+  assert.match(styles, /\.site-deadline-banners\{/);
+  assert.match(caldevSrc, /function renderDeadlineBanners/);
+  const marqueeAt = workerSrc.indexOf('${marqueeHtml}');
+  const deadlineAt = workerSrc.indexOf('${deadlineHtml}');
+  const mainAt = workerSrc.indexOf('<main id="main">');
+  assert.ok(marqueeAt > 0 && deadlineAt > marqueeAt && mainAt > deadlineAt);
+});
+
 test('notify me nav control is rendered in public navigation', () => {
   assert.match(renderNotifyMeNavControl(), /nav-notify-bell/);
   assert.match(renderNotifyMeNavControl(), /data-notify-me/);

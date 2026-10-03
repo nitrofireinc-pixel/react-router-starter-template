@@ -4841,7 +4841,18 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   display:grid;
   gap:8px;
 }
-.cms-caldev-deadline-banners[hidden]{display:none!important}
+.site-deadline-banners{
+  display:grid;
+  gap:0;
+  width:100%;
+  background:var(--red);
+}
+.site-deadline-banners[hidden]{display:none!important}
+.site-deadline-banners .caldev-deadline-banner{
+  border-radius:0;
+  margin:0;
+}
+.site-chrome .site-deadline-banners{position:relative;z-index:1}
 .caldev-deadline-banner a,
 .caldev-deadline-banner button{
   color:#fff;
