@@ -79,11 +79,13 @@ body.efhs-theme header.site-header{
   backdrop-filter:none;
   color:#fff;
   display:grid;
-  grid-template-columns:auto minmax(0,1fr);
-  grid-template-areas:"brand nav";
+  grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"brand" "nav";
   align-items:center;
-  column-gap:18px;
-  padding:0 18px;
+  justify-items:center;
+  column-gap:0;
+  row-gap:0;
+  padding:0 18px 6px;
   overflow:visible;
 }
 body.efhs-theme .site-chrome{
@@ -99,16 +101,17 @@ body.maintenance-preview.efhs-theme .site-chrome header.site-header{
 }
 body.efhs-theme .header-inner{
   grid-area:brand;
-  justify-content:flex-start;
-  padding:10px 0;
-  column-gap:12px;
+  width:100%;
+  justify-content:center;
+  padding:12px 0 2px;
+  column-gap:0;
 }
 body.efhs-theme .brand{
-  margin:0;
-  justify-content:flex-start;
-  gap:10px;
+  margin:0 auto;
+  justify-content:center;
+  gap:4px;
   color:#fff;
-  text-align:left;
+  text-align:center;
 }
 body.efhs-theme .brand .brand-logo,
 body.efhs-theme .brand .brand-mark{
@@ -120,21 +123,21 @@ body.efhs-theme .brand .brand-mark{
 }
 body.efhs-theme header.site-header .brand span,
 body.efhs-theme header.site-header .brand [data-site-field="title"]{
-  font-size:clamp(.92rem,1.5vw,1.12rem)!important;
-  line-height:1.15;
-  text-align:left;
+  font-size:clamp(1rem,2.1vw,1.45rem)!important;
+  line-height:1.1;
+  text-align:center;
   color:#fff;
   letter-spacing:.08em;
   text-transform:uppercase;
-  max-width:14rem;
+  max-width:none;
 }
 body.efhs-theme header.site-header nav{
   grid-area:nav;
-  width:auto;
+  width:100%;
   max-width:none;
-  justify-content:flex-end;
+  justify-content:center;
   border-top:0;
-  padding:8px 0;
+  padding:2px 0 10px;
   gap:2px;
   overflow:visible;
 }
@@ -143,6 +146,7 @@ body.efhs-theme header.site-header nav .nav-notify-me,
 body.efhs-theme header.site-header nav .nav-support-toggle{
   color:#eaf2ff;
   font-size:.78rem;
+  font-weight:800;
   letter-spacing:.08em;
   text-transform:uppercase;
   padding:8px 10px;
@@ -168,7 +172,7 @@ body.efhs-theme header.site-header nav .nav-notify-me.is-enabled{
 }
 body.efhs-theme .nav-support-toggle{
   font-family:inherit;
-  font-weight:inherit;
+  font-weight:800;
 }
 body.efhs-theme .nav-support-toggle:focus-visible{
   outline:2px solid var(--efhs-blue-bright);
@@ -252,6 +256,37 @@ body.efhs-theme .hero .wrap,
   padding:72px 20px 108px;
   gap:32px;
   align-items:center;
+}
+body.efhs-theme .hero .wrap{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  grid-template-columns:none;
+}
+body.efhs-theme .hero .wrap > div{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  width:100%;
+  max-width:46rem;
+}
+body.efhs-theme .hero .eyebrow{
+  justify-content:center;
+}
+body.efhs-theme .hero h1{
+  text-align:center;
+}
+body.efhs-theme .hero p{
+  margin-left:auto;
+  margin-right:auto;
+}
+body.efhs-theme .hero .button-row{
+  justify-content:center;
+}
+/* Public homepage only: keep the CMS card in admin preview, hide it from visitors. */
+body.efhs-theme .hero-card{
+  display:none!important;
 }
 body.efhs-theme .eyebrow,
 #page-preview .eyebrow{
@@ -740,6 +775,7 @@ body.efhs-theme .footer h3{
   }
   body.efhs-theme .brand{
     justify-content:center;
+    gap:4px;
   }
   body.efhs-theme header.site-header .brand span,
   body.efhs-theme header.site-header .brand [data-site-field="title"]{
@@ -813,6 +849,10 @@ body.efhs-theme .footer h3{
   #page-preview .hero .wrap{
     grid-template-columns:1fr;
     padding:48px 16px 88px;
+  }
+  body.efhs-theme .hero .wrap{
+    align-items:center;
+    text-align:center;
   }
   body.efhs-theme .hero h1,
   #page-preview .hero h1{
