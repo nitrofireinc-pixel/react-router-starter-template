@@ -205,7 +205,7 @@ body.efhs-theme header.site-header nav a,
 body.efhs-theme header.site-header nav .nav-notify-me,
 body.efhs-theme header.site-header nav .nav-support-toggle{
   color:#eaf2ff;
-  font-size:.68rem;
+  font-size:12px;
   font-weight:800;
   letter-spacing:.06em;
   text-transform:uppercase;
@@ -884,11 +884,17 @@ body.efhs-theme .footer h3{
   body.efhs-theme header.site-header nav a,
   body.efhs-theme header.site-header nav .nav-notify-me,
   body.efhs-theme header.site-header nav .nav-support-toggle{
-    font-size:.62rem;
+    font-size:12px;
     letter-spacing:.04em;
     padding:6px 5px;
   }
-  body.efhs-theme .header-donate{display:none!important}
+  body.efhs-theme .header-donate{
+    display:inline-flex;
+    margin:0 0 4px;
+    padding:8px 12px;
+    font-size:12px;
+    min-height:36px;
+  }
 }
 
 /* Extra nav items (dev has 9 vs live 7) clip Donate on the single-row header
@@ -926,7 +932,7 @@ body.efhs-theme .footer h3{
   body.efhs-theme header.site-header nav a,
   body.efhs-theme header.site-header nav .nav-notify-me,
   body.efhs-theme header.site-header nav .nav-support-toggle{
-    font-size:.62rem;
+    font-size:12px;
     letter-spacing:.04em;
     padding:6px 5px;
   }
@@ -935,7 +941,7 @@ body.efhs-theme .footer h3{
     flex:0 0 auto;
     margin:0 0 4px;
     padding:8px 12px;
-    font-size:.66rem;
+    font-size:12px;
     min-height:36px;
   }
 }
@@ -1260,9 +1266,16 @@ body.efhs-theme .footer h3{
   body.efhs-theme header.site-header nav .header-donate,
   body.efhs-theme header.site-header #site-nav .header-donate{
     display:inline-flex!important;
-    margin:8px 4px 4px;
+    margin:4px 4px 8px;
     width:calc(100% - 8px);
     justify-content:center;
+    order:-1;
+  }
+  body.home-page.efhs-theme header.site-header nav,
+  body.efhs-theme.home-page header.site-header nav,
+  body.efhs-theme.home-page header.site-header #site-nav{
+    max-height:calc(100dvh - 52px - 6.75rem);
+    padding-bottom:8px;
   }
 }
 
@@ -1324,4 +1337,59 @@ body.efhs-theme .footer h3{
   #page-preview .directory{
     grid-template-columns:1fr;
   }
+}
+
+html.nav-use-hamburger body.efhs-theme header.site-header{
+  display:grid;
+  grid-template-columns:minmax(4.5rem,1fr) auto minmax(4.5rem,1fr);
+  grid-template-areas:"menu brand actions";
+  align-items:center;
+  height:auto;
+  min-height:64px;
+  max-height:none;
+  padding:0 12px;
+}
+html.nav-use-hamburger body.efhs-theme .menu-button{
+  display:inline-flex;
+  grid-area:menu;
+  justify-self:start;
+  z-index:95;
+}
+html.nav-use-hamburger body.efhs-theme .header-inner{
+  grid-area:brand;
+  justify-self:center;
+  width:auto;
+  min-height:0;
+}
+html.nav-use-hamburger body.efhs-theme .mobile-nav-tray{
+  display:flex;
+  grid-area:actions;
+  justify-self:end;
+}
+html.nav-use-hamburger body.efhs-theme .header-donate{display:none!important}
+html.nav-use-hamburger body.efhs-theme header.site-header nav,
+html.nav-use-hamburger body.efhs-theme header.site-header #site-nav{
+  width:max-content;
+  max-width:min(92vw,20rem);
+  justify-content:flex-start;
+  overflow:auto;
+  background:#fff;
+  color:var(--efhs-navy);
+}
+html.nav-use-hamburger body.efhs-theme header.site-header nav a,
+html.nav-use-hamburger body.efhs-theme header.site-header nav .nav-support-toggle,
+html.nav-use-hamburger body.efhs-theme header.site-header #site-nav a,
+html.nav-use-hamburger body.efhs-theme header.site-header #site-nav .nav-support-toggle{
+  color:var(--efhs-navy);
+  background:transparent;
+  font-size:.95rem;
+  padding:12px 4px;
+}
+html.nav-use-hamburger body.efhs-theme header.site-header nav .header-donate,
+html.nav-use-hamburger body.efhs-theme header.site-header #site-nav .header-donate{
+  display:inline-flex!important;
+  margin:4px 4px 8px;
+  width:calc(100% - 8px);
+  justify-content:center;
+  order:-1;
 }

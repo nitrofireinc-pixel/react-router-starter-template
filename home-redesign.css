@@ -857,6 +857,8 @@ body.home-page .header-donate{display:inline-flex}
 @media (max-width:767px){
   body.home-page .header-donate{display:none}
 }
+html.nav-use-hamburger body.home-page .header-donate{display:none}
+html.nav-use-hamburger body.home-page header.site-header nav .header-donate{display:inline-flex!important}
 .coming-soon-logos{display:flex;align-items:center;gap:16px;margin:0 0 18px}
 .coming-soon-logos img:first-child{height:58px;width:auto}
 .coming-soon-logos img:last-child{height:68px;width:68px}
