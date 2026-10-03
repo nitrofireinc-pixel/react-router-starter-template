@@ -106,6 +106,18 @@ import {
   renderPublicReadBootstrap,
   resetPublicReadCache,
 } from './d1-read-policy.mjs';
+import {
+  sanitizeCmsPageHtml as sanitizeCmsPageHtmlAllowlist,
+  sanitizeHomeAllowlistHtml,
+  sanitizePageSectionHtml as sanitizePageSectionHtmlAllowlist,
+} from './html-sanitizer.mjs';
+
+export {
+  sanitizeAllowlistHtml,
+  isSafeFormAction,
+  isSafeHref,
+  isSafeSrc,
+} from './html-sanitizer.mjs';
 
 export {
   CALDEV_TRACKS,
@@ -518,6 +530,31 @@ export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
     return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
   }
   return { ok: true };
+}
+
+function samePermissionList(left, right) {
+  const a = parsePermissions(left).map((item) => String(item).trim().toLowerCase()).sort();
+  const b = parsePermissions(right).map((item) => String(item).trim().toLowerCase()).sort();
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+/** Users-permission holders cannot change their own role or permissions. */
+export function assertSafeSelfPrivilegeEdit(actor, targetId, payload = {}, existing = {}) {
+  if (isSuperAdmin(actor)) return { ok: true, payload };
+  if (Number(actor?.id) !== Number(targetId)) return { ok: true, payload };
+  const requestedRole = String(payload.role || existing.role || 'editor').trim().toLowerCase();
+  const existingRole = String(existing.role || 'editor').trim().toLowerCase();
+  if (requestedRole !== existingRole || !samePermissionList(payload.permissions, existing.permissions)) {
+    return { ok: false, status: 403, detail: 'You cannot change your own role or permissions' };
+  }
+  return {
+    ok: true,
+    payload: {
+      ...payload,
+      role: existing.role,
+      permissions: parsePermissions(existing.permissions),
+    },
+  };
 }
 
 /** Security log is Super Admin only — never grantable via permissions. */
@@ -6812,24 +6849,12 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
 }
 
 export function sanitizePageSectionHtml(dirty = '') {
-  return String(dirty || '')
-    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '')
-    .trim();
+  return sanitizePageSectionHtmlAllowlist(dirty);
 }
 
-/** Full-page save sanitizer: drop XSS vectors, keep forms/buttons/normal markup. */
+/** Full-page save sanitizer: allowlist tags/attrs only, after entity decode. */
 export function sanitizeCmsPageHtml(dirty = '') {
-  return String(dirty || '')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<\/?script\b[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:href|src|action|xlink:href)\s*=\s*(['"])\s*javascript:[^'"]*\1/gi, '')
-    .replace(/\s(?:href|src|action|xlink:href)\s*=\s*javascript:[^\s>]+/gi, '')
-    .replace(/javascript:/gi, '')
-    .trim();
+  return sanitizeCmsPageHtmlAllowlist(dirty);
 }
 
 export function isPublicCmsPageActive(page) {
@@ -6881,7 +6906,16 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+export function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+  if (!isPublicCmsPageActive(page)) {
+    return injectComingSoonLogos(comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }), {
+      logo: site?.logo_url || '/assets/efhs-logo.png',
+      mark: PUBLIC_BRAND_MARK,
+    });
+  }
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -8289,7 +8323,7 @@ export function sanitizeHomeBodyHtml(html = '') {
       }
       return next;
     });
-  return source.trim();
+  return sanitizeHomeAllowlistHtml(source);
 }
 
 export function serializePagePayload(payload, existing = null) {
@@ -9893,15 +9927,24 @@ async function routeApi(request, env, url, ctx = null) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
-    const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
+    const selfEdit = assertSafeSelfPrivilegeEdit(auth.user, id, payload, existing);
+    if (!selfEdit.ok) return jsonResponse({ detail: selfEdit.detail }, selfEdit.status);
+    const nextPayload = selfEdit.payload;
+    const privilege = assertSafeUserPrivilegeGrant(auth.user, nextPayload);
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
-    const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
-    const role = wantsAdmin ? 'admin' : 'editor';
-    const permissions = JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions));
+    const wantsAdmin = nextPayload.role === 'admin' && isSuperAdmin(auth.user);
+    const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+      ? (existing.role === 'admin' ? 'admin' : 'editor')
+      : (wantsAdmin ? 'admin' : 'editor');
+    const permissions = JSON.stringify(
+      Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+        ? parsePermissions(existing.permissions)
+        : sanitizeAssignablePermissions(auth.user, nextPayload.permissions),
+    );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password);
+    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
+    if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
     return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
@@ -11629,7 +11672,8 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [] } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
-  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug);
+  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
+    || !isPublicCmsPageActive(page);
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
     calendarHighlights,
     home,
@@ -12508,7 +12552,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>President, Vice President, and Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
