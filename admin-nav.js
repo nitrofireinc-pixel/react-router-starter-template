@@ -48,10 +48,53 @@
 
   let lastFocus = null;
   let trapHandler = null;
+  let focusTimer = null;
+  let focusTransitionHandler = null;
+  let focusSidebar = null;
 
   function unbindTrap() {
     if (trapHandler) document.removeEventListener('keydown', trapHandler, true);
     trapHandler = null;
+  }
+
+  function clearScheduledFocus() {
+    if (focusTimer) {
+      window.clearTimeout(focusTimer);
+      focusTimer = null;
+    }
+    if (focusSidebar && focusTransitionHandler) {
+      focusSidebar.removeEventListener('transitionend', focusTransitionHandler);
+    }
+    focusTransitionHandler = null;
+    focusSidebar = null;
+  }
+
+  function focusDrawer(sidebar) {
+    const first = sidebar.querySelector('[data-admin-nav-close]') || focusable(sidebar)[0];
+    first?.focus?.();
+  }
+
+  function scheduleDrawerFocus(sidebar) {
+    clearScheduledFocus();
+    const run = () => {
+      clearScheduledFocus();
+      focusDrawer(sidebar);
+    };
+    const reduceMotion = Boolean(
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+    if (reduceMotion) {
+      run();
+      return;
+    }
+    focusSidebar = sidebar;
+    focusTransitionHandler = (event) => {
+      if (event.target !== sidebar) return;
+      if (event.propertyName && event.propertyName !== 'transform') return;
+      run();
+    };
+    sidebar.addEventListener('transitionend', focusTransitionHandler);
+    focusTimer = window.setTimeout(run, TRANSITION_MS + 80);
   }
 
   function bindTrap(sidebar) {
@@ -109,11 +152,11 @@
 
     if (open && !wasOpen) {
       lastFocus = document.activeElement;
-      const first = sidebar.querySelector('[data-admin-nav-close]') || focusable(sidebar)[0];
-      window.requestAnimationFrame(() => first?.focus?.());
+      scheduleDrawerFocus(sidebar);
       if (overlay) bindTrap(sidebar);
     }
     if (!open && wasOpen) {
+      clearScheduledFocus();
       unbindTrap();
       const restore = document.querySelector('.admin-nav-toggle') || lastFocus;
       restore?.focus?.();

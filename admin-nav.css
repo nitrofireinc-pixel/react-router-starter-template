@@ -141,7 +141,7 @@ body.admin-nav-overlay .admin-sidebar-backdrop:not([hidden]){
   min-height:calc(100dvh - 62px);
   overflow:auto;
   padding-top:48px;
-  transition:transform var(--admin-nav-duration) ease, visibility var(--admin-nav-duration) ease;
+  transition:transform var(--admin-nav-duration) ease;
 }
 .image-admin-shell > .admin-workspace{
   grid-area:workspace;
@@ -155,7 +155,16 @@ body.admin-nav-closed .image-admin-shell > .admin-sidebar{
 }
 
 @media (max-width:1023px){
-  .image-admin-shell{
+  html,
+  body,
+  html.admin-nav-open,
+  body.admin-nav-open,
+  html.admin-nav-closed,
+  body.admin-nav-closed{
+    --admin-nav-col:0px;
+  }
+  .image-admin-shell,
+  body.admin-body .image-admin-shell{
     grid-template-columns:minmax(0,1fr);
     grid-template-areas:
       "chrome"
@@ -226,7 +235,7 @@ body.visual-editor-body > .admin-sidebar{
   color:#dce9f8;
   box-shadow:12px 0 34px rgba(2,20,40,.16);
   z-index:50;
-  transition:transform var(--admin-nav-duration) ease, visibility var(--admin-nav-duration) ease;
+  transition:transform var(--admin-nav-duration) ease;
 }
 body.visual-editor-body.admin-nav-closed > .admin-sidebar{
   transform:translateX(-100%);

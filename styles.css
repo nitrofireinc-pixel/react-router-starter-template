@@ -1410,7 +1410,8 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
 .image-admin-shell .form-grid .full{grid-column:1/-1;}
 .image-admin-shell .editor-layout > *,
 .image-admin-shell .form-grid > *{min-width:0;max-width:100%}
-@media(max-width:1280px){.image-admin-shell{grid-template-columns:var(--admin-nav-col,250px) minmax(0,1fr)}.admin-workspace{padding:24px}.sponsor-admin-row{grid-template-columns:22px 48px minmax(0,1fr)}.sponsor-admin-row .row-actions{grid-column:1/-1;justify-content:flex-end}}
+@media(min-width:1024px) and (max-width:1280px){.image-admin-shell{grid-template-columns:var(--admin-nav-col,250px) minmax(0,1fr)}}
+@media(max-width:1280px){.admin-workspace{padding:24px}.sponsor-admin-row{grid-template-columns:22px 48px minmax(0,1fr)}.sponsor-admin-row .row-actions{grid-column:1/-1;justify-content:flex-end}}
 @media(max-width:980px){
   .image-admin-shell .editor-layout,
   .image-admin-shell .form-grid,

@@ -52,6 +52,10 @@ test('admin nav script stores desktop preference and traps overlay focus', () =>
   assert.match(navJs, /aria-expanded/);
   assert.match(navJs, /aria-controls/);
   assert.match(navJs, /focusable/);
+  assert.match(navJs, /scheduleDrawerFocus/);
+  assert.match(navJs, /transitionend/);
+  assert.match(navJs, /TRANSITION_MS \+ 80/);
+  assert.doesNotMatch(navJs, /requestAnimationFrame\(\(\) => first\?\.focus/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /efhsAdminNav\?\.isOverlay/);
   assert.match(adminJs, /requestedTab/);
@@ -69,9 +73,14 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.match(css, /admin-nav-scroll-lock\{overflow:hidden\}/);
   assert.match(css, /--admin-nav-col:0px/);
   assert.match(css, /admin-sidebar-backdrop/);
+  assert.doesNotMatch(css, /transition:[^;]*visibility var\(--admin-nav-duration\)/);
+  const overlayBlock = css.slice(css.indexOf('@media (max-width:1023px)'));
+  assert.match(overlayBlock, /html\.admin-nav-open[\s\S]*?--admin-nav-col:0px/);
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   assert.match(syncSrc, /'admin-nav\.js'/);
   assert.match(syncSrc, /'admin-nav\.css'/);
   const styles = readFileSync(join(root, 'styles.css'), 'utf8');
   assert.doesNotMatch(styles, /@media\(max-width:980px\)\{[\s\S]*?\.admin-sidebar\{display:none!important\}/);
+  assert.match(styles, /@media\(min-width:1024px\) and \(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
+  assert.doesNotMatch(styles, /@media\(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
 });
