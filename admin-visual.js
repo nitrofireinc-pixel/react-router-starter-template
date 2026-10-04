@@ -8,8 +8,10 @@
   const phoneGate = window.matchMedia(`(max-width: ${PHONE_EDITOR_MAX}px)`).matches;
   if (phoneGate) {
     document.body.classList.add('is-visual-phone-gate');
+    window.efhsAdminNav?.init?.();
     return;
   }
+  window.efhsAdminNav?.init?.();
   const statusEl = document.querySelector('[data-visual-status]');
   const addDrawer = document.querySelector('[data-visual-add-drawer]');
   const addGrid = document.querySelector('[data-visual-add-grid]');
@@ -788,6 +790,15 @@
     requestAnimationFrame(() => enableCanvasScroll());
     clampSelectionToolbarSoon();
   }
+  function relayoutVisualCanvas() {
+    try { editor.refresh?.(); } catch { /* editor not ready */ }
+    window.dispatchEvent(new Event('resize'));
+    requestAnimationFrame(() => {
+      enableCanvasScroll();
+      clampSelectionToolbarSoon();
+    });
+  }
+  document.addEventListener('efhs-admin-nav-change', relayoutVisualCanvas);
   deviceSelect?.addEventListener('change', () => setActiveDevice(deviceSelect.value));
   setActiveDevice('Desktop');
 

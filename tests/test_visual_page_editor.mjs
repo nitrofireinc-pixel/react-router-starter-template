@@ -243,6 +243,10 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /data-visual-css/);
   assert.match(editorCss, /visual-edit-banner/);
   assert.match(editorCss, /a\.visual-banner-btn/);
+  assert.match(page, /id="admin-sidebar"/);
+  assert.match(page, /class="admin-nav-toggle"/);
+  assert.match(page, /class="visual-editor-main"/);
+  assert.match(editorJs, /efhs-admin-nav-change/);
   assert.match(editorCss, /font-size:13px/);
   assert.match(editorCss, /flex-wrap:wrap/);
   assert.match(editorCss, /@media \(max-width:1024px\)/);

@@ -2740,16 +2740,12 @@ function setSelectValue(select, value) {
 }
 
 function setAdminNavOpen(open) {
-  const toggle = document.querySelector('.admin-nav-toggle');
-  const menu = document.querySelector('#admin-mobile-menu');
-  if (!toggle || !menu) return;
-  toggle.setAttribute('aria-expanded', String(open));
-  menu.hidden = !open;
-  document.querySelector('.admin-mobile-bar')?.classList.toggle('open', open);
+  if (open) window.efhsAdminNav?.open?.();
+  else window.efhsAdminNav?.close?.();
 }
 
 function closeAdminNav() {
-  setAdminNavOpen(false);
+  if (window.efhsAdminNav?.isOverlay?.()) window.efhsAdminNav.close();
 }
 
 function renderMobileAdminMenu() {
@@ -3262,24 +3258,15 @@ function showAllowedPanels() {
   renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
-  activateTab(scheduleOnly ? 'caldev' : 'dashboard');
+  const requestedTab = new URLSearchParams(window.location.search).get('tab');
+  const startTab = scheduleOnly
+    ? 'caldev'
+    : (requestedTab && canOpenAdminTab(requestedTab) ? requestedTab : 'dashboard');
+  activateTab(startTab);
 }
 
 function bindAdminNavToggle() {
-  const toggle = document.querySelector('.admin-nav-toggle');
-  if (!toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', event => {
-    event.stopPropagation();
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    if (open) renderMobileAdminMenu();
-    setAdminNavOpen(open);
-  });
-  document.addEventListener('click', event => {
-    const bar = document.querySelector('.admin-mobile-bar');
-    if (!bar || bar.hidden || !bar.classList.contains('open')) return;
-    if (!bar.contains(event.target)) closeAdminNav();
-  });
+  window.efhsAdminNav?.init?.();
 }
 
 async function loadMe() {

@@ -165,7 +165,8 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.match(workerSrc, /Add and edit events for the public Calendar/);
   assert.doesNotMatch(workerSrc, /President, Vice President, and Super Admin editing for the public Calendar/);
   assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
-  assert.match(workerSrc, /data-tab="events" hidden/);
+  const chromeSrc = readFileSync(join(root, 'worker/src/admin-chrome.mjs'), 'utf8');
+  assert.match(chromeSrc, /data-tab="events" hidden/);
   assert.match(workerSrc, /canNotifyCalendarSubscribers\(auth\.user\)/);
   assert.doesNotMatch(adminSrc, /\['Calendar Events'/);
 });
