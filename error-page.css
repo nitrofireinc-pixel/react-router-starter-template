@@ -1,0 +1,74 @@
+/* EFHS reusable error-page template (404/403/401/500/503/429).
+   One hero block; works inside the normal public chrome (header/footer)
+   and inside the D1-free "lite" shell used for 500/503/429. */
+.err-hero{
+  --err-navy:#002142; --err-navy-2:#014990; --err-blue:#0b63d6; --err-gold:#FDD703; --err-ink:#24364d;
+  position:relative; overflow:hidden; isolation:isolate;
+  min-height:560px; display:flex; align-items:center;
+  background:
+    radial-gradient(120% 90% at 78% 40%, #f3f7fd 0%, rgba(243,247,253,0) 60%),
+    linear-gradient(180deg,#f7faff 0%,#e7eff9 100%);
+  color:var(--err-ink); padding:0; margin:0;
+}
+.err-title,.err-copy{text-wrap:balance;}
+/* beat the site's `body.efhs-theme main section{padding:64px 20px}` */
+body.efhs-theme main section.err-hero, main section.err-hero{padding:0;}
+/* instrument photo (replaceable asset), faded into the stage on its left/bottom edges */
+.err-photo{
+  position:absolute; z-index:-2; top:0; right:0; bottom:0; width:60%;
+  background:var(--err-photo, url("/assets/error/instrument-hero.webp")) right center/cover no-repeat;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 34%), linear-gradient(0deg,transparent 0%,#000 22%);
+  -webkit-mask-composite:source-in; mask-image:linear-gradient(90deg,transparent 0%,#000 34%), linear-gradient(0deg,transparent 0%,#000 22%); mask-composite:intersect;
+}
+/* stage lights: pure CSS, no image weight */
+.err-stage{position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(38% 55% at 70% 0%, rgba(255,255,255,.75), rgba(255,255,255,0) 70%),
+    radial-gradient(26% 40% at 84% 58%, rgba(253,215,3,.20), rgba(253,215,3,0) 70%),
+    radial-gradient(60% 70% at 12% 100%, rgba(1,73,144,.10), rgba(1,73,144,0) 70%);
+}
+.err-stage::before,.err-stage::after{content:""; position:absolute; top:-12%; height:135%; width:190px;
+  background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(255,255,255,0) 85%);
+  filter:blur(16px); opacity:.55; transform-origin:top center; mix-blend-mode:screen;}
+.err-stage::before{left:52%; transform:rotate(-17deg);}
+.err-stage::after{left:76%; width:150px; transform:rotate(14deg); opacity:.45;}
+.err-inner{position:relative; width:min(1180px,calc(100% - 64px)); margin:0 auto; padding:64px 0 72px;}
+.err-content{max-width:560px;}
+.err-mark{display:block; width:92px; height:92px; margin:0 0 6px; filter:drop-shadow(0 8px 18px rgba(0,33,66,.22));}
+.err-code{margin:0; font:700 clamp(7rem,15vw,13.5rem)/.88 "Oswald",Impact,"Arial Narrow",sans-serif; letter-spacing:-.01em;
+  background:linear-gradient(180deg,var(--err-navy-2) 0%,var(--err-navy) 78%); -webkit-background-clip:text; background-clip:text; color:transparent;
+  text-shadow:0 18px 40px rgba(0,33,66,.10);}
+.err-rule{display:block; width:110px; height:6px; margin:18px 0 18px; border-radius:3px; background:var(--err-gold); box-shadow:0 0 0 1px rgba(160,128,0,.18);}
+.err-title{margin:0; font:600 clamp(2.1rem,3.6vw,3.3rem)/1.02 "Oswald",Impact,"Arial Narrow",sans-serif; text-transform:uppercase; letter-spacing:.02em; color:var(--err-navy);}
+.err-copy{margin:14px 0 0; font:500 1.22rem/1.45 "Work Sans",system-ui,sans-serif; color:var(--err-ink);}
+.err-actions{display:flex; flex-wrap:wrap; align-items:center; gap:14px 30px; margin-top:30px;}
+.err-btn{display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:50px; padding:13px 26px; border-radius:4px;
+  background:var(--err-blue); border:2px solid var(--err-blue); color:#fff; text-decoration:none;
+  font:800 .86rem/1 "Work Sans",system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; box-shadow:0 12px 26px rgba(11,99,214,.25);}
+.err-btn:hover{background:#094fb0; border-color:#094fb0;}
+.err-btn svg,.err-link svg{width:18px; height:18px; flex:0 0 auto;}
+.err-link{display:inline-flex; align-items:center; gap:8px; color:var(--err-navy-2); text-decoration:none;
+  font:800 .86rem/1 "Work Sans",system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase;}
+.err-link:hover{color:var(--err-blue); text-decoration:underline; text-underline-offset:4px;}
+.err-btn:focus-visible,.err-link:focus-visible{outline:3px solid var(--err-gold); outline-offset:3px;}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.err-detail{margin:8px 0 0;font:500 1rem/1.4 "Work Sans",system-ui,sans-serif;color:#5b6472}
+
+@media (max-width:760px){
+  .err-hero{min-height:0; display:block; text-align:center;}
+  .err-photo{position:relative; display:block; width:calc(100% + 40px); height:250px; margin:0; background-image:var(--err-photo-sm, url("/assets/error/instrument-hero-480.webp")); background-position:72% 46%;
+    -webkit-mask-image:linear-gradient(0deg,transparent 0%,#000 45%), linear-gradient(90deg,transparent 0%,#000 30%);
+    mask-image:linear-gradient(0deg,transparent 0%,#000 45%), linear-gradient(90deg,transparent 0%,#000 30%);}
+  .err-stage::before{left:38%; width:120px;} .err-stage::after{left:74%; width:100px;}
+  .err-inner{width:calc(100% - 40px); padding:0 0 48px; margin-top:-108px;}
+  .err-content{max-width:none;}
+  .err-mark{width:76px; height:76px; margin:0 auto 4px;}
+  .err-code{font-size:7.6rem;}
+  .err-rule{margin:14px auto;}
+  .err-title{font-size:2.15rem;}
+  .err-copy{font-size:1.06rem; margin-top:10px;}
+  .err-actions{flex-direction:column; gap:18px; margin-top:24px;}
+  .err-btn{width:100%; max-width:320px;}
+}
+@media (prefers-reduced-motion:no-preference){ .err-stage::before{animation:errSweep 9s ease-in-out infinite alternate;} }
+@keyframes errSweep{ from{transform:rotate(-17deg)} to{transform:rotate(-9deg)} }

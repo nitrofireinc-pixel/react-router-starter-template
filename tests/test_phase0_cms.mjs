@@ -172,7 +172,7 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
 });
 
 test('Phase 0.7 public calendar feed is cached and busted on writes', () => {
-  assert.match(workerSrc, /cachedPublicRead\('caldev-events', \(\) => listCaldevEvents\(env\)\)/);
+  assert.match(workerSrc, /cachedPublicRead\('caldev-events', \(\) => listCaldevEvents\(env\), \{ ctx \}\)/);
   assert.match(workerSrc, /invalidatePublicReadCache\(\)/);
   const publicGet = workerSrc.match(/if \(url\.pathname === '\/api\/caldev\/events' && request\.method === 'GET'\) \{[\s\S]*?\n  \}/);
   assert.ok(publicGet, 'public caldev GET block not found');

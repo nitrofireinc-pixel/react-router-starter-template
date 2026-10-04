@@ -161,6 +161,45 @@ test('concurrent waiters on a stuck pending time out and fall back to a direct r
   assert.equal(peekPublicRead('shared-stuck').hit, true);
 });
 
+test('edge cache writes use ctx.waitUntil and do not block the request path', async () => {
+  resetPublicReadCache();
+  const waited = [];
+  const ctx = {
+    waitUntil(promise) {
+      waited.push(promise);
+    },
+  };
+  let putStarted;
+  const putBegan = new Promise((resolve) => {
+    putStarted = resolve;
+  });
+  const originalCaches = globalThis.caches;
+  globalThis.caches = {
+    default: {
+      async match() {
+        return undefined;
+      },
+      put() {
+        putStarted();
+        return new Promise(() => {});
+      },
+    },
+  };
+  try {
+    const value = await cachedPublicRead('wait-until-site', async () => ({ ok: true }), { ctx });
+    assert.deepEqual(value, { ok: true });
+    assert.equal(waited.length, 1);
+    assert.equal(typeof waited[0]?.then, 'function');
+    await putBegan;
+    resetPublicReadCache();
+    const noCtx = await cachedPublicRead('void-fallback-site', async () => ({ ok: true }));
+    assert.deepEqual(noCtx, { ok: true });
+  } finally {
+    globalThis.caches = originalCaches;
+    resetPublicReadCache();
+  }
+});
+
 test('rejected public reads are evicted so the next caller can load again', async () => {
   resetPublicReadCache();
   let loads = 0;
@@ -201,7 +240,10 @@ test('worker source follows the public D1 read policy', () => {
   const clientSrc = readFileSync(join(root, 'site-content.js'), 'utf8');
   assert.equal(workerSrc.includes("export const DB_SCHEMA_VERSION = '2026-10-04.2'"), true);
   assert.match(workerSrc, /SELECT key, value FROM site_content WHERE key IN/);
+  assert.match(workerSrc, /error_pages/);
   assert.match(workerSrc, /loadPublicCmsReads\(env/);
+  assert.match(workerSrc, /serveStaticOrCms\(request, env, url, ctx\)/);
+  assert.match(workerSrc, /cachedPublicRead\('site', \(\) => getSite\(env\), \{ ctx \}\)/);
   assert.match(workerSrc, /id="efhs-public-read"|renderPublicReadBootstrap/);
   assert.match(workerSrc, /openD1Session\(request, env\)/);
   assert.match(workerSrc, /invalidatePublicReadCache\(\)/);
@@ -214,7 +256,9 @@ test('worker source follows the public D1 read policy', () => {
   assert.equal(PUBLIC_READ_PENDING_TIMEOUT_MS >= 1000, true);
   assert.match(policySrc, /public-read-timeout/);
   assert.match(policySrc, /evictIfPending/);
-  assert.match(policySrc, /void writeEdgeCache/);
+  assert.match(policySrc, /scheduleEdgeCacheWrite/);
+  assert.match(policySrc, /ctx\.waitUntil\(write\)/);
+  assert.match(policySrc, /else void write/);
   for (const sql of PUBLIC_READ_INDEX_SQL) {
     assert.equal(policySrc.includes(sql), true, sql);
   }

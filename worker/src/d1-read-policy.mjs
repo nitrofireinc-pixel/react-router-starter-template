@@ -128,7 +128,14 @@ export function peekPublicRead(key) {
   return { hit: true, value: existing.value };
 }
 
-export async function rememberPublicRead(key, value) {
+function scheduleEdgeCacheWrite(key, value, ctx) {
+  const write = writeEdgeCache(key, value);
+  // waitUntil keeps the isolate alive after the response. A bare `void` can be cancelled.
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(write);
+  else void write;
+}
+
+export async function rememberPublicRead(key, value, ctx) {
   const generation = publicReadGeneration;
   publicReadMemory.set(key, {
     value,
@@ -137,7 +144,7 @@ export async function rememberPublicRead(key, value) {
   });
   publicReadKeys.add(key);
   // Never await the Cache API on the request path — a stuck put would hang every waiter.
-  if (generation === publicReadGeneration) void writeEdgeCache(key, value);
+  if (generation === publicReadGeneration) scheduleEdgeCacheWrite(key, value, ctx);
   return value;
 }
 
@@ -164,7 +171,7 @@ async function loadDirectPublicRead(loader, timeoutMs) {
   return withPublicReadTimeout(Promise.resolve().then(() => loader()), timeoutMs);
 }
 
-export async function readCachedPublicValue(key, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS } = {}) {
+export async function readCachedPublicValue(key, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS, ctx } = {}) {
   const existing = publicReadMemory.get(key);
   if (existing?.pending && existing.generation === publicReadGeneration) {
     try {
@@ -181,12 +188,12 @@ export async function readCachedPublicValue(key, { timeoutMs = PUBLIC_READ_PENDI
   if (publicReadGeneration !== (existing?.generation ?? publicReadGeneration)) {
     return { hit: false };
   }
-  await rememberPublicRead(key, edge);
+  await rememberPublicRead(key, edge, ctx);
   return { hit: true, value: edge };
 }
 
-export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS } = {}) {
-  const cached = await readCachedPublicValue(key, { timeoutMs });
+export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS, ctx } = {}) {
+  const cached = await readCachedPublicValue(key, { timeoutMs, ctx });
   if (cached.hit) return cached.value;
   const generation = publicReadGeneration;
   const existing = publicReadMemory.get(key);
@@ -209,7 +216,7 @@ export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PE
     if (current && current.pending !== pending) {
       return current.pending ? value : current.value;
     }
-    await rememberPublicRead(key, value);
+    await rememberPublicRead(key, value, ctx);
     return value;
   })().catch((error) => {
     evictIfPending(key, pending);
@@ -224,7 +231,7 @@ export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PE
     if (!timedOut) throw error;
     try {
       const value = await loadDirectPublicRead(loader, timeoutMs);
-      if (publicReadGeneration === generation) await rememberPublicRead(key, value);
+      if (publicReadGeneration === generation) await rememberPublicRead(key, value, ctx);
       return value;
     } catch {
       throw error;
@@ -252,11 +259,11 @@ export async function invalidatePublicReadCache() {
  * A batch failure falls back to individual statements so one optional query cannot
  * blank the page.
  */
-export async function readCachedQueryBatch(env, jobs = []) {
+export async function readCachedQueryBatch(env, jobs = [], { ctx } = {}) {
   const values = new Map();
   const missing = [];
   for (const job of jobs) {
-    const cached = await readCachedPublicValue(job.key);
+    const cached = await readCachedPublicValue(job.key, { ctx });
     if (cached.hit) values.set(job.key, cached.value);
     else missing.push(job);
   }
@@ -266,7 +273,7 @@ export async function readCachedQueryBatch(env, jobs = []) {
     try {
       const result = await job.statement().all();
       const value = job.parse(result);
-      await rememberPublicRead(job.key, value);
+      await rememberPublicRead(job.key, value, ctx);
       values.set(job.key, value);
     } catch (error) {
       if (!job.optional) throw error;
@@ -287,7 +294,7 @@ export async function readCachedQueryBatch(env, jobs = []) {
     for (let index = 0; index < missing.length; index += 1) {
       const job = missing[index];
       const value = job.parse(results[index]);
-      await rememberPublicRead(job.key, value);
+      await rememberPublicRead(job.key, value, ctx);
       values.set(job.key, value);
     }
   } catch {

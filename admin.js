@@ -3713,12 +3713,41 @@ function applyZernioQueryFeedback() {
   window.history.replaceState({}, '', next);
 }
 
+const ERROR_PAGE_CODES = ['404', '403', '401', '500', '503', '429'];
+
+function fillErrorPagesForm(form, pages) {
+  if (!form) return;
+  const rows = pages && typeof pages === 'object' ? pages : {};
+  for (const code of ERROR_PAGE_CODES) {
+    const row = rows[code] || {};
+    for (const field of ['title', 'copy', 'link_label', 'link_href']) {
+      const input = form.elements[`error_${code}_${field}`];
+      if (input) input.value = row[field] || '';
+    }
+  }
+}
+
+function collectErrorPages(form) {
+  const pages = {};
+  for (const code of ERROR_PAGE_CODES) {
+    pages[code] = {
+      title: String(form.elements[`error_${code}_title`]?.value || '').trim(),
+      copy: String(form.elements[`error_${code}_copy`]?.value || '').trim(),
+      link_label: String(form.elements[`error_${code}_link_label`]?.value || '').trim(),
+      link_href: String(form.elements[`error_${code}_link_href`]?.value || '').trim(),
+    };
+  }
+  return pages;
+}
+
 async function loadSite() {
   if (!hasPermission('site')) return;
   state.site = await jsonFetch('/api/site');
   const duesSetting = document.querySelector('[data-boosters-dues-setting]');
   if (duesSetting) duesSetting.hidden = !isSuperAdmin();
-  fillForm(document.querySelector('#site-form'), state.site);
+  const form = document.querySelector('#site-form');
+  fillForm(form, state.site);
+  fillErrorPagesForm(form, state.site?.error_pages);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
   await loadZernioFacebookStatus();
@@ -7662,9 +7691,11 @@ function bindForms() {
     if (form.elements.boosters_dues_enabled) {
       payload.boosters_dues_enabled = Boolean(form.elements.boosters_dues_enabled.checked);
     }
+    payload.error_pages = collectErrorPages(form);
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);
+    fillErrorPagesForm(form, saved.error_pages);
     if (status) {
       const duesNote = form.elements.boosters_dues_enabled
         ? (saved.boosters_dues_enabled
