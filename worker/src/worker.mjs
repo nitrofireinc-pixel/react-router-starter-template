@@ -115,6 +115,29 @@ import {
 } from './schema-upgrade.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
+  DEFAULT_ERROR_PAGES,
+  DEFAULT_INSTAGRAM_HREF,
+  ERROR_DEFAULTS,
+  errorHeroHtml,
+  errorPageHeaders,
+  instagramHrefFromSite,
+  mergeErrorCopy,
+  normalizeErrorPages,
+  renderLiteErrorHtml,
+  wantsJsonRequest,
+} from './error-pages.mjs';
+
+export {
+  DEFAULT_ERROR_PAGES,
+  DEFAULT_INSTAGRAM_HREF,
+  ERROR_DEFAULTS,
+  errorHeroHtml,
+  mergeErrorCopy,
+  normalizeErrorPages,
+  renderLiteErrorHtml,
+  wantsJsonRequest,
+};
+import {
   VISUAL_EDITOR_PATH_PREFIX,
   canEditVisualPage,
   isVisualEditorSlug,
@@ -201,6 +224,7 @@ export const DEFAULT_SITE = {
   sponsor_ad_seconds: '6',
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
+  error_pages: JSON.stringify(DEFAULT_ERROR_PAGES),
 };
 
 /** Public `/api/site` and SSR chrome may only use these CMS fields. Secrets stay in site_content, not JSON. */
@@ -359,7 +383,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004q';
+export const ASSET_VERSION = 'cms-p1-20261004r';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -463,11 +487,19 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
-export function jsonResponse(payload, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-  });
+export function jsonResponse(payload, status = 200, headers = {}) {
+  const extra = headers && typeof headers === 'object' ? headers : {};
+  const retryAfter = Number(extra.retryAfter ?? extra['retry-after'] ?? extra['Retry-After']);
+  const merged = {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+    ...extra,
+  };
+  delete merged.retryAfter;
+  if ((status === 503 || status === 429) && Number.isFinite(retryAfter) && retryAfter > 0) {
+    merged['retry-after'] = String(Math.round(retryAfter));
+  }
+  return new Response(JSON.stringify(payload), { status, headers: merged });
 }
 
 export function normalizeStaticPath(pathname) {
@@ -479,7 +511,7 @@ export function normalizeStaticPath(pathname) {
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
   'admin.js', 'admin-caldev.js', 'admin-visual.js', 'caldev.js', 'site-content.js',
-  'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css',
+  'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
 
@@ -3213,6 +3245,7 @@ export function publicSitePayload(site = {}) {
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
+  payload.error_pages = normalizeErrorPages(payload.error_pages);
   return payload;
 }
 
@@ -3801,7 +3834,12 @@ async function handleZernioInstagramConnect(request, env) {
   const user = await currentUser(request, env);
   if (!user) return redirect('/admin/login');
   if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Instagram.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    return renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      detail: 'Site settings permission is required to connect Instagram.',
+    });
   }
   if (!(await zernioConfigured(env))) {
     return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Zernio is not configured for this site yet.</p><p><a href="/admin?tab=social">Back to Social Media</a></p>', 503);
@@ -3846,7 +3884,12 @@ async function handleZernioInstagramCallback(request, env) {
     return redirect(`/admin/login?next=${encodeURIComponent(nextPath)}`);
   }
   if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    return renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      detail: 'Site settings permission is required.',
+    });
   }
   return redirect(nextPath);
 }
@@ -4201,7 +4244,12 @@ async function handleZernioFacebookConnect(request, env) {
   const user = await currentUser(request, env);
   if (!user) return redirect('/admin/login');
   if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required to connect Facebook.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    return renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      detail: 'Site settings permission is required to connect Facebook.',
+    });
   }
   if (!(await zernioConfigured(env))) {
     return htmlResponse('<!doctype html><title>Zernio not configured</title><p>Zernio is not configured for this site yet.</p><p><a href="/admin?tab=social">Back to Social Media</a></p>', 503);
@@ -4260,7 +4308,12 @@ async function handleZernioFacebookCallback(request, env) {
     return redirect(`/admin/login?next=${encodeURIComponent(nextPath)}`);
   }
   if (!hasPermission(user, 'site')) {
-    return htmlResponse('<!doctype html><title>Forbidden</title><p>Site settings permission is required.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+    return renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      detail: 'Site settings permission is required.',
+    });
   }
   return redirect(nextPath);
 }
@@ -9876,6 +9929,12 @@ async function routeApi(request, env, url, ctx = null) {
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
+    if (payload.error_pages !== undefined) {
+      const packed = normalizeErrorPages(payload.error_pages);
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .bind('error_pages', JSON.stringify(packed))
+        .run();
+    }
     if (payload.boosters_dues_enabled !== undefined) {
       if (!isSuperAdmin(auth.user)) {
         return jsonResponse({ detail: 'Only Super Admins can change the Band dues Boosters setting.' }, 403);
@@ -11885,13 +11944,32 @@ async function handleVisualEditorPage(request, env, slug) {
   if (!user) return redirect('/admin/login');
   const key = String(slug || '').trim().toLowerCase();
   if (!isVisualEditorSlug(key)) {
-    return htmlResponse('<!doctype html><title>Not yet</title><p>This page is not yet available in the visual editor.</p>', 404);
+    return renderErrorPage(404, {
+      request,
+      env,
+      url: new URL(request.url),
+      loggedIn: true,
+      detail: 'This page is not yet available in the visual editor.',
+    });
   }
   if (!canEditVisualPage(user, key, canEditPage)) {
-    return htmlResponse(`<!doctype html><title>Not allowed</title><p>Permission required: page:${key}</p>`, 403);
+    return renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      loggedIn: true,
+      detail: `Permission required: page:${key}`,
+    });
   }
   const cms = await getPageBySlug(env, key, true);
-  if (!cms) return htmlResponse('<!doctype html><title>Not found</title><p>Page not found</p>', 404);
+  if (!cms) {
+    return renderErrorPage(404, {
+      request,
+      env,
+      url: new URL(request.url),
+      loggedIn: true,
+    });
+  }
   await writeAdminAuditLog(env, {
     action: 'page.edit.open',
     category: 'pages',
@@ -12084,7 +12162,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
   return merged;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [] } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
@@ -12109,8 +12187,15 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   if (isHomePage) bodyClasses.push('home-page');
   if (page.slug === 'fundraising') bodyClasses.push('fundraising-page');
   if (isComingSoonPage) bodyClasses.push('coming-soon-page');
-  if (page.slug === 'not-found') bodyClasses.push('not-found-page');
+  if (page.slug === 'not-found' || String(page.slug || '').startsWith('error-')) bodyClasses.push('not-found-page');
+  for (const extra of extraBodyClasses) {
+    if (extra && !bodyClasses.includes(extra)) bodyClasses.push(extra);
+  }
   const bodyClass = ` class="${bodyClasses.join(' ')}"`;
+  const extraCss = (Array.isArray(extraStylesheets) ? extraStylesheets : [])
+    .filter(Boolean)
+    .map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`)
+    .join('\n  ');
   const marqueeFlag = showMarquee ? 'on' : 'off';
   const themePhotoStyle = renderPublicThemePhotoStyle(pickPublicThemePhotoVars(photos, { slug: page.slug || (page.is_home ? 'home' : '') }));
   return `<!doctype html>
@@ -12119,7 +12204,8 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="${escapeAttr(site.title)} website.">
-  ${page.slug === 'not-found' ? '<meta name="robots" content="noindex">' : ''}
+  ${page.slug === 'not-found' || String(page.slug || '').startsWith('error-') || extraHead ? '<meta name="robots" content="noindex">' : ''}
+  ${extraHead || ''}
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
   <link rel="apple-touch-icon" href="${escapeAttr(PUBLIC_BRAND_MARK)}">
@@ -12134,6 +12220,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
+  ${extraCss}
   ${themePhotoStyle}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
@@ -12238,32 +12325,94 @@ function isPublicDocumentRequest(pathname = '/') {
   return true;
 }
 
-const PUBLIC_NOT_FOUND_BODY = `<section class="page-hero"><div class="page-title"><div class="kicker">404</div><h1>Page not found</h1><p>That address is not on the East Forsyth Band site.</p></div></section><section class="content"><div class="wrap"><p><a class="btn primary" href="/">Back to home</a></p></div></section>`;
+export function liteErrorResponse(status, {
+  site = {},
+  path = '/',
+  detail = '',
+  retryAfter,
+} = {}) {
+  const code = Number(status) || 500;
+  const copy = mergeErrorCopy(code, site, {
+    path,
+    instagramHref: instagramHrefFromSite(site),
+    detail,
+  });
+  const headers = errorPageHeaders(code, {
+    retryAfter: retryAfter ?? copy.retryAfter ?? ERROR_DEFAULTS[code]?.retryAfter,
+  });
+  return htmlResponse(renderLiteErrorHtml(code, copy, {
+    markSrc: PUBLIC_BRAND_MARK,
+    logoSrc: site?.logo_url || '/assets/efhs-logo.png',
+    instagramHref: instagramHrefFromSite(site),
+    pollMaintenance: code === 503,
+  }), code, headers);
+}
+
+export async function renderErrorPage(status, opts = {}) {
+  const code = Number(status) || 404;
+  const defaults = ERROR_DEFAULTS[code] || ERROR_DEFAULTS[404];
+  const url = opts.url || (opts.request ? new URL(opts.request.url) : new URL('https://efhsband.org/missing'));
+  const path = `${url.pathname || '/'}${url.search || ''}`;
+  const shell = opts.shell || defaults.shell || 'full';
+  const siteHint = opts.site && typeof opts.site === 'object' ? opts.site : {};
+
+  if (shell === 'lite' || !opts.env) {
+    return liteErrorResponse(code, {
+      site: siteHint,
+      path,
+      detail: opts.detail,
+      retryAfter: opts.retryAfter,
+    });
+  }
+
+  try {
+    const today = easternTodayIso();
+    const chrome = opts.chrome || await loadPublicChromeReads(opts.env, today);
+    const site = chrome.site || siteHint;
+    const copy = mergeErrorCopy(code, site, {
+      path,
+      instagramHref: instagramHrefFromSite(site),
+      detail: opts.detail,
+    });
+    const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents || [], today);
+    const html = renderCmsPage({
+      slug: `error-${code}`,
+      path: url.pathname,
+      title: copy.doc,
+      is_home: 0,
+      active: 1,
+      body_html: errorHeroHtml(code, copy, { markSrc: PUBLIC_BRAND_MARK }),
+    }, site, chrome.pages || [], [], [], [], chrome.sponsors || [], {
+      loggedIn: Boolean(opts.loggedIn),
+      photos: [],
+      showSponsorMarquee: true,
+      deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+      extraStylesheets: [`/error-page.css?v=${ASSET_VERSION}`],
+      extraBodyClasses: ['error-page', `error-${code}`],
+      publicRead: {
+        site,
+        sponsors: chrome.sponsors || [],
+        photos: [],
+        deadlineBanners,
+        square: null,
+      },
+    });
+    return htmlResponse(html, code, errorPageHeaders(code, {
+      retryAfter: opts.retryAfter ?? copy.retryAfter,
+    }));
+  } catch (error) {
+    console.error('error_page_full_failed', String(error?.stack || error?.message || error));
+    return liteErrorResponse(code, {
+      site: siteHint,
+      path,
+      detail: opts.detail,
+      retryAfter: opts.retryAfter,
+    });
+  }
+}
 
 async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
-  const today = easternTodayIso();
-  const chrome = await loadPublicChromeReads(env, today);
-  const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents, today);
-  const html = renderCmsPage({
-    slug: 'not-found',
-    path: url.pathname,
-    title: 'Page not found',
-    is_home: 0,
-    body_html: PUBLIC_NOT_FOUND_BODY,
-  }, chrome.site, chrome.pages, [], [], [], chrome.sponsors, {
-    loggedIn,
-    photos: [],
-    showSponsorMarquee: true,
-    deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
-    publicRead: {
-      site: chrome.site,
-      sponsors: chrome.sponsors,
-      photos: [],
-      deadlineBanners,
-      square: publicSquarePublishableConfig(env),
-    },
-  });
-  return htmlResponse(html, 404);
+  return renderErrorPage(404, { env, url, loggedIn });
 }
 
 async function serveBundledStaticAsset(request, env, url) {
@@ -12339,18 +12488,32 @@ async function serveStaticOrCms(request, env, url) {
         },
       }));
     }
-    return withHint(htmlResponse(renderMaintenancePage(site)));
+    return withHint(await renderErrorPage(503, {
+      request,
+      env,
+      url,
+      site,
+      shell: 'lite',
+      retryAfter: 600,
+    }));
   }
-  // Public + non-super-admin users get the maintenance page. Super admins can preview.
+  // Public + non-super-admin users get an in-place 503. Super admins can preview.
   if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
-    return withHint(new Response(null, {
-      status: 302,
-      headers: {
-        location: '/maintenance.html',
-        'cache-control': 'no-store',
-        'set-cookie': maintenanceReturnCookie(returnPath),
-      },
+    const response = await renderErrorPage(503, {
+      request,
+      env,
+      url,
+      site,
+      shell: 'lite',
+      retryAfter: 600,
+    });
+    const headers = new Headers(response.headers);
+    headers.set('set-cookie', maintenanceReturnCookie(returnPath));
+    return withHint(new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
     }));
   }
   const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
@@ -12427,7 +12590,13 @@ async function serveStaticOrCms(request, env, url) {
       return redirect(`/admin/login?next=${encodeURIComponent('/admin')}`);
     }
     if (!canAccessWebsiteGuide(guideAuth.user)) {
-      return htmlResponse('<!doctype html><title>Forbidden</title><p>The Website Guide is available to Super Admins only.</p><p><a href="/admin">Back to CMS</a></p>', 403);
+      return renderErrorPage(403, {
+        request,
+        env,
+        url,
+        loggedIn: Boolean(guideAuth.user),
+        detail: 'The Website Guide is available to Super Admins only.',
+      });
     }
     // Always serve the current Super Admin PDF (legacy filenames redirect here).
     const servePdf = !rawGuidePath.endsWith('.html') && !assetUrl.pathname.endsWith('.html');
@@ -12450,7 +12619,7 @@ async function serveStaticOrCms(request, env, url) {
   }
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
+  if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
     if (assetName === 'push-sw.js') {
@@ -12551,7 +12720,15 @@ export default {
       return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
     } catch (error) {
       console.error('worker_exception', String(error?.stack || error?.message || error));
-      throw error;
+      try {
+        const failUrl = new URL(request.url);
+        if (wantsJsonRequest(request, failUrl.pathname)) {
+          return applyWorkerSecurityHeaders(jsonResponse({ detail: 'Server error' }, 500));
+        }
+        return applyWorkerSecurityHeaders(liteErrorResponse(500, { path: failUrl.pathname }));
+      } catch {
+        return applyWorkerSecurityHeaders(liteErrorResponse(500));
+      }
     }
   },
 };
@@ -12656,7 +12833,36 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
     <button class="btn primary" type="button" data-open-social-tab>Open Social Media</button>
   </div>
 </div>
-<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label><div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see maintenance.html. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<form id="site-form" class="admin-card stack"><label class="full form-rich-label"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label>
+<div class="admin-card stack error-pages-card" data-error-pages-card>
+  <h2>Error pages</h2>
+  <p class="muted">Copy for 404, 403, 401, 500, 503, and 429. Empty fields fall back to the built-in band defaults. 500/503/429 stay on the lite page so they never query the database.</p>
+  <div class="form-grid error-pages-grid">
+    <label>404 title<input name="error_404_title" maxlength="80" placeholder="Page Not Found"></label>
+    <label>404 link label<input name="error_404_link_label" maxlength="80" placeholder="View Calendar"></label>
+    <label class="full">404 copy<input name="error_404_copy" maxlength="280" placeholder="Looks like this page marched off the field."></label>
+    <label class="full">404 link URL<input name="error_404_link_href" placeholder="/calendar.html"></label>
+    <label>403 title<input name="error_403_title" maxlength="80" placeholder="Access Denied"></label>
+    <label>403 link label<input name="error_403_link_label" maxlength="80" placeholder="Contact the Band"></label>
+    <label class="full">403 copy<input name="error_403_copy" maxlength="280"></label>
+    <label class="full">403 link URL<input name="error_403_link_href" placeholder="/contact.html"></label>
+    <label>401 title<input name="error_401_title" maxlength="80" placeholder="Sign-In Needed"></label>
+    <label>401 link label<input name="error_401_link_label" maxlength="80" placeholder="Staff Login"></label>
+    <label class="full">401 copy<input name="error_401_copy" maxlength="280"></label>
+    <label class="full">401 link URL<input name="error_401_link_href" placeholder="/admin/login"></label>
+    <label>500 title<input name="error_500_title" maxlength="80" placeholder="Server Error"></label>
+    <label>500 link label<input name="error_500_link_label" maxlength="80" placeholder="Try Again"></label>
+    <label class="full">500 copy<input name="error_500_copy" maxlength="280"></label>
+    <label>503 title<input name="error_503_title" maxlength="80" placeholder="Back Shortly"></label>
+    <label>503 link label<input name="error_503_link_label" maxlength="80" placeholder="Follow on Instagram"></label>
+    <label class="full">503 copy<input name="error_503_copy" maxlength="280"></label>
+    <label class="full">503 Instagram URL<input name="error_503_link_href" placeholder="https://www.instagram.com/efblueregiment"></label>
+    <label>429 title<input name="error_429_title" maxlength="80" placeholder="Too Many Requests"></label>
+    <label>429 link label<input name="error_429_link_label" maxlength="80" placeholder="Try Again"></label>
+    <label class="full">429 copy<input name="error_429_copy" maxlength="280"></label>
+  </div>
+</div>
+<div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">

@@ -30,6 +30,7 @@ for (const name of [
   'styles.css',
   'public-theme.css',
   'home-redesign.css',
+  'error-page.css',
   'script.js',
   'site-content.js',
   'caldev.js',

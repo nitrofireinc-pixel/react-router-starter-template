@@ -148,6 +148,7 @@ test('public site payload is an allowlist and never includes secrets', () => {
   }
   assert.ok(PUBLIC_SITE_KEYS.includes('title'));
   assert.ok(PUBLIC_SITE_KEYS.includes('sponsor_ad_seconds'));
+  assert.ok(PUBLIC_SITE_KEYS.includes('error_pages'));
   assert.equal(PUBLIC_SITE_KEYS.includes('square_settings'), false);
   assert.equal(Object.keys(DEFAULT_SITE).includes('zernio_api_key'), false);
 });
@@ -1549,7 +1550,7 @@ test('sponsor marquee stays on named public pages and off generic CMS pages', ()
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
   assert.match(workerSrc, /publicPageShowsSponsorMarquee\(page\)/);
   assert.match(workerSrc, /showSponsorMarquee: true/);
-  assert.match(workerSrc, /slug: 'not-found'/);
+  assert.match(workerSrc, /slug: `error-\$\{code\}`/);
   assert.match(workerSrc, /loadPublicChromeReads/);
   assert.match(workerSrc, /data-sponsor-marquee="\$\{marqueeFlag\}"/);
   assert.match(siteContent, /function sponsorMarqueeEnabled\(/);
@@ -2322,6 +2323,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(workerSrc, /pageSlug === 'ensembles'/);
   assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918'/);
   assert.match(syncSrc, /'public-theme\.css'/);
+  assert.match(syncSrc, /'error-page\.css'/);
   assert.match(syncSrc, /cpSync\(join\(ROOT, 'assets'\), assetsDest/);
   assert.match(siteContent, /function applyPublicThemePhotos/);
   assert.match(siteContent, /\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918/);
@@ -2329,7 +2331,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004q'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004r'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
