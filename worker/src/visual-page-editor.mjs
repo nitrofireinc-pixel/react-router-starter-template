@@ -186,6 +186,17 @@ export function replaceLockedVisualBlocks(html = '') {
   return out;
 }
 
+export function stripVisualLockedLabels(html = '') {
+  return String(html || '').replace(
+    /<([a-z0-9]+)\b[^>]*\bvisual-locked-label\b[^>]*>[\s\S]*?<\/\1>/gi,
+    '',
+  );
+}
+
+export function htmlForPublicVisualPublish(html = '') {
+  return stripVisualLockedLabels(String(html || ''));
+}
+
 export function sanitizeLockedVisualHtml(html = '') {
   return canonicalLockedPlaceholder(lockedKindFromHtml(html));
 }
@@ -567,13 +578,20 @@ export function importCmsBodyToVisual(html = '', slug = '') {
   return defaultVisualHtml(slug);
 }
 
+export function overflowClassName(className = '') {
+  return String(className || '')
+    .split(/\s+/)
+    .filter((part) => part && part !== 'gjs-selected')
+    [0] || '';
+}
+
 export function overflowElementLabel({
   tag = '',
   className = '',
   text = '',
 } = {}) {
   const name = String(tag || 'element').toLowerCase() || 'element';
-  const cls = String(className || '').split(/\s+/).filter(Boolean)[0] || '';
+  const cls = overflowClassName(className);
   const snippet = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 32);
   if (cls && snippet) return `${name}.${cls} (“${snippet}”)`;
   if (cls) return `${name}.${cls}`;
@@ -790,7 +808,7 @@ export async function saveVisualPage(env, {
   if (kind === 'publish') {
     await env.DB.prepare(
       'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?',
-    ).bind(clean, key).run();
+    ).bind(htmlForPublicVisualPublish(clean), key).run();
   }
   return loadVisualPageState(env, key);
 }

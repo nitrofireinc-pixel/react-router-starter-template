@@ -2329,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004c'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004d'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3195,6 +3195,10 @@ test('ensureEmailListSignupSlot injects once', () => {
   const upgraded = ensureEmailListSignupSlot('<section class="content email-list-signup" data-email-list-signup><form data-email-list-form></form></section>');
   assert.match(upgraded, /data-email-list-open/);
   assert.doesNotMatch(upgraded, /data-email-list-form/);
+  const locked = ensureEmailListSignupSlot('<div class="visual-locked-slot" data-visual-locked="email-list" data-email-list-signup><p class="visual-locked-label">Email signup (locked)</p></div>');
+  assert.match(locked, /data-email-list-open/);
+  assert.equal([...locked.matchAll(/data-email-list-signup/gi)].length, 1);
+  assert.doesNotMatch(locked, /visual-locked-label|\(locked\)/i);
 });
 
 test('buildEmailListUpdateMessage includes reply-stop guidance', () => {

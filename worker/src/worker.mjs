@@ -122,6 +122,7 @@ import {
   renderVisualEditorHtml,
   restoreVisualVersion,
   saveVisualPage,
+  stripVisualLockedLabels,
 } from './visual-page-editor.mjs';
 import {
   sanitizeCmsPageHtml as sanitizeCmsPageHtmlAllowlist,
@@ -350,7 +351,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004c';
+export const ASSET_VERSION = 'cms-p1-20261004d';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1035,11 +1036,22 @@ export function renderEmailListSignup({ topics = EMAIL_LIST_TOPICS, heading = 'G
 
 export function ensureEmailListSignupSlot(html, options = {}) {
   const source = String(html || '');
-  // Keep button-only signup blocks; rewrite older QR/form variants for print-only QR usage.
-  if (/data-email-list-open/i.test(source) && /data-email-list-signup/i.test(source) && !/email-list-signup-qr/i.test(source)) {
+  const open = source.match(/<([a-z0-9]+)\b([^>]*\bdata-email-list-signup\b[^>]*)>/i);
+  const attrs = open?.[2] || '';
+  const lockedPlaceholder = /data-visual-locked|visual-locked-slot/i.test(attrs);
+  // Keep a real button-only signup; replace locked visual placeholders and older QR/form variants.
+  if (
+    /data-email-list-open/i.test(source)
+    && /data-email-list-signup/i.test(source)
+    && !/email-list-signup-qr/i.test(source)
+    && !lockedPlaceholder
+  ) {
     return source;
   }
-  const stripped = source.replace(/<section\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/section>/gi, '');
+  const stripped = source.replace(
+    /<(section|div|article|aside)\b[^>]*data-email-list-signup[^>]*>[\s\S]*?<\/\1>/gi,
+    '',
+  );
   return `${stripped}${renderEmailListSignup(options)}`;
 }
 
@@ -7046,6 +7058,10 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
 }
 
 export function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+  return stripVisualLockedLabels(renderPublicPageBody(page, sponsors, staff, boosterMembers, site, extras));
+}
+
+function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
   if (!isPublicCmsPageActive(page)) {
     return injectComingSoonLogos(comingSoonPageHtml({
       heading: page.title || 'Coming soon',

@@ -35,9 +35,14 @@ import {
   wrapLiveDataAsLocked,
   trimVisualVersions,
   isGrapesJsAutoId,
+  LIVE_DATA_LOCK_KINDS,
+  canonicalLockedPlaceholder,
+  htmlForPublicVisualPublish,
+  stripVisualLockedLabels,
 } from '../worker/src/visual-page-editor.mjs';
 import { DEFAULT_CMS_PAGES } from '../worker/src/default-pages.mjs';
 import { injectComingSoonLogos } from '../worker/src/home-redesign.mjs';
+import { ensureEmailListSignupSlot, renderPageBody } from '../worker/src/worker.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -378,13 +383,99 @@ test('visual publish guard treats published_at as locked', () => {
 
 test('narrow overflow warning names the innermost element', () => {
   assert.equal(overflowElementLabel({ tag: 'div', className: 'wide-test', text: 'Wide test block' }), 'div.wide-test (“Wide test block”)');
+  assert.equal(
+    overflowElementLabel({ tag: 'div', className: 'gjs-selected wide-test', text: 'Wide test block' }),
+    'div.wide-test (“Wide test block”)',
+  );
   const message = formatNarrowOverflowWarning([
-    { tag: 'div', className: 'wide-test', text: 'Wide test block', width: 820, viewportWidth: 390 },
+    { tag: 'div', className: 'gjs-selected wide-test', text: 'Wide test block', width: 820, viewportWidth: 390 },
   ]);
   assert.match(message, /At 390px/);
   assert.match(message, /div\.wide-test/);
   assert.match(message, /820px/);
+  assert.doesNotMatch(message, /gjs-selected/);
   assert.doesNotMatch(message, /Join the Band/);
+});
+
+const VISUAL_WIDGET_MARKERS = Object.freeze({
+  calendar: /\bid=["']caldev-app["']/gi,
+  events: /\bdata-events\b/gi,
+  gallery: /\bdata-photo-gallery\b/gi,
+  sponsors: /\bdata-sponsors\b/gi,
+  staff: /\bdata-staff\b/gi,
+  'booster-meetings': /\bdata-booster-meetings\b/gi,
+  'booster-members': /\bdata-booster-members\b/gi,
+  dues: /\bdata-boosters-dues\b/gi,
+  'contact-form': /\bdata-contact-form-slot\b/gi,
+  form: /\bdata-cms-form\b/gi,
+  'email-list': /\bdata-email-list-signup\b/gi,
+  'sponsor-tiers': /\bdata-sponsor-tiers\b/gi,
+  fundraiser: /\bdata-fundraising-cards\b/gi,
+  donate: /\bdata-donate-open\b/gi,
+  'sponsor-form': /\bdata-sponsor-choice-open\b/gi,
+  widget: /\bdata-visual-locked=["']widget["']/gi,
+});
+
+const VISUAL_WIDGET_PUBLIC_SLUGS = Object.freeze({
+  calendar: ['calendar'],
+  events: ['ensembles'],
+  gallery: ['gallery'],
+  sponsors: ['sponsors'],
+  staff: ['directors'],
+  'booster-meetings': ['boosters'],
+  'booster-members': ['boosters'],
+  dues: ['boosters'],
+  'contact-form': ['contact'],
+  form: ['ensembles'],
+  'email-list': ['fundraising', 'calendar'],
+  'sponsor-tiers': ['become-a-sponsor'],
+  fundraiser: ['fundraising'],
+  donate: ['ensembles'],
+  'sponsor-form': ['ensembles'],
+  widget: ['ensembles'],
+});
+
+function countWidgetMatches(html, pattern) {
+  return [...String(html || '').matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))].length;
+}
+
+function assertNoLockedLabelLeak(html, label) {
+  assert.doesNotMatch(html, /visual-locked-label/i, label);
+  assert.doesNotMatch(html, /\(locked\)/i, label);
+}
+
+test('visual publish replaces each locked placeholder with one public widget and no locked labels', () => {
+  const kinds = [...new Set([...LIVE_DATA_LOCK_KINDS.map((item) => item.kind), 'widget'])];
+  assert.ok(kinds.includes('email-list'));
+  for (const kind of kinds) {
+    const draft = `<section class="content"><div class="wrap"><h1>Page</h1>${canonicalLockedPlaceholder(kind)}</div></section>`;
+    const sanitized = sanitizeVisualPageHtml(draft);
+    assert.match(sanitized, /visual-locked-label|\bdata-visual-locked=/, kind);
+    const published = htmlForPublicVisualPublish(sanitized);
+    assertNoLockedLabelLeak(published, `${kind} published body`);
+    const marker = VISUAL_WIDGET_MARKERS[kind];
+    assert.ok(marker, kind);
+    assert.equal(countWidgetMatches(published, marker), 1, `${kind} published marker`);
+    for (const slug of VISUAL_WIDGET_PUBLIC_SLUGS[kind] || ['join']) {
+      const publicHtml = renderPageBody({
+        slug,
+        title: 'Page',
+        body_html: published,
+        active: 1,
+      }, [], [], [], { boosters_dues_enabled: 1 });
+      assertNoLockedLabelLeak(publicHtml, `${kind} public ${slug}`);
+      assert.equal(countWidgetMatches(publicHtml, marker), 1, `${kind} public ${slug} marker`);
+    }
+  }
+
+  const emailPlaceholder = canonicalLockedPlaceholder('email-list');
+  assert.match(emailPlaceholder, /Email signup \(locked\)/);
+  const replaced = ensureEmailListSignupSlot(`<section class="content"><h1>Give</h1>${emailPlaceholder}</section>`);
+  assertNoLockedLabelLeak(replaced, 'email-list slot');
+  assert.equal(countWidgetMatches(replaced, VISUAL_WIDGET_MARKERS['email-list']), 1);
+  assert.match(replaced, /data-email-list-open/);
+  assert.doesNotMatch(replaced, /<div[^>]*data-email-list-signup/i);
+  assert.equal(ensureEmailListSignupSlot(replaced), replaced);
 });
 
 test('pageHasVisualPublish is a no-write lookup', async () => {

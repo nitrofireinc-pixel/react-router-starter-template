@@ -829,7 +829,7 @@
   function overflowLabel(el) {
     if (!el) return 'element';
     const tag = String(el.tagName || 'element').toLowerCase();
-    const className = String(el.className || '').split(/\s+/).filter(Boolean)[0] || '';
+    const className = String(el.className || '').split(/\s+/).filter((name) => name && name !== 'gjs-selected')[0] || '';
     const ownText = String(el.childNodes?.[0]?.nodeType === 3 ? el.childNodes[0].textContent : '')
       .replace(/\s+/g, ' ')
       .trim();
