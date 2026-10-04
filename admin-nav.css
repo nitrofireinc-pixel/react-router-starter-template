@@ -307,7 +307,8 @@ body.visual-editor-body .admin-menu{
   overflow:auto;
   grid-template-columns:minmax(0,1fr)!important;
 }
-body.visual-editor-body .admin-menu > *{display:block;width:100%;min-width:0;max-width:100%;flex:0 0 auto;grid-column:1/-1}
+body.visual-editor-body .admin-menu > :not([hidden]){display:block;width:100%;min-width:0;max-width:100%;flex:0 0 auto;grid-column:1/-1}
+body.visual-editor-body .admin-menu [hidden]{display:none!important}
 body.visual-editor-body .admin-menu button,
 body.visual-editor-body .admin-logout{
   width:100%;
@@ -367,17 +368,23 @@ body.visual-editor-body .admin-change-password{
     align-items:stretch!important;
     grid-template-columns:minmax(0,1fr)!important;
   }
-  #admin-sidebar .admin-menu > *,
-  #admin-sidebar .admin-tabs > *,
-  .image-admin-shell .admin-menu > *,
-  .image-admin-shell .admin-tabs > *,
-  body.visual-editor-body .admin-menu > *{
+  #admin-sidebar .admin-menu > :not([hidden]),
+  #admin-sidebar .admin-tabs > :not([hidden]),
+  .image-admin-shell .admin-menu > :not([hidden]),
+  .image-admin-shell .admin-tabs > :not([hidden]),
+  body.visual-editor-body .admin-menu > :not([hidden]){
     display:block;
     width:100%;
     min-width:0;
     max-width:100%;
     flex:0 0 auto;
     grid-column:1/-1;
+  }
+  #admin-sidebar .admin-menu [hidden],
+  #admin-sidebar .admin-tabs [hidden],
+  .image-admin-shell .admin-menu [hidden],
+  body.visual-editor-body .admin-menu [hidden]{
+    display:none!important;
   }
   #admin-sidebar .admin-menu-group,
   #admin-sidebar .admin-page-shortcuts,

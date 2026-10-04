@@ -385,6 +385,7 @@ test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t
       assert.match(joined, /Band Boosters[\s\S]*Booster Members[\s\S]*Meeting Minutes[\s\S]*Badge Creator/);
       assert.match(joined, /Sponsors[\s\S]*Manage sponsors/);
       assert.match(joined, /PAGES[\s\S]*Fundraising[\s\S]*Sponsors \(page layout\)/i);
+      assert.doesNotMatch(joined, /Calendar Events/);
     }
 
     await page.close();
