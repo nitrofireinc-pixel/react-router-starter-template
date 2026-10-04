@@ -116,6 +116,16 @@
     document.addEventListener('keydown', trapHandler, true);
   }
 
+  function revealOverlaySubmenus() {
+    if (!isOverlay()) return;
+    document.querySelectorAll('.admin-menu-group:not([hidden])').forEach((group) => {
+      const toggle = group.querySelector('.admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle]');
+      const sub = group.querySelector('.admin-menu-sub');
+      if (toggle) toggle.setAttribute('aria-expanded', 'true');
+      if (sub) sub.hidden = false;
+    });
+  }
+
   function notifyLayout() {
     const fire = () => {
       window.dispatchEvent(new Event('resize'));
@@ -163,6 +173,7 @@
       lastFocus = null;
     }
 
+    if (open && overlay) revealOverlaySubmenus();
     notifyLayout();
   }
 
@@ -197,6 +208,7 @@
     const closeBtn = document.querySelector('[data-admin-nav-close]');
 
     setOpen(desiredOpen(), { persist: false });
+    if (isOverlay()) revealOverlaySubmenus();
 
     toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -228,6 +240,7 @@
     window.matchMedia(MOBILE_MQ).addEventListener('change', onBreakpoint);
     window.matchMedia(OVERLAY_MQ).addEventListener('change', () => {
       setOpen(isMobile() ? false : document.body.classList.contains('admin-nav-open'), { persist: false });
+      if (isOverlay()) revealOverlaySubmenus();
     });
   }
 
@@ -238,6 +251,7 @@
     toggle() { setOpen(!document.body.classList.contains('admin-nav-open'), { fromUser: true }); },
     isOpen() { return document.body.classList.contains('admin-nav-open'); },
     isOverlay,
+    revealOverlaySubmenus,
     notifyLayout,
   };
 

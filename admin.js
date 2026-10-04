@@ -2756,13 +2756,20 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
-  const isVisibleButton = (button) => (
-    Boolean(button)
-    && !button.hidden
-    && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
-  );
+  const isCollapsedMenuSub = (node) => Boolean(node?.classList?.contains('admin-menu-sub'));
+
+  const isVisibleButton = (button) => {
+    if (!button || button.hidden) return false;
+    if (button.classList.contains('admin-menu-parent')) return false;
+    if (button.hasAttribute('data-sponsors-toggle') || button.hasAttribute('data-boosters-toggle')) return false;
+    let node = button.parentElement;
+    while (node) {
+      // Collapsed Boosters/Sponsors lists stay copyable; only skip permission-hidden groups.
+      if (node.hidden && !isCollapsedMenuSub(node)) return false;
+      node = node.parentElement;
+    }
+    return true;
+  };
 
   const pushButton = (button) => {
     if (!isVisibleButton(button)) return;
@@ -2992,7 +2999,11 @@ function pageLabel(slug) {
 
 function pageShortcutLabel(page) {
   const title = String(page?.title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim();
-  return title || pageLabel(page?.slug || '');
+  const label = title || pageLabel(page?.slug || '');
+  if (String(page?.slug || '').trim().toLowerCase() === 'sponsors') {
+    return /page layout/i.test(label) ? label : `${label} (page layout)`;
+  }
+  return label;
 }
 
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
@@ -3257,6 +3268,7 @@ function showAllowedPanels() {
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
+  window.efhsAdminNav?.revealOverlaySubmenus?.();
   renderDashboard();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   const startTab = scheduleOnly

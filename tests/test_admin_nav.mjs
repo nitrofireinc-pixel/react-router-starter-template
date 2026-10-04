@@ -60,6 +60,10 @@ test('admin nav script stores desktop preference and traps overlay focus', () =>
   assert.match(adminJs, /efhsAdminNav\?\.isOverlay/);
   assert.match(adminJs, /requestedTab/);
   assert.match(adminJs, /get\('tab'\)/);
+  assert.match(navJs, /function revealOverlaySubmenus/);
+  assert.match(navJs, /revealOverlaySubmenus/);
+  assert.match(navJs, /admin-menu-group:not\(\[hidden\]\)/);
+  assert.match(navJs, /revealOverlaySubmenus,/);
   const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
   assert.match(visualJs, /efhs-admin-nav-change/);
   assert.match(visualJs, /relayoutVisualCanvas|editor\.refresh/);
@@ -83,4 +87,22 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.doesNotMatch(styles, /@media\(max-width:980px\)\{[\s\S]*?\.admin-sidebar\{display:none!important\}/);
   assert.match(styles, /@media\(min-width:1024px\) and \(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
   assert.doesNotMatch(styles, /@media\(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
+});
+
+test('mobile admin menu copies collapsed children and labels Sponsors page layout', () => {
+  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
+  const renderFn = adminJs.slice(adminJs.indexOf('function renderMobileAdminMenu()'), adminJs.indexOf('function markAdminNavActive'));
+  assert.match(renderFn, /isCollapsedMenuSub/);
+  assert.match(renderFn, /admin-menu-sub/);
+  assert.doesNotMatch(renderFn, /closest\(\s*['"]\[hidden\]['"]\s*\)/);
+  assert.match(renderFn, /node\.hidden && !isCollapsedMenuSub\(node\)/);
+  assert.match(adminJs, /page layout/i);
+  assert.match(adminJs, /slug \|\| ''\)\)\.trim\(\)\.toLowerCase\(\) === 'sponsors'/);
+  assert.match(adminJs, /revealOverlaySubmenus\?\.\(\)/);
+
+  const chrome = renderAdminSidebarHtml('test');
+  assert.match(chrome, /data-tab="sponsors">Manage sponsors</);
+  assert.match(chrome, /data-tab="booster-members">Booster Members</);
+  assert.match(chrome, /data-boosters-sub hidden/);
+  assert.match(chrome, /data-sponsors-sub hidden/);
 });

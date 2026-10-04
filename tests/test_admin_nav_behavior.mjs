@@ -154,8 +154,38 @@ test('overlay open focuses the drawer after the transition and matches visual 76
     assert.ok(dashClosed.overflowX <= 1, `dashboard overflowX ${dashClosed.overflowX}`);
     assert.ok(visualClosed.overflowX <= 1, `visual overflowX ${visualClosed.overflowX}`);
 
+    await dashboard.evaluate(() => {
+      document.querySelector('[data-sponsors-menu]').hidden = false;
+      document.querySelector('[data-boosters-menu]').hidden = false;
+    });
     await dashboard.locator('.admin-nav-toggle').click();
     await waitForFocusInSidebar(dashboard);
+    const overlayChildren = await dashboard.evaluate(() => {
+      const labels = [...document.querySelectorAll('.admin-menu button')]
+        .filter((button) => {
+          if (button.hidden) return false;
+          const style = getComputedStyle(button);
+          return style.display !== 'none' && style.visibility !== 'hidden';
+        })
+        .map((button) => button.textContent.trim());
+      const sponsorsSub = document.querySelector('[data-sponsors-sub]');
+      const boostersSub = document.querySelector('[data-boosters-sub]');
+      return {
+        labels,
+        sponsorsSubHidden: Boolean(sponsorsSub?.hidden),
+        boostersSubHidden: Boolean(boostersSub?.hidden),
+        sponsorsExpanded: document.querySelector('[data-sponsors-toggle]')?.getAttribute('aria-expanded'),
+        boostersExpanded: document.querySelector('[data-boosters-toggle]')?.getAttribute('aria-expanded'),
+      };
+    });
+    assert.equal(overlayChildren.sponsorsSubHidden, false);
+    assert.equal(overlayChildren.boostersSubHidden, false);
+    assert.equal(overlayChildren.sponsorsExpanded, 'true');
+    assert.equal(overlayChildren.boostersExpanded, 'true');
+    assert.ok(overlayChildren.labels.includes('Manage sponsors'), `missing Manage sponsors in ${overlayChildren.labels.join(', ')}`);
+    assert.ok(overlayChildren.labels.includes('Booster Members'), `missing Booster Members in ${overlayChildren.labels.join(', ')}`);
+    assert.ok(overlayChildren.labels.includes('Meeting Minutes'), `missing Meeting Minutes in ${overlayChildren.labels.join(', ')}`);
+    assert.ok(overlayChildren.labels.includes('Badge Creator'), `missing Badge Creator in ${overlayChildren.labels.join(', ')}`);
     const focused = await dashboard.evaluate(() => {
       const sidebar = document.getElementById('admin-sidebar');
       const active = document.activeElement;
@@ -200,6 +230,23 @@ test('overlay open focuses the drawer after the transition and matches visual 76
     assert.ok(dashOpen.workspaceWidth >= 740, `open dashboard should stay full width, got ${dashOpen.workspaceWidth}`);
     assert.ok(visualOpen.workspaceWidth >= 740, `open visual should stay full width, got ${visualOpen.workspaceWidth}`);
     assert.ok(Math.abs(dashOpen.workspaceWidth - visualOpen.workspaceWidth) <= 24);
+
+    await dashboard.setViewportSize({ width: 390, height: 844 });
+    await dashboard.evaluate(() => {
+      document.querySelector('[data-sponsors-menu]').hidden = false;
+      document.querySelector('[data-boosters-menu]').hidden = false;
+      window.efhsAdminNav.open();
+      window.efhsAdminNav.revealOverlaySubmenus();
+    });
+    await dashboard.waitForTimeout(260);
+    const phoneChildren = await dashboard.evaluate(() => ({
+      manage: !document.querySelector('[data-tab="sponsors"]')?.hidden
+        && getComputedStyle(document.querySelector('[data-tab="sponsors"]')).display !== 'none',
+      members: !document.querySelector('[data-tab="booster-members"]')?.hidden
+        && getComputedStyle(document.querySelector('[data-tab="booster-members"]')).display !== 'none',
+    }));
+    assert.equal(phoneChildren.manage, true, 'Manage sponsors should stay visible on phone overlay');
+    assert.equal(phoneChildren.members, true, 'Booster Members should stay visible on phone overlay');
 
     await dashboard.close();
     await visual.close();
