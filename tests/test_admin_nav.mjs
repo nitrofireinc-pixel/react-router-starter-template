@@ -80,8 +80,9 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.doesNotMatch(css, /transition:[^;]*visibility var\(--admin-nav-duration\)/);
   const overlayBlock = css.slice(css.indexOf('@media (max-width:1023px)'));
   assert.match(overlayBlock, /html\.admin-nav-open[\s\S]*?--admin-nav-col:0px/);
-  assert.match(overlayBlock, /grid-template-columns:minmax\(0,1fr\)!important/);
-  assert.match(overlayBlock, /grid-column:1\/-1/);
+  assert.match(overlayBlock, /flex-direction:column!important/);
+  assert.match(overlayBlock, /flex-wrap:nowrap!important/);
+  assert.match(overlayBlock, /#admin-sidebar \.admin-menu/);
   assert.match(overlayBlock, /overflow-wrap:break-word/);
   assert.match(overlayBlock, /word-break:normal/);
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
@@ -93,7 +94,7 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.doesNotMatch(styles, /@media\(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
   assert.match(styles, /\.cms-shell:not\(\.image-admin-shell\) \.admin-tabs\{grid-template-columns:repeat\(2/);
   assert.doesNotMatch(styles, /@media\(max-width:900px\)\{[\s\S]*?\.cms-shell \.admin-tabs\{grid-template-columns:repeat\(2/);
-  assert.match(styles, /\.admin-menu\{display:grid!important;grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(styles, /\.admin-menu\{display:flex!important;flex-direction:column!important;flex-wrap:nowrap!important/);
   assert.match(styles, /\.admin-page-row\{\s*display:flex/);
 });
 

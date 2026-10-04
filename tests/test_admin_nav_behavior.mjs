@@ -28,6 +28,8 @@ function dashboardHtml() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/public-theme.css">
+  <link rel="stylesheet" href="/home-redesign.css">
   <link rel="stylesheet" href="/admin-nav.css">
 </head>
 <body class="admin-body">
@@ -282,7 +284,7 @@ function measureOverlayStack() {
   const sidebar = document.getElementById('admin-sidebar');
   const menu = document.querySelector('.admin-menu');
   const menuStyle = getComputedStyle(menu);
-  const items = [...menu.querySelectorAll('button, .admin-menu-label, .admin-page-edit')]
+  const items = [...menu.querySelectorAll(':scope > button, :scope > .admin-menu-label, :scope .admin-page-edit, :scope .admin-menu-sub button, :scope .admin-menu-parent')]
     .filter((el) => {
       if (el.hidden || el.closest('[hidden]')) return false;
       const style = getComputedStyle(el);
@@ -331,7 +333,9 @@ function measureOverlayStack() {
   }
   const becomeStyle = wrapSample ? getComputedStyle(wrapSample) : null;
   return {
-    columns: menuStyle.gridTemplateColumns,
+    display: menuStyle.display,
+    flexDirection: menuStyle.flexDirection,
+    flexWrap: menuStyle.flexWrap,
     overflowX: Math.max(sidebar.scrollWidth - sidebar.clientWidth, document.documentElement.scrollWidth - document.documentElement.clientWidth),
     sideBySide,
     gears,
@@ -367,7 +371,9 @@ test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t
       await page.evaluate(prepareOverlayMenu);
       await page.waitForTimeout(280);
       const stack = await page.evaluate(measureOverlayStack);
-      assert.match(stack.columns, /^[0-9.]+px$/, `${width}px drawer should be one column, got ${stack.columns}`);
+      assert.equal(stack.display, 'flex', `${width}px display ${stack.display}`);
+      assert.equal(stack.flexDirection, 'column', `${width}px flex-direction ${stack.flexDirection}`);
+      assert.equal(stack.flexWrap, 'nowrap', `${width}px flex-wrap ${stack.flexWrap}`);
       assert.equal(stack.sideBySide.length, 0, `${width}px side-by-side items: ${stack.sideBySide.join('; ')}`);
       assert.ok(stack.overflowX <= 1, `${width}px overflowX ${stack.overflowX}`);
       assert.equal(stack.wordBreak, 'normal', `${width}px word-break ${stack.wordBreak}`);

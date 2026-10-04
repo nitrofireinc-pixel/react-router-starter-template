@@ -296,17 +296,18 @@ body.visual-editor-body .admin-user{display:grid;gap:2px;margin:0 6px;padding:13
 body.visual-editor-body .admin-user b{color:#fff;line-height:1.15}
 body.visual-editor-body .admin-user span{font-size:.73rem;color:#fbd7d9;text-transform:uppercase;letter-spacing:.1em;font-weight:900}
 body.visual-editor-body .admin-menu{
-  display:grid;
-  grid-template-columns:minmax(0,1fr);
-  justify-items:stretch;
-  align-content:start;
+  display:flex!important;
+  flex-direction:column!important;
+  flex-wrap:nowrap!important;
+  align-items:stretch!important;
   gap:5px;
   margin:0;
   flex:1 1 auto;
   min-height:0;
   overflow:auto;
+  grid-template-columns:minmax(0,1fr)!important;
 }
-body.visual-editor-body .admin-menu > *{grid-column:1/-1;min-width:0;max-width:100%}
+body.visual-editor-body .admin-menu > *{display:block;width:100%;min-width:0;max-width:100%;flex:0 0 auto;grid-column:1/-1}
 body.visual-editor-body .admin-menu button,
 body.visual-editor-body .admin-logout{
   width:100%;
@@ -355,20 +356,36 @@ body.visual-editor-body .admin-change-password{
 
 /* Overlay drawer and shared sidebar list stay one column under 1024px */
 @media (max-width:1023px){
+  #admin-sidebar .admin-menu,
+  #admin-sidebar .admin-tabs,
   .image-admin-shell .admin-menu,
   .image-admin-shell .admin-tabs,
   body.visual-editor-body .admin-menu{
-    display:grid!important;
+    display:flex!important;
+    flex-direction:column!important;
+    flex-wrap:nowrap!important;
+    align-items:stretch!important;
     grid-template-columns:minmax(0,1fr)!important;
-    justify-items:stretch;
-    align-content:start;
   }
+  #admin-sidebar .admin-menu > *,
+  #admin-sidebar .admin-tabs > *,
   .image-admin-shell .admin-menu > *,
   .image-admin-shell .admin-tabs > *,
   body.visual-editor-body .admin-menu > *{
-    grid-column:1/-1;
+    display:block;
+    width:100%;
     min-width:0;
     max-width:100%;
+    flex:0 0 auto;
+    grid-column:1/-1;
+  }
+  #admin-sidebar .admin-menu-group,
+  #admin-sidebar .admin-page-shortcuts,
+  #admin-sidebar .admin-menu-sub{
+    display:flex;
+    flex-direction:column;
+    flex-wrap:nowrap;
+    align-items:stretch;
   }
   .admin-sidebar .admin-menu-label{
     display:block;
