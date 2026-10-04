@@ -1,22 +1,46 @@
 /**
- * Join-the-Band visual editor pilot (GrapesJS).
- * Publish writes sanitized HTML onto cms_pages.body_html so the public
- * join page stays on the existing single cached page read.
+ * Generic CMS visual editor (GrapesJS).
+ * Publish writes sanitized HTML onto cms_pages.body_html so public pages
+ * stay on the existing single cached page read.
  */
 
 export const VISUAL_PILOT_SLUG = 'join';
 export const VISUAL_PILOT_PATH = '/join.html';
 export const VISUAL_VERSION_LIMIT = 20;
+export const VISUAL_EDITOR_PATH_PREFIX = '/admin/visual';
 export const VISUAL_EDITOR_PATH = '/admin/visual/join';
+export const VISUAL_EDITOR_NOT_YET_SLUGS = Object.freeze(['home']);
+
+export function normalizeVisualSlug(slug = '') {
+  return String(slug || '').trim().toLowerCase();
+}
+
+export function isVisualEditorSlug(slug = '') {
+  const key = normalizeVisualSlug(slug);
+  if (!key || !/^[a-z0-9-]+$/.test(key)) return false;
+  return !VISUAL_EDITOR_NOT_YET_SLUGS.includes(key);
+}
 
 export function isVisualPilotSlug(slug = '') {
-  return String(slug || '').trim().toLowerCase() === VISUAL_PILOT_SLUG;
+  return isVisualEditorSlug(slug);
+}
+
+export function visualEditorPath(slug = '') {
+  return `${VISUAL_EDITOR_PATH_PREFIX}/${normalizeVisualSlug(slug)}`;
+}
+
+export function canEditVisualPage(user, slug, canEditPage) {
+  if (!user || !isVisualEditorSlug(slug)) return false;
+  if (typeof canEditPage === 'function') return Boolean(canEditPage(user, normalizeVisualSlug(slug)));
+  return false;
 }
 
 export function canEditVisualPilot(user, canEditPage) {
-  if (!user) return false;
-  if (typeof canEditPage === 'function') return Boolean(canEditPage(user, VISUAL_PILOT_SLUG));
-  return false;
+  return canEditVisualPage(user, VISUAL_PILOT_SLUG, canEditPage);
+}
+
+export function isVisualPublishedRow(row) {
+  return Boolean(String(row?.published_at || '').trim());
 }
 
 const ALLOWED_TAGS = new Set([
@@ -27,6 +51,92 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 const VOID_TAGS = new Set(['br', 'img']);
+
+export const LIVE_DATA_LOCK_KINDS = Object.freeze([
+  { test: /\bid\s*=\s*["']caldev-app["']|\bclass=["'][^"']*\bcaldev-app\b/i, kind: 'calendar' },
+  { test: /\bdata-events\b/i, kind: 'events' },
+  { test: /\bdata-photo-gallery\b/i, kind: 'gallery' },
+  { test: /\bdata-sponsors\b/i, kind: 'sponsors' },
+  { test: /\bdata-staff\b/i, kind: 'staff' },
+  { test: /\bdata-booster-meetings\b/i, kind: 'booster-meetings' },
+  { test: /\bdata-booster-members\b/i, kind: 'booster-members' },
+  { test: /\bdata-boosters-dues\b/i, kind: 'dues' },
+  { test: /\bdata-contact-form-slot\b/i, kind: 'contact-form' },
+  { test: /\bdata-contact-form\b/i, kind: 'contact-form' },
+  { test: /\bdata-cms-form\b/i, kind: 'form' },
+  { test: /\bdata-email-list-signup\b/i, kind: 'email-list' },
+  { test: /\bdata-sponsor-tiers\b/i, kind: 'sponsor-tiers' },
+  { test: /\bdata-fundraising-cards\b/i, kind: 'fundraiser' },
+  { test: /\bdata-donate-open\b/i, kind: 'donate' },
+  { test: /\bdata-dues-open\b/i, kind: 'dues' },
+  { test: /\bdata-sponsor-choice-open\b/i, kind: 'sponsor-form' },
+]);
+
+export function liveDataLockKind(attrs = '') {
+  const text = String(attrs || '');
+  for (const item of LIVE_DATA_LOCK_KINDS) {
+    if (item.test.test(text)) return item.kind;
+  }
+  return '';
+}
+
+export function wrapLiveDataAsLocked(html = '') {
+  return String(html || '').replace(/<([a-z0-9]+)([^>]*)>/gi, (match, tag, attrs) => {
+    if (/\bdata-visual-locked\b/i.test(attrs)) return match;
+    const kind = liveDataLockKind(attrs);
+    if (!kind) return match;
+    return `<${tag}${attrs} data-visual-locked="${kind}">`;
+  });
+}
+
+function findHtmlElementRange(html, start) {
+  const open = String(html || '').slice(start).match(/^<([a-z0-9]+)([^>]*)>/i);
+  if (!open) return null;
+  const tag = open[1].toLowerCase();
+  const openLen = open[0].length;
+  if (VOID_TAGS.has(tag) || /\/\s*>$/.test(open[0])) {
+    return { start, end: start + openLen };
+  }
+  const re = new RegExp(`</?${tag}\\b[^>]*>`, 'gi');
+  re.lastIndex = start + openLen;
+  let depth = 1;
+  let match;
+  while ((match = re.exec(html))) {
+    if (match[0].startsWith('</')) depth -= 1;
+    else if (!/\/\s*>$/.test(match[0])) depth += 1;
+    if (depth === 0) return { start, end: match.index + match[0].length };
+  }
+  return { start, end: start + openLen };
+}
+
+export function extractLockedVisualRegions(html = '') {
+  const source = String(html || '');
+  const blocks = [];
+  let out = '';
+  let last = 0;
+  const openRe = /<([a-z0-9]+)([^>]*\bdata-visual-locked\b[^>]*)>/gi;
+  let match;
+  while ((match = openRe.exec(source))) {
+    const range = findHtmlElementRange(source, match.index);
+    if (!range) continue;
+    out += source.slice(last, range.start);
+    out += `<!--visual-locked-${blocks.length}-->`;
+    blocks.push(source.slice(range.start, range.end));
+    last = range.end;
+    openRe.lastIndex = range.end;
+  }
+  out += source.slice(last);
+  return { html: out, blocks };
+}
+
+export function sanitizeLockedVisualHtml(html = '') {
+  return String(html || '')
+    .replace(/<(script|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|iframe|object|embed|link|meta)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/\u0000/g, '');
+}
 
 function escapeAttr(value) {
   return String(value || '')
@@ -120,11 +230,7 @@ function sanitizeStyle(value = '', tag = '') {
       && (SAFE_LENGTH.test(next) || next === 'auto' || next === '0')) {
       parts.push(`${prop}: ${next}`);
     }
-    if (['top', 'right', 'bottom', 'left'].includes(prop)
-      && (SAFE_LENGTH.test(next) || next === 'auto')) {
-      parts.push(`${prop}: ${next}`);
-    }
-    if (prop === 'position' && /^(static|relative|absolute)$/i.test(next)) parts.push(`position: ${next}`);
+    if (prop === 'position' && /^(static|relative)$/i.test(next)) parts.push(`position: ${next}`);
     if (prop === 'display' && /^(block|inline|inline-block|flex|none)$/i.test(next)) parts.push(`display: ${next}`);
     if (prop === 'flex-direction' && /^(row|column)$/i.test(next)) parts.push(`flex-direction: ${next}`);
     if (prop === 'justify-content' && /^(flex-start|flex-end|center|space-between|space-around)$/i.test(next)) {
@@ -134,9 +240,6 @@ function sanitizeStyle(value = '', tag = '') {
     if (prop === 'gap' && SAFE_LENGTH.test(next)) parts.push(`gap: ${next}`);
     if (prop === 'object-fit' && /^(contain|cover|fill|none)$/i.test(next)) parts.push(`object-fit: ${next}`);
     if (prop === 'border-radius' && SAFE_BOX.test(next)) parts.push(`border-radius: ${next}`);
-    if (prop === 'transform' && /^translate\(\s*[-+]?\d*\.?\d+(px|%)\s*,\s*[-+]?\d*\.?\d+(px|%)\s*\)$/i.test(next)) {
-      parts.push(`transform: ${next}`);
-    }
   }
   return parts.join('; ');
 }
@@ -268,6 +371,8 @@ function rewriteOpenTag(tag, rawAttrs) {
   if (className) open += attr('class', className);
   const block = String((attrs.match(/\bdata-visual-block\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
   if (block && /^[a-z0-9-]{1,32}$/i.test(block)) open += attr('data-visual-block', block);
+  const locked = String((attrs.match(/\bdata-visual-locked\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
+  if (locked && /^[a-z0-9-]{1,32}$/i.test(locked)) open += attr('data-visual-locked', locked);
   if (tag === 'a') {
     const hrefMatch = attrs.match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
     const href = hrefMatch?.[1] || hrefMatch?.[2] || '';
@@ -286,8 +391,9 @@ function rewriteOpenTag(tag, rawAttrs) {
 }
 
 export function sanitizeVisualPageHtml(dirty = '') {
+  const pulled = extractLockedVisualRegions(String(dirty || ''));
   const styles = [];
-  let html = String(dirty || '').replace(
+  let html = pulled.html.replace(
     /<style\b[^>]*\bdata-visual-css\b[^>]*>([\s\S]*?)<\/style>/gi,
     (_, css) => {
       const clean = sanitizeVisualCss(css);
@@ -310,6 +416,9 @@ export function sanitizeVisualPageHtml(dirty = '') {
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .replace(/\u0000/g, '')
     .trim();
+  pulled.blocks.forEach((block, index) => {
+    html = html.replace(`<!--visual-locked-${index}-->`, sanitizeLockedVisualHtml(block));
+  });
   const css = sanitizeVisualCss(styles.join('\n'));
   return css ? `<style data-visual-css>${css}</style>${html}` : html;
 }
@@ -343,6 +452,49 @@ export function extractEditableJoinHtml(html = '') {
     .replace(/<header\b[^>]*class="[^"]*\bsite-header\b[\s\S]*?<\/header>/gi, '')
     .replace(/<footer\b[^>]*class="[^"]*\bfooter\b[\s\S]*?<\/footer>/gi, '')
     .replace(/<div\b[^>]*class="[^"]*\butility\b[\s\S]*?<\/div>/gi, '');
+}
+
+export const extractEditablePageHtml = extractEditableJoinHtml;
+
+export function defaultVisualHtml(slug = '') {
+  if (normalizeVisualSlug(slug) === VISUAL_PILOT_SLUG) return defaultJoinVisualHtml();
+  return `<section class="page-hero" data-visual-block="hero"><div class="page-title"><h1>Page</h1><p>Add the page heading and intro.</p></div></section><section class="content"><div class="wrap"><div class="card" data-visual-block="text"><h2>Content</h2><p>Add page content here.</p></div></div></section>`;
+}
+
+export function importCmsBodyToVisual(html = '', slug = '') {
+  const extracted = extractEditablePageHtml(html);
+  const wrapped = wrapLiveDataAsLocked(extracted);
+  const clean = sanitizeVisualPageHtml(wrapped);
+  if (clean && !isNearEmptyVisualHtml(clean)) return clean;
+  return defaultVisualHtml(slug);
+}
+
+export function overflowElementLabel({
+  tag = '',
+  id = '',
+  block = '',
+  heading = '',
+  text = '',
+} = {}) {
+  const title = String(heading || '').replace(/\s+/g, ' ').trim();
+  if (title) return title.slice(0, 64);
+  const locked = String(block || '').replace(/-/g, ' ').trim();
+  if (locked) return locked;
+  if (id) return `#${id}`;
+  const snippet = String(text || '').replace(/\s+/g, ' ').trim();
+  if (snippet) return snippet.slice(0, 48);
+  return String(tag || 'element').toLowerCase() || 'element';
+}
+
+export function formatNarrowOverflowWarning(issues = []) {
+  const rows = (Array.isArray(issues) ? issues : []).filter(Boolean);
+  if (!rows.length) return '';
+  return rows.map((item) => {
+    const width = Number(item.width) || 0;
+    const viewport = Number(item.viewportWidth) || 0;
+    const name = overflowElementLabel(item);
+    return `At ${viewport}px, “${name}” is ${width}px wide and overflows the screen.`;
+  }).join(' ');
 }
 
 export function visibleVisualText(html = '') {
@@ -425,25 +577,40 @@ export async function ensureVisualPagesSchema(env) {
   await visualSchemaPromise;
 }
 
-export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
-  if (!isVisualPilotSlug(slug)) return null;
+export async function pageHasVisualPublish(env, slug) {
+  const key = normalizeVisualSlug(slug);
+  if (!key) return false;
   await ensureVisualPagesSchema(env);
+  const row = await env.DB.prepare(
+    'SELECT published_at FROM visual_pages WHERE slug = ?',
+  ).bind(key).first();
+  return isVisualPublishedRow(row);
+}
+
+export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
+  const key = normalizeVisualSlug(slug);
+  if (!isVisualEditorSlug(key)) return null;
+  await ensureVisualPagesSchema(env);
+  const cms = await env.DB.prepare(
+    'SELECT title, path, body_html FROM cms_pages WHERE slug = ?',
+  ).bind(key).first();
+  if (!cms) return null;
   const page = await env.DB.prepare(
     'SELECT slug, draft_html, published_html, published_at, updated_at FROM visual_pages WHERE slug = ?',
-  ).bind(VISUAL_PILOT_SLUG).first();
-  const cms = await env.DB.prepare(
-    'SELECT title, body_html FROM cms_pages WHERE slug = ?',
-  ).bind(VISUAL_PILOT_SLUG).first();
+  ).bind(key).first();
   const versions = await env.DB.prepare(
     'SELECT id, kind, created_at, created_by_name FROM visual_page_versions WHERE slug = ? ORDER BY id DESC LIMIT 20',
-  ).bind(VISUAL_PILOT_SLUG).all();
-  const starter = defaultJoinVisualHtml();
-  const draft = sanitizeVisualPageHtml(page?.draft_html || cms?.body_html || starter) || starter;
+  ).bind(key).all();
+  const starter = defaultVisualHtml(key);
+  const rawDraft = String(page?.draft_html || '').trim();
+  const imported = rawDraft ? '' : importCmsBodyToVisual(cms.body_html || '', key);
+  const draft = sanitizeVisualPageHtml(rawDraft || imported || starter) || starter;
   const published = sanitizeVisualPageHtml(page?.published_html || '') || '';
   return {
-    slug: VISUAL_PILOT_SLUG,
-    path: VISUAL_PILOT_PATH,
-    title: cms?.title || 'Join the Band',
+    slug: key,
+    path: cms.path || (key === VISUAL_PILOT_SLUG ? VISUAL_PILOT_PATH : `/${key}.html`),
+    title: cms.title || key,
+    visual_editor: true,
     draft_html: draft,
     published_html: published,
     published_at: page?.published_at || null,
@@ -458,11 +625,24 @@ export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
 }
 
 export async function saveVisualPage(env, {
+  slug = VISUAL_PILOT_SLUG,
   html,
   action = 'draft',
   user = null,
 } = {}) {
+  const key = normalizeVisualSlug(slug);
+  if (!isVisualEditorSlug(key)) {
+    const error = new Error('This page is not yet available in the visual editor.');
+    error.status = 409;
+    throw error;
+  }
   await ensureVisualPagesSchema(env);
+  const cms = await env.DB.prepare('SELECT slug FROM cms_pages WHERE slug = ?').bind(key).first();
+  if (!cms) {
+    const error = new Error('Page not found');
+    error.status = 404;
+    throw error;
+  }
   const clean = sanitizeVisualPageHtml(html);
   if (!clean || isNearEmptyVisualHtml(clean)) {
     const error = new Error('Add some page content before saving.');
@@ -472,7 +652,7 @@ export async function saveVisualPage(env, {
   const kind = action === 'publish' ? 'publish' : 'draft';
   const actorId = Number(user?.id) || null;
   const actorName = String(user?.display_name || user?.username || '').trim();
-  const existing = await env.DB.prepare('SELECT slug FROM visual_pages WHERE slug = ?').bind(VISUAL_PILOT_SLUG).first();
+  const existing = await env.DB.prepare('SELECT slug FROM visual_pages WHERE slug = ?').bind(key).first();
   if (existing) {
     if (kind === 'publish') {
       await env.DB.prepare(`
@@ -480,20 +660,20 @@ export async function saveVisualPage(env, {
         SET draft_html = ?, published_html = ?, published_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP, updated_by = ?
         WHERE slug = ?
-      `).bind(clean, clean, actorId, VISUAL_PILOT_SLUG).run();
+      `).bind(clean, clean, actorId, key).run();
     } else {
       await env.DB.prepare(`
         UPDATE visual_pages
         SET draft_html = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
         WHERE slug = ?
-      `).bind(clean, actorId, VISUAL_PILOT_SLUG).run();
+      `).bind(clean, actorId, key).run();
     }
   } else {
     await env.DB.prepare(`
       INSERT INTO visual_pages (slug, draft_html, published_html, published_at, updated_by)
       VALUES (?, ?, ?, ?, ?)
     `).bind(
-      VISUAL_PILOT_SLUG,
+      key,
       clean,
       kind === 'publish' ? clean : '',
       kind === 'publish' ? new Date().toISOString() : null,
@@ -503,10 +683,10 @@ export async function saveVisualPage(env, {
   await env.DB.prepare(`
     INSERT INTO visual_page_versions (slug, kind, html, created_by, created_by_name)
     VALUES (?, ?, ?, ?, ?)
-  `).bind(VISUAL_PILOT_SLUG, kind, clean, actorId, actorName).run();
+  `).bind(key, kind, clean, actorId, actorName).run();
   const rows = await env.DB.prepare(
     'SELECT id FROM visual_page_versions WHERE slug = ? ORDER BY id DESC',
-  ).bind(VISUAL_PILOT_SLUG).all();
+  ).bind(key).all();
   const { dropIds } = trimVisualVersions(rows?.results || [], VISUAL_VERSION_LIMIT);
   for (const id of dropIds) {
     await env.DB.prepare('DELETE FROM visual_page_versions WHERE id = ?').bind(id).run();
@@ -514,12 +694,13 @@ export async function saveVisualPage(env, {
   if (kind === 'publish') {
     await env.DB.prepare(
       'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?',
-    ).bind(clean, VISUAL_PILOT_SLUG).run();
+    ).bind(clean, key).run();
   }
-  return loadVisualPageState(env);
+  return loadVisualPageState(env, key);
 }
 
-export async function restoreVisualVersion(env, versionId, user = null) {
+export async function restoreVisualVersion(env, versionId, user = null, slug = VISUAL_PILOT_SLUG) {
+  const key = normalizeVisualSlug(slug);
   await ensureVisualPagesSchema(env);
   const id = Number(versionId);
   if (!Number.isFinite(id) || id <= 0) {
@@ -529,31 +710,45 @@ export async function restoreVisualVersion(env, versionId, user = null) {
   }
   const row = await env.DB.prepare(
     'SELECT id, slug, html FROM visual_page_versions WHERE id = ? AND slug = ?',
-  ).bind(id, VISUAL_PILOT_SLUG).first();
+  ).bind(id, key).first();
   if (!row) {
     const error = new Error('Version not found');
     error.status = 404;
     throw error;
   }
-  return saveVisualPage(env, { html: row.html, action: 'draft', user });
+  return saveVisualPage(env, { slug: key, html: row.html, action: 'draft', user });
 }
 
-export function renderVisualEditorHtml(assetVersion = 'dev') {
+export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   const v = escapeAttr(assetVersion);
+  const slug = normalizeVisualSlug(options.slug || VISUAL_PILOT_SLUG) || VISUAL_PILOT_SLUG;
+  const title = String(options.title || (slug === VISUAL_PILOT_SLUG ? 'Join the Band' : slug)).trim() || slug;
+  const path = String(options.path || (slug === VISUAL_PILOT_SLUG ? VISUAL_PILOT_PATH : `/${slug}.html`)).trim()
+    || `/${slug}.html`;
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Editing Join the Band</title>
+  <title>Editing ${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css?v=${v}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
-<body class="visual-editor-body">
+<body class="visual-editor-body" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}">
+  <div class="visual-phone-gate" data-visual-phone-gate>
+    <div class="visual-phone-gate-card">
+      <h1>Please edit pages on a computer or tablet.</h1>
+      <p>Phones are too small for the editor.</p>
+      <div class="visual-phone-gate-actions">
+        <a class="visual-banner-btn visual-banner-btn-primary" href="${escapeAttr(path)}" data-visual-view-live>View live page</a>
+        <a class="visual-banner-btn" href="/admin" data-visual-back-cms>Back to CMS</a>
+      </div>
+    </div>
+  </div>
   <header class="visual-edit-banner" data-visual-banner>
     <p class="visual-edit-banner-label">This page is being edited</p>
     <div class="visual-edit-banner-title">
-      <strong>Join the Band</strong>
+      <strong>${escapeHtml(title)}</strong>
       <small>Visitors still see the published page until you publish</small>
     </div>
     <div class="visual-edit-banner-tools">
@@ -608,6 +803,16 @@ export function renderVisualEditorHtml(assetVersion = 'dev') {
         <button type="button" data-visual-link-close>Cancel</button>
       </div>
     </form>
+  </div>
+  <div class="visual-modal" data-visual-overflow-modal hidden>
+    <div class="visual-modal-card" role="dialog" aria-labelledby="visual-overflow-title">
+      <h2 id="visual-overflow-title">This layout is too wide for phones</h2>
+      <p data-visual-overflow-detail></p>
+      <div class="visual-modal-actions">
+        <button type="button" class="visual-banner-btn visual-banner-btn-primary" data-visual-overflow-continue>Publish anyway</button>
+        <button type="button" class="visual-banner-btn" data-visual-overflow-back>Go back</button>
+      </div>
+    </div>
   </div>
   <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>

@@ -50,7 +50,7 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /\/api\/admin\/website-guide\.pdf/);
   assert.match(html, /Coming Soon/);
   assert.match(html, /Ensembles/);
-  assert.match(html, /Join page visual editor/);
+  assert.match(html, /Visual page editor/);
   assert.match(html, /last 20 saves/);
   assert.match(html, /Schedule Board/);
   assert.match(html, /IMPORTANT/);

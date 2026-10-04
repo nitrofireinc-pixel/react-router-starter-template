@@ -1,5 +1,15 @@
-/* Join visual editor pilot — Wix-style on-page canvas. GrapesJS engine, custom chrome. */
+/* Generic CMS visual editor — Wix-style on-page canvas. GrapesJS engine, custom chrome. */
 (function startVisualEditor() {
+  const PHONE_EDITOR_MAX = 767;
+  const pageSlug = document.body?.dataset?.visualSlug
+    || (window.location.pathname.match(/^\/admin\/visual\/([a-z0-9-]+)/) || [])[1]
+    || '';
+  const pagePath = document.body?.dataset?.visualPath || (pageSlug ? `/${pageSlug}.html` : '/');
+  const phoneGate = window.matchMedia(`(max-width: ${PHONE_EDITOR_MAX}px)`).matches;
+  if (phoneGate) {
+    document.body.classList.add('is-visual-phone-gate');
+    return;
+  }
   const statusEl = document.querySelector('[data-visual-status]');
   const addDrawer = document.querySelector('[data-visual-add-drawer]');
   const addGrid = document.querySelector('[data-visual-add-grid]');
@@ -153,8 +163,9 @@
   }
 
   async function loadLiveCanvasHtml(draftHtml) {
+    const bodyClass = `efhs-theme coming-soon-page visual-page-${pageSlug || 'page'}`;
     try {
-      const response = await fetch('/join.html', { credentials: 'same-origin', cache: 'no-store' });
+      const response = await fetch(pagePath || '/join.html', { credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) throw new Error('Live page unavailable');
       const liveHtml = await response.text();
       const doc = new DOMParser().parseFromString(liveHtml, 'text/html');
@@ -162,12 +173,12 @@
       const main = doc.querySelector('#main') || doc.querySelector('main');
       if (!main) throw new Error('Live page has no main');
       main.innerHTML = draftHtml;
-      doc.body.classList.add('efhs-theme', 'coming-soon-page', 'visual-page-join');
+      doc.body.classList.add('efhs-theme', 'coming-soon-page', `visual-page-${pageSlug || 'page'}`);
       return { html: doc.body.innerHTML, bodyClass: doc.body.className };
     } catch (_) {
       return {
         html: fallbackChrome(draftHtml),
-        bodyClass: 'efhs-theme coming-soon-page visual-page-join',
+        bodyClass,
       };
     }
   }
@@ -311,10 +322,39 @@
     }
   }
 
+  function isLockedLiveBlock(comp) {
+    let current = comp;
+    while (current && !isWrapper(current)) {
+      const attrs = current.getAttributes?.() || {};
+      if (attrs['data-visual-locked']) return true;
+      current = current.parent?.();
+    }
+    return false;
+  }
+
+  function lockLiveDataBlock(comp) {
+    comp.set({
+      selectable: true,
+      hoverable: true,
+      highlightable: true,
+      draggable: false,
+      droppable: false,
+      copyable: false,
+      removable: false,
+      editable: false,
+      resizable: false,
+      locked: true,
+    });
+  }
+
   function applyComponentRules(comp) {
     if (isWrapper(comp)) return;
     if (isMain(comp)) {
       lockMainFrame(comp);
+      return;
+    }
+    if (isLockedLiveBlock(comp)) {
+      lockLiveDataBlock(comp);
       return;
     }
     if (isInsideMain(comp)) {
@@ -468,7 +508,7 @@
       button.addEventListener('click', async () => {
         if (!window.confirm('Restore this version into the draft?')) return;
         try {
-          const state = await jsonFetch('/api/admin/visual-pages/join/restore', {
+          const state = await jsonFetch(`/api/admin/visual-pages/${encodeURIComponent(pageSlug)}/restore`, {
             method: 'POST',
             body: JSON.stringify({ version_id: Number(button.dataset.restore) }),
           });
@@ -476,7 +516,7 @@
           renderVersions(state.versions);
           setDrawer(historyDrawer, false);
           markDirty();
-          setStatus('Draft restored. Publish when you want it on the public join page.');
+          setStatus('Draft restored. Publish when you want it on the public page.');
         } catch (error) {
           setStatus(error.message, true);
         }
@@ -552,6 +592,26 @@
     return !/[a-z0-9]/i.test(text);
   }
 
+  function enableCanvasScroll() {
+    const frame = editor.Canvas.getFrameEl?.();
+    if (frame) frame.setAttribute('scrolling', 'yes');
+    const doc = editor.Canvas.getDocument();
+    if (doc) {
+      doc.documentElement.style.overflowY = 'auto';
+      doc.documentElement.style.overflowX = 'hidden';
+      doc.body.style.overflowY = 'auto';
+      doc.body.style.overflowX = 'hidden';
+      doc.documentElement.style.height = 'auto';
+      doc.body.style.height = 'auto';
+      doc.body.style.touchAction = 'pan-y';
+    }
+    document.querySelectorAll('.gjs-cv-canvas, .gjs-cv-canvas__frames, .visual-editor-stage').forEach((node) => {
+      node.style.overflowY = 'auto';
+      node.style.overflowX = 'hidden';
+      node.style.touchAction = 'pan-y';
+    });
+  }
+
   async function loadCanvas(draftHtml) {
     editor.UndoManager?.stop?.();
     const split = splitVisualCss(draftHtml);
@@ -562,14 +622,16 @@
     if (doc?.body) doc.body.className = frame.bodyClass;
     applyRulesTree(editor.getWrapper());
     stripLegacyInlineWidths(findMain() || editor.getWrapper());
+    enableCanvasScroll();
     editor.UndoManager?.start?.();
     clearLoadHistory();
   }
 
-  editor.on('load', () => {
+    editor.on('load', () => {
     const doc = editor.Canvas.getDocument();
-    if (doc?.body) doc.body.classList.add('efhs-theme', 'coming-soon-page', 'visual-page-join');
+    if (doc?.body) doc.body.classList.add('efhs-theme', 'coming-soon-page', `visual-page-${pageSlug || 'page'}`);
     applyRulesTree(editor.getWrapper());
+    enableCanvasScroll();
   });
 
   editor.on('component:add', (comp) => {
@@ -683,6 +745,11 @@
       editor.select(null);
       return;
     }
+    if (isLockedLiveBlock(comp)) {
+      comp.set('toolbar', []);
+      setStatus('This block shows live data and cannot be edited.');
+      return;
+    }
     const tag = String(comp.get('tagName') || '').toLowerCase();
     if (tag === 'summary') {
       const details = detailsOf(comp);
@@ -714,6 +781,7 @@
   function setActiveDevice(id) {
     editor.setDevice(id);
     if (deviceSelect) deviceSelect.value = id;
+    requestAnimationFrame(() => enableCanvasScroll());
     clampSelectionToolbarSoon();
   }
   deviceSelect?.addEventListener('change', () => setActiveDevice(deviceSelect.value));
@@ -754,14 +822,117 @@
 
   renderAddGallery();
 
-  async function save(action) {
+  function overflowLabel(el) {
+    if (!el) return 'element';
+    const heading = el.querySelector?.('h1,h2,h3,h4')?.textContent?.replace(/\s+/g, ' ').trim();
+    if (heading) return heading.slice(0, 64);
+    const block = el.getAttribute?.('data-visual-block') || el.getAttribute?.('data-visual-locked');
+    if (block) return String(block).replace(/-/g, ' ');
+    const alt = el.getAttribute?.('alt');
+    if (alt) return alt;
+    const text = String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text) return text.slice(0, 48);
+    return String(el.tagName || 'element').toLowerCase();
+  }
+
+  function findOverflowInDoc(doc, viewportWidth) {
+    const body = doc?.body;
+    if (!body) return null;
+    const limit = viewportWidth + 1;
+    if ((body.scrollWidth || 0) <= limit && (doc.documentElement?.scrollWidth || 0) <= limit) {
+      const wide = [...body.querySelectorAll('*')].find((el) => {
+        const width = Math.max(el.scrollWidth || 0, Math.round(el.getBoundingClientRect?.().width || 0));
+        return width > viewportWidth + 1;
+      });
+      if (!wide) return null;
+      return {
+        tag: wide.tagName,
+        heading: overflowLabel(wide),
+        width: Math.max(wide.scrollWidth || 0, Math.round(wide.getBoundingClientRect?.().width || 0)),
+        viewportWidth,
+      };
+    }
+    let worst = null;
+    body.querySelectorAll('*').forEach((el) => {
+      const width = Math.max(el.scrollWidth || 0, Math.round(el.getBoundingClientRect?.().width || 0));
+      if (width > viewportWidth + 1 && (!worst || width > worst.width)) {
+        worst = {
+          tag: el.tagName,
+          heading: overflowLabel(el),
+          width,
+          viewportWidth,
+        };
+      }
+    });
+    return worst || {
+      tag: 'page',
+      heading: 'page',
+      width: Math.max(body.scrollWidth || 0, doc.documentElement?.scrollWidth || 0),
+      viewportWidth,
+    };
+  }
+
+  async function checkNarrowOverflow() {
+    const current = editor.getDevice();
+    const issues = [];
+    for (const id of ['Phone', 'Small']) {
+      editor.setDevice(id);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const width = id === 'Phone' ? 390 : 320;
+      const issue = findOverflowInDoc(editor.Canvas.getDocument(), width);
+      if (issue) issues.push(issue);
+    }
+    setActiveDevice(current);
+    return issues;
+  }
+
+  function formatOverflowMessage(issues) {
+    return issues.map((item) => (
+      `At ${item.viewportWidth}px, “${item.heading}” is ${item.width}px wide and overflows the screen.`
+    )).join(' ');
+  }
+
+  function confirmOverflow(action, issues) {
+    const modal = document.querySelector('[data-visual-overflow-modal]');
+    const detail = document.querySelector('[data-visual-overflow-detail]');
+    const continueBtn = document.querySelector('[data-visual-overflow-continue]');
+    const backBtn = document.querySelector('[data-visual-overflow-back]');
+    if (!modal || !detail || !continueBtn || !backBtn) {
+      return window.confirm(`${formatOverflowMessage(issues)} Continue anyway?`);
+    }
+    detail.textContent = formatOverflowMessage(issues);
+    continueBtn.textContent = action === 'publish' ? 'Publish anyway' : 'Save anyway';
+    setDrawer(modal, true);
+    return new Promise((resolve) => {
+      const finish = (ok) => {
+        continueBtn.onclick = null;
+        backBtn.onclick = null;
+        setDrawer(modal, false);
+        resolve(ok);
+      };
+      continueBtn.onclick = () => finish(true);
+      backBtn.onclick = () => finish(false);
+    });
+  }
+
+  async function save(action, { skipOverflow = false } = {}) {
     if (canvasIsNearEmpty()) {
       setStatus('Add some page content before saving.', true);
       return;
     }
+    if (!skipOverflow) {
+      const issues = await checkNarrowOverflow();
+      if (issues.length) {
+        const ok = await confirmOverflow(action, issues);
+        if (!ok) {
+          setStatus('Save cancelled. Fix the wide element, or choose a Width of 390 or 320 to review it.');
+          return;
+        }
+      }
+    }
     try {
       setStatus(action === 'publish' ? 'Publishing…' : 'Saving draft…');
-      const state = await jsonFetch('/api/admin/visual-pages/join', {
+      const state = await jsonFetch(`/api/admin/visual-pages/${encodeURIComponent(pageSlug)}`, {
         method: 'PUT',
         body: JSON.stringify({ action, html: exportEditableHtml() }),
       });
@@ -854,7 +1025,7 @@
 
   (async function boot() {
     try {
-      const state = await jsonFetch('/api/admin/visual-pages/join');
+      const state = await jsonFetch(`/api/admin/visual-pages/${encodeURIComponent(pageSlug)}`);
       await loadCanvas(state.draft_html || '');
       renderVersions(state.versions);
       await renderPhotos().catch(() => {});

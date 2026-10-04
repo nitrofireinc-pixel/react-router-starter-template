@@ -1720,11 +1720,9 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
-  if (original === 'join' || payload.slug === 'join') {
-    if (status) {
-      status.innerHTML = 'Join the Band is edited in the visual editor. <a href="/admin/visual/join">Open the Join visual editor</a> to save this page.';
-    }
-    return false;
+  if (isVisualEditorPageSlug(original) || isVisualEditorPageSlug(payload.slug)) {
+    const page = (state.pages || []).find((item) => item.slug === original);
+    if (page) payload.body_html = page.body_html;
   }
   const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
   if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
@@ -2997,6 +2995,15 @@ function pageShortcutLabel(page) {
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
+function isVisualEditorPageSlug(slug) {
+  const key = String(slug || '').trim().toLowerCase();
+  return Boolean(key) && key !== 'home';
+}
+
+function visualEditorHref(slug) {
+  return `/admin/visual/${encodeURIComponent(String(slug || '').trim().toLowerCase())}`;
+}
+
 function isFormMakerPage(page) {
   if (!page) return false;
   if (page.is_form || page.slug === 'letterman-jacket') return true;
@@ -3021,9 +3028,8 @@ function syncPageSettingsAccess() {
 function editablePages() {
   return (state.pages || [])
     .filter((page) => {
-      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug) || isFormMakerPage(page)) return false;
-      if (page.slug === 'boosters') return canEditBoostersPage();
-      return canManageSitePages() && canEditPage(page);
+      if (page.slug === 'boosters') return canEditBoostersPage() || canEditPage(page);
+      return canEditPage(page);
     })
     .slice()
     .sort((a, b) => {
@@ -3073,8 +3079,8 @@ function bindSponsorsMenu() {
     button.addEventListener('click', () => {
       const key = button.dataset.sponsorNav;
       setSponsorsMenuOpen(true);
-      if (key === 'sponsors-page') editPage('sponsors');
-      else if (key === 'become-a-sponsor') editPage('become-a-sponsor');
+      if (key === 'sponsors-page') window.location.href = visualEditorHref('sponsors');
+      else if (key === 'become-a-sponsor') window.location.href = visualEditorHref('become-a-sponsor');
     });
   });
 }
@@ -3096,11 +3102,26 @@ function renderPageShortcuts() {
   if (!mount) return;
   const pages = editablePages();
   if (label) label.hidden = !pages.length;
-  mount.innerHTML = pages.map((page) => (
-    `<button type="button" data-edit-shortcut="${escapeAttr(page.slug)}">${escapeHtml(pageShortcutLabel(page))}</button>`
-  )).join('');
+  const siteAdmin = canManageSitePages();
+  mount.innerHTML = pages.map((page) => {
+    const name = escapeHtml(pageShortcutLabel(page));
+    const slug = escapeAttr(page.slug);
+    const settings = siteAdmin
+      ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}">Settings</a>`
+      : '';
+    if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
+      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>`;
+    }
+    return `<div class="admin-page-row"><button type="button" data-edit-shortcut="${slug}">${name}</button>${settings}</div>`;
+  }).join('');
   mount.querySelectorAll('[data-edit-shortcut]').forEach((button) => {
     button.onclick = () => editPage(button.dataset.editShortcut);
+  });
+  mount.querySelectorAll('[data-page-settings]').forEach((link) => {
+    link.onclick = (event) => {
+      event.preventDefault();
+      editPage(link.dataset.pageSettings);
+    };
   });
 }
 
@@ -3177,7 +3198,7 @@ function showAllowedPanels() {
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
   const visualPilotLink = document.querySelector('[data-visual-pilot-link]');
-  if (visualPilotLink) visualPilotLink.hidden = !canEditPage('join');
+  if (visualPilotLink) visualPilotLink.remove();
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
@@ -3193,17 +3214,17 @@ function showAllowedPanels() {
   const editDirectorsPage = document.querySelector('#edit-directors-page');
   if (editDirectorsPage) {
     editDirectorsPage.hidden = !canEditPage('directors');
-    editDirectorsPage.onclick = () => editPage('directors');
+    editDirectorsPage.onclick = () => { window.location.href = visualEditorHref('directors'); };
   }
   const editBoostersPage = document.querySelector('#edit-boosters-page');
   if (editBoostersPage) {
     editBoostersPage.hidden = !canEditBoostersPage();
-    editBoostersPage.onclick = () => editPage('boosters');
+    editBoostersPage.onclick = () => { window.location.href = visualEditorHref('boosters'); };
   }
   const editContactPage = document.querySelector('#edit-contact-page');
   if (editContactPage) {
     editContactPage.hidden = !canEditPage('contact');
-    editContactPage.onclick = () => editPage('contact');
+    editContactPage.onclick = () => { window.location.href = visualEditorHref('contact'); };
   }
   const newEventButton = document.querySelector('#new-event');
   const eventForm = document.querySelector('#event-form');
@@ -3805,9 +3826,9 @@ function editPage(slug, { skipGuard = false } = {}) {
       visualHint.setAttribute('data-visual-pilot-hint', '');
       form.insertBefore(visualHint, form.querySelector('.form-grid, .page-meta-grid'));
     }
-    if (page.slug === 'join') {
+    if (isVisualEditorPageSlug(page.slug)) {
       visualHint.hidden = false;
-      visualHint.innerHTML = 'Join the Band is managed in the visual editor. The old Pages editor cannot save this page. <a href="/admin/visual/join">Open the Join visual editor</a>';
+      visualHint.innerHTML = `Page text is edited in the visual editor. This screen is for title, address, menu, and Active. <a href="${visualEditorHref(page.slug)}">Open the visual editor</a>`;
     } else {
       visualHint.hidden = true;
       visualHint.textContent = '';

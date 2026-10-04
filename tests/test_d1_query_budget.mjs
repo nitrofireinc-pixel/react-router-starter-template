@@ -200,7 +200,7 @@ test('public GET routes stay at or under 10 D1 queries; no request exceeds 40', 
 });
 
 test('go-live SQL matches the incremental statements and stays under 40 queries with 20 concurrent first requests', async () => {
-  const sqlFile = readFileSync(join(root, 'migrations/2026-10-03.1.sql'), 'utf8');
+  const sqlFile = readFileSync(join(root, 'migrations/2026-10-04.1.sql'), 'utf8');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
   assert.equal(normalize(sqlFile).includes('CREATE TABLE IF NOT EXISTS visual_pages'), true);

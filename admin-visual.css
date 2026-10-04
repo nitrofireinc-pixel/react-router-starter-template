@@ -127,12 +127,52 @@ a.visual-banner-btn,
   z-index:36;
 }
 .visual-editor-status.is-error{background:#E71321}
+.visual-phone-gate{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:80;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:#002142;
+  color:#F3F6FB;
+}
+.visual-phone-gate-card{
+  width:min(420px,100%);
+  display:grid;
+  gap:14px;
+  text-align:center;
+}
+.visual-phone-gate-card h1{
+  margin:0;
+  font-family:"Oswald",system-ui,sans-serif;
+  font-size:1.6rem;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+.visual-phone-gate-card p{margin:0;color:#C9D4E4}
+.visual-phone-gate-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:center;
+}
+@media (max-width:767px){
+  .visual-phone-gate{display:flex}
+  .visual-edit-banner,
+  .visual-editor-status,
+  .visual-editor-stage,
+  .visual-modal{display:none !important}
+}
 .visual-editor-stage{
   position:relative;
   flex:1 1 auto;
   min-height:0;
   min-width:0;
-  overflow:hidden;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
 }
 #gjs,
 .gjs-editor,
@@ -159,8 +199,32 @@ a.visual-banner-btn,
 .gjs-mdl-container{
   display:none !important;
 }
+.gjs-cv-canvas,
+.gjs-cv-canvas__frames,
+.gjs-frame{
+  overflow:auto !important;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
 .gjs-cv-canvas__frames{
   background:#c5d0de;
+}
+[data-visual-locked]{
+  outline:1px dashed rgba(0,33,66,.35);
+  position:relative;
+}
+[data-visual-locked]:before{
+  content:"Live data — locked";
+  display:inline-block;
+  margin:0 0 6px;
+  padding:2px 6px;
+  border-radius:4px;
+  background:#FDD703;
+  color:#111;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.03em;
+  text-transform:uppercase;
 }
 .gjs-frame-wrapper{
   background:#fff;

@@ -84,7 +84,7 @@ table.t td:first-child { color: #0f1f36; }
 <h1>Website & CMS Guide</h1>
 <div class="sub">Site layout and content administration for efhsband.org</div>
 <div class="rule"></div>
-<div class="inside">Site map · Header, menu &amp; footer · Accounts &amp; permissions · Editing every kind of content · Join page visual editor · Do’s &amp; don’ts · Troubleshooting · Site host appendix</div>
+<div class="inside">Site map · Header, menu &amp; footer · Accounts &amp; permissions · Editing every kind of content · Visual page editor · Do’s &amp; don’ts · Troubleshooting · Site host appendix</div>
 <div class="panel"><div class="meta">
 <div><div class="k">Version</div><div class="v">Version 2.0<br>October 2026</div></div>
 <div><div class="k">Written for</div><div class="v">The content administrator<br>(Super Admin) · Appendix for the site host</div></div>
@@ -105,7 +105,7 @@ table.t td:first-child { color: #0f1f36; }
 <li class="l1"><a href="#tour"><span class="n">5</span>A quick tour of the CMS<span class="dots"></span><span class="pg">9</span></a></li>
 <li class="l1"><a href="#editing"><span class="n">6</span>Editing content<span class="dots"></span><span class="pg">10</span></a></li>
 <li class="l2"><a href="#editing-1">6.1 Pages editor<span class="dots"></span><span class="pg">10</span></a></li>
-<li class="l2"><a href="#editing-2">6.2 Join page visual editor<span class="dots"></span><span class="pg">10</span></a></li>
+<li class="l2"><a href="#editing-2">6.2 Visual page editor<span class="dots"></span><span class="pg">10</span></a></li>
 <li class="l2"><a href="#editing-3">6.3 Calendar: the Schedule Board<span class="dots"></span><span class="pg">11</span></a></li>
 <li class="l2"><a href="#editing-4">6.4 Fundraising cards<span class="dots"></span><span class="pg">11</span></a></li>
 <li class="l2"><a href="#editing-5">6.5 Sponsors<span class="dots"></span><span class="pg">12</span></a></li>
@@ -136,11 +136,11 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td><b>Content administrator</b> (you)</td><td>Words, photos, calendar events, sponsors, staff listings, forms, social links and editor accounts, all through the CMS.</td></tr>
 <tr><td><b>Trevor Olsen, site host</b></td><td>The domain, Cloudflare hosting, the database, GitHub code, deploys, email and payment connections, and anything that needs a code change.</td></tr>
 </tbody></table>
-<div class="note info"><span class="lbl">Good to know</span>This guide matches the website as of <b>October 2026</b> (the release that adds the Join page visual editor). The CMS shows each person only the tools their account allows. If a button in this guide is missing for you, see <b>Section 4</b> (accounts and permissions).</div>
+<div class="note info"><span class="lbl">Good to know</span>This guide matches the website as of <b>October 2026</b> (the release that adds the visual page editor). The CMS shows each person only the tools their account allows. If a button in this guide is missing for you, see <b>Section 4</b> (accounts and permissions).</div>
 <p>Conventions: menu items and buttons appear in <b>bold</b>, exactly as they are labeled on screen. “Menu → Item” means click the item in the CMS left-hand menu. On a phone, tap <b>Menu</b> at the top of the CMS to open the same list.</p>
 <div class="docinfo"><div class="lbl" style="font:800 7.4pt Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--navy-2);margin-bottom:4px">Document information</div><table>
 <tr><td>Document</td><td>East Forsyth Blue Regiment Band, Website & CMS Guide. Replaces the September 7, 2026 Super Admin guide.</td></tr>
-<tr><td>Version / date</td><td>Version 2.0, October 2026. Matches the CMS release with the Join page visual editor.</td></tr>
+<tr><td>Version / date</td><td>Version 2.1, October 2026. Matches the CMS release with the visual page editor for most pages.</td></tr>
 <tr><td>Prepared by</td><td>Trevor Olsen, site host</td></tr>
 <tr><td>Next review</td><td>After any release that changes CMS screens, or by the start of the next school year.</td></tr>
 </table></div>
@@ -159,7 +159,7 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td>Become a Sponsor</td><td>/become-a-sponsor.html</td><td>Bronze, Silver and Gold packages with online payment.</td><td>Live · not in menu (footer and Sponsors page)</td></tr>
 <tr><td>In-Kind Donation</td><td>/in-kind.html</td><td>Form for donated goods and services.</td><td>Live · not in menu</td></tr>
 <tr><td>Letterman Jacket Order Form</td><td>/letterman-jacket.html</td><td>Built-in order form.</td><td>Live · not in menu</td></tr>
-<tr><td>Join the Band</td><td>/join.html</td><td>Information for new families. Edited with the Join page visual editor.</td><td>Live · not in menu (Home Join buttons)</td></tr>
+<tr><td>Join the Band</td><td>/join.html</td><td>Information for new families. Edited with the visual page editor.</td><td>Live · not in menu (Home Join buttons)</td></tr>
 <tr><td>Volunteer</td><td>/volunteer.html</td><td>Volunteer placeholder page.</td><td>Coming Soon style · not in menu</td></tr>
 <tr><td>Coming Soon</td><td>/coming-soon.html</td><td>General placeholder page.</td><td>Not in menu</td></tr>
 <tr><td><b>Ensembles</b></td><td>/ensembles.html</td><td>Program groups (concert, marching, etc.).</td><td><b>Coming Soon</b> (inactive)</td></tr>
@@ -208,7 +208,7 @@ table.t td:first-child { color: #0f1f36; }
 <h2 id="accounts-4">Global permission checkboxes</h2>
 <table class="t"><colgroup><col style="width:36%"><col style="width:64%"></colgroup><thead><tr><th>Checkbox (as labeled)</th><th>What it allows</th></tr></thead><tbody>
 <tr><td>Site settings, home text, logo</td><td><b>Site Settings</b> (site title, hero text, footer note, logo, top links, maintenance mode) and <b>Social Media</b>. <i>Policy: Super Admin only.</i></td></tr>
-<tr><td>Add/remove/manage all pages</td><td>The <b>Pages</b> list in the menu, <b>Add Page</b>, page settings (title, address, menu order, layout, Active) and editing every page, including the Join visual editor and Ensemble body.</td></tr>
+<tr><td>Add/remove/manage all pages</td><td>The <b>Pages</b> list in the menu, <b>Add Page</b>, page settings (title, address, menu order, Active) and the visual editor for every page except Home.</td></tr>
 <tr><td>Manage sponsors</td><td><b>Sponsors → Manage sponsors</b>: add, edit, reorder and delete sponsors, set tiers and fly-in timing, print the Gold sponsors PDF.</td></tr>
 <tr><td>Manage contact form topics</td><td><b>Contact Form</b>: topics, who receives each topic, and Recent Messages.</td></tr>
 <tr><td>Manage directors & staff</td><td><b>Directors & Staff</b> directory.</td></tr>
@@ -224,14 +224,14 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td>Forms (create, edit, and delete public forms)</td><td><b>Forms</b> (Form Builder) and form submissions.</td></tr>
 <tr><td>Vice President (Square Checkout)</td><td>Checkout, Schedule Board (including <b>Finished</b>) and Badge Creator. No Ledger.</td></tr>
 </tbody></table>
-<p><b>Page edit permissions</b> list one checkbox per page (Home, Calendar, Gallery, Contact, Directors & Staff, Boosters, Student Resources, Fundraising, Sponsors, Become a Sponsor, Ensembles, Coming Soon, Join the Band, Volunteer). A page box lets the person edit that page’s text without touching page settings. They reach it from the matching Manage tool: <b>Edit page text</b> on Directors & Staff or Contact Form, <b>Edit Boosters page</b>, <b>Sponsors page</b> or <b>Become a Sponsor</b> in the Sponsors menu, <b>Ensemble</b>, or <b>Join visual editor</b>. Form pages and In-Kind are managed under Forms, not here.</p>
+<p><b>Page edit permissions</b> list one checkbox per page (Home, Calendar, Gallery, Contact, Directors & Staff, Boosters, Student Resources, Fundraising, Sponsors, Become a Sponsor, Ensembles, Coming Soon, Join the Band, Volunteer). A page box lets the person open that page from the <b>Pages</b> list. Most pages open in the visual editor. Home still uses the older Pages editor. Page settings (title, address, menu, Active) stay on the small <b>Settings</b> link and need <b>Add/remove/manage all pages</b>.</p>
 <div class="note tip"><span class="lbl">Tip</span>Someone who has <i>only</i> calendar permissions sees just the Schedule Board, with no Dashboard. That suits a calendar volunteer.</div>
 </section>
 <section class="sec" id="tour"><h1 class="sec-h"><span class="num">5</span><span>A quick tour of the CMS</span></h1><div class="sec-rule"></div>
 <p>The left menu has three areas. The CMS hides anything your account cannot use.</p>
 <table class="t"><colgroup><col style="width:18%"><col style="width:82%"></colgroup><thead><tr><th>Menu area</th><th>Items</th></tr></thead><tbody>
 <tr><td>Top</td><td><b>Dashboard</b> · <b>Staff Email</b></td></tr>
-<tr><td>Pages</td><td>One shortcut per page you can manage (Home, Gallery, Contact, Directors & Staff, Boosters, Fundraising, Join the Band, Volunteer, and so on), plus the <b>Join visual editor</b> link.</td></tr>
+<tr><td>Pages</td><td>One shortcut per page you can edit. Click the name to open the visual editor (Home still opens the older editor). A small <b>Settings</b> link appears if you can manage all pages.</td></tr>
 <tr><td>Manage</td><td><b>Directors & Staff</b> · <b>Ensemble</b> · <b>Band Boosters</b> (Booster Members, Meeting Minutes, Badge Creator) · <b>Sponsors</b> (Manage sponsors, Sponsors page, Become a Sponsor) · <b>Contact Form</b> · <b>Forms</b> · <b>Ledger</b> · <b>Checkout</b> · <b>Users</b> · <b>Schedule Board</b> · <b>Security Log</b> · <b>Social Media</b> · <b>Site Settings</b> · <b>Photos</b></td></tr>
 <tr><td>Bottom</td><td><b>Log Out</b> · <b>Change Password</b></td></tr>
 </tbody></table>
@@ -239,11 +239,11 @@ table.t td:first-child { color: #0f1f36; }
 </section>
 <section class="sec" id="editing"><h1 class="sec-h"><span class="num">6</span><span>Editing content</span></h1><div class="sec-rule"></div>
 <h2 id="editing-1">6.1 Pages editor</h2>
-<ol><li>Open a page from the <b>Pages</b> list in the menu (or from a Manage button such as <b>Edit page text</b>).</li><li>The <b>Live page preview</b> looks like the public page. Click any text to edit it.</li><li>Select text, then use the <b>Formatting</b> bar: <b>B</b>, <i>I</i>, U, <b>Color</b>, <b>Size</b> (Normal, Small, Medium, Large, Extra large), <b>• List</b> and <b>Photo</b> (insert an image at the cursor, then drag a corner to resize or use Delete photo).</li><li>An <b>Unsaved</b> tag shows you have changes. Click <b>Save Changes</b> to publish. If you try to leave with unsaved edits, the CMS offers <b>Stay</b>, <b>Discard</b> or <b>Save & leave</b>.</li></ol>
-<p>With <b>Add/remove/manage all pages</b> you also get <b>Page settings</b>: Page title, Slug, Path, Navigation order, Page layout, <b>Active / visible on the public site</b>, <b>Add callout</b>, and the <b>Add Page</b> button. Editors with a single page checkbox see a smaller <b>Publish</b> panel instead.</p>
-<ul><li><b>To switch a page off</b> (show Coming Soon and remove it from the menu), uncheck <b>Active</b> and save. Check it again to bring the page back. This is how <b>Ensembles</b> will go live: open Ensembles, check <b>Active</b>, then <b>Save Changes</b>. The CMS has no delete-page button, so you hide pages instead.</li><li><b>Fundraising page:</b> the <b>Notify email list</b> box (on by default) emails fundraising subscribers when you save. Turn it off for small fixes.</li><li><b>Home page:</b> the hero headline and top links live in Site Settings. The fundraiser, calendar, sponsor, officer and photo sections fill in automatically (Section 2).</li><li><b>Ensembles body:</b> Menu → <b>Ensemble</b> → <b>Edit Body</b> opens a floating editor. Click <b>Save body</b> when done.</li><li><b>Join the Band</b> cannot be saved in this editor. Use the Join page visual editor (next section).</li></ul>
-<h2 id="editing-2">6.2 Join page visual editor</h2>
-<p>The Join the Band page (<b>/join.html</b>) has its own drag-and-drop editor. Open it from Menu → <b>Join visual editor</b>. You need the <b>Join the Band</b> page checkbox or <b>Add/remove/manage all pages</b>.</p>
+<ol><li>Open <b>Home</b> from the <b>Pages</b> list, or click <b>Settings</b> beside any page if you can manage all pages.</li><li>The <b>Live page preview</b> looks like the public page. Click any text to edit it. This older editor is still used for <b>Home</b> and for title / address / menu / Active settings.</li><li>Select text, then use the <b>Formatting</b> bar: <b>B</b>, <i>I</i>, U, <b>Color</b>, <b>Size</b> (Normal, Small, Medium, Large, Extra large), <b>• List</b> and <b>Photo</b> (insert an image at the cursor, then drag a corner to resize or use Delete photo).</li><li>An <b>Unsaved</b> tag shows you have changes. Click <b>Save Changes</b> to publish. If you try to leave with unsaved edits, the CMS offers <b>Stay</b>, <b>Discard</b> or <b>Save & leave</b>.</li></ol>
+<p>With <b>Add/remove/manage all pages</b> you also get <b>Page settings</b>: Page title, Slug, Path, Navigation order, Page layout, <b>Active / visible on the public site</b>, <b>Add callout</b>, and the <b>Add Page</b> button. Editors with a single page checkbox see only their pages in the list and do not see Settings.</p>
+<ul><li><b>To switch a page off</b> (show Coming Soon and remove it from the menu), open <b>Settings</b>, uncheck <b>Active</b>, and save. Check it again to bring the page back. This is how <b>Ensembles</b> will go live.</li><li><b>Home page:</b> the hero headline and top links live in Site Settings. The fundraiser, calendar, sponsor, officer and photo sections fill in automatically (Section 2). Home is not in the visual editor yet.</li><li>Most other pages open in the visual editor (next section). Live lists, calendars, forms, and donate buttons stay locked in place so they keep working on the public site.</li></ul>
+<h2 id="editing-2">6.2 Visual page editor</h2>
+<p>Click a page name under <b>Pages</b> to open the drag-and-drop editor at <b>/admin/visual/</b> and that page’s address. You need that page’s checkbox or <b>Add/remove/manage all pages</b>. Home is not in this editor yet. Use a computer or tablet — phones show a notice and send you back to the live page or the CMS.</p>
 <p>A banner reads <b>“This page is being edited”</b> and reminds you that visitors still see the published page until you publish. The banner buttons are:</p>
 <table class="t"><colgroup><col style="width:20%"><col style="width:80%"></colgroup><thead><tr><th>Button</th><th>What it does</th></tr></thead><tbody>
 <tr><td><b>Add section</b></td><td>Adds a ready-made block: Hero, Hero card, Text, Photo, Button or Dropdown (question and answer).</td></tr>
@@ -251,10 +251,10 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td><b>Width</b></td><td>Previews the page at 1920, 1280, 768, 390 or 320 pixels wide, to check phones and tablets.</td></tr>
 <tr><td><b>History</b></td><td>Lists recent saves (Draft or Published, with time and name). <b>It keeps the last 20 saves.</b> Click one to restore it into the draft.</td></tr>
 <tr><td><b>Save draft</b></td><td>Saves your work without changing the live page.</td></tr>
-<tr><td><b>Publish</b></td><td>After a confirmation, <b>replaces the live Join page content</b> with what is on screen.</td></tr>
+<tr><td><b>Publish</b></td><td>After a confirmation, <b>replaces the live page content</b> with what is on screen.</td></tr>
 <tr><td><b>Exit</b></td><td>Returns to the CMS. You are warned if you have unsaved changes.</td></tr>
 </tbody></table>
-<ul><li>Click any part of the page to select it. The small toolbar lets you <b>Select parent</b>, <b>Move</b>, <b>Copy</b>, change the <b>Image</b>, add a <b>Link</b> or <b>Delete</b>. Double-click text to edit it.</li><li><b>Change image</b> lets you pick a photo already on the site or <b>Upload a site photo</b>. Uploads are added to the site photo library and appear in the public Gallery.</li><li>Links must start with <code>/</code> (a page on this site), <code>https://</code>, <code>mailto:</code>, <code>tel:</code> or <code>#</code>.</li><li>Restoring an old version puts it in the <b>draft</b> only. Click <b>Publish</b> to make it live.</li><li>Every save counts toward the 20 kept versions, drafts included. Older versions drop off automatically.</li></ul>
+<ul><li>Click any part of the page to select it. The small toolbar lets you <b>Select parent</b>, <b>Move</b>, <b>Copy</b>, change the <b>Image</b>, add a <b>Link</b> or <b>Delete</b>. Double-click text to edit it.</li><li>Yellow <b>Live data — locked</b> blocks (calendar, upcoming events, gallery, sponsors, staff, boosters, forms, contact, donate) cannot be edited. They keep showing live data on the public page.</li><li>Use Width <b>390</b> and <b>320</b> to scroll the whole page as a phone would see it. Before Save draft or Publish, the editor checks those widths. If something is too wide, it names the element and offers <b>Publish anyway</b> / <b>Go back</b>.</li><li><b>Change image</b> lets you pick a photo already on the site or <b>Upload a site photo</b>. Uploads are added to the site photo library and appear in the public Gallery.</li><li>Links must start with <code>/</code> (a page on this site), <code>https://</code>, <code>mailto:</code>, <code>tel:</code> or <code>#</code>.</li><li>Restoring an old version puts it in the <b>draft</b> only. Click <b>Publish</b> to make it live.</li><li>Every save counts toward the 20 kept versions, drafts included. Older versions drop off automatically.</li></ul>
 <div class="note important"><span class="lbl">Important</span><b>Publishing replaces the page.</b> Save a draft first, check every Width, then publish. If something goes wrong, open <b>History</b>, restore the last <b>Published</b> version and publish it again.</div>
 <h2 id="editing-3">6.3 Calendar: the Schedule Board</h2>
 <p>The public Calendar, the Home calendar list, the Boosters meetings card and the red IMPORTANT banner all come from Menu → <b>Schedule Board</b>.</p>
@@ -331,7 +331,7 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td>A menu item or Dashboard card is missing</td><td>Your account lacks that permission. Ask a Super Admin.</td></tr>
 <tr><td>My change isn’t showing</td><td>Wait a minute, then hard-refresh (Ctrl+Shift+R on Windows, Cmd+Shift+R on Mac). Make sure you clicked Save, or Publish for Join.</td></tr>
 <tr><td>A page shows “Coming soon”</td><td>The page is inactive. Check <b>Active / visible on the public site</b> in Page settings.</td></tr>
-<tr><td>The Join page won’t save in Pages</td><td>That is expected. Use <b>Join visual editor</b>.</td></tr>
+<tr><td>A page won’t change in Settings</td><td>That is expected. Settings save title, address, menu, and Active. Click the page name to edit the text in the visual editor. Home still uses the older editor.</td></tr>
 <tr><td>“Add some page content before saving.”</td><td>The Join page is empty. Add a section or restore a version from History.</td></tr>
 <tr><td>Photo won’t upload</td><td>Use JPG, PNG, WEBP or GIF, add alt text, and try a smaller file.</td></tr>
 <tr><td>“This image is still used as …” on delete</td><td>Replace the photo on that staff member, booster member, sponsor or logo first.</td></tr>

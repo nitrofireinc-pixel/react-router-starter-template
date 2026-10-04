@@ -142,7 +142,7 @@ test('worker source follows the public D1 read policy', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const caldevSrc = readFileSync(join(root, 'worker/src/caldev.mjs'), 'utf8');
   const clientSrc = readFileSync(join(root, 'site-content.js'), 'utf8');
-  assert.equal(workerSrc.includes("export const DB_SCHEMA_VERSION = '2026-10-03.1'"), true);
+  assert.equal(workerSrc.includes("export const DB_SCHEMA_VERSION = '2026-10-04.1'"), true);
   assert.match(workerSrc, /SELECT key, value FROM site_content WHERE key IN/);
   assert.match(workerSrc, /loadPublicCmsReads\(env/);
   assert.match(workerSrc, /id="efhs-public-read"|renderPublicReadBootstrap/);

@@ -5,34 +5,54 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  loadVisualPageState,
+  resetVisualPagesSchemaCache,
+  saveVisualPage,
+  VISUAL_EDITOR_NOT_YET_SLUGS,
   VISUAL_EDITOR_PATH,
+  VISUAL_EDITOR_PATH_PREFIX,
   VISUAL_PILOT_SLUG,
   VISUAL_VERSION_LIMIT,
+  canEditVisualPage,
   canEditVisualPilot,
   defaultJoinVisualHtml,
   extractEditableJoinHtml,
+  formatNarrowOverflowWarning,
   formatVisualHistoryTime,
+  importCmsBodyToVisual,
   isSafeVisualHref,
   isSafeVisualImageSrc,
+  isVisualEditorSlug,
   isVisualPilotSlug,
+  isVisualPublishedRow,
   normalizeVisualSavePayload,
+  overflowElementLabel,
+  pageHasVisualPublish,
   renderVisualEditorHtml,
   sanitizeVisualCss,
   sanitizeVisualPageHtml,
+  wrapLiveDataAsLocked,
   trimVisualVersions,
 } from '../worker/src/visual-page-editor.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('visual editor pilot is Join the Band only', () => {
+test('visual editor is generic per slug and keeps Home not yet', () => {
   assert.equal(VISUAL_PILOT_SLUG, 'join');
   assert.equal(VISUAL_EDITOR_PATH, '/admin/visual/join');
-  assert.equal(isVisualPilotSlug('join'), true);
+  assert.equal(VISUAL_EDITOR_PATH_PREFIX, '/admin/visual');
+  assert.deepEqual([...VISUAL_EDITOR_NOT_YET_SLUGS], ['home']);
+  assert.equal(isVisualEditorSlug('join'), true);
+  assert.equal(isVisualEditorSlug('fundraising'), true);
+  assert.equal(isVisualEditorSlug('calendar'), true);
+  assert.equal(isVisualEditorSlug('home'), false);
   assert.equal(isVisualPilotSlug('home'), false);
-  assert.equal(isVisualPilotSlug('fundraising'), false);
+  assert.equal(canEditVisualPage({ id: 1 }, 'join', (user, slug) => slug === 'join'), true);
+  assert.equal(canEditVisualPage({ id: 1 }, 'contact', (user, slug) => slug === 'contact'), true);
+  assert.equal(canEditVisualPage({ id: 1 }, 'home', () => true), false);
+  assert.equal(canEditVisualPage({ id: 1 }, 'contact', (user, slug) => slug === 'join'), false);
   assert.equal(canEditVisualPilot({ id: 1 }, (user, slug) => slug === 'join'), true);
   assert.equal(canEditVisualPilot(null, () => true), false);
-  assert.equal(canEditVisualPilot({ id: 1 }, () => false), false);
 });
 
 test('visual page HTML sanitizer strips scripts and unsafe sources', () => {
@@ -83,7 +103,8 @@ test('visual sanitizer keeps on-page resize and move styles', () => {
   assert.doesNotMatch(clean, /(?:^|[^-])width: 420px/);
   assert.match(clean, /height: 180px/);
   assert.match(clean, /margin-top: 12px/);
-  assert.match(clean, /transform: translate\(10px, 4px\)/);
+  assert.doesNotMatch(clean, /position:\s*absolute/i);
+  assert.doesNotMatch(clean, /transform:/i);
   assert.match(clean, /max-width: 160px/);
   assert.doesNotMatch(clean, /javascript/i);
   assert.doesNotMatch(clean, /gjs-selected/);
@@ -164,14 +185,17 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /Keeps the last 20 saves\./);
   assert.match(editorJs, /Publishing replaces this page's content on the live page\./);
   assert.doesNotMatch(editorJs, /Published to the preview site/);
-  assert.match(workerSrc, /\/api\/admin\/visual-pages\/join/);
+  assert.match(workerSrc, /visual-pages/);
+  assert.match(workerSrc, /VISUAL_EDITOR_PATH_PREFIX/);
   assert.match(workerSrc, /handleVisualEditorPage/);
-  assert.match(workerSrc, /VISUAL_EDITOR_PATH/);
-  assert.match(workerSrc, /canEditVisualPilot\(auth\.user, canEditPage\)/);
-  assert.match(workerSrc, /canEditPage\(auth\.user, 'join'\)/);
+  assert.match(workerSrc, /VISUAL_EDITOR_PATH_PREFIX/);
+  assert.match(workerSrc, /canEditVisualPage\(auth\.user, slug, canEditPage\)/);
+  assert.match(workerSrc, /canEditVisualPage\(user, key, canEditPage\)/);
   assert.match(workerSrc, /renderVisualEditorHtml/);
-  assert.doesNotMatch(workerSrc, /visual-pages\/home/);
-  assert.match(adminJs, /\/admin\/visual\/join/);
+  assert.match(workerSrc, /pageHasVisualPublish/);
+  assert.match(adminJs, /\/admin\/visual\//);
+  assert.match(adminJs, /admin-page-settings/);
+  assert.doesNotMatch(adminJs, /Join visual editor/);
   assert.match(editorJs, /versionedAsset\('\/styles\.css'\)/);
   assert.match(editorJs, /grapesjs\.init/);
   assert.match(editorJs, /panels:\s*\{\s*defaults:\s*\[\]/);
@@ -181,7 +205,7 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /hasUndo/);
   assert.match(editorJs, /canvasIsNearEmpty/);
   assert.match(editorJs, /Add some page content before saving/);
-  assert.match(editorJs, /\/join\.html/);
+  assert.match(editorJs, /pagePath \|\| '\/join\.html'/);
   assert.match(editorJs, /exportEditableHtml/);
   assert.match(editorJs, /data-add-block/);
   assert.match(editorJs, /visual-parent/);
@@ -211,7 +235,19 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?flex-wrap:nowrap/);
   assert.match(editorCss, /\.gjs-toolbar\{[\s\S]*?min-width:240px/);
   assert.match(editorCss, /max-width:min\(100%,304px\)/);
+  assert.match(editorCss, /visual-phone-gate/);
+  assert.match(editorCss, /@media \(max-width:767px\)/);
+  assert.match(editorJs, /PHONE_EDITOR_MAX = 767/);
+  assert.match(editorJs, /checkNarrowOverflow/);
+  assert.match(editorJs, /Publish anyway/);
   assert.match(page, /This page is being edited/);
+  assert.match(page, /Please edit pages on a computer or tablet/);
+  assert.match(page, /Phones are too small for the editor/);
+  assert.match(page, /View live page/);
+  assert.match(page, /Back to CMS/);
+  assert.match(page, /This layout is too wide for phones/);
+  assert.match(page, /Publish anyway/);
+  assert.match(page, /Go back/);
   assert.match(page, /Add a section/);
   assert.match(page, /data-visual-device-select/);
   assert.match(page, /data-visual-exit/);
@@ -244,11 +280,128 @@ test('visual editor action bar uses inline SVG icons', () => {
   assert.match(visualCss, /min-width:240px/);
 });
 
-test('published Join content stays on the existing public page read', () => {
+test('published visual content stays on the existing public page read', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const visualSrc = readFileSync(join(root, 'worker/src/visual-page-editor.mjs'), 'utf8');
   assert.match(visualSrc, /UPDATE cms_pages SET body_html/);
   assert.match(workerSrc, /key: `page-path:\$\{path\}`/);
   assert.doesNotMatch(workerSrc, /FROM visual_pages/);
   assert.doesNotMatch(workerSrc, /visual_page_versions/);
+});
+
+test('first-open import wraps live-data sections as locked blocks', () => {
+  const html = importCmsBodyToVisual(
+    '<main><h1>Contact</h1><p>Call us</p><div data-contact-form-slot><form><input name="n"><button>Send</button></form></div></main>',
+    'contact',
+  );
+  assert.match(html, /<h1>Contact<\/h1>/);
+  assert.match(html, /data-visual-locked="contact-form"/);
+  assert.match(html, /<form/i);
+  assert.match(html, /<input/i);
+  assert.match(html, /<button/i);
+  const calendar = wrapLiveDataAsLocked('<div id="caldev-app" class="caldev-app"></div>');
+  assert.match(calendar, /data-visual-locked="calendar"/);
+});
+
+test('visual sanitizer keeps locked forms and still strips scripts', () => {
+  const dirty = `<section><h2>Give</h2><div data-visual-locked="donate"><button type="button" data-donate-open>Donate</button><script>alert(1)</script></div></section>`;
+  const clean = sanitizeVisualPageHtml(dirty);
+  assert.match(clean, /data-visual-locked="donate"/);
+  assert.match(clean, /<button type="button" data-donate-open>Donate<\/button>/);
+  assert.doesNotMatch(clean, /<script/i);
+});
+
+test('visual publish guard treats published_at as locked', () => {
+  assert.equal(isVisualPublishedRow({ published_at: '2026-10-04T12:00:00.000Z' }), true);
+  assert.equal(isVisualPublishedRow({ published_at: null }), false);
+  assert.equal(isVisualPublishedRow({}), false);
+});
+
+test('narrow overflow warning names the wide element', () => {
+  assert.equal(overflowElementLabel({ heading: 'Hero title', tag: 'section' }), 'Hero title');
+  const message = formatNarrowOverflowWarning([
+    { heading: 'Hero title', width: 820, viewportWidth: 390 },
+  ]);
+  assert.match(message, /At 390px/);
+  assert.match(message, /Hero title/);
+  assert.match(message, /820px/);
+});
+
+test('pageHasVisualPublish is a no-write lookup', async () => {
+  const sql = [];
+  const env = {
+    DB: {
+      prepare(text) {
+        sql.push(String(text));
+        return {
+          bind() { return this; },
+          async first() { return { published_at: '2026-10-04T00:00:00.000Z' }; },
+          async run() { return { success: true }; },
+        };
+      },
+    },
+  };
+  assert.equal(await pageHasVisualPublish(env, 'boosters'), true);
+  assert.equal(sql.some((item) => /UPDATE|DELETE|INSERT/i.test(item) && !/CREATE TABLE/i.test(item)), false);
+});
+
+test('visual editor load, save, and publish stay under 50 D1 queries', async () => {
+  let queries = 0;
+  const versions = [];
+  let visual = null;
+  const cms = { slug: 'join', title: 'Join the Band', path: '/join.html', body_html: '<h1>Join</h1><p>Hi</p>' };
+  const env = {
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            queries += 1;
+            if (q.includes('FROM cms_pages')) return cms;
+            if (q.includes('FROM visual_pages')) return visual;
+            return null;
+          },
+          async all() {
+            queries += 1;
+            return { results: versions.slice().reverse() };
+          },
+          async run() {
+            queries += 1;
+            if (q.includes('INSERT INTO visual_pages')) {
+              visual = { slug: this.binds[0], draft_html: this.binds[1], published_html: this.binds[2], published_at: this.binds[3] };
+            }
+            if (q.includes('UPDATE visual_pages')) {
+              visual = { ...(visual || {}), draft_html: this.binds[0], published_at: visual?.published_at || 'now' };
+            }
+            if (q.includes('INSERT INTO visual_page_versions')) {
+              versions.push({ id: versions.length + 1, slug: this.binds[0], kind: this.binds[1], html: this.binds[2] });
+            }
+            if (q.includes('UPDATE cms_pages SET body_html')) {
+              cms.body_html = this.binds[0];
+            }
+            return { success: true };
+          },
+        };
+      },
+    },
+  };
+  resetVisualPagesSchemaCache();
+  const opened = await loadVisualPageState(env, 'join');
+  const openQueries = queries;
+  assert.ok(opened.draft_html.includes('Join'));
+  assert.ok(openQueries <= 50, `open used ${openQueries}`);
+  queries = 0;
+  resetVisualPagesSchemaCache();
+  await saveVisualPage(env, { slug: 'join', html: '<h1>Join</h1><p>Draft</p>', action: 'draft', user: { id: 1, display_name: 'Admin' } });
+  const saveQueries = queries;
+  assert.ok(saveQueries <= 50, `save used ${saveQueries}`);
+  queries = 0;
+  resetVisualPagesSchemaCache();
+  const published = await saveVisualPage(env, { slug: 'join', html: '<h1>Join</h1><p>Live</p>', action: 'publish', user: { id: 1, display_name: 'Admin' } });
+  const publishQueries = queries;
+  assert.ok(publishQueries <= 50, `publish used ${publishQueries}`);
+  assert.match(published.draft_html, /Live/);
+  console.log('visual_editor_d1', { openQueries, saveQueries, publishQueries });
 });

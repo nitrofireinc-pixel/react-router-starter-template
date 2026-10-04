@@ -2329,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261004d'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2742,7 +2742,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /width:100% !important/);
   assert.match(styles, /p:has\(> br:only-child\)/);
   assert.doesNotMatch(workerSrc, /DEV_UPLOAD_ORIGIN/);
-  assert.match(workerSrc, /\/admin\/visual\/join/);
+  assert.match(workerSrc, /VISUAL_EDITOR_PATH_PREFIX/);
 });
 
 test('join, volunteer, and coming soon stay out of the public nav', () => {

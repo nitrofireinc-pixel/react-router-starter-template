@@ -1138,6 +1138,43 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
   gap:3px;
   margin:0 0 8px;
 }
+.admin-page-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:4px;
+  align-items:center;
+}
+.admin-page-shortcuts a.admin-page-edit,
+.admin-page-shortcuts button{
+  width:100%;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:#c7d7eb;
+  text-align:left;
+  font-weight:850;
+  padding:10px 12px;
+  cursor:pointer;
+  text-decoration:none;
+  font:inherit;
+  display:block;
+}
+.admin-page-shortcuts a.admin-page-edit:hover,
+.admin-page-shortcuts button:hover{
+  background:rgba(255,255,255,.12);
+  color:#fff;
+}
+.admin-page-settings{
+  color:#9fb4ce;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  text-decoration:none;
+  padding:4px 6px;
+  white-space:nowrap;
+}
+.admin-page-settings:hover{color:#fff}
 .admin-menu-group{
   display:grid;
   gap:3px;

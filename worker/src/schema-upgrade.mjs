@@ -1,6 +1,6 @@
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
 
-export const PREVIOUS_DB_SCHEMA_VERSION = '2026-10-02.1';
+export const PREVIOUS_DB_SCHEMA_VERSION = '2026-10-03.1';
 export const MAX_D1_QUERIES_PER_INVOCATION = 40;
 
 export const VISUAL_PAGES_TABLE_SQL = `
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS visual_page_versions (
 export const VISUAL_PAGE_VERSIONS_INDEX_SQL =
   'CREATE INDEX IF NOT EXISTS idx_visual_page_versions_slug ON visual_page_versions (slug, id)';
 
-/** Idempotent 2026-10-02.1 → 2026-10-03.1 statements. No seed rewrites. */
+/** Idempotent 2026-10-03.1 → 2026-10-04.1 statements. No seed rewrites. Join visual rows stay. */
 export function incrementalSchemaStatements() {
   return [
     VISUAL_PAGES_TABLE_SQL,
@@ -43,9 +43,9 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-02.1 → 2026-10-03.1',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.1',
     '-- Run at deploy time (owner sign-off only):',
-    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-03.1.sql',
+    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.1.sql',
     '-- Do NOT run this against production from a laptop or Cloud Agent.',
     '-- Safe to re-run. Worker initDb applies the same statements when it sees an older schema.',
     '',

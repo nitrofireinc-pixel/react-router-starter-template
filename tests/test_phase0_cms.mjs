@@ -405,12 +405,12 @@ test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
   assert.match(joinSample, /#ih1\{/);
 });
 
-test('Phase 0 old Pages editor cannot save visual-managed Join', () => {
-  assert.match(workerSrc, /isVisualPilotSlug\(existing\.slug\)/);
-  assert.match(workerSrc, /Join the Band is edited in the visual editor/);
+test('Phase 0 old Pages editor cannot overwrite visual-managed page bodies', () => {
+  assert.match(workerSrc, /isVisualEditorSlug\(existing\.slug\)/);
+  assert.match(workerSrc, /page\.body_html = existing\.body_html/);
   assert.match(workerSrc, /function isVisualPilotSlug|isVisualPilotSlug,/);
-  assert.match(adminSrc, /original === 'join' \|\| payload\.slug === 'join'/);
-  assert.match(adminSrc, /Open the Join visual editor/);
+  assert.match(adminSrc, /isVisualEditorPageSlug/);
+  assert.match(adminSrc, /Open the visual editor/);
 });
 
 const SVG_STYLE_XSS = '<svg><style>color: red<img src=x onerror=alert(1)></style></svg>';
@@ -633,12 +633,12 @@ function createWorkerTestEnv({
   };
 }
 
-test('Pages API fetch handler blocks Join and saves a normal page', async () => {
+test('Pages API fetch handler keeps visual page bodies and saves Home', async () => {
   resetDbInitCache();
   const env = createWorkerTestEnv({
     pages: {
       join: pageRow('join', { id: 2, body_html: '<p>Join</p>' }),
-      contact: pageRow('contact', { id: 3, body_html: '<p>Contact</p>' }),
+      home: pageRow('home', { id: 1, body_html: '<p>Home</p>' }),
     },
   });
   const cookie = `efband_session=${await makeSession({ id: 1, username: 'admin@efhsband.org' }, env)}`;
@@ -647,25 +647,26 @@ test('Pages API fetch handler blocks Join and saves a normal page', async () => 
     headers: { cookie, 'content-type': 'application/json' },
     body: JSON.stringify({ title: 'Join the Band', body_html: '<p>Hacked</p>' }),
   }), env, {});
-  assert.equal(joinRes.status, 409);
+  assert.equal(joinRes.status, 200, await joinRes.clone().text());
   const joinBody = await joinRes.json();
-  assert.match(String(joinBody.detail || ''), /visual editor/i);
+  assert.match(String(joinBody.body_html || ''), /<p>Join<\/p>/);
+  assert.doesNotMatch(String(joinBody.body_html || ''), /Hacked/);
 
-  const saveRes = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/contact', {
+  const saveRes = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/home', {
     method: 'PUT',
     headers: { cookie, 'content-type': 'application/json' },
     body: JSON.stringify({
-      title: 'Contact',
-      slug: 'contact',
-      path: '/contact.html',
-      body_html: '<section><p>Updated contact</p></section>',
+      title: 'Home',
+      slug: 'home',
+      path: '/',
+      body_html: '<section><p>Updated home</p></section>',
       active: true,
     }),
   }), env, {});
   assert.equal(saveRes.status, 200, await saveRes.clone().text());
   const saved = await saveRes.json();
-  assert.equal(saved.slug, 'contact');
-  assert.match(String(saved.body_html || ''), /Updated contact/);
+  assert.equal(saved.slug, 'home');
+  assert.match(String(saved.body_html || ''), /Updated home/);
 });
 
 test('inactive CMS pages reject matching public form POSTs with Coming soon', async () => {

@@ -112,11 +112,13 @@ import {
 } from './schema-upgrade.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
-  VISUAL_EDITOR_PATH,
-  canEditVisualPilot,
+  VISUAL_EDITOR_PATH_PREFIX,
+  canEditVisualPage,
+  isVisualEditorSlug,
   isVisualPilotSlug,
   loadVisualPageState,
   normalizeVisualSavePayload,
+  pageHasVisualPublish,
   renderVisualEditorHtml,
   restoreVisualVersion,
   saveVisualPage,
@@ -136,7 +138,7 @@ export {
 
 export { applyWorkerSecurityHeaders, WORKER_SECURITY_HEADERS } from './worker-security-headers.mjs';
 
-export { isVisualPilotSlug };
+export { isVisualPilotSlug, isVisualEditorSlug, canEditVisualPage, pageHasVisualPublish };
 
 export {
   CALDEV_TRACKS,
@@ -348,7 +350,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-rc-20261004d';
+export const ASSET_VERSION = 'cms-p1-20261004';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1872,7 +1874,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-03.1';
+export const DB_SCHEMA_VERSION = '2026-10-04.1';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1932,7 +1934,7 @@ export async function initDb(env) {
         console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'full' });
         await migrateAndSeedDb(env);
       } else if (schemaNeedsIncrementalUpgrade(current.value, DB_SCHEMA_VERSION)) {
-        // Existing DBs (including production at 2026-10-02.1) only run the
+        // Existing DBs (including production at 2026-10-03.1) only run the
         // small idempotent upgrade — never the 70-query seed path.
         console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'incremental' });
         await applyIncrementalSchema(env);
@@ -2744,6 +2746,12 @@ async function writeCmsFormPage(env, { slug, path, title, definition }) {
   const body = renderCmsFormPageBody({ title, slug }, definition, slug);
   const page = await env.DB.prepare('SELECT id FROM cms_pages WHERE slug = ?').bind(slug).first();
   if (page?.id) {
+    if (await pageHasVisualPublish(env, slug)) {
+      await env.DB.prepare('UPDATE cms_pages SET path = ?, title = ?, active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .bind(path, title, page.id)
+        .run();
+      return page.id;
+    }
     await env.DB.prepare('UPDATE cms_pages SET path = ?, title = ?, body_html = ?, active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .bind(path, title, body, page.id)
       .run();
@@ -4910,6 +4918,7 @@ export function applyBoostersDuesVisibility(html, enabled = true) {
 }
 
 async function syncBoostersDuesCmsBody(env, enabled) {
+  if (await pageHasVisualPublish(env, 'boosters')) return;
   const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
   if (!boostersPageRow?.body_html) return;
   const nextBoostersHtml = applyBoostersDuesVisibility(
@@ -7156,6 +7165,7 @@ function mapCmsPage(page) {
   return {
     ...page,
     is_form: Number(page.is_form) === 1 || isCmsFormPage(page) || page.slug === 'letterman-jacket',
+    visual_editor: isVisualEditorSlug(page.slug),
   };
 }
 
@@ -10126,39 +10136,60 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true });
   }
 
-  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'GET') {
+  const visualPageMatch = url.pathname.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)$/);
+  const visualRestoreMatch = url.pathname.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)\/restore$/);
+  if (visualPageMatch && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    if (!canEditVisualPilot(auth.user, canEditPage)) {
-      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    const slug = visualPageMatch[1];
+    if (!isVisualEditorSlug(slug)) {
+      return jsonResponse({ detail: 'This page is not yet available in the visual editor.' }, 409);
     }
-    return jsonResponse(await loadVisualPageState(env));
+    if (!canEditVisualPage(auth.user, slug, canEditPage)) {
+      return jsonResponse({ detail: `Permission required: page:${slug}` }, 403);
+    }
+    const state = await loadVisualPageState(env, slug);
+    if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
+    return jsonResponse(state);
   }
-  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'PUT') {
+  if (visualPageMatch && request.method === 'PUT') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    if (!canEditVisualPilot(auth.user, canEditPage)) {
-      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    const slug = visualPageMatch[1];
+    if (!isVisualEditorSlug(slug)) {
+      return jsonResponse({ detail: 'This page is not yet available in the visual editor.' }, 409);
+    }
+    if (!canEditVisualPage(auth.user, slug, canEditPage)) {
+      return jsonResponse({ detail: `Permission required: page:${slug}` }, 403);
     }
     const raw = await request.json().catch(() => ({}));
     const parsed = normalizeVisualSavePayload(raw);
     if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
-    const state = await saveVisualPage(env, {
-      html: parsed.html,
-      action: parsed.action,
-      user: auth.user,
-    });
-    return jsonResponse(state);
+    try {
+      const state = await saveVisualPage(env, {
+        slug,
+        html: parsed.html,
+        action: parsed.action,
+        user: auth.user,
+      });
+      return jsonResponse(state);
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Save failed' }, Number(error.status) || 400);
+    }
   }
-  if (url.pathname === '/api/admin/visual-pages/join/restore' && request.method === 'POST') {
+  if (visualRestoreMatch && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    if (!canEditVisualPilot(auth.user, canEditPage)) {
-      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    const slug = visualRestoreMatch[1];
+    if (!isVisualEditorSlug(slug)) {
+      return jsonResponse({ detail: 'This page is not yet available in the visual editor.' }, 409);
+    }
+    if (!canEditVisualPage(auth.user, slug, canEditPage)) {
+      return jsonResponse({ detail: `Permission required: page:${slug}` }, 403);
     }
     const raw = await request.json().catch(() => ({}));
     try {
-      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user));
+      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user, slug));
     } catch (error) {
       return jsonResponse({ detail: error.message || 'Restore failed' }, Number(error.status) || 400);
     }
@@ -10193,12 +10224,10 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
-    if (isVisualPilotSlug(existing.slug)) {
-      return jsonResponse({
-        detail: 'Join the Band is edited in the visual editor. Open the Join visual editor to save this page.',
-      }, 409);
-    }
     let page = serializePagePayload(rawPayload, existing);
+    if (isVisualEditorSlug(existing.slug)) {
+      page.body_html = existing.body_html;
+    }
     if (!canManagePageSettings(auth.user)) {
       page = lockPageSettingsToExisting(page, existing);
     }
@@ -10252,6 +10281,9 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const page = await getPageBySlug(env, 'ensembles', true);
     if (!page) return jsonResponse({ detail: 'Ensembles page not found' }, 404);
+    if (await pageHasVisualPublish(env, 'ensembles')) {
+      return jsonResponse({ detail: 'Ensembles is edited in the visual editor.' }, 409);
+    }
     const payload = await request.json().catch(() => ({}));
     const nextBody = applyEnsemblesBodyHtml(page.body_html || '', payload.body_html || '');
     await env.DB.prepare(
@@ -11797,14 +11829,24 @@ async function handleAdmin(request, env) {
   return attachLoginHintIfNeeded(request, htmlResponse(ADMIN_HTML), user);
 }
 
-async function handleVisualEditorPage(request, env) {
+async function handleVisualEditorPage(request, env, slug) {
   await initDb(env);
   const user = await currentUser(request, env);
   if (!user) return redirect('/admin/login');
-  if (!canEditVisualPilot(user, canEditPage)) {
-    return htmlResponse('<!doctype html><title>Not allowed</title><p>Permission required: page:join</p>', 403);
+  const key = String(slug || '').trim().toLowerCase();
+  if (!isVisualEditorSlug(key)) {
+    return htmlResponse('<!doctype html><title>Not yet</title><p>This page is not yet available in the visual editor.</p>', 404);
   }
-  return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION)), user);
+  if (!canEditVisualPage(user, key, canEditPage)) {
+    return htmlResponse(`<!doctype html><title>Not allowed</title><p>Permission required: page:${key}</p>`, 403);
+  }
+  const cms = await getPageBySlug(env, key, true);
+  if (!cms) return htmlResponse('<!doctype html><title>Not found</title><p>Page not found</p>', 404);
+  return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION, {
+    title: cms.title,
+    slug: key,
+    path: cms.path,
+  })), user);
 }
 
 async function logout(request, env) {
@@ -12413,8 +12455,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
-    if (url.pathname === VISUAL_EDITOR_PATH || url.pathname === `${VISUAL_EDITOR_PATH}/`) {
-      return handleVisualEditorPage(request, env);
+    const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
+    if (visualEditorMatch) {
+      return handleVisualEditorPage(request, env, visualEditorMatch[1]);
     }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
@@ -12454,7 +12497,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><a class="admin-visual-pilot-link" href="/admin/visual/join" data-visual-pilot-link hidden>Join visual editor</a><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich="insertUnorderedList" title="Bulleted list">• List</button><button type="button" data-rich-insert-photo title="Insert a photo at the cursor">Photo</button></div><small class="rich-text-hint">Select text, then apply formatting. Use List to add or remove bullets. Click Photo to insert an image, then drag a corner to resize or Delete photo to remove it.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
