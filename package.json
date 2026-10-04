@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "npm run build:pages",
-    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs tests/test_d1_read_policy.mjs tests/test_site_marquee_chrome.mjs tests/test_public_square_sponsor_logout.mjs tests/test_visual_page_editor.mjs tests/test_phase0_cms.mjs",
+    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs tests/test_d1_read_policy.mjs tests/test_site_marquee_chrome.mjs tests/test_public_square_sponsor_logout.mjs tests/test_visual_page_editor.mjs tests/test_phase0_cms.mjs tests/test_d1_query_budget.mjs",
     "test:pages-build": "node --test tests/test_pages_build.mjs",
     "test:cms-guide-pdf": "node --test tests/test_cms_guide_pdf.mjs",
     "build:cms-guide-pdf": "node worker/scripts/build-cms-guide-pdf.mjs",

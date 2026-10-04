@@ -107,6 +107,10 @@ import {
   resetPublicReadCache,
 } from './d1-read-policy.mjs';
 import {
+  applyIncrementalSchema,
+  schemaNeedsIncrementalUpgrade,
+} from './schema-upgrade.mjs';
+import {
   VISUAL_EDITOR_PATH,
   canEditVisualPilot,
   isVisualPilotSlug,
@@ -340,7 +344,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-rc-20261003e';
+const ASSET_VERSION = 'cms-rc-20261004a';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1863,13 +1867,13 @@ async function readDbSchemaVersion(env) {
     const row = await env.DB.prepare(
       'SELECT value FROM site_content WHERE key = ?',
     ).bind(DB_SCHEMA_VERSION_KEY).first();
-    return { ok: true, value: row?.value == null ? null : String(row.value) };
+    return { ok: true, value: row?.value == null ? null : String(row.value), missingTable: false };
   } catch (error) {
     // Fresh databases have no site_content table. Transient D1 errors must not
     // look like "needs migrate" or a cold burst will run migrateAndSeedDb in
     // every new isolate and throw 1101s.
-    if (isMissingSchemaTableError(error)) return { ok: true, value: null };
-    return { ok: false, error };
+    if (isMissingSchemaTableError(error)) return { ok: true, value: null, missingTable: true };
+    return { ok: false, error, missingTable: false };
   }
 }
 
@@ -1897,8 +1901,18 @@ export async function initDb(env) {
         dbInitVersion = DB_SCHEMA_VERSION;
         return;
       }
-      console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION });
-      await migrateAndSeedDb(env);
+      if (current.missingTable) {
+        console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'full' });
+        await migrateAndSeedDb(env);
+      } else if (schemaNeedsIncrementalUpgrade(current.value, DB_SCHEMA_VERSION)) {
+        // Existing DBs (including production at 2026-10-02.1) only run the
+        // small idempotent upgrade — never the 70-query seed path.
+        console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'incremental' });
+        await applyIncrementalSchema(env);
+      } else {
+        dbInitVersion = DB_SCHEMA_VERSION;
+        return;
+      }
       await writeDbSchemaVersion(env);
       dbInitVersion = DB_SCHEMA_VERSION;
     })()
@@ -7058,8 +7072,16 @@ function photoListStatement(env) {
   );
 }
 
+export function publicPhotoUrl(photo = {}) {
+  const filename = encodeURIComponent(String(photo?.filename || '').trim());
+  if (!filename) return '';
+  const stamp = String(photo?.created_at || photo?.id || '1').replace(/[^\dA-Za-z]/g, '').slice(0, 18) || '1';
+  const id = Number(photo?.id) || 0;
+  return `/uploads/${filename}?v=${id || 'x'}-${stamp}`;
+}
+
 function mapPhotoRows(rows = []) {
-  return (rows || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+  return (rows || []).map((photo) => ({ ...photo, url: publicPhotoUrl(photo) }));
 }
 
 async function getPhotos(env) {
@@ -7176,7 +7198,7 @@ function rowsOf(result) {
   return result?.results || [];
 }
 
-function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false } = {}) {
+export function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false, needsPhotos = false } = {}) {
   const jobs = [
     {
       key: 'site',
@@ -7204,13 +7226,6 @@ function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoos
       parse: (result) => rowsOf(result).map((row) => hydrateSponsor(row)),
     },
     {
-      key: 'photos',
-      optional: true,
-      fallback: [],
-      statement: () => photoListStatement(env),
-      parse: (result) => mapPhotoRows(rowsOf(result)),
-    },
-    {
       key: `deadline-events:${today}`,
       optional: true,
       fallback: [],
@@ -7218,6 +7233,15 @@ function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoos
       parse: (result) => mapCaldevRows(result),
     },
   ];
+  if (needsPhotos) {
+    jobs.push({
+      key: 'photos',
+      optional: true,
+      fallback: [],
+      statement: () => photoListStatement(env),
+      parse: (result) => mapPhotoRows(rowsOf(result)),
+    });
+  }
   if (needsBoosters) {
     jobs.push({
       key: 'booster-members',
@@ -8097,7 +8121,11 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
       caption: cleanCaption,
       sort_order: resolvedSort,
       created_at: createdAt,
-      url: `/uploads/${encodeURIComponent(filename)}`,
+      url: publicPhotoUrl({
+        id: result.meta.last_row_id,
+        filename,
+        created_at: createdAt,
+      }),
     };
   } catch (error) {
     const detail = String(error?.message || error || 'Database error');
@@ -8471,7 +8499,7 @@ async function handleApi(request, env, url, ctx = null) {
     requestSummary,
     ctx,
   });
-  if (!['GET', 'HEAD'].includes(request.method) && response.ok) {
+  if (response.ok && shouldInvalidatePublicReadCache(url.pathname, request.method)) {
     const cleared = invalidatePublicReadCache();
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cleared);
     else await cleared;
@@ -11512,27 +11540,48 @@ async function routeApi(request, env, url, ctx = null) {
     const updated = await env.DB.prepare(
       'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE id = ?',
     ).bind(id).first();
-    return jsonResponse({ ...updated, url: `/uploads/${encodeURIComponent(updated.filename)}` });
+    return jsonResponse({ ...updated, url: publicPhotoUrl(updated) });
   }
 
   return jsonResponse({ detail: 'Not found' }, 404);
 }
 
 const PHOTO_BYTE_CACHE_VERSION = 'blob-1';
+const PHOTO_BROWSER_CACHE = 'public, max-age=31536000, immutable';
+
+export function uploadCacheRequest(url) {
+  const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
+  const filename = decodeURIComponent(parsed.pathname.replace(/^\/uploads\//, '').split('/')[0] || '');
+  const version = parsed.searchParams.get('v') || PHOTO_BYTE_CACHE_VERSION;
+  return new Request(`https://efhsband.internal/uploads/${encodeURIComponent(filename)}?pcv=${PHOTO_BYTE_CACHE_VERSION}&v=${encodeURIComponent(version)}`);
+}
+
+export async function matchUploadCache(url) {
+  if (typeof caches === 'undefined' || !caches?.default) return null;
+  try {
+    return await caches.default.match(uploadCacheRequest(url)) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function shouldInvalidatePublicReadCache(pathname = '', method = 'GET') {
+  const verb = String(method || 'GET').toUpperCase();
+  if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS') return false;
+  return String(pathname || '').startsWith('/api/admin');
+}
 
 async function handleUploadGet(request, env, url, ctx = null) {
-  await initDb(env);
-  const cacheKey = new Request(new URL(`${url.pathname}?pcv=${PHOTO_BYTE_CACHE_VERSION}`, 'https://efhsband.internal'));
-  if (typeof caches !== 'undefined' && caches?.default) {
-    try {
-      const hit = await caches.default.match(cacheKey);
-      if (hit) return hit;
-    } catch {
-      // Fall through to the indexed filename lookup.
-    }
-  }
+  const cacheKey = uploadCacheRequest(url);
+  const hit = await matchUploadCache(url);
+  if (hit) return hit;
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
-  const row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
+  let row;
+  try {
+    row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
+  } catch (error) {
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
   if (!row) return new Response('Not found', { status: 404 });
   try {
     const bytes = photoBytesFromStored(row.data_base64);
@@ -11540,7 +11589,7 @@ async function handleUploadGet(request, env, url, ctx = null) {
     const response = new Response(bytes, {
       headers: {
         'content-type': row.content_type || 'application/octet-stream',
-        'cache-control': 'public, max-age=86400',
+        'cache-control': PHOTO_BROWSER_CACHE,
       },
     });
     if (typeof caches !== 'undefined' && caches?.default) {
@@ -12119,6 +12168,7 @@ async function serveStaticOrCms(request, env, url) {
         needsEvents: isHome || isFundraising,
         needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
         needsStaff: pageIsLive && page.slug === 'directors',
+        needsPhotos: pageIsLive && (isHome || page.slug === 'gallery'),
       });
       const pages = reads.pages;
       const allSponsors = reads.sponsors;
@@ -12284,6 +12334,10 @@ export default {
       const url = new URL(request.url);
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
         return serveBundledStaticAsset(request, env, url);
+      }
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
+        const cached = await matchUploadCache(url);
+        if (cached) return cached;
       }
       const opened = openD1Session(request, env);
       const response = await dispatchWorker(request, opened.env, ctx);

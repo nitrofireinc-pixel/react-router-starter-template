@@ -14,8 +14,11 @@ function fail(message) {
 if (!/directory\s*=\s*"\.\/worker\/public"/.test(toml)) {
   fail('wrangler.toml [assets] directory must be "./worker/public" (not "./assets"). Deploying with ./assets 404s styles.css/script.js on efhsband.org.');
 }
-if (!/run_worker_first\s*=\s*true/.test(toml)) {
-  fail('wrangler.toml must set run_worker_first = true so the Worker serves CMS HTML ahead of static assets.');
+if (/run_worker_first\s*=\s*true/.test(toml)) {
+  fail('wrangler.toml must not set run_worker_first = true (that sends every CSS/JS/image through the Worker).');
+}
+if (!/run_worker_first\s*=\s*\[/.test(toml) || !/\/\*\.html/.test(toml) || !/\/api\/\*/.test(toml) || !/\/uploads\/\*/.test(toml)) {
+  fail('wrangler.toml must set run_worker_first to CMS HTML, /admin*, /api/*, and /uploads/* only.');
 }
 if (!/html_handling\s*=\s*"none"/.test(toml)) {
   fail('wrangler.toml must set html_handling = "none" so /ensembles.html is not redirected to the static /ensembles draft.');

@@ -41,6 +41,7 @@ for (const name of [
   'badge-creator-admin.js',
   'push-sw.js',
   'manifest.webmanifest',
+  '_headers',
 ]) {
   cpSync(join(ROOT, name), join(PUBLIC, name));
 }

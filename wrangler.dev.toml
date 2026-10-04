@@ -9,7 +9,30 @@ workers_dev = true
 [assets]
 directory = "./worker/public"
 binding = "ASSETS"
-run_worker_first = true
+run_worker_first = [
+  "/",
+  "/*.html",
+  "/admin",
+  "/admin/*",
+  "/api/*",
+  "/uploads/*",
+  "/health",
+  "/subscribe",
+  "/subscribe/",
+  "/caldev",
+  "/caldev/",
+  "/calendar",
+  "/calendar/",
+  "/sponsor",
+  "/sponsor/",
+  "/in-kind",
+  "/in-kind/",
+  "/letterman-jacket",
+  "/letterman-jacket/",
+  "/donate",
+  "/donate/",
+  "/assets/downloads/*",
+]
 html_handling = "none"
 
 [vars]

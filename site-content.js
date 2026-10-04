@@ -1109,7 +1109,11 @@ async function loadPublicContent() {
       : Promise.resolve([]),
     Array.isArray(bootstrap?.photos)
       ? bootstrap.photos
-      : fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+      : (
+        document.querySelector('[data-photo-gallery], .photo-gallery, [data-home-gallery]')
+          ? fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+          : []
+      ),
     needsMonthCalendar
       ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
       : Promise.resolve([]),
