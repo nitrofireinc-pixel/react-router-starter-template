@@ -151,7 +151,8 @@ async function run() {
     await overflow.waitFor({ state: 'visible', timeout: 15000 });
     const detail = await tablet.locator('[data-visual-overflow-detail]').innerText();
     if (!/390px|320px/.test(detail)) failures.push(`overflow warning missing width: ${detail}`);
-    if (!/Wide test|Join the Band/i.test(detail)) failures.push(`overflow warning missing element name: ${detail}`);
+    if (!/wide-test|Wide test|div\b/i.test(detail)) failures.push(`overflow warning missing innermost name: ${detail}`);
+    if (/Join the Band/.test(detail) && !/Wide test/i.test(detail)) failures.push(`overflow warning named the heading: ${detail}`);
     await tablet.screenshot({ path: join(shots, 'visual-editor-overflow-warning.png') });
     await tablet.locator('[data-visual-overflow-back]').click();
     await tablet.close();

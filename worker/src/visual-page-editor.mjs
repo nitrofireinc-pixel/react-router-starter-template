@@ -9,7 +9,8 @@ export const VISUAL_PILOT_PATH = '/join.html';
 export const VISUAL_VERSION_LIMIT = 20;
 export const VISUAL_EDITOR_PATH_PREFIX = '/admin/visual';
 export const VISUAL_EDITOR_PATH = '/admin/visual/join';
-export const VISUAL_EDITOR_NOT_YET_SLUGS = Object.freeze(['home']);
+export const VISUAL_EDITOR_NOT_YET_SLUGS = Object.freeze(['home', 'in-kind', 'letterman-jacket']);
+export const CODE_RENDERED_EMPTY_BODY_SLUGS = Object.freeze(['in-kind', 'letterman-jacket']);
 
 export function normalizeVisualSlug(slug = '') {
   return String(slug || '').trim().toLowerCase();
@@ -129,13 +130,64 @@ export function extractLockedVisualRegions(html = '') {
   return { html: out, blocks };
 }
 
+export function lockedKindFromHtml(html = '') {
+  const source = String(html || '');
+  const named = source.match(/\bdata-visual-locked\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s/>]+))/i);
+  const value = String(named?.[1] || named?.[2] || named?.[3] || '').trim().toLowerCase();
+  if (value && /^[a-z0-9-]{1,32}$/.test(value)) return value;
+  return liveDataLockKind(source) || 'widget';
+}
+
+export function canonicalLockedPlaceholder(kind = '') {
+  const key = String(kind || '').trim().toLowerCase() || 'widget';
+  const lock = ` data-visual-locked="${key}"`;
+  switch (key) {
+    case 'calendar':
+      return `<div id="caldev-app" class="caldev-app visual-locked-slot"${lock} aria-live="polite"></div>`;
+    case 'events':
+      return `<div class="timeline visual-locked-slot"${lock} data-events></div>`;
+    case 'gallery':
+      return `<div class="photo-gallery visual-locked-slot"${lock} data-photo-gallery></div>`;
+    case 'sponsors':
+      return `<div class="sponsor-directory visual-locked-slot"${lock} data-sponsors></div>`;
+    case 'staff':
+      return `<div class="directory visual-locked-slot"${lock} data-staff></div>`;
+    case 'booster-meetings':
+      return `<div class="timeline booster-meetings visual-locked-slot"${lock} data-booster-meetings></div>`;
+    case 'booster-members':
+      return `<div class="directory visual-locked-slot"${lock} data-booster-members></div>`;
+    case 'dues':
+      return `<div class="card accent-card boosters-dues-card visual-locked-slot"${lock} data-boosters-dues><span class="tag">Band dues</span><h3>Pay band dues</h3><p class="visual-locked-label">Pay dues (locked)</p><span class="btn primary" data-dues-open>Pay dues</span></div>`;
+    case 'contact-form':
+      return `<div class="visual-locked-slot"${lock} data-contact-form-slot><p class="visual-locked-label">Contact form (locked)</p></div>`;
+    case 'form':
+      return `<div class="visual-locked-slot"${lock} data-cms-form><p class="visual-locked-label">Form (locked)</p></div>`;
+    case 'email-list':
+      return `<div class="visual-locked-slot"${lock} data-email-list-signup><p class="visual-locked-label">Email signup (locked)</p></div>`;
+    case 'sponsor-tiers':
+      return `<section class="sponsor-tiers visual-locked-slot"${lock} data-sponsor-tiers><p class="visual-locked-label">Sponsor packages (locked)</p></section>`;
+    case 'fundraiser':
+      return `<div class="visual-locked-slot"${lock} data-fundraising-cards><p class="visual-locked-label">Fundraiser cards (locked)</p></div>`;
+    case 'donate':
+      return `<span class="btn outline visual-locked-slot"${lock} data-donate-open>Donate</span>`;
+    case 'sponsor-form':
+      return `<span class="btn primary visual-locked-slot"${lock} data-sponsor-choice-open>Sponsor/In-Kind</span>`;
+    default:
+      return `<div class="visual-locked-slot"${lock}><p class="visual-locked-label">Live section (locked)</p></div>`;
+  }
+}
+
+export function replaceLockedVisualBlocks(html = '') {
+  const pulled = extractLockedVisualRegions(String(html || ''));
+  let out = pulled.html;
+  pulled.blocks.forEach((block, index) => {
+    out = out.replace(`<!--visual-locked-${index}-->`, canonicalLockedPlaceholder(lockedKindFromHtml(block)));
+  });
+  return out;
+}
+
 export function sanitizeLockedVisualHtml(html = '') {
-  return String(html || '')
-    .replace(/<(script|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/?(script|iframe|object|embed|link|meta)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '')
-    .replace(/\u0000/g, '');
+  return canonicalLockedPlaceholder(lockedKindFromHtml(html));
 }
 
 function escapeAttr(value) {
@@ -176,14 +228,21 @@ function sanitizeClassName(value = '') {
     .join(' ');
 }
 
+export function isGrapesJsAutoId(value = '') {
+  return /^i[a-z0-9]{2,8}$/i.test(String(value || '').trim());
+}
+
 function sanitizeVisualId(value = '') {
   const id = String(value || '').trim();
-  return /^[a-zA-Z][a-zA-Z0-9_-]{0,60}$/.test(id) ? id : '';
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,60}$/.test(id)) return '';
+  if (isGrapesJsAutoId(id)) return '';
+  return id;
 }
 
 function isSafeVisualSelector(selector = '') {
   const value = String(selector || '').trim();
   if (!value || value.length > 180) return false;
+  if (/#i[a-z0-9]{2,8}\b/i.test(value)) return false;
   if (/[>:@*[\]=+"'`\\]|url\s*\(|expression|javascript:/i.test(value)) return false;
   return /^[#.]?[a-zA-Z][a-zA-Z0-9#.\s_-]*$/.test(value);
 }
@@ -350,12 +409,56 @@ function quotedAttr(attrs, name) {
   return match?.[1] || match?.[2] || '';
 }
 
+const VISUAL_DATA_ATTRS = Object.freeze([
+  'data-visual-block',
+  'data-visual-locked',
+  'data-contact-form-slot',
+  'data-contact-form',
+  'data-photo-gallery',
+  'data-sponsors',
+  'data-staff',
+  'data-booster-meetings',
+  'data-booster-members',
+  'data-boosters-dues',
+  'data-cms-form',
+  'data-email-list-signup',
+  'data-sponsor-tiers',
+  'data-fundraising-cards',
+  'data-donate-open',
+  'data-dues-open',
+  'data-sponsor-choice-open',
+  'data-events',
+  'data-limit',
+  'data-sort',
+]);
+
+function appendVisualDataAttrs(open, rawAttrs) {
+  let next = open;
+  for (const name of VISUAL_DATA_ATTRS) {
+    const match = String(rawAttrs || '').match(new RegExp(
+      `\\b${name}(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s/>]+)))?`,
+      'i',
+    ));
+    if (!match) continue;
+    const value = String(match[1] || match[2] || match[3] || '').trim();
+    if (!value) {
+      next += ` ${name}`;
+      continue;
+    }
+    if (!/^[a-z0-9,-]{1,64}$/i.test(value)) continue;
+    next += attr(name, value.toLowerCase() === value || name === 'data-visual-locked' || name === 'data-visual-block' || name === 'data-cms-form'
+      ? value
+      : value);
+  }
+  return next;
+}
+
 function rewriteOpenTag(tag, rawAttrs) {
-  const attrs = String(rawAttrs || '');
+  const attrs = String(rawAttrs || '').replace(/(?:^|[/\s])on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s/>]+)/gi, ' ');
   if (tag === 'br') return '<br>';
   if (tag === 'img') {
-    const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-    const src = srcMatch?.[1] || srcMatch?.[2] || '';
+    const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s/>]+))/i);
+    const src = srcMatch?.[1] || srcMatch?.[2] || srcMatch?.[3] || '';
     if (!isSafeVisualImageSrc(src)) return '';
     const altMatch = attrs.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
     const alt = altMatch?.[1] || altMatch?.[2] || 'Photo';
@@ -369,13 +472,10 @@ function rewriteOpenTag(tag, rawAttrs) {
   if (id) open += attr('id', id);
   const className = sanitizeClassName((attrs.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
   if (className) open += attr('class', className);
-  const block = String((attrs.match(/\bdata-visual-block\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-  if (block && /^[a-z0-9-]{1,32}$/i.test(block)) open += attr('data-visual-block', block);
-  const locked = String((attrs.match(/\bdata-visual-locked\s*=\s*(?:"([^"]*)"|'([^']*)')/i) || [])[1] || '');
-  if (locked && /^[a-z0-9-]{1,32}$/i.test(locked)) open += attr('data-visual-locked', locked);
+  open = appendVisualDataAttrs(open, attrs);
   if (tag === 'a') {
-    const hrefMatch = attrs.match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-    const href = hrefMatch?.[1] || hrefMatch?.[2] || '';
+    const hrefMatch = attrs.match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s/>]+))/i);
+    const href = hrefMatch?.[1] || hrefMatch?.[2] || hrefMatch?.[3] || '';
     if (!isSafeVisualHref(href)) return '';
     open += attr('href', href);
     const targetMatch = attrs.match(/\btarget\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
@@ -391,9 +491,9 @@ function rewriteOpenTag(tag, rawAttrs) {
 }
 
 export function sanitizeVisualPageHtml(dirty = '') {
-  const pulled = extractLockedVisualRegions(String(dirty || ''));
+  const replaced = replaceLockedVisualBlocks(String(dirty || ''));
   const styles = [];
-  let html = pulled.html.replace(
+  let html = replaced.replace(
     /<style\b[^>]*\bdata-visual-css\b[^>]*>([\s\S]*?)<\/style>/gi,
     (_, css) => {
       const clean = sanitizeVisualCss(css);
@@ -402,10 +502,11 @@ export function sanitizeVisualPageHtml(dirty = '') {
     },
   );
   html = html
-    .replace(/<(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select|svg)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select|svg)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
+    .replace(/<(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea|select|svg)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea|select|svg)[^>]*>/gi, '')
+    .replace(/(?:^|[/\s])on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s/>]+)/gi, ' ')
+    .replace(/javascript:/gi, '')
+    .replace(/data:/gi, '');
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!ALLOWED_TAGS.has(tag)) return '';
@@ -416,9 +517,6 @@ export function sanitizeVisualPageHtml(dirty = '') {
     .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
     .replace(/\u0000/g, '')
     .trim();
-  pulled.blocks.forEach((block, index) => {
-    html = html.replace(`<!--visual-locked-${index}-->`, sanitizeLockedVisualHtml(block));
-  });
   const css = sanitizeVisualCss(styles.join('\n'));
   return css ? `<style data-visual-css>${css}</style>${html}` : html;
 }
@@ -471,19 +569,16 @@ export function importCmsBodyToVisual(html = '', slug = '') {
 
 export function overflowElementLabel({
   tag = '',
-  id = '',
-  block = '',
-  heading = '',
+  className = '',
   text = '',
 } = {}) {
-  const title = String(heading || '').replace(/\s+/g, ' ').trim();
-  if (title) return title.slice(0, 64);
-  const locked = String(block || '').replace(/-/g, ' ').trim();
-  if (locked) return locked;
-  if (id) return `#${id}`;
-  const snippet = String(text || '').replace(/\s+/g, ' ').trim();
-  if (snippet) return snippet.slice(0, 48);
-  return String(tag || 'element').toLowerCase() || 'element';
+  const name = String(tag || 'element').toLowerCase() || 'element';
+  const cls = String(className || '').split(/\s+/).filter(Boolean)[0] || '';
+  const snippet = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 32);
+  if (cls && snippet) return `${name}.${cls} (“${snippet}”)`;
+  if (cls) return `${name}.${cls}`;
+  if (snippet) return `${name} (“${snippet}”)`;
+  return name;
 }
 
 export function formatNarrowOverflowWarning(issues = []) {
@@ -592,7 +687,7 @@ export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
   if (!isVisualEditorSlug(key)) return null;
   await ensureVisualPagesSchema(env);
   const cms = await env.DB.prepare(
-    'SELECT title, path, body_html FROM cms_pages WHERE slug = ?',
+    'SELECT title, path, body_html, active FROM cms_pages WHERE slug = ?',
   ).bind(key).first();
   if (!cms) return null;
   const page = await env.DB.prepare(
@@ -610,6 +705,7 @@ export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
     slug: key,
     path: cms.path || (key === VISUAL_PILOT_SLUG ? VISUAL_PILOT_PATH : `/${key}.html`),
     title: cms.title || key,
+    active: Number(cms.active) === 1 ? 1 : 0,
     visual_editor: true,
     draft_html: draft,
     published_html: published,
@@ -725,6 +821,11 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   const title = String(options.title || (slug === VISUAL_PILOT_SLUG ? 'Join the Band' : slug)).trim() || slug;
   const path = String(options.path || (slug === VISUAL_PILOT_SLUG ? VISUAL_PILOT_PATH : `/${slug}.html`)).trim()
     || `/${slug}.html`;
+  const pageActive = Number(options.active) !== 0;
+  const bannerLabel = pageActive ? 'This page is being edited' : 'Coming Soon (inactive)';
+  const inactiveNote = pageActive
+    ? ''
+    : '<p class="visual-inactive-banner">Coming Soon (inactive) — visitors don\'t see this content until the page is turned on in Settings</p>';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -734,7 +835,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   <link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css?v=${v}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
-<body class="visual-editor-body" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}">
+<body class="visual-editor-body" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}">
   <div class="visual-phone-gate" data-visual-phone-gate>
     <div class="visual-phone-gate-card">
       <h1>Please edit pages on a computer or tablet.</h1>
@@ -746,11 +847,12 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
     </div>
   </div>
   <header class="visual-edit-banner" data-visual-banner>
-    <p class="visual-edit-banner-label">This page is being edited</p>
+    <p class="visual-edit-banner-label">${escapeHtml(bannerLabel)}</p>
     <div class="visual-edit-banner-title">
       <strong>${escapeHtml(title)}</strong>
-      <small>Visitors still see the published page until you publish</small>
+      <small>${pageActive ? 'Visitors still see the published page until you publish' : 'Coming Soon (inactive) — visitors don\'t see this content until the page is turned on in Settings'}</small>
     </div>
+    ${inactiveNote}
     <div class="visual-edit-banner-tools">
       <button type="button" class="visual-banner-btn" data-visual-add>Add section</button>
       <button type="button" class="visual-banner-btn" data-visual-undo>Undo</button>

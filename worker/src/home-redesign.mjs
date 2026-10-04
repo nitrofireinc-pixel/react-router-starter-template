@@ -500,10 +500,18 @@ export function injectComingSoonLogos(html, { logo = '/assets/efhs-logo.png', ma
   const source = String(html || '');
   if (!source.trim() || /coming-soon-logos/i.test(source)) return source;
   const logos = `<div class="coming-soon-logos"><img src="${escapeAttr(logo)}" alt="East Forsyth High School Eagles logo"><img src="${escapeAttr(mark)}" alt="East Forsyth Blue Regiment logo"></div>`;
-  if (/<div class="page-title">/i.test(source)) {
-    return source.replace(/<div class="page-title">/i, `<div class="page-title">${logos}`);
-  }
-  return `${logos}${source}`;
+  const openRe = /<div\b[^>]*>/gi;
+  let replaced = false;
+  const next = source.replace(openRe, (tag) => {
+    if (replaced) return tag;
+    const quoted = tag.match(/\bclass\s*=\s*(["'])([\s\S]*?)\1/i);
+    const unquoted = quoted ? '' : (tag.match(/\bclass\s*=\s*([^\s>]+)/i)?.[1] || '');
+    const className = String(quoted?.[2] || unquoted || '').replace(/["']/g, '');
+    if (!/(^|\s)page-title(\s|$)/i.test(className)) return tag;
+    replaced = true;
+    return `${tag}${logos}`;
+  });
+  return replaced ? next : `${logos}${source}`;
 }
 
 export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } = {}) {

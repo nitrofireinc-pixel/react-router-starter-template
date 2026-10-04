@@ -2816,7 +2816,14 @@ function renderMobileAdminMenu() {
       return;
     }
     if (child.matches('#admin-page-shortcuts, .admin-page-shortcuts')) {
-      [...child.querySelectorAll('button')].forEach(pushButton);
+      [...child.querySelectorAll('button, a.admin-page-edit')].forEach((node) => {
+        if (node.matches('button')) pushButton(node);
+        else {
+          const index = sourceButtons.length;
+          sourceButtons.push(node);
+          parts.push(`<button type="button" data-mobile-index="${index}">${escapeHtml(node.textContent.trim())}</button>`);
+        }
+      });
       return;
     }
     if (child.matches('.admin-menu-group')) {
@@ -2995,9 +3002,11 @@ function pageShortcutLabel(page) {
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['home', 'in-kind', 'letterman-jacket']);
+
 function isVisualEditorPageSlug(slug) {
   const key = String(slug || '').trim().toLowerCase();
-  return Boolean(key) && key !== 'home';
+  return Boolean(key) && !VISUAL_EDITOR_NOT_YET_SLUGS.has(key);
 }
 
 function visualEditorHref(slug) {
@@ -3107,7 +3116,7 @@ function renderPageShortcuts() {
     const name = escapeHtml(pageShortcutLabel(page));
     const slug = escapeAttr(page.slug);
     const settings = siteAdmin
-      ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}">Settings</a>`
+      ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg></a>`
       : '';
     if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
       return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>`;

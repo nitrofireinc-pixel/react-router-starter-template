@@ -8,6 +8,7 @@ import {
   loadVisualPageState,
   resetVisualPagesSchemaCache,
   saveVisualPage,
+  CODE_RENDERED_EMPTY_BODY_SLUGS,
   VISUAL_EDITOR_NOT_YET_SLUGS,
   VISUAL_EDITOR_PATH,
   VISUAL_EDITOR_PATH_PREFIX,
@@ -33,7 +34,10 @@ import {
   sanitizeVisualPageHtml,
   wrapLiveDataAsLocked,
   trimVisualVersions,
+  isGrapesJsAutoId,
 } from '../worker/src/visual-page-editor.mjs';
+import { DEFAULT_CMS_PAGES } from '../worker/src/default-pages.mjs';
+import { injectComingSoonLogos } from '../worker/src/home-redesign.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -41,11 +45,14 @@ test('visual editor is generic per slug and keeps Home not yet', () => {
   assert.equal(VISUAL_PILOT_SLUG, 'join');
   assert.equal(VISUAL_EDITOR_PATH, '/admin/visual/join');
   assert.equal(VISUAL_EDITOR_PATH_PREFIX, '/admin/visual');
-  assert.deepEqual([...VISUAL_EDITOR_NOT_YET_SLUGS], ['home']);
+  assert.deepEqual([...VISUAL_EDITOR_NOT_YET_SLUGS], ['home', 'in-kind', 'letterman-jacket']);
+  assert.deepEqual([...CODE_RENDERED_EMPTY_BODY_SLUGS], ['in-kind', 'letterman-jacket']);
   assert.equal(isVisualEditorSlug('join'), true);
   assert.equal(isVisualEditorSlug('fundraising'), true);
   assert.equal(isVisualEditorSlug('calendar'), true);
   assert.equal(isVisualEditorSlug('home'), false);
+  assert.equal(isVisualEditorSlug('in-kind'), false);
+  assert.equal(isVisualEditorSlug('letterman-jacket'), false);
   assert.equal(isVisualPilotSlug('home'), false);
   assert.equal(canEditVisualPage({ id: 1 }, 'join', (user, slug) => slug === 'join'), true);
   assert.equal(canEditVisualPage({ id: 1 }, 'contact', (user, slug) => slug === 'contact'), true);
@@ -79,20 +86,24 @@ test('visual page HTML sanitizer strips scripts and unsafe sources', () => {
   assert.match(clean, /data-visual-block="hero"/);
 });
 
-test('visual sanitizer keeps per-device CSS and element ids', () => {
-  const dirty = `<style data-visual-css>@media (max-width: 390px){#ih1{width: 238px; height: 80px}} body{background:url(javascript:alert(1))}</style><h1 id="ih1" style="color: #002142">Join</h1><p>Hello</p>`;
+test('visual sanitizer keeps per-device CSS and strips GrapesJS auto ids', () => {
+  const dirty = `<style data-visual-css>@media (max-width: 390px){#hero-title{width: 238px; height: 80px}#i1x2{width:10px}} body{background:url(javascript:alert(1))}</style><div id="i1x2" class="page-title"><h1 id="hero-title" style="color: #002142">Join</h1></div><p>Hello</p>`;
   const clean = sanitizeVisualPageHtml(dirty);
   assert.match(clean, /<style data-visual-css>/);
   assert.match(clean, /@media \(max-width: 390px\)/);
-  assert.match(clean, /#ih1\{/);
+  assert.match(clean, /#hero-title\{/);
   assert.match(clean, /max-width: 238px/);
   assert.match(clean, /width: 100%/);
-  assert.match(clean, /id="ih1"/);
+  assert.match(clean, /id="hero-title"/);
+  assert.doesNotMatch(clean, /id="i1x2"/);
+  assert.doesNotMatch(clean, /#i1x2/);
   assert.doesNotMatch(clean, /javascript/i);
   assert.doesNotMatch(clean, /body\{/);
-  const css = sanitizeVisualCss('@media (max-width: 390px){#ih1{width:238px}} #idesktop{max-width:720px;width:100%}');
+  assert.equal(isGrapesJsAutoId('i1x2'), true);
+  assert.equal(isGrapesJsAutoId('hero-title'), false);
+  const css = sanitizeVisualCss('@media (max-width: 390px){#hero-title{width:238px}} #join-hero{max-width:720px;width:100%}');
   assert.match(css, /@media \(max-width: 390px\)/);
-  assert.match(css, /#idesktop\{/);
+  assert.match(css, /#join-hero\{/);
 });
 
 test('visual sanitizer keeps on-page resize and move styles', () => {
@@ -241,6 +252,12 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(editorJs, /checkNarrowOverflow/);
   assert.match(editorJs, /Publish anyway/);
   assert.match(page, /This page is being edited/);
+  assert.match(renderVisualEditorHtml('test', { slug: 'resources', title: 'Student Resources', active: 0 }), /Coming Soon \(inactive\) — visitors don't see this content until the page is turned on in Settings/);
+  assert.match(editorJs, /waitForCanvasLayout/);
+  assert.match(editorJs, /waitTwoFrames/);
+  assert.match(editorJs, /stripGrapesAutoIds/);
+  assert.match(adminJs, /a\.admin-page-edit/);
+  assert.match(adminJs, /VISUAL_EDITOR_NOT_YET_SLUGS/);
   assert.match(page, /Please edit pages on a computer or tablet/);
   assert.match(page, /Phones are too small for the editor/);
   assert.match(page, /View live page/);
@@ -289,26 +306,68 @@ test('published visual content stays on the existing public page read', () => {
   assert.doesNotMatch(workerSrc, /visual_page_versions/);
 });
 
-test('first-open import wraps live-data sections as locked blocks', () => {
+test('first-open import wraps live-data sections as locked placeholders', () => {
   const html = importCmsBodyToVisual(
     '<main><h1>Contact</h1><p>Call us</p><div data-contact-form-slot><form><input name="n"><button>Send</button></form></div></main>',
     'contact',
   );
   assert.match(html, /<h1>Contact<\/h1>/);
   assert.match(html, /data-visual-locked="contact-form"/);
-  assert.match(html, /<form/i);
-  assert.match(html, /<input/i);
-  assert.match(html, /<button/i);
+  assert.match(html, /data-contact-form-slot/);
+  assert.doesNotMatch(html, /<form/i);
+  assert.doesNotMatch(html, /<input/i);
+  assert.doesNotMatch(html, /<button/i);
   const calendar = wrapLiveDataAsLocked('<div id="caldev-app" class="caldev-app"></div>');
   assert.match(calendar, /data-visual-locked="calendar"/);
 });
 
-test('visual sanitizer keeps locked forms and still strips scripts', () => {
+test('locked blocks never keep client HTML and use server placeholders', () => {
   const dirty = `<section><h2>Give</h2><div data-visual-locked="donate"><button type="button" data-donate-open>Donate</button><script>alert(1)</script></div></section>`;
   const clean = sanitizeVisualPageHtml(dirty);
   assert.match(clean, /data-visual-locked="donate"/);
-  assert.match(clean, /<button type="button" data-donate-open>Donate<\/button>/);
+  assert.match(clean, /data-donate-open/);
+  assert.match(clean, /visual-locked-slot/);
   assert.doesNotMatch(clean, /<script/i);
+  assert.doesNotMatch(clean, /<button/i);
+});
+
+test('locked-block XSS payloads are replaced and fully sanitized', () => {
+  const payloads = [
+    ['slash-separated onerror', '<div data-visual-locked="donate"><img src=x /onerror=alert(1)></div>', /onerror|alert\(1\)/i],
+    ['base href', '<div data-visual-locked="form"><base href="https://evil.example/"></div>', /<base|evil\.example/i],
+    ['form password', '<div data-visual-locked="form"><form action="https://evil.example"><input type="password" name="p"></form></div>', /<form|<input|password|evil\.example/i],
+    ['fixed overlay', '<div data-visual-locked="donate" style="position:fixed;inset:0;z-index:9999;background:#000">overlay</div>', /position:\s*fixed|inset:0/i],
+    ['external css url', '<div data-visual-locked="donate" style="background:url(http://evil.example/x.png)">ad</div>', /url\(|evil\.example/i],
+  ];
+  for (const [label, dirty, banned] of payloads) {
+    const clean = sanitizeVisualPageHtml(`<section><h1>Join</h1>${dirty}<p>Safe</p></section>`);
+    assert.doesNotMatch(clean, banned, `${label} leaked through locked sanitizer`);
+    assert.match(clean, /data-visual-locked=/);
+    assert.match(clean, /<h1>Join<\/h1>/);
+    assert.doesNotMatch(clean, /<form/i);
+    assert.doesNotMatch(clean, /<input/i);
+    assert.doesNotMatch(clean, /<base/i);
+  }
+});
+
+test('coming-soon logo injector is attribute-tolerant', () => {
+  const withId = '<section class="page-hero"><div id="i1x2" class="page-title"><h1>Volunteer</h1></div></section>';
+  const injected = injectComingSoonLogos(withId);
+  assert.match(injected, /coming-soon-logos/);
+  assert.doesNotMatch(injected, /^<div class="coming-soon-logos">/);
+  assert.match(injected, /page-title[\s\S]*coming-soon-logos/);
+  const sanitized = sanitizeVisualPageHtml(withId);
+  assert.doesNotMatch(sanitized, /id="i1x2"/);
+});
+
+test('code-rendered empty CMS bodies stay out of the visual editor', () => {
+  const empty = DEFAULT_CMS_PAGES.filter((page) => !String(page.body_html || '').trim());
+  assert.deepEqual(empty.map((page) => page.slug).sort(), ['in-kind', 'letterman-jacket']);
+  for (const page of empty) {
+    assert.equal(isVisualEditorSlug(page.slug), false, page.slug);
+    assert.ok(CODE_RENDERED_EMPTY_BODY_SLUGS.includes(page.slug), page.slug);
+  }
+  assert.equal(isVisualEditorSlug('home'), false);
 });
 
 test('visual publish guard treats published_at as locked', () => {
@@ -317,14 +376,15 @@ test('visual publish guard treats published_at as locked', () => {
   assert.equal(isVisualPublishedRow({}), false);
 });
 
-test('narrow overflow warning names the wide element', () => {
-  assert.equal(overflowElementLabel({ heading: 'Hero title', tag: 'section' }), 'Hero title');
+test('narrow overflow warning names the innermost element', () => {
+  assert.equal(overflowElementLabel({ tag: 'div', className: 'wide-test', text: 'Wide test block' }), 'div.wide-test (“Wide test block”)');
   const message = formatNarrowOverflowWarning([
-    { heading: 'Hero title', width: 820, viewportWidth: 390 },
+    { tag: 'div', className: 'wide-test', text: 'Wide test block', width: 820, viewportWidth: 390 },
   ]);
   assert.match(message, /At 390px/);
-  assert.match(message, /Hero title/);
+  assert.match(message, /div\.wide-test/);
   assert.match(message, /820px/);
+  assert.doesNotMatch(message, /Join the Band/);
 });
 
 test('pageHasVisualPublish is a no-write lookup', async () => {
@@ -349,7 +409,7 @@ test('visual editor load, save, and publish stay under 50 D1 queries', async () 
   let queries = 0;
   const versions = [];
   let visual = null;
-  const cms = { slug: 'join', title: 'Join the Band', path: '/join.html', body_html: '<h1>Join</h1><p>Hi</p>' };
+  const cms = { slug: 'join', title: 'Join the Band', path: '/join.html', body_html: '<h1>Join</h1><p>Hi</p>', active: 1 };
   const env = {
     DB: {
       prepare(sql) {

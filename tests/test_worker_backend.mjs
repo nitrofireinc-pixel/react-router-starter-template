@@ -2329,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004c'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2636,6 +2636,8 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.match(soon, /efhs-logo\.png/);
   assert.match(soon, /efhs-blue-regiment-mark\.png/);
   assert.match(soon, /data-cms-field="heading"/);
+  const grapesTitle = injectComingSoonLogos('<section class="page-hero"><div id="i1x2" class="page-title"><h1>Volunteer</h1></div></section>');
+  assert.match(grapesTitle, /<div id="i1x2" class="page-title"><div class="coming-soon-logos">/);
 });
 
 test('fundraising page cards use CMS flyer and event data without inventing a time', () => {

@@ -466,11 +466,15 @@
     };
   }
 
+  function stripGrapesAutoIds(html = '') {
+    return String(html || '').replace(/\s+id\s*=\s*(["'])i[a-z0-9]{2,8}\1/gi, '');
+  }
+
   function exportEditableHtml() {
     const main = findMain();
-    if (!main) return editor.getHtml();
+    if (!main) return stripGrapesAutoIds(editor.getHtml());
     walkResponsive(main);
-    const html = main.components().map((comp) => comp.toHTML()).join('');
+    const html = stripGrapesAutoIds(main.components().map((comp) => comp.toHTML()).join(''));
     const css = String(editor.getCss({ clearStyles: false }) || '').trim();
     return css ? `<style data-visual-css>${css}</style>${html}` : html;
   }
@@ -824,35 +828,76 @@
 
   function overflowLabel(el) {
     if (!el) return 'element';
-    const heading = el.querySelector?.('h1,h2,h3,h4')?.textContent?.replace(/\s+/g, ' ').trim();
-    if (heading) return heading.slice(0, 64);
-    const block = el.getAttribute?.('data-visual-block') || el.getAttribute?.('data-visual-locked');
-    if (block) return String(block).replace(/-/g, ' ');
-    const alt = el.getAttribute?.('alt');
-    if (alt) return alt;
-    const text = String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-    if (text) return text.slice(0, 48);
-    return String(el.tagName || 'element').toLowerCase();
+    const tag = String(el.tagName || 'element').toLowerCase();
+    const className = String(el.className || '').split(/\s+/).filter(Boolean)[0] || '';
+    const ownText = String(el.childNodes?.[0]?.nodeType === 3 ? el.childNodes[0].textContent : '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const text = ownText
+      || String(el.getAttribute?.('alt') || el.getAttribute?.('data-visual-block') || '')
+      || String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    const snippet = text.slice(0, 32);
+    if (className && snippet) return `${tag}.${className} (“${snippet}”)`;
+    if (className) return `${tag}.${className}`;
+    if (snippet) return `${tag} (“${snippet}”)`;
+    return tag;
   }
 
   function findOverflowInDoc(doc, viewportWidth) {
     const root = doc?.querySelector('#main') || doc?.querySelector('main') || doc?.body;
     if (!root) return null;
-    const limit = viewportWidth + 1;
-    let worst = null;
-    [root, ...root.querySelectorAll('*')].forEach((el) => {
-      if (el.closest?.('header, footer, .utility, .site-header')) return;
+    let best = null;
+    const walk = (el, depth) => {
+      if (!el || el.closest?.('header, footer, .utility, .site-header')) return;
       const width = Math.max(el.scrollWidth || 0, Math.round(el.getBoundingClientRect?.().width || 0));
-      if (width > viewportWidth + 1 && (!worst || width > worst.width)) {
-        worst = {
-          tag: el.tagName,
-          heading: overflowLabel(el),
-          width,
-          viewportWidth,
-        };
+      if (width > viewportWidth + 1 && (!best || depth >= best.depth)) {
+        best = { el, width, depth };
       }
+      [...(el.children || [])].forEach((child) => walk(child, depth + 1));
+    };
+    walk(root, 0);
+    if (!best) return null;
+    return {
+      tag: best.el.tagName,
+      className: best.el.className,
+      text: overflowLabel(best.el),
+      heading: overflowLabel(best.el),
+      width: best.width,
+      viewportWidth,
+    };
+  }
+
+  function waitForImages(doc) {
+    const images = [...(doc?.images || doc?.querySelectorAll?.('img') || [])];
+    return Promise.all(images.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        const done = () => resolve();
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+        setTimeout(done, 800);
+      });
+    }));
+  }
+
+  function waitTwoFrames() {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
     });
-    return worst;
+  }
+
+  async function waitForCanvasLayout(width) {
+    const frame = editor.Canvas.getFrameEl?.() || editor.Canvas.getFrameEl();
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      const actual = Number(frame?.offsetWidth || frame?.clientWidth || 0);
+      if (actual && Math.abs(actual - width) <= 2) break;
+      await waitTwoFrames();
+    }
+    await waitForImages(editor.Canvas.getDocument());
+    await waitTwoFrames();
   }
 
   async function checkNarrowOverflow() {
@@ -860,8 +905,8 @@
     const issues = [];
     for (const id of ['Phone', 'Small']) {
       editor.setDevice(id);
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const width = id === 'Phone' ? 390 : 320;
+      await waitForCanvasLayout(width);
       const issue = findOverflowInDoc(editor.Canvas.getDocument(), width);
       if (issue) issues.push(issue);
     }
