@@ -385,7 +385,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit.admin_after_window'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.delete'));
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004u'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004v'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });

@@ -8,29 +8,43 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ADMIN_AUDIT_PAGE_SIZE,
+  MUTATING_ADMIN_API_ROUTES,
   assertAuditSqlIsAppendOnly,
   auditCategoryFromPath,
   auditEntryMatchesQuery,
+  auditSecretEnvName,
+  buildAdminAuditExportCsv,
+  buildAdminAuditExportJson,
   buildAdminAuditExportPdfBase64,
   buildAdminAuditExportText,
   buildAuditSummary,
   canonicalAuditPayload,
+  canonicalChainMaterial,
+  cheapTextDiff,
+  contentEvidence,
   currentEasternMonthYear,
   decryptAuditPayload,
   easternMonthUtcBounds,
   encryptAuditPayload,
   enrichMailAuditMeta,
   formatAuditTimestampEt,
+  inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
   maybeAuditAdminApiResponse,
+  nextAuditKeyId,
   redactAuditObject,
   recordAuditWriteFailure,
+  registerLoginFailure,
+  resetAuditGenerationCache,
   resetAuditWriteFailureState,
+  resetLoginLockState,
   serializeAuditRow,
   sha256Hex,
   shouldAuditAdminApiRequest,
+  startNewAuditLogGeneration,
   verifyAuditHashChain,
+  verifyAuditRowDigest,
   visualPageAuditFromRequest,
   wrapPdfLine,
   writeAdminAuditLog,
@@ -50,6 +64,10 @@ test('shouldAuditAdminApiRequest logs mutations but skips reads and security-log
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log.pdf', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/mail', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/mail/test-no-reply', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/password', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/users', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/users/3', 'PUT'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes/9', 'PUT'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes/upload', 'POST'), false);
@@ -110,6 +128,8 @@ test('audit helpers categorize paths and build export text', () => {
   assert.equal(auditCategoryFromPath('/api/admin/sponsors/manual'), 'sponsors');
   assert.equal(auditCategoryFromPath('/api/admin/minutes/9'), 'minutes');
   assert.equal(auditCategoryFromPath('/api/admin/visual-pages/fundraising'), 'pages');
+  assert.equal(auditCategoryFromPath('/api/admin/badges/2'), 'badges');
+  assert.equal(auditCategoryFromPath('/api/admin/forms'), 'forms');
   const visual = visualPageAuditFromRequest('/api/admin/visual-pages/calendar', { body: { action: 'publish' } }, 'PUT');
   assert.equal(visual.action, 'change.pages');
   assert.equal(visual.kind, 'publish');
@@ -289,6 +309,7 @@ function createAuditDb(seedRows = []) {
   const sqlLog = [];
   const env = {
     EFBAND_SECRET: 'unit-test-secret',
+    AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere',
     DB: {
       prepare(sql) {
         const q = String(sql);
@@ -343,14 +364,15 @@ function createAuditDb(seedRows = []) {
             if (q.includes('INSERT INTO admin_audit_log')) {
               rows.push({
                 id: rows.length + 1,
-                created_at: '2026-10-04 16:00:00',
-                action: this.binds[0],
-                category: this.binds[1],
-                actor_username: this.binds[6],
-                payload_sha256: this.binds[11],
-                ciphertext: this.binds[12],
-                prev_sha256: this.binds[14],
-                enc_version: this.binds[13],
+                created_at: this.binds[0] || '2026-10-04 16:00:00',
+                action: this.binds[1],
+                category: this.binds[2],
+                actor_user_id: this.binds[6],
+                actor_username: this.binds[7],
+                payload_sha256: this.binds[12],
+                ciphertext: this.binds[13],
+                enc_version: this.binds[14],
+                prev_sha256: this.binds[15],
               });
               return { success: true, meta: { last_row_id: rows.length } };
             }
@@ -504,10 +526,186 @@ test('2026-10-04.2.sql can be applied twice without ALTER', () => {
 
 test('new audit rows store the previous payload hash', async () => {
   resetAuditWriteFailureState();
+  resetAuditGenerationCache();
   const { env, rows } = createAuditDb();
   const first = await writeAdminAuditLog(env, { action: 'login', actor_username: 'a@efhsband.org' });
   const second = await writeAdminAuditLog(env, { action: 'logout', actor_username: 'a@efhsband.org' });
   assert.equal(first.prev_sha256, '');
   assert.equal(second.prev_sha256, first.payload_sha256);
   assert.equal(rows[1].prev_sha256, first.payload_sha256);
+});
+
+test('new rows hash ciphertext plus index columns and stay decryptable', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, rows } = createAuditDb();
+  const written = await writeAdminAuditLog(env, {
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 1,
+    actor_username: 'agent@efhsband.org',
+    ip: '203.0.113.9',
+    country: 'US',
+    user_agent: 'TestAgent',
+  });
+  assert.equal(written.key_missing, false);
+  assert.equal(rows[0].actor_username, '');
+  const digest = await verifyAuditRowDigest(rows[0]);
+  assert.equal(digest.recomputed, true);
+  assert.equal(digest.ok, true);
+  const expected = await sha256Hex(canonicalChainMaterial({
+    created_at: rows[0].created_at,
+    action: rows[0].action,
+    category: rows[0].category,
+    actor_user_id: rows[0].actor_user_id,
+    key_id: 'k1',
+    ciphertext: rows[0].ciphertext,
+  }));
+  assert.equal(rows[0].payload_sha256, expected);
+  const listed = await listAdminAuditLogs(env, { year: 2026, month: 10, limit: 25 });
+  assert.equal(listed.entries[0].actor_username, 'agent@efhsband.org');
+  assert.equal(listed.entries[0].ip, '203.0.113.9');
+  assert.equal(listed.entries[0].country, 'US');
+  assert.equal(listed.entries[0].integrity_ok, true);
+});
+
+test('missing AUDIT_LOG_KEY still writes an unsigned row', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, rows } = createAuditDb();
+  delete env.AUDIT_LOG_KEY;
+  const written = await writeAdminAuditLog(env, {
+    action: 'login',
+    actor_username: 'agent@efhsband.org',
+  });
+  assert.equal(written.key_missing, true);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].ciphertext, /^missing\./);
+  const listed = await listAdminAuditLogs(env, { year: 2026, month: 10, limit: 25 });
+  assert.equal(listed.entries[0].actor_username, 'agent@efhsband.org');
+});
+
+test('each mutating /api/admin route produces exactly one audit row', async () => {
+  assert.ok(MUTATING_ADMIN_API_ROUTES.length >= 40);
+  for (const route of MUTATING_ADMIN_API_ROUTES) {
+    resetAuditWriteFailureState();
+    resetAuditGenerationCache();
+    const { env, rows } = createAuditDb();
+    const generic = shouldAuditAdminApiRequest(route.path, route.method);
+    if (route.logger === 'explicit') {
+      assert.equal(generic, false, `${route.method} ${route.path} should be explicit`);
+      await writeAdminAuditLog(env, {
+        action: route.action,
+        path: route.path,
+        method: route.method,
+        actor_username: 'agent@efhsband.org',
+      });
+    } else {
+      assert.equal(generic, true, `${route.method} ${route.path} should use generic logger`);
+      await maybeAuditAdminApiResponse(env, {
+        request: { method: route.method, headers: { get: () => '' } },
+        url: { pathname: route.path },
+        response: { status: 200 },
+        actor: { id: 1, username: 'agent@efhsband.org', role: 'admin' },
+        requestSummary: { body: { title: 'Example', body_html: '<p>After</p>' } },
+      });
+    }
+    assert.equal(rows.length, 1, `${route.method} ${route.path} wrote ${rows.length} rows`);
+    assert.equal(rows[0].action, route.action, `${route.method} ${route.path}`);
+  }
+});
+
+test('login lockout trips after five failures', () => {
+  resetLoginLockState();
+  let state = { locked: false };
+  for (let i = 0; i < 5; i += 1) {
+    state = registerLoginFailure('agent@efhsband.org', '203.0.113.9');
+  }
+  assert.equal(state.locked, true);
+  assert.equal(inspectLoginLock('agent@efhsband.org', '203.0.113.9').locked, true);
+  assert.equal(inspectLoginLock('other@efhsband.org', '203.0.113.9').locked, false);
+});
+
+test('content evidence stores a capped diff and hashes', () => {
+  const small = contentEvidence('Hello world', 'Hello friends');
+  assert.equal(small.capped, false);
+  assert.match(small.diff.added, /friends/);
+  assert.match(small.diff.removed, /world/);
+  const before = 'a'.repeat(5000);
+  const after = `bbb${'a'.repeat(4997)}`;
+  const large = contentEvidence(before, after);
+  assert.equal(large.capped, true);
+  assert.ok(large.before_excerpt);
+  assert.equal(cheapTextDiff('same', 'same').unchanged, true);
+});
+
+test('new log genesis continues the chain and does not rewrite old rows', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, rows, site } = createAuditDb();
+  env.AUDIT_LOG_KEY_K2 = 'unit-audit-key-generation-two';
+  const first = await writeAdminAuditLog(env, { action: 'login', actor_username: 'agent@efhsband.org' });
+  const started = await startNewAuditLogGeneration(env, {
+    reason: 'Lost access to previous generation key',
+    authorizedBy: 'Trevor',
+    actor: { id: 1, username: 'agent@efhsband.org' },
+  });
+  assert.equal(started.ok, true);
+  assert.equal(started.new_key_id, 'k2');
+  assert.equal(started.previous_chain_head, first.payload_sha256);
+  assert.equal(started.previous_row_count, 1);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].action, 'login');
+  assert.equal(rows[0].payload_sha256, first.payload_sha256);
+  assert.equal(rows[1].action, 'log.genesis');
+  assert.equal(rows[1].prev_sha256, first.payload_sha256);
+  const stored = JSON.parse(site.get('audit_log_generation'));
+  assert.equal(stored.key_id, 'k2');
+  assert.equal(nextAuditKeyId('k2'), 'k3');
+  assert.equal(auditSecretEnvName('k2'), 'AUDIT_LOG_KEY_K2');
+});
+
+test('CSV and JSON exports include the signed chain head', async () => {
+  const entries = [{
+    id: 1,
+    created_at: '2026-10-04 16:00:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 1,
+    actor_username: 'agent@efhsband.org',
+    ip: '203.0.113.9',
+    country: 'US',
+    session_id_hash: 'abc',
+    method: 'POST',
+    path: '/admin/login',
+    status: 302,
+    summary: 'login ok',
+    payload_sha256: 'aa',
+    prev_sha256: '',
+    integrity_ok: true,
+  }];
+  const verify = { chain_ok: true, chain_head: 'aa', signed_chain: 'sig' };
+  const csv = buildAdminAuditExportCsv(entries, verify);
+  assert.match(csv, /agent@efhsband.org/);
+  assert.match(csv, /signed_chain,sig/);
+  const json = JSON.parse(buildAdminAuditExportJson(entries, verify));
+  assert.equal(json.verify.signed_chain, 'sig');
+  assert.equal(json.entries[0].country, 'US');
+});
+
+test('new-row encrypt plus chain hash stays well under the Workers 10ms budget in Node', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env } = createAuditDb();
+  const started = performance.now();
+  for (let i = 0; i < 5; i += 1) {
+    await writeAdminAuditLog(env, {
+      action: 'change.pages',
+      actor_username: 'agent@efhsband.org',
+      meta: { content: { before_text: 'Hello', after_text: 'Hello world' } },
+    });
+  }
+  const elapsed = performance.now() - started;
+  const perRow = elapsed / 5;
+  assert.ok(perRow < 25, `audit write averaged ${perRow.toFixed(2)}ms in Node`);
 });

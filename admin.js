@@ -5260,6 +5260,8 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   const chainEl = document.querySelector('#security-log-chain');
   const failEl = document.querySelector('#security-log-write-warning');
   const download = document.querySelector('#download-security-log');
+  const downloadCsv = document.querySelector('#download-security-log-csv');
+  const downloadJson = document.querySelector('#download-security-log-json');
   const pager = document.querySelector('#security-log-pager');
   if (!list) return;
   if (resetPage) state.securityLogPage = 1;
@@ -5278,17 +5280,25 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.q) params.set('q', filters.q);
+  const exportParams = new URLSearchParams({
+    year: filters.year,
+    month: filters.month,
+  });
+  if (filters.actor) exportParams.set('actor', filters.actor);
+  if (filters.action) exportParams.set('action', filters.action);
+  if (filters.from) exportParams.set('from', filters.from);
+  if (filters.to) exportParams.set('to', filters.to);
   if (download) {
-    const pdfParams = new URLSearchParams({
-      year: filters.year,
-      month: filters.month,
-    });
-    if (filters.actor) pdfParams.set('actor', filters.actor);
-    if (filters.action) pdfParams.set('action', filters.action);
-    if (filters.from) pdfParams.set('from', filters.from);
-    if (filters.to) pdfParams.set('to', filters.to);
-    download.href = `/api/admin/security-log.pdf?${pdfParams.toString()}`;
+    download.href = `/api/admin/security-log.pdf?${exportParams.toString()}`;
     download.setAttribute('rel', 'noopener');
+  }
+  if (downloadCsv) {
+    downloadCsv.href = `/api/admin/security-log.csv?${exportParams.toString()}`;
+    downloadCsv.setAttribute('rel', 'noopener');
+  }
+  if (downloadJson) {
+    downloadJson.href = `/api/admin/security-log.json?${exportParams.toString()}`;
+    downloadJson.setAttribute('rel', 'noopener');
   }
   try {
     if (status) status.textContent = 'Loading sealed security log…';
@@ -5346,7 +5356,9 @@ async function loadSecurityLog({ resetPage = false } = {}) {
           </header>
           <p>${summary}</p>
           ${route ? `<p class="muted mono">${route}</p>` : ''}
-          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}</p>` : ''}
+          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}${entry.country ? ` · ${escapeHtml(entry.country)}` : ''}</p>` : ''}
+          ${entry.session_id_hash ? `<p class="muted mono">Session: ${escapeHtml(entry.session_id_hash)}</p>` : ''}
+          ${entry.key_id ? `<p class="muted mono">Key: ${escapeHtml(entry.key_id)}</p>` : ''}
           ${integrity}
           ${sha}
           ${meta}
@@ -8359,6 +8371,59 @@ function bindForms() {
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
     loadSecurityLog({ resetPage: true }).catch(() => {});
+  });
+  document.querySelector('#verify-security-log')?.addEventListener('click', async () => {
+    const out = document.querySelector('#security-log-verify');
+    if (out) out.textContent = 'Verifying hash chain…';
+    try {
+      const filters = securityLogFilterValues();
+      const params = new URLSearchParams({
+        year: filters.year,
+        month: filters.month,
+      });
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
+      if (out) {
+        out.textContent = `${data.chain_status || 'Checked'} · ${data.checked || 0} rows · head ${String(data.chain_head || '').slice(0, 16)}…`;
+        out.className = data.chain_ok === false ? 'error' : 'status';
+      }
+    } catch (error) {
+      if (out) {
+        out.textContent = error.message || 'Verify failed';
+        out.className = 'error';
+      }
+    }
+  });
+  document.querySelector('#security-log-genesis-start')?.addEventListener('click', async () => {
+    const status = document.querySelector('#security-log-genesis-status');
+    const reason = String(document.querySelector('#security-log-genesis-reason')?.value || '').trim();
+    const authorizedBy = String(document.querySelector('#security-log-genesis-by')?.value || '').trim();
+    const confirmed = Boolean(document.querySelector('#security-log-genesis-confirm')?.checked);
+    if (!confirmed || authorizedBy.toLowerCase() !== 'trevor' || reason.length < 8) {
+      if (status) status.textContent = 'Trevor must authorize, check the confirm box, and enter a reason.';
+      return;
+    }
+    if (status) status.textContent = 'Starting new log generation…';
+    try {
+      const data = await jsonFetch('/api/admin/security-log/genesis', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          confirm: 'START NEW LOG',
+          reason,
+          authorized_by: authorizedBy,
+        }),
+      });
+      if (status) {
+        status.textContent = data.ok
+          ? `New log generation ${data.generation} started (${data.new_key_id}). Old rows were not changed.`
+          : (data.detail || 'Could not start a new log');
+      }
+      loadSecurityLog({ resetPage: true }).catch(() => {});
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not start a new log';
+    }
   });
   let securityLogFilterTimer = null;
   ['#security-log-actor', '#security-log-action', '#security-log-month', '#security-log-year', '#security-log-from', '#security-log-to', '#security-log-q'].forEach((selector) => {

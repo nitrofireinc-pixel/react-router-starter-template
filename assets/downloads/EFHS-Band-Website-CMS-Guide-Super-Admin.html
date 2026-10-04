@@ -320,6 +320,8 @@ table.t td:first-child { color: #0f1f36; }
 <li>Visual editor <b>Save draft</b>, <b>Publish</b>, and <b>Restore</b> appear as <b>change.pages</b>, with the page name and kind (draft, publish, or restore) in the summary. Opening a visual editor page adds <b>page.edit.open</b>.</li>
 <li>Each sealed row still shows its own integrity flag. The screen also reports <b>Chain intact</b> or <b>Break at entry #id</b> for the hash chain on new rows.</li>
 <li>If an audit write fails, the Worker logs it and the Security Log shows a warning such as <b>N audit writes failed since &lt;time&gt;</b>.</li>
+<li><b>Verify integrity</b> checks the SHA-256 hash chain for the selected date range without needing to edit anything. <b>Download CSV</b> and <b>Download JSON</b> include a signed chain-head hash for handing records to the school or police.</li>
+<li><b>Start a new log generation</b> is Super Admin only and needs Trevor’s authorization. It does not change or delete old rows. It writes a <code>log.genesis</code> row (reason, date, who started it, previous chain head, previous row count, and that the site has been logged since the original build) and continues the hash chain under a new key id (<code>k2</code>, <code>k3</code>, …).</li>
 </ul>
 </section>
 <section class="sec" id="dos"><h1 class="sec-h"><span class="num">7</span><span>Do&#x27;s and don&#x27;ts</span></h1><div class="sec-rule"></div>
@@ -391,6 +393,23 @@ table.t td:first-child { color: #0f1f36; }
 <p>Daily D1 limits reset at midnight UTC (8 PM Eastern during daylight time). Since September 1, 2026, Cloudflare blocks D1 queries for the rest of the day when an account goes over, so pages and CMS screens that need the database would stop working until the reset. Check usage in the Cloudflare dashboard (Workers & Pages → D1) if anything looks wrong.</p>
 <h2 id="host-4">A.4 Backups</h2>
 <ul><li><b>Built in:</b> D1 Time Travel allows point-in-time restore of <code>efhsband-db</code> to any minute in the last <b>7 days</b> on the Free plan (<code>npx wrangler d1 time-travel restore efhsband-db --timestamp=…</code>).</li><li><b>Code:</b> GitHub holds the full history. Any commit can be redeployed.</li><li><b>No scheduled export job exists</b> in the repository. Recommended: a monthly <code>npx wrangler d1 export efhsband-db --remote --output efhsband-db-YYYY-MM-DD.sql</code> kept off-site in encrypted storage. The export includes photos, personal data and password hashes, so treat it as confidential.</li></ul>
+<h2 id="host-6">A.6 Security log encryption key and “new log” procedure</h2>
+<p>The Security Log encrypts each new row’s details (IP, user agent, content excerpts, diffs, file hashes) with AES-256-GCM. The key is a Cloudflare Worker secret named <code>AUDIT_LOG_KEY</code> for generation <code>k1</code>, then <code>AUDIT_LOG_KEY_K2</code>, <code>AUDIT_LOG_KEY_K3</code>, and so on. Trevor does not hold or see the key. It must never exist outside Cloudflare’s secret store: not in git, wrangler.toml, chat, screenshots, or a file.</p>
+<p><b>First install (deploy step only):</b> generate and store the secret in one pipe so it is never assigned to a variable or printed. DEV uses a different random value than production. Do not set the production secret until the production deploy step.</p>
+<pre style="white-space:pre-wrap;background:#f4f6f8;padding:10px;border-radius:6px">openssl rand -base64 32 | wrangler secret put AUDIT_LOG_KEY --name efhsband-dev
+wrangler secret list --name efhsband-dev
+# Production, only at the prod deploy step:
+openssl rand -base64 32 | wrangler secret put AUDIT_LOG_KEY --name efhsband-live
+wrangler secret list --name efhsband-live</pre>
+<p>After the pipe, report only that <code>wrangler secret list</code> shows <code>AUDIT_LOG_KEY</code>. Do not read the secret back.</p>
+<p><b>If the key is lost, or a new log must start</b> (Trevor’s authorization required):</p>
+<ol>
+<li>Do not overwrite <code>AUDIT_LOG_KEY</code>. Old rows stay encrypted with the original secret and must remain readable.</li>
+<li>An authorized deploy agent pipes a fresh CSPRNG value into the next named secret, for example <code>AUDIT_LOG_KEY_K2</code>, using the same one-line openssl | wrangler pattern. Never print it.</li>
+<li>A Super Admin opens Security Log → Start a new log generation, enters the reason, types that Trevor authorized it, and confirms <code>START NEW LOG</code>.</li>
+<li>The Worker writes <code>log.genesis</code> (reason, UTC date, actor, previous chain-head hash, previous row count, note that the site has been logged since the original build) and continues the hash chain. Every new row stores its key id so generations stay distinct. Existing rows are not updated or re-encrypted.</li>
+</ol>
+<p>Limits: the Cloudflare account owner can still decrypt because they control the Worker secrets and D1. Encryption protects privacy from anyone browsing raw D1. The hash chain plus a scheduled daily export of the chain head to an outside location is the stronger tamper-evidence plan; that daily export is not built yet.</p>
 <h2 id="host-5">A.5 Where this guide lives</h2>
 <p>This guide is committed as <code>assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf</code>, with its HTML source next to it. The Worker serves both only to logged-in Super Admins (<code>/api/admin/website-guide.pdf</code> and the <code>/assets/downloads/</code> paths). Anyone else is sent to login or gets a 403. To update the guide, replace both files, run <code>npm run build:cms-guide-pdf</code> and the guide test, commit, and deploy as in A.2.</p>
 </section>

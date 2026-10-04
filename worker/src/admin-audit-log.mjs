@@ -11,13 +11,29 @@
 
 export const ADMIN_AUDIT_TABLE = 'admin_audit_log';
 export const ADMIN_AUDIT_ENC_VERSION = 1;
+export const ADMIN_AUDIT_ENC_VERSION_V2 = 2;
+export const ADMIN_AUDIT_ENC_VERSION_UNSIGNED = 0;
 export const ADMIN_AUDIT_PAGE_SIZE = 25;
 export const AUDIT_LOG_TIMEZONE = 'America/New_York';
 export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
+export const AUDIT_LOG_KEY_ENV = 'AUDIT_LOG_KEY';
+export const DEFAULT_AUDIT_KEY_ID = 'k1';
+export const LOGIN_LOCK_MAX_FAILURES = 5;
+export const LOGIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
+export const PHOTO_QUARANTINE_SORT = -91000;
+export const CONTENT_EVIDENCE_FULL_MAX = 4000;
+export const CONTENT_EVIDENCE_EXCERPT = 400;
+export const CONTENT_DIFF_MAX = 800;
 export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'login',
   'login.failed',
+  'login.locked',
   'logout',
+  'session.expired',
+  'password.change',
+  'user.create',
+  'user.edit',
+  'user.delete',
   'page.edit.open',
   'change.pages',
   'change.admin',
@@ -36,9 +52,84 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'change.contact',
   'change.site',
   'change.mail',
+  'change.badges',
+  'change.forms',
   'mail.send',
+  'mail.test',
   'security.log.view',
   'security.log.export',
+  'security.log.verify',
+  'log.genesis',
+]);
+export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
+  { method: 'POST', path: '/api/admin/forms', logger: 'generic', action: 'change.forms' },
+  { method: 'PUT', path: '/api/admin/forms', logger: 'generic', action: 'change.forms' },
+  { method: 'PUT', path: '/api/admin/forms/4', logger: 'generic', action: 'change.forms' },
+  { method: 'DELETE', path: '/api/admin/forms/4', logger: 'generic', action: 'change.forms' },
+  { method: 'POST', path: '/api/admin/site', logger: 'generic', action: 'change.site' },
+  { method: 'PUT', path: '/api/admin/utility-links', logger: 'generic', action: 'change.site' },
+  { method: 'PUT', path: '/api/admin/social-links', logger: 'generic', action: 'change.site' },
+  { method: 'DELETE', path: '/api/admin/zernio/facebook', logger: 'generic', action: 'change.site' },
+  { method: 'POST', path: '/api/admin/zernio/facebook/select-page', logger: 'generic', action: 'change.site' },
+  { method: 'POST', path: '/api/admin/zernio/facebook/events/ignore-all', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/zernio/facebook/events/1/ignore', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/zernio/facebook/events/publish', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/zernio/posts', logger: 'generic', action: 'change.site' },
+  { method: 'DELETE', path: '/api/admin/zernio/instagram', logger: 'generic', action: 'change.site' },
+  { method: 'PUT', path: '/api/admin/zernio/instagram/settings', logger: 'generic', action: 'change.site' },
+  { method: 'POST', path: '/api/admin/logo', logger: 'generic', action: 'change.site' },
+  { method: 'POST', path: '/api/admin/password', logger: 'explicit', action: 'password.change' },
+  { method: 'POST', path: '/api/admin/users', logger: 'explicit', action: 'user.create' },
+  { method: 'PUT', path: '/api/admin/users/3', logger: 'explicit', action: 'user.edit' },
+  { method: 'DELETE', path: '/api/admin/users/3', logger: 'explicit', action: 'user.delete' },
+  { method: 'PUT', path: '/api/admin/visual-pages/home', logger: 'generic', action: 'change.pages' },
+  { method: 'POST', path: '/api/admin/visual-pages/home/restore', logger: 'generic', action: 'change.pages' },
+  { method: 'POST', path: '/api/admin/pages', logger: 'generic', action: 'change.pages' },
+  { method: 'PUT', path: '/api/admin/pages/home', logger: 'generic', action: 'change.pages' },
+  { method: 'DELETE', path: '/api/admin/pages/join', logger: 'generic', action: 'change.pages' },
+  { method: 'PUT', path: '/api/admin/ensembles/body', logger: 'generic', action: 'change.pages' },
+  { method: 'PUT', path: '/api/admin/sponsors/settings', logger: 'generic', action: 'change.sponsors' },
+  { method: 'POST', path: '/api/admin/checkout/settings', logger: 'generic', action: 'change.sponsors' },
+  { method: 'POST', path: '/api/admin/checkout/pay', logger: 'generic', action: 'change.sponsors' },
+  { method: 'POST', path: '/api/admin/ledger', logger: 'generic', action: 'change.ledger' },
+  { method: 'POST', path: '/api/admin/sponsors/payment-ledger/in-kind', logger: 'generic', action: 'change.sponsors' },
+  { method: 'DELETE', path: '/api/admin/ledger/9', logger: 'generic', action: 'change.ledger' },
+  { method: 'POST', path: '/api/admin/sponsors', logger: 'generic', action: 'change.sponsors' },
+  { method: 'POST', path: '/api/admin/sponsors/reorder', logger: 'generic', action: 'change.sponsors' },
+  { method: 'PUT', path: '/api/admin/sponsors/9', logger: 'generic', action: 'change.sponsors' },
+  { method: 'DELETE', path: '/api/admin/sponsors/9', logger: 'generic', action: 'change.sponsors' },
+  { method: 'POST', path: '/api/admin/staff', logger: 'generic', action: 'change.staff' },
+  { method: 'POST', path: '/api/admin/staff/reorder', logger: 'generic', action: 'change.staff' },
+  { method: 'PUT', path: '/api/admin/staff/2', logger: 'generic', action: 'change.staff' },
+  { method: 'DELETE', path: '/api/admin/staff/2', logger: 'generic', action: 'change.staff' },
+  { method: 'POST', path: '/api/admin/booster-members', logger: 'generic', action: 'change.boosters' },
+  { method: 'POST', path: '/api/admin/booster-members/reorder', logger: 'generic', action: 'change.boosters' },
+  { method: 'PUT', path: '/api/admin/booster-members/2', logger: 'generic', action: 'change.boosters' },
+  { method: 'DELETE', path: '/api/admin/booster-members/2', logger: 'generic', action: 'change.boosters' },
+  { method: 'POST', path: '/api/admin/contact/topics', logger: 'generic', action: 'change.contact' },
+  { method: 'PUT', path: '/api/admin/contact/topics/2', logger: 'generic', action: 'change.contact' },
+  { method: 'DELETE', path: '/api/admin/contact/topics/2', logger: 'generic', action: 'change.contact' },
+  { method: 'POST', path: '/api/admin/badges', logger: 'generic', action: 'change.badges' },
+  { method: 'PUT', path: '/api/admin/badges/2', logger: 'generic', action: 'change.badges' },
+  { method: 'DELETE', path: '/api/admin/badges/2', logger: 'generic', action: 'change.badges' },
+  { method: 'POST', path: '/api/admin/minutes', logger: 'explicit', action: 'minutes.create' },
+  { method: 'POST', path: '/api/admin/minutes/upload', logger: 'explicit', action: 'minutes.create' },
+  { method: 'PUT', path: '/api/admin/minutes/3', logger: 'explicit', action: 'minutes.edit' },
+  { method: 'DELETE', path: '/api/admin/minutes/3', logger: 'explicit', action: 'minutes.delete' },
+  { method: 'POST', path: '/api/admin/mail/test-no-reply', logger: 'explicit', action: 'mail.test' },
+  { method: 'POST', path: '/api/admin/mail', logger: 'explicit', action: 'mail.send' },
+  { method: 'POST', path: '/api/admin/caldev/events', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/seed', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/notify-finished', logger: 'generic', action: 'change.events' },
+  { method: 'PUT', path: '/api/admin/caldev/events/8', logger: 'generic', action: 'change.events' },
+  { method: 'DELETE', path: '/api/admin/caldev/events/8', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/events', logger: 'generic', action: 'change.events' },
+  { method: 'PUT', path: '/api/admin/events/8', logger: 'generic', action: 'change.events' },
+  { method: 'DELETE', path: '/api/admin/events/8', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/photos', logger: 'generic', action: 'change.photos' },
+  { method: 'POST', path: '/api/admin/photos/reorder', logger: 'generic', action: 'change.photos' },
+  { method: 'PUT', path: '/api/admin/photos/5', logger: 'generic', action: 'change.photos' },
+  { method: 'DELETE', path: '/api/admin/photos/5', logger: 'generic', action: 'change.photos' },
 ]);
 export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
   'security-log',
@@ -49,10 +140,50 @@ export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
 ]);
 
 const isolateWriteFailures = { count: 0, since: '' };
+const loginAttempts = new Map();
 
 export function resetAuditWriteFailureState() {
   isolateWriteFailures.count = 0;
   isolateWriteFailures.since = '';
+}
+
+export function resetLoginLockState() {
+  loginAttempts.clear();
+}
+
+export function loginAttemptKey(username = '', ip = '') {
+  return `${String(username || '').trim().toLowerCase()}|${String(ip || '').trim()}`;
+}
+
+export function inspectLoginLock(username = '', ip = '', now = Date.now()) {
+  const rec = loginAttempts.get(loginAttemptKey(username, ip));
+  if (!rec) return { locked: false, failures: 0, locked_until: 0 };
+  if (rec.lockedUntil && now < rec.lockedUntil) {
+    return { locked: true, failures: rec.count, locked_until: rec.lockedUntil };
+  }
+  if (now - rec.first > LOGIN_LOCK_WINDOW_MS) {
+    loginAttempts.delete(loginAttemptKey(username, ip));
+    return { locked: false, failures: 0, locked_until: 0 };
+  }
+  return { locked: false, failures: rec.count, locked_until: 0 };
+}
+
+export function registerLoginFailure(username = '', ip = '', now = Date.now()) {
+  const key = loginAttemptKey(username, ip);
+  let rec = loginAttempts.get(key);
+  if (!rec || now - rec.first > LOGIN_LOCK_WINDOW_MS) {
+    rec = { count: 0, first: now, lockedUntil: 0 };
+  }
+  rec.count += 1;
+  if (rec.count >= LOGIN_LOCK_MAX_FAILURES) {
+    rec.lockedUntil = now + LOGIN_LOCK_WINDOW_MS;
+  }
+  loginAttempts.set(key, rec);
+  return inspectLoginLock(username, ip, now);
+}
+
+export function clearLoginFailures(username = '', ip = '') {
+  loginAttempts.delete(loginAttemptKey(username, ip));
 }
 
 const TEXT = new TextEncoder();
@@ -67,7 +198,6 @@ const SENSITIVE_KEYS = new Set([
   'token',
   'completion_token',
   'data_base64',
-  'content',
   'attachment_content',
   'square_access_token',
   'access_token',
@@ -83,6 +213,9 @@ export function isSecurityLogPath(pathname = '') {
   return path === '/api/admin/security-log'
     || path === '/api/admin/security-log.txt'
     || path === '/api/admin/security-log.pdf'
+    || path === '/api/admin/security-log.csv'
+    || path === '/api/admin/security-log.json'
+    || path === '/api/admin/security-log/verify'
     || path.startsWith('/api/admin/security-log/');
 }
 
@@ -109,9 +242,12 @@ export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   if (isSecurityLogPath(path)) return false;
   if (path === '/api/admin/me') return false;
   // Staff mail is logged with recipient/body details in the mail handler.
-  if (path === '/api/admin/mail') return false;
+  if (path === '/api/admin/mail' || path === '/api/admin/mail/test-no-reply') return false;
   // Minutes mutations write minutes.create / minutes.edit / minutes.delete themselves.
   if (path === '/api/admin/minutes' || path.startsWith('/api/admin/minutes/')) return false;
+  // Password and user grant changes write explicit forensic rows.
+  if (path === '/api/admin/password') return false;
+  if (path === '/api/admin/users' || path.startsWith('/api/admin/users/')) return false;
   return isMutatingHttpMethod(method);
 }
 
@@ -119,7 +255,7 @@ export function auditCategoryFromPath(pathname = '') {
   const path = String(pathname || '');
   if (path.includes('/mail')) return 'mail';
   if (path.includes('/users') || path.includes('/password')) return 'users';
-  if (path.includes('/events') || path.includes('/push')) return 'events';
+  if (path.includes('/events') || path.includes('/push') || path.includes('/caldev')) return 'events';
   if (path.includes('/sponsors') || path.includes('/sponsor-applications') || path.includes('/checkout')) return 'sponsors';
   if (path.includes('/ledger')) return 'ledger';
   if (path.includes('/staff')) return 'staff';
@@ -127,6 +263,8 @@ export function auditCategoryFromPath(pathname = '') {
   if (path.includes('/minutes')) return 'minutes';
   if (path.includes('/photos')) return 'photos';
   if (path.includes('/contact')) return 'contact';
+  if (path.includes('/badges')) return 'badges';
+  if (path.includes('/forms')) return 'forms';
   if (
     path.includes('/pages')
     || path.includes('/visual-pages')
@@ -157,6 +295,223 @@ export function visualPageAuditFromRequest(pathname = '', requestSummary = null,
     category: 'pages',
     detail: `${slug} ${kind}`,
   };
+}
+
+export function requestCountry(request) {
+  if (!request?.headers?.get) return '';
+  return String(
+    request.headers.get('cf-ipcountry')
+    || request.headers.get('cf-ip-country')
+    || '',
+  ).trim().toUpperCase().slice(0, 8);
+}
+
+export const AUDIT_BEFORE_VISUAL_SQL = 'SELECT slug, draft_html, published_html FROM visual_pages WHERE slug = ?';
+export const AUDIT_LOG_GENERATION_KEY = 'audit_log_generation';
+export const AUDIT_LOG_SINCE_NOTE = 'This site has been logged since the original CMS security-log build.';
+
+const generationCache = { key_id: '', loaded: false };
+
+export function resetAuditGenerationCache() {
+  generationCache.key_id = '';
+  generationCache.loaded = false;
+}
+
+export function nextAuditKeyId(currentId = DEFAULT_AUDIT_KEY_ID) {
+  const match = String(currentId || DEFAULT_AUDIT_KEY_ID).trim().match(/^k(\d+)$/i);
+  const n = match ? Number(match[1]) : 1;
+  return `k${n + 1}`;
+}
+
+export function auditSecretEnvName(keyId = DEFAULT_AUDIT_KEY_ID) {
+  const id = String(keyId || DEFAULT_AUDIT_KEY_ID).trim().toLowerCase();
+  if (!id || id === 'k1' || id === 'missing') return 'AUDIT_LOG_KEY';
+  return `AUDIT_LOG_KEY_${id.toUpperCase()}`;
+}
+
+export function currentAuditKeyId(env = {}) {
+  if (generationCache.loaded && generationCache.key_id) return generationCache.key_id;
+  return String(env.AUDIT_LOG_KEY_ID || DEFAULT_AUDIT_KEY_ID).trim() || DEFAULT_AUDIT_KEY_ID;
+}
+
+export function auditLogKeyMaterial(env = {}, keyId = '') {
+  const id = String(keyId || currentAuditKeyId(env) || DEFAULT_AUDIT_KEY_ID).trim().toLowerCase() || DEFAULT_AUDIT_KEY_ID;
+  return String(env[auditSecretEnvName(id)] || (id === 'k1' ? env.AUDIT_LOG_KEY : '') || '');
+}
+
+export function hasAuditLogKey(env = {}, keyId = '') {
+  return Boolean(auditLogKeyMaterial(env, keyId).trim());
+}
+
+export async function resolveAuditKeyId(env) {
+  if (generationCache.loaded && generationCache.key_id) return generationCache.key_id;
+  if (env?.AUDIT_LOG_KEY_ID) {
+    generationCache.key_id = currentAuditKeyId(env);
+    generationCache.loaded = true;
+    return generationCache.key_id;
+  }
+  if (!env?.DB) {
+    generationCache.key_id = DEFAULT_AUDIT_KEY_ID;
+    generationCache.loaded = true;
+    return generationCache.key_id;
+  }
+  try {
+    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+      .bind(AUDIT_LOG_GENERATION_KEY)
+      .first();
+    const parsed = JSON.parse(String(row?.value || '{}')) || {};
+    generationCache.key_id = String(parsed.key_id || DEFAULT_AUDIT_KEY_ID).trim() || DEFAULT_AUDIT_KEY_ID;
+  } catch {
+    generationCache.key_id = DEFAULT_AUDIT_KEY_ID;
+  }
+  generationCache.loaded = true;
+  return generationCache.key_id;
+}
+
+function excerptText(value = '', size = CONTENT_EVIDENCE_EXCERPT) {
+  const text = String(value ?? '');
+  if (text.length <= size * 2) return text;
+  return `${text.slice(0, size)}…[${text.length} chars]…${text.slice(-size)}`;
+}
+
+export function cheapTextDiff(before = '', after = '') {
+  const a = String(before ?? '');
+  const b = String(after ?? '');
+  if (a === b) return { unchanged: true, added: '', removed: '' };
+  let start = 0;
+  const maxStart = Math.min(a.length, b.length);
+  while (start < maxStart && a.charCodeAt(start) === b.charCodeAt(start)) start += 1;
+  let end = 0;
+  const maxEnd = Math.min(a.length - start, b.length - start);
+  while (end < maxEnd && a.charCodeAt(a.length - 1 - end) === b.charCodeAt(b.length - 1 - end)) end += 1;
+  const removed = a.slice(start, a.length - end);
+  const added = b.slice(start, b.length - end);
+  return {
+    unchanged: false,
+    added: added.length > CONTENT_DIFF_MAX ? `${added.slice(0, CONTENT_DIFF_MAX)}…[truncated]` : added,
+    removed: removed.length > CONTENT_DIFF_MAX ? `${removed.slice(0, CONTENT_DIFF_MAX)}…[truncated]` : removed,
+    added_len: added.length,
+    removed_len: removed.length,
+  };
+}
+
+export function contentEvidence(before = '', after = '') {
+  const prev = String(before ?? '');
+  const next = String(after ?? '');
+  const capped = prev.length > CONTENT_EVIDENCE_FULL_MAX || next.length > CONTENT_EVIDENCE_FULL_MAX;
+  const evidence = {
+    before_len: prev.length,
+    after_len: next.length,
+    capped,
+    diff: cheapTextDiff(
+      capped ? prev.slice(0, CONTENT_EVIDENCE_FULL_MAX) : prev,
+      capped ? next.slice(0, CONTENT_EVIDENCE_FULL_MAX) : next,
+    ),
+  };
+  if (capped) {
+    evidence.before_excerpt = excerptText(prev);
+    evidence.after_excerpt = excerptText(next);
+  } else {
+    evidence.before_text = prev;
+    evidence.after_text = next;
+  }
+  return evidence;
+}
+
+export async function contentEvidenceHashed(before = '', after = '') {
+  const evidence = contentEvidence(before, after);
+  evidence.before_sha256 = await sha256Hex(String(before ?? ''));
+  evidence.after_sha256 = await sha256Hex(String(after ?? ''));
+  return evidence;
+}
+
+export function extractContentAfter(requestSummary = null) {
+  if (!requestSummary || typeof requestSummary !== 'object') return '';
+  const body = requestSummary.body && typeof requestSummary.body === 'object' ? requestSummary.body : {};
+  const fields = requestSummary.fields && typeof requestSummary.fields === 'object' ? requestSummary.fields : {};
+  const candidates = [
+    body.body_html,
+    body.html,
+    body.text,
+    body.description,
+    fields.body_html,
+    fields.html,
+    fields.text,
+    requestSummary.content_after,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
+export function permissionListFromValue(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).sort();
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item)).filter(Boolean).sort();
+    } catch {
+      return value ? [value] : [];
+    }
+  }
+  return [];
+}
+
+export function parseCiphertextEnvelope(ciphertext = '') {
+  const raw = String(ciphertext || '');
+  const parts = raw.split('.');
+  if (parts[0] === 'missing' && parts.length === 2) {
+    return { kind: 'unsigned', key_id: 'missing', payload: parts[1] || '' };
+  }
+  if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+    return { kind: 'v2', key_id: parts[0], iv: parts[1], data: parts[2] };
+  }
+  if (parts.length === 2) {
+    return { kind: 'legacy', key_id: '', iv: parts[0], data: parts[1] };
+  }
+  return { kind: 'unknown', key_id: '', raw };
+}
+
+export function canonicalChainMaterial(row = {}) {
+  return JSON.stringify({
+    v: 2,
+    created_at: String(row.created_at || ''),
+    action: String(row.action || ''),
+    category: String(row.category || ''),
+    actor_user_id: row.actor_user_id == null || row.actor_user_id === '' ? null : Number(row.actor_user_id),
+    key_id: String(row.key_id || row.enc_key_id || parseCiphertextEnvelope(row.ciphertext).key_id || ''),
+    ciphertext: String(row.ciphertext || ''),
+  });
+}
+
+export async function verifyAuditRowDigest(row = {}) {
+  const encVersion = Number(row.enc_version);
+  if (encVersion !== ADMIN_AUDIT_ENC_VERSION_V2 && encVersion !== ADMIN_AUDIT_ENC_VERSION_UNSIGNED) {
+    return { recomputed: false, ok: true, legacy: true };
+  }
+  const expected = String(row.payload_sha256 || '');
+  const actual = await sha256Hex(canonicalChainMaterial(row));
+  return {
+    recomputed: true,
+    ok: Boolean(expected) && expected === actual,
+    legacy: false,
+    actual,
+  };
+}
+
+export function utcStampNow(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  return sqliteUtcStamp(date.toISOString());
+}
+
+export async function enqueueAdminAudit(env, ctx, entry = {}) {
+  const write = writeAdminAuditLog(env, entry);
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(write);
+    return write;
+  }
+  return write;
 }
 
 function pad2(value) {
@@ -351,8 +706,8 @@ export async function fetchAuditHashChainRows(env, minId, maxId) {
   if (low <= 0 || high <= 0 || high < low) {
     return { rows: [], olderNeighbor: null };
   }
-  const windowSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id >= ? AND id <= ? ORDER BY id ASC`;
-  const neighborSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id < ? ORDER BY id DESC LIMIT 1`;
+  const windowSql = `SELECT id, created_at, action, category, actor_user_id, payload_sha256, prev_sha256, ciphertext, enc_version FROM ${ADMIN_AUDIT_TABLE} WHERE id >= ? AND id <= ? ORDER BY id ASC`;
+  const neighborSql = `SELECT id, created_at, action, category, actor_user_id, payload_sha256, prev_sha256, ciphertext, enc_version FROM ${ADMIN_AUDIT_TABLE} WHERE id < ? ORDER BY id DESC LIMIT 1`;
   assertAuditSqlIsAppendOnly(windowSql);
   assertAuditSqlIsAppendOnly(neighborSql);
   const window = await env.DB.prepare(windowSql).bind(low, high).all();
@@ -409,12 +764,20 @@ export async function summarizeAdminRequestForAudit(request) {
       const files = [];
       for (const [key, value] of form.entries()) {
         if (typeof File !== 'undefined' && value instanceof File) {
-          files.push({
+          const fileInfo = {
             field: key,
             filename: value.name || 'upload',
             size: Number(value.size) || 0,
             type: value.type || '',
-          });
+          };
+          try {
+            const bytes = new Uint8Array(await value.arrayBuffer());
+            fileInfo.size = fileInfo.size || bytes.byteLength;
+            fileInfo.sha256 = await sha256BytesHex(bytes);
+          } catch {
+            fileInfo.sha256 = '';
+          }
+          files.push(fileInfo);
           continue;
         }
         fields[key] = redactAuditValue(key, String(value ?? ''));
@@ -489,9 +852,24 @@ export async function sha256Hex(value = '') {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Derive an AES-256 key from SHA-256(secret + purpose). */
+export async function sha256BytesHex(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const digest = await crypto.subtle.digest('SHA-256', view);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Legacy AES key for rows written before AUDIT_LOG_KEY (do not use for new rows). */
 export async function deriveAuditAesKey(env) {
   const material = `${auditLogSecretMaterial(env)}:admin-audit-log:v${ADMIN_AUDIT_ENC_VERSION}`;
+  const digest = await crypto.subtle.digest('SHA-256', TEXT.encode(material));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function deriveAuditLogAesKey(env, keyId = '') {
+  const id = String(keyId || currentAuditKeyId(env));
+  const secret = auditLogKeyMaterial(env, id);
+  if (!secret) throw new Error('AUDIT_LOG_KEY is not set');
+  const material = `${secret}:admin-audit-log:v${ADMIN_AUDIT_ENC_VERSION_V2}:${id}`;
   const digest = await crypto.subtle.digest('SHA-256', TEXT.encode(material));
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
@@ -507,7 +885,10 @@ export function canonicalAuditPayload(entry = {}) {
     actor_user_id: entry.actor_user_id == null ? null : Number(entry.actor_user_id),
     actor_username: String(entry.actor_username || ''),
     ip: String(entry.ip || ''),
+    country: String(entry.country || ''),
     user_agent: String(entry.user_agent || ''),
+    session_id_hash: String(entry.session_id_hash || ''),
+    created_at: String(entry.created_at || ''),
     summary: String(entry.summary || ''),
     meta,
   });
@@ -520,15 +901,39 @@ export async function encryptAuditPayload(env, plaintext = '') {
   return `${bytesToBase64(iv)}.${bytesToBase64(encrypted)}`;
 }
 
+export async function encryptAuditPayloadV2(env, plaintext = '', keyId = '') {
+  const id = String(keyId || currentAuditKeyId(env));
+  const key = await deriveAuditLogAesKey(env, id);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, TEXT.encode(String(plaintext)));
+  return `${id}.${bytesToBase64(iv)}.${bytesToBase64(encrypted)}`;
+}
+
 export async function decryptAuditPayload(env, ciphertext = '') {
-  const raw = String(ciphertext || '');
-  const [ivB64, dataB64] = raw.split('.');
-  if (!ivB64 || !dataB64) throw new Error('Invalid ciphertext');
+  const envelope = parseCiphertextEnvelope(ciphertext);
+  if (envelope.kind === 'unsigned') {
+    return READ_TEXT.decode(base64ToBytes(envelope.payload));
+  }
+  if (envelope.kind === 'v2') {
+    const key = await deriveAuditLogAesKey(env, envelope.key_id);
+    const iv = base64ToBytes(envelope.iv);
+    const data = base64ToBytes(envelope.data);
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return READ_TEXT.decode(decrypted);
+  }
+  if (envelope.kind !== 'legacy') throw new Error('Invalid ciphertext');
   const key = await deriveAuditAesKey(env);
-  const iv = base64ToBytes(ivB64);
-  const data = base64ToBytes(dataB64);
+  const iv = base64ToBytes(envelope.iv);
+  const data = base64ToBytes(envelope.data);
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
   return READ_TEXT.decode(decrypted);
+}
+
+export async function signAuditChainHead(env, material = '') {
+  const secret = String(env.AUDIT_LOG_KEY || env.EFBAND_SECRET || 'change-me-before-launch');
+  const key = await crypto.subtle.importKey('raw', TEXT.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, TEXT.encode(String(material)));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export async function writeAdminAuditLog(env, entry = {}) {
@@ -543,7 +948,10 @@ export async function writeAdminAuditLog(env, entry = {}) {
     : Number(entry.actor_user_id);
   const actorUsername = String(entry.actor_username || '').trim().slice(0, 190);
   const ip = String(entry.ip || '').trim().slice(0, 80);
+  const country = String(entry.country || '').trim().toUpperCase().slice(0, 8);
   const userAgent = String(entry.user_agent || '').trim().slice(0, 400);
+  const sessionIdHash = String(entry.session_id_hash || '').trim().slice(0, 64);
+  const createdAt = String(entry.created_at || utcStampNow()).trim() || utcStampNow();
   const summary = String(entry.summary || buildAuditSummary({
     action,
     method,
@@ -566,21 +974,48 @@ export async function writeAdminAuditLog(env, entry = {}) {
     actor_user_id: Number.isInteger(actorUserId) && actorUserId > 0 ? actorUserId : null,
     actor_username: actorUsername,
     ip,
+    country,
     user_agent: userAgent,
+    session_id_hash: sessionIdHash,
+    created_at: createdAt,
     summary,
     meta,
   };
   const canonical = canonicalAuditPayload(record);
-  let payloadSha256 = '';
+  const keyId = String(entry.key_id || await resolveAuditKeyId(env) || DEFAULT_AUDIT_KEY_ID);
+  const keyed = hasAuditLogKey(env, keyId);
   let ciphertext = '';
+  let encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
+  let usedKeyId = 'missing';
   try {
-    payloadSha256 = await sha256Hex(canonical);
-    ciphertext = await encryptAuditPayload(env, canonical);
+    if (keyed) {
+      ciphertext = await encryptAuditPayloadV2(env, canonical, keyId);
+      encVersion = ADMIN_AUDIT_ENC_VERSION_V2;
+      usedKeyId = keyId;
+    } else {
+      // Never drop a CMS action if AUDIT_LOG_KEY is missing. Index stays
+      // non-sensitive; payload is unsigned until the secret is set at deploy.
+      ciphertext = `missing.${bytesToBase64(TEXT.encode(canonical))}`;
+      encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
+      usedKeyId = 'missing';
+      console.error('admin_audit_key_missing_unsigned_fallback');
+    }
   } catch (error) {
-    console.error('admin audit log encrypt failed', error?.message || error);
+    console.error('admin audit log encrypt failed; writing unsigned fallback', error?.message || error);
+    ciphertext = `missing.${bytesToBase64(TEXT.encode(canonical))}`;
+    encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
+    usedKeyId = 'missing';
     await recordAuditWriteFailure(env, error);
-    return null;
   }
+  const chainRow = {
+    created_at: createdAt,
+    action,
+    category,
+    actor_user_id: record.actor_user_id,
+    key_id: usedKeyId,
+    ciphertext,
+  };
+  const payloadSha256 = await sha256Hex(canonicalChainMaterial(chainRow));
   let prevSha256 = '';
   try {
     const prevSql = `SELECT payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
@@ -592,37 +1027,135 @@ export async function writeAdminAuditLog(env, entry = {}) {
   }
   try {
     const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
-        (action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     assertAuditSqlIsAppendOnly(insertSql);
     const result = await env.DB.prepare(insertSql).bind(
-      // Index fields only (needed for Super Admin filters). Details are sealed in ciphertext.
+      createdAt,
       action,
       category,
       '',
       '',
-      record.status,
+      null,
       record.actor_user_id,
-      actorUsername,
+      '',
       '',
       '',
       '',
       '{}',
       payloadSha256,
       ciphertext,
-      ADMIN_AUDIT_ENC_VERSION,
+      encVersion,
       prevSha256,
     ).run();
     return {
       id: result?.meta?.last_row_id || null,
       payload_sha256: payloadSha256,
       prev_sha256: prevSha256,
+      enc_version: encVersion,
+      key_id: usedKeyId,
+      key_missing: !keyed,
     };
   } catch (error) {
     console.error('admin audit log write failed', error?.message || error);
     await recordAuditWriteFailure(env, error);
     return null;
   }
+}
+
+export async function startNewAuditLogGeneration(env, {
+  reason = '',
+  authorizedBy = 'Trevor',
+  actor = null,
+  request = null,
+  sessionIdHash = '',
+} = {}) {
+  const currentId = await resolveAuditKeyId(env);
+  const nextId = nextAuditKeyId(currentId);
+  const nextSecretName = auditSecretEnvName(nextId);
+  if (!hasAuditLogKey(env, nextId)) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `The next generation secret is not in Cloudflare yet. An authorized deploy step must pipe a fresh CSPRNG value into wrangler secret put ${nextSecretName} without printing it. Then start the new log again.`,
+      next_key_id: nextId,
+      next_secret_name: nextSecretName,
+    };
+  }
+  const prevSql = `SELECT id, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
+  const countSql = `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE}`;
+  assertAuditSqlIsAppendOnly(prevSql);
+  assertAuditSqlIsAppendOnly(countSql);
+  const previous = await env.DB.prepare(prevSql).first();
+  const countRow = await env.DB.prepare(countSql).first();
+  let generation = 2;
+  try {
+    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+      .bind(AUDIT_LOG_GENERATION_KEY)
+      .first();
+    const parsed = JSON.parse(String(row?.value || '{}')) || {};
+    generation = Number(parsed.generation || 1) + 1;
+  } catch {
+    generation = 2;
+  }
+  const startedAt = new Date().toISOString();
+  const meta = {
+    reason: String(reason || '').trim(),
+    authorized_by: String(authorizedBy || 'Trevor').trim(),
+    previous_key_id: currentId,
+    new_key_id: nextId,
+    generation,
+    previous_chain_head: String(previous?.payload_sha256 || ''),
+    previous_row_count: Number(countRow?.total || 0),
+    previous_last_id: previous?.id || null,
+    started_at_utc: startedAt,
+    site_logged_since_original_build: true,
+    note: AUDIT_LOG_SINCE_NOTE,
+  };
+  const written = await writeAdminAuditLog(env, {
+    action: 'log.genesis',
+    category: 'security',
+    method: 'POST',
+    path: '/api/admin/security-log/genesis',
+    status: 201,
+    key_id: nextId,
+    actor_user_id: actor?.id,
+    actor_username: actor?.username,
+    ip: request ? requestClientIp(request) : '',
+    country: request ? requestCountry(request) : '',
+    user_agent: request?.headers?.get?.('user-agent') || '',
+    session_id_hash: sessionIdHash,
+    summary: buildAuditSummary({
+      action: 'log.genesis',
+      method: 'POST',
+      path: '/api/admin/security-log/genesis',
+      status: 201,
+      actorUsername: actor?.username || 'unknown',
+      detail: `generation ${generation} key ${nextId}`,
+    }),
+    meta,
+  });
+  generationCache.key_id = nextId;
+  generationCache.loaded = true;
+  await env.DB.prepare(
+    'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).bind(AUDIT_LOG_GENERATION_KEY, JSON.stringify({
+    key_id: nextId,
+    generation,
+    started_at: startedAt,
+    previous_head: meta.previous_chain_head,
+    previous_count: meta.previous_row_count,
+    genesis_id: written?.id || null,
+    authorized_by: meta.authorized_by,
+    reason: meta.reason,
+  })).run();
+  return {
+    ok: true,
+    status: 201,
+    ...meta,
+    genesis: written,
+    next_secret_name: nextSecretName,
+  };
 }
 
 export async function recordAuditWriteFailure(env, error) {
@@ -692,6 +1225,8 @@ export async function maybeAuditAdminApiResponse(env, {
   response,
   actor = null,
   requestSummary = null,
+  beforeSnapshot = null,
+  sessionIdHash = '',
   ctx = null,
 } = {}) {
   if (!shouldAuditAdminApiRequest(url?.pathname, request?.method)) return;
@@ -705,6 +1240,14 @@ export async function maybeAuditAdminApiResponse(env, {
   const detail = status >= 400
     ? `failed (${status})`
     : (visual?.detail || 'saved');
+  const afterText = extractContentAfter(requestSummary);
+  const beforeText = beforeSnapshot && typeof beforeSnapshot.content_before === 'string'
+    ? beforeSnapshot.content_before
+    : '';
+  let content = null;
+  if (beforeText || afterText) {
+    content = await contentEvidenceHashed(beforeText, afterText);
+  }
   const write = writeAdminAuditLog(env, {
     action,
     category,
@@ -714,7 +1257,9 @@ export async function maybeAuditAdminApiResponse(env, {
     actor_user_id: actor?.id,
     actor_username: actor?.username || actor?.display_name || '',
     ip: requestClientIp(request),
+    country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: sessionIdHash,
     summary: buildAuditSummary({
       action,
       method,
@@ -726,7 +1271,12 @@ export async function maybeAuditAdminApiResponse(env, {
     meta: {
       request: requestSummary || null,
       actor_role: actor?.role || '',
+      target: beforeSnapshot?.target || visual?.slug || path,
+      content,
+      files: requestSummary?.files || beforeSnapshot?.files || null,
+      grants: beforeSnapshot?.grants || null,
       ...(visual ? { slug: visual.slug, kind: visual.kind } : {}),
+      ...(beforeSnapshot?.photo ? { photo: beforeSnapshot.photo } : {}),
     },
   });
   if (ctx && typeof ctx.waitUntil === 'function') {
@@ -749,21 +1299,27 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
     actor_user_id: row.actor_user_id == null ? null : Number(row.actor_user_id),
     actor_username: String(row.actor_username || ''),
     ip: String(row.ip || ''),
+    country: '',
     user_agent: String(row.user_agent || ''),
+    session_id_hash: '',
     summary: String(row.summary || ''),
     meta: {},
     payload_sha256: String(row.payload_sha256 || ''),
     prev_sha256: String(row.prev_sha256 || ''),
+    enc_version: row.enc_version == null ? null : Number(row.enc_version),
+    key_id: parseCiphertextEnvelope(row.ciphertext).key_id || '',
     integrity_ok: false,
-    encrypted: Boolean(row.ciphertext),
+    encrypted: Boolean(row.ciphertext) && Number(row.enc_version) !== ADMIN_AUDIT_ENC_VERSION_UNSIGNED,
   };
 
   if (row.ciphertext) {
     try {
       const plaintext = await decryptAuditPayload(env, row.ciphertext);
-      const expected = String(row.payload_sha256 || '');
-      const actual = await sha256Hex(plaintext);
-      if (expected && expected !== actual) {
+      const encVersion = Number(row.enc_version);
+      const digest = (encVersion === ADMIN_AUDIT_ENC_VERSION_V2 || encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED)
+        ? await verifyAuditRowDigest(row)
+        : { ok: String(row.payload_sha256 || '') === await sha256Hex(plaintext), recomputed: true, legacy: encVersion === ADMIN_AUDIT_ENC_VERSION };
+      if (digest.ok === false) {
         return {
           ...base,
           summary: '[integrity check failed — entry sealed]',
@@ -782,7 +1338,9 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
         actor_user_id: parsed.actor_user_id == null ? null : Number(parsed.actor_user_id),
         actor_username: String(parsed.actor_username || base.actor_username),
         ip: String(parsed.ip || ''),
+        country: String(parsed.country || ''),
         user_agent: String(parsed.user_agent || ''),
+        session_id_hash: String(parsed.session_id_hash || ''),
         summary: String(parsed.summary || ''),
         meta: parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {},
         integrity_ok: true,
@@ -891,9 +1449,9 @@ export async function listAdminAuditLogs(env, {
     clauses.push('action = ?');
     binds.push(actionFilter);
   }
-  if (actorFilter) {
-    clauses.push('LOWER(actor_username) LIKE ?');
-    binds.push(`%${actorFilter}%`);
+  if (actorFilter && /^\d+$/.test(actorFilter)) {
+    clauses.push('actor_user_id = ?');
+    binds.push(Number(actorFilter));
   }
   if (range.start) {
     clauses.push('created_at >= ?');
@@ -924,10 +1482,19 @@ export async function listAdminAuditLogs(env, {
   for (const row of rawRows) {
     decrypted.push(await deserializeEncryptedAuditRow(env, row));
   }
-  const entries = query
-    ? decrypted.filter((entry) => auditEntryMatchesQuery(entry, query))
-    : decrypted;
+  let entries = decrypted;
+  if (actorFilter && !/^\d+$/.test(actorFilter)) {
+    entries = entries.filter((entry) => String(entry.actor_username || '').toLowerCase().includes(actorFilter));
+  }
+  if (query) {
+    entries = entries.filter((entry) => auditEntryMatchesQuery(entry, query));
+  }
   const chain = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
+  let digestBreaks = 0;
+  for (const row of chainRows.rows || []) {
+    const digest = await verifyAuditRowDigest(row);
+    if (digest.recomputed && !digest.ok) digestBreaks += 1;
+  }
   const writeFailures = await readAuditWriteFailures(env);
   return {
     total: Number(countRow?.total) || 0,
@@ -941,18 +1508,140 @@ export async function listAdminAuditLogs(env, {
     entries,
     fetched: decrypted.length,
     matched: entries.length,
-    chain_ok: chain.chain_ok,
-    chain_status: chain.chain_status,
+    chain_ok: chain.chain_ok && digestBreaks === 0,
+    chain_status: digestBreaks ? `Digest mismatch on ${digestBreaks} row(s)` : chain.chain_status,
     chain_break_id: chain.chain_break_id,
     write_failures: writeFailures,
     known_actions: [...ADMIN_AUDIT_KNOWN_ACTIONS],
     storage: 'encrypted-d1',
     integrity: 'sha-256',
-    encryption: 'aes-256-gcm',
+    encryption: hasAuditLogKey(env) ? 'aes-256-gcm' : 'unsigned-fallback',
+    key_configured: hasAuditLogKey(env),
     access: 'super_admin_only',
     mode: 'view_print_only',
     editable: false,
   };
+}
+
+export async function verifyAdminAuditRange(env, options = {}) {
+  const listed = await listAdminAuditLogs(env, {
+    ...options,
+    limit: Math.min(Number(options.limit) || 2000, 2000),
+    offset: 0,
+    q: '',
+  });
+  const window = auditChainIdWindow(listed.entries);
+  const chainRows = window
+    ? await fetchAuditHashChainRows(env, window.minId, window.maxId)
+    : { rows: [], olderNeighbor: null };
+  const link = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
+  const rows = chainRows.rows || [];
+  const digestResults = [];
+  for (const row of rows) {
+    digestResults.push({
+      id: Number(row.id) || 0,
+      ...(await verifyAuditRowDigest(row)),
+    });
+  }
+  const digestFails = digestResults.filter((row) => row.recomputed && !row.ok);
+  const head = rows.length ? rows[rows.length - 1] : null;
+  const tail = rows.length ? rows[0] : null;
+  const material = [
+    String(tail?.id || 0),
+    String(head?.id || 0),
+    String(rows.length),
+    String(head?.payload_sha256 || ''),
+    String(tail?.payload_sha256 || ''),
+  ].join('|');
+  const signature = await signAuditChainHead(env, material);
+  return {
+    chain_ok: link.chain_ok && digestFails.length === 0,
+    chain_status: digestFails.length
+      ? `Digest mismatch at entry #${digestFails[0].id}`
+      : link.chain_status,
+    chain_break_id: digestFails[0]?.id || link.chain_break_id,
+    checked: rows.length,
+    digest_failures: digestFails.length,
+    min_id: window?.minId || null,
+    max_id: window?.maxId || null,
+    chain_head: head?.payload_sha256 || '',
+    chain_tail: tail?.payload_sha256 || '',
+    signed_chain: signature,
+    key_configured: hasAuditLogKey(env),
+    year: listed.year,
+    month: listed.month,
+    from: listed.from,
+    to: listed.to,
+  };
+}
+
+function csvEscape(value) {
+  const raw = String(value ?? '');
+  if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+  return raw;
+}
+
+export function buildAdminAuditExportCsv(entries = [], verify = null) {
+  const header = [
+    'id',
+    'created_at_utc',
+    'created_at_et',
+    'action',
+    'category',
+    'actor_user_id',
+    'actor_username',
+    'ip',
+    'country',
+    'session_id_hash',
+    'method',
+    'path',
+    'status',
+    'summary',
+    'payload_sha256',
+    'prev_sha256',
+    'integrity_ok',
+  ];
+  const lines = [header.join(',')];
+  for (const entry of entries) {
+    lines.push([
+      entry.id,
+      entry.created_at,
+      entry.created_at_et || formatAuditTimestampEt(entry.created_at),
+      entry.action,
+      entry.category,
+      entry.actor_user_id,
+      entry.actor_username,
+      entry.ip,
+      entry.country,
+      entry.session_id_hash,
+      entry.method,
+      entry.path,
+      entry.status,
+      entry.summary,
+      entry.payload_sha256,
+      entry.prev_sha256,
+      entry.integrity_ok,
+    ].map(csvEscape).join(','));
+  }
+  if (verify) {
+    lines.push('');
+    lines.push(`chain_ok,${csvEscape(verify.chain_ok)}`);
+    lines.push(`chain_head,${csvEscape(verify.chain_head)}`);
+    lines.push(`signed_chain,${csvEscape(verify.signed_chain)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function buildAdminAuditExportJson(entries = [], verify = null) {
+  return `${JSON.stringify({
+    generated_at: new Date().toISOString(),
+    access: 'super_admin_only',
+    editable: false,
+    encryption: 'aes-256-gcm',
+    integrity: 'sha-256-hash-chain',
+    verify: verify || null,
+    entries,
+  }, null, 2)}\n`;
 }
 
 export function buildAdminAuditExportText(entries = []) {

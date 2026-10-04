@@ -45,15 +45,29 @@ import {
 import {
   ADMIN_AUDIT_KNOWN_ACTIONS,
   ADMIN_AUDIT_PAGE_SIZE,
+  AUDIT_BEFORE_VISUAL_SQL,
+  PHOTO_QUARANTINE_SORT,
+  buildAdminAuditExportCsv,
+  buildAdminAuditExportJson,
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
+  clearLoginFailures,
+  contentEvidenceHashed,
+  enqueueAdminAudit,
   enrichMailAuditMeta,
+  inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
   maybeAuditAdminApiResponse,
   parseAuditUtcDate,
+  permissionListFromValue,
+  registerLoginFailure,
   requestClientIp,
+  requestCountry,
+  sha256BytesHex,
+  startNewAuditLogGeneration,
   summarizeAdminRequestForAudit,
+  verifyAdminAuditRange,
   writeAdminAuditLog,
 } from './admin-audit-log.mjs';
 import {
@@ -392,7 +406,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004u';
+export const ASSET_VERSION = 'cms-p1-20261004v';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1880,17 +1894,154 @@ export function attachLoginHintIfNeeded(request, response, user) {
   return response;
 }
 
-async function currentUser(request, env) {
+async function inspectSessionCookie(request, env) {
   const value = getCookie(request, SESSION_COOKIE);
-  if (!value || !value.includes('.')) return null;
+  if (!value || !value.includes('.')) {
+    return { user: null, expired: false, session_id_hash: '', username: '', uid: null };
+  }
   const [payload, supplied] = value.split('.');
   const expected = await hmacSign(payload, sessionSecret(env));
-  if (supplied !== expected) return null;
+  const sessionIdHash = await sha256Hex(value);
+  if (supplied !== expected) {
+    return { user: null, expired: false, invalid: true, session_id_hash: sessionIdHash, username: '', uid: null };
+  }
   try {
     const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
-    if (!isSessionFresh(data.t)) return null;
-    if (data.uid) return getUserById(env, Number(data.uid));
-    if (data.u) return getUserByUsername(env, data.u);
+    if (!isSessionFresh(data.t)) {
+      return {
+        user: null,
+        expired: true,
+        session_id_hash: sessionIdHash,
+        username: String(data.u || ''),
+        uid: data.uid ? Number(data.uid) : null,
+        issued_at: data.t,
+      };
+    }
+    const user = data.uid
+      ? await getUserById(env, Number(data.uid))
+      : await getUserByUsername(env, data.u);
+    return {
+      user,
+      expired: false,
+      session_id_hash: sessionIdHash,
+      username: user?.username || data.u || '',
+      uid: user?.id || data.uid || null,
+    };
+  } catch {
+    return { user: null, expired: false, session_id_hash: sessionIdHash, username: '', uid: null };
+  }
+}
+
+async function currentUser(request, env) {
+  return (await inspectSessionCookie(request, env)).user;
+}
+
+function auditRequestForensics(request, actor = null, session = null) {
+  return {
+    actor_user_id: actor?.id ?? session?.uid ?? null,
+    actor_username: actor?.username || session?.username || '',
+    ip: requestClientIp(request),
+    country: requestCountry(request),
+    user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: session?.session_id_hash || '',
+  };
+}
+
+async function logSessionExpired(env, request, session, {
+  path = '',
+  method = 'GET',
+  ctx = null,
+} = {}) {
+  if (!session?.expired) return;
+  await enqueueAdminAudit(env, ctx, {
+    action: 'session.expired',
+    category: 'auth',
+    method: String(method || 'GET').toUpperCase(),
+    path,
+    status: 401,
+    ...auditRequestForensics(request, null, session),
+    summary: buildAuditSummary({
+      action: 'session.expired',
+      method: String(method || 'GET').toUpperCase(),
+      path,
+      status: 401,
+      actorUsername: session.username || 'unknown',
+      detail: 'session TTL exceeded',
+    }),
+    meta: { issued_at: session.issued_at || null },
+  });
+}
+
+async function snapshotAdminMutationBefore(env, pathname = '', method = '') {
+  const verb = String(method || '').toUpperCase();
+  const path = String(pathname || '');
+  try {
+    const page = path.match(/^\/api\/admin\/pages\/([a-z0-9-]+)$/);
+    if (page && (verb === 'PUT' || verb === 'DELETE')) {
+      const row = await env.DB.prepare('SELECT slug, title, body_html, active FROM cms_pages WHERE slug = ?').bind(page[1]).first();
+      if (!row) return null;
+      return {
+        target: row.slug,
+        content_before: String(row.body_html || ''),
+        extra: { title: row.title, active: row.active },
+      };
+    }
+    const visual = path.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)/);
+    if (visual && (verb === 'PUT' || verb === 'POST')) {
+      const row = await env.DB.prepare(AUDIT_BEFORE_VISUAL_SQL).bind(visual[1]).first();
+      if (!row) return null;
+      return {
+        target: row.slug,
+        content_before: String(row.draft_html || row.published_html || ''),
+      };
+    }
+    if (path === '/api/admin/ensembles/body' && verb === 'PUT') {
+      const row = await env.DB.prepare("SELECT body_html FROM cms_pages WHERE slug = 'ensembles'").first();
+      return row ? { target: 'ensembles', content_before: String(row.body_html || '') } : null;
+    }
+    if (path === '/api/admin/site' && verb === 'POST') {
+      const rows = await env.DB.prepare(
+        "SELECT key, value FROM site_content WHERE key IN ('title','hero_title','hero_subtitle','footer_note','maintenance_mode','error_pages')",
+      ).all();
+      const map = Object.fromEntries((rows?.results || []).map((item) => [item.key, item.value]));
+      return { target: 'site', content_before: JSON.stringify(map) };
+    }
+    const user = path.match(/^\/api\/admin\/users\/(\d+)$/);
+    if (user && (verb === 'PUT' || verb === 'DELETE')) {
+      const row = await env.DB.prepare(
+        'SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?',
+      ).bind(Number(user[1])).first();
+      if (!row) return null;
+      return {
+        target: `user:${row.id}`,
+        grants: {
+          before: permissionListFromValue(row.permissions),
+          username: row.username,
+          role: row.role,
+          active: row.active,
+        },
+      };
+    }
+    const photo = path.match(/^\/api\/admin\/photos\/(\d+)$/);
+    if (photo && verb === 'DELETE') {
+      const row = await env.DB.prepare(
+        'SELECT id, filename, original_name, content_type, data_base64, sort_order FROM photos WHERE id = ?',
+      ).bind(Number(photo[1])).first();
+      if (!row) return null;
+      const bytes = photoBytesFromStored(row.data_base64);
+      return {
+        target: `photo:${row.id}`,
+        photo: {
+          id: row.id,
+          filename: row.filename,
+          original_name: row.original_name,
+          type: row.content_type,
+          size: bytes?.byteLength || 0,
+          sha256: bytes ? await sha256BytesHex(bytes) : '',
+          quarantined: true,
+        },
+      };
+    }
   } catch {
     return null;
   }
@@ -7994,6 +8145,8 @@ async function writeMinutesAudit(env, request, user, {
   minutes = null,
   before = '',
   after = '',
+  beforeHtml = '',
+  afterHtml = '',
   detail = '',
 } = {}) {
   const path = (() => {
@@ -8025,6 +8178,9 @@ async function writeMinutesAudit(env, request, user, {
       within_window: minutesWithinEditWindow(minutes),
       before_sha256: before,
       after_sha256: after,
+      content: (beforeHtml || afterHtml || minutes?.body_html)
+        ? await contentEvidenceHashed(beforeHtml, afterHtml || minutes?.body_html || '')
+        : null,
     },
   });
 }
@@ -8727,22 +8883,38 @@ export function serializePagePayload(payload, existing = null) {
 
 async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
+  const isAdminApi = url.pathname.startsWith('/api/admin');
+  const mutating = isAdminApi && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+  const session = isAdminApi ? await inspectSessionCookie(request, env) : { user: null };
+  const actor = session.user;
+  let skipGeneric = false;
+  if (session.expired && mutating) {
+    await logSessionExpired(env, request, session, {
+      path: url.pathname,
+      method: request.method,
+      ctx,
+    });
+    skipGeneric = true;
+  }
   let requestSummary = null;
-  const actor = url.pathname.startsWith('/api/admin')
-    ? await currentUser(request, env)
-    : null;
-  if (url.pathname.startsWith('/api/admin') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+  let beforeSnapshot = null;
+  if (mutating) {
     requestSummary = await summarizeAdminRequestForAudit(request);
+    beforeSnapshot = await snapshotAdminMutationBefore(env, url.pathname, request.method);
   }
   const response = await routeApi(request, env, url, ctx);
-  await maybeAuditAdminApiResponse(env, {
-    request,
-    url,
-    response,
-    actor,
-    requestSummary,
-    ctx,
-  });
+  if (!skipGeneric) {
+    await maybeAuditAdminApiResponse(env, {
+      request,
+      url,
+      response,
+      actor,
+      requestSummary,
+      beforeSnapshot,
+      sessionIdHash: session.session_id_hash || '',
+      ctx,
+    });
+  }
   if (response.ok && shouldInvalidatePublicReadCache(url.pathname, request.method)) {
     const cleared = invalidatePublicReadCache();
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cleared);
@@ -8753,14 +8925,16 @@ async function handleApi(request, env, url, ctx = null) {
 
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
-  // Security log is immutable: no create/update/delete endpoints.
+  // Security log is immutable except the Super-Admin new-log genesis action.
   if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
-    return jsonResponse({
-      detail: 'Security log is view and print only. Editing is not allowed.',
-      access: 'super_admin_only',
-      mode: 'view_print_only',
-      editable: false,
-    }, 405);
+    if (!(url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST')) {
+      return jsonResponse({
+        detail: 'Security log is view and print only. Editing is not allowed.',
+        access: 'super_admin_only',
+        mode: 'view_print_only',
+        editable: false,
+      }, 405);
+    }
   }
   if (url.pathname === '/api/site' && request.method === 'GET') {
     return jsonResponse(await cachedPublicRead('site', () => getSite(env), { ctx }));
@@ -10035,7 +10209,121 @@ async function routeApi(request, env, url, ctx = null) {
       },
     });
   }
-
+  if ((url.pathname === '/api/admin/security-log.csv' || url.pathname === '/api/admin/security-log.json') && request.method === 'GET') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const range = {
+      limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
+      offset: 0,
+      action: String(url.searchParams.get('action') || '').trim(),
+      actor: String(url.searchParams.get('actor') || '').trim(),
+      year: url.searchParams.get('year'),
+      month: url.searchParams.get('month'),
+      from: String(url.searchParams.get('from') || '').trim(),
+      to: String(url.searchParams.get('to') || '').trim(),
+      q: String(url.searchParams.get('q') || '').trim(),
+    };
+    const payload = await listAdminAuditLogs(env, range);
+    const verify = await verifyAdminAuditRange(env, range);
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export',
+      category: 'security',
+      method: 'GET',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export',
+        method: 'GET',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `exported ${payload.entries.length} entries`,
+      }),
+      meta: {
+        entry_count: payload.entries.length,
+        total: payload.total,
+        format: url.pathname.endsWith('.csv') ? 'csv' : 'json',
+        chain_head: verify.chain_head,
+        signed_chain: verify.signed_chain,
+      },
+    });
+    if (url.pathname.endsWith('.csv')) {
+      return new Response(buildAdminAuditExportCsv(payload.entries, verify), {
+        status: 200,
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="efhsband-security-audit-log.csv"',
+          'cache-control': 'no-store',
+        },
+      });
+    }
+    return new Response(buildAdminAuditExportJson(payload.entries, verify), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': 'attachment; filename="efhsband-security-audit-log.json"',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const verify = await verifyAdminAuditRange(env, {
+      year: url.searchParams.get('year'),
+      month: url.searchParams.get('month'),
+      from: String(url.searchParams.get('from') || '').trim(),
+      to: String(url.searchParams.get('to') || '').trim(),
+      action: String(url.searchParams.get('action') || '').trim(),
+      actor: String(url.searchParams.get('actor') || '').trim(),
+    });
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.verify',
+      category: 'security',
+      method: 'GET',
+      path: '/api/admin/security-log/verify',
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.verify',
+        method: 'GET',
+        path: '/api/admin/security-log/verify',
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: verify.chain_status,
+      }),
+      meta: {
+        checked: verify.checked,
+        chain_ok: verify.chain_ok,
+        chain_head: verify.chain_head,
+        min_id: verify.min_id,
+        max_id: verify.max_id,
+      },
+    });
+    return jsonResponse(verify);
+  }
+  if (url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const confirm = String(payload.confirm || '').trim();
+    const reason = String(payload.reason || '').trim();
+    const authorizedBy = String(payload.authorized_by || '').trim();
+    if (confirm !== 'START NEW LOG' || authorizedBy.toLowerCase() !== 'trevor' || reason.length < 8) {
+      return jsonResponse({
+        detail: 'New log requires Trevor’s authorization, confirm text START NEW LOG, and a reason of at least 8 characters.',
+      }, 422);
+    }
+    const started = await startNewAuditLogGeneration(env, {
+      reason,
+      authorizedBy,
+      actor: auth.user,
+      request,
+    });
+    if (!started.ok) return jsonResponse(started, started.status || 409);
+    return jsonResponse(started, 201);
+  }
 
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
@@ -10284,11 +10572,64 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     const payload = await request.json();
     const check = validateSelfPasswordChange(payload);
-    if (!check.ok) return jsonResponse({ detail: check.detail }, check.status);
+    if (!check.ok) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'password.change',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: check.status,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'password.change',
+          method: 'POST',
+          path: '/api/admin/password',
+          status: check.status,
+          actorUsername: auth.user.username,
+          detail: 'validation failed',
+        }),
+        meta: { target_user_id: auth.user.id },
+      });
+      return jsonResponse({ detail: check.detail }, check.status);
+    }
     if (!(await verifyPassword(check.current_password, auth.user.password_hash))) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'password.change',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: 400,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'password.change',
+          method: 'POST',
+          path: '/api/admin/password',
+          status: 400,
+          actorUsername: auth.user.username,
+          detail: 'current password incorrect',
+        }),
+        meta: { target_user_id: auth.user.id },
+      });
       return jsonResponse({ detail: 'Current password is incorrect' }, 400);
     }
     await updatePassword(env, auth.user.id, check.new_password);
+    await enqueueAdminAudit(env, ctx, {
+      action: 'password.change',
+      category: 'users',
+      method: 'POST',
+      path: '/api/admin/password',
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'password.change',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: 'password updated',
+      }),
+      meta: { target_user_id: auth.user.id },
+    });
     return jsonResponse({ ok: true });
   }
 
@@ -10315,6 +10656,29 @@ async function routeApi(request, env, url, ctx = null) {
       const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
       const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
+      const afterGrants = permissionListFromValue(created?.permissions);
+      await enqueueAdminAudit(env, ctx, {
+        action: 'user.create',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/users',
+        status: 200,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'user.create',
+          method: 'POST',
+          path: '/api/admin/users',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: created?.username || username,
+        }),
+        meta: {
+          target_user_id: created?.id,
+          target_username: created?.username || username,
+          role: created?.role,
+          grants: { before: [], after: afterGrants },
+        },
+      });
       return jsonResponse(publicUser(created));
     } catch (error) {
       const message = String(error?.message || error || '');
@@ -10357,18 +10721,67 @@ async function routeApi(request, env, url, ctx = null) {
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
     if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
+    const updated = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first();
+    await enqueueAdminAudit(env, ctx, {
+      action: 'user.edit',
+      category: 'users',
+      method: 'PUT',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'user.edit',
+        method: 'PUT',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: updated?.username || existing.username,
+      }),
+      meta: {
+        target_user_id: id,
+        target_username: updated?.username || existing.username,
+        password_changed: Boolean(nextPayload.password),
+        grants: {
+          before: permissionListFromValue(existing.permissions),
+          after: permissionListFromValue(updated?.permissions || permissions),
+        },
+        role: { before: existing.role, after: updated?.role || role },
+      },
+    });
+    return jsonResponse(publicUser(updated));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     if (Number(userMatch[1]) === auth.user.id) return jsonResponse({ detail: 'You cannot delete your own account' }, 400);
-    const existing = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
+    const existing = await env.DB.prepare('SELECT id, username, role, permissions FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
     if (!existing) return jsonResponse({ detail: 'User not found' }, 404);
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can delete Super Admin accounts' }, 403);
     }
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
+    await enqueueAdminAudit(env, ctx, {
+      action: 'user.delete',
+      category: 'users',
+      method: 'DELETE',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'user.delete',
+        method: 'DELETE',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: existing.username || String(existing.id),
+      }),
+      meta: {
+        target_user_id: existing.id,
+        target_username: existing.username,
+        grants: { before: permissionListFromValue(existing.permissions), after: [] },
+        role: existing.role,
+      },
+    });
     return jsonResponse({ ok: true });
   }
 
@@ -11304,6 +11717,7 @@ async function routeApi(request, env, url, ctx = null) {
         status: 201,
         minutes: created,
         after: await sha256Hex(created.body_html || ''),
+        afterHtml: created.body_html || '',
         detail: `${created.meeting_date} created`,
       });
       return jsonResponse(created, 201);
@@ -11362,6 +11776,7 @@ async function routeApi(request, env, url, ctx = null) {
         status: 201,
         minutes: created,
         after: await sha256Hex(created.body_html || ''),
+        afterHtml: created.body_html || '',
         detail: `${created.meeting_date} uploaded`,
       });
       return jsonResponse(created, 201);
@@ -11401,6 +11816,7 @@ async function routeApi(request, env, url, ctx = null) {
           status: 403,
           minutes: existing,
           before: await sha256Hex(existing.body_html || ''),
+          beforeHtml: existing.body_html || '',
           detail: 'Only Super Admins can delete meeting minutes',
         });
         return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
@@ -11411,6 +11827,7 @@ async function routeApi(request, env, url, ctx = null) {
         status: 200,
         minutes: existing,
         before: await sha256Hex(existing.body_html || ''),
+        beforeHtml: existing.body_html || '',
         detail: `${existing.meeting_date} deleted`,
       });
       return jsonResponse({ ok: true });
@@ -11421,6 +11838,7 @@ async function routeApi(request, env, url, ctx = null) {
         status: 403,
         minutes: existing,
         before: await sha256Hex(existing.body_html || ''),
+        beforeHtml: existing.body_html || '',
         detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
       });
       return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
@@ -11446,6 +11864,8 @@ async function routeApi(request, env, url, ctx = null) {
         minutes: updated || existing,
         before: beforeSha,
         after: await sha256Hex(updated?.body_html || payload.body_html || ''),
+        beforeHtml: existing.body_html || '',
+        afterHtml: updated?.body_html || payload.body_html || '',
         detail: afterWindow ? `${existing.meeting_date} edited after 48h` : `${existing.meeting_date} edited`,
       });
       return jsonResponse(updated);
@@ -11556,12 +11976,31 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'mail');
     if (auth.response) return auth.response;
+    const logMailTest = (status, detail, extra = {}) => enqueueAdminAudit(env, ctx, {
+      action: 'mail.test',
+      category: 'mail',
+      method: 'POST',
+      path: '/api/admin/mail/test-no-reply',
+      status,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'mail.test',
+        method: 'POST',
+        path: '/api/admin/mail/test-no-reply',
+        status,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: extra,
+    });
     if (!env.RESEND_API_KEY) {
+      await logMailTest(503, 'RESEND_API_KEY is not configured');
       return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
     }
     const payload = await request.json().catch(() => ({}));
     const to = String(payload.to || auth.user?.username || '').trim().toLowerCase();
     if (!isValidEmail(to)) {
+      await logMailTest(422, 'invalid test recipient');
       return jsonResponse({ detail: 'Provide a valid test recipient email' }, 422);
     }
     try {
@@ -11578,6 +12017,7 @@ async function routeApi(request, env, url, ctx = null) {
         fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
         fromName: SPONSOR_INVOICE_FROM_NAME,
       });
+      await logMailTest(200, `sent to ${to}`, { to });
       return jsonResponse({
         ok: true,
         from: `${SPONSOR_INVOICE_FROM_NAME} <${SPONSOR_INVOICE_FROM_EMAIL}>`,
@@ -11585,33 +12025,68 @@ async function routeApi(request, env, url, ctx = null) {
         detail: `Test email sent to ${to} from ${SPONSOR_INVOICE_FROM_EMAIL}.`,
       });
     } catch (error) {
+      await logMailTest(502, error?.message || 'Could not send test email', { to });
       return jsonResponse({ ok: false, detail: error?.message || 'Could not send test email' }, 502);
     }
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    const logMailFailure = (status, detail, extra = {}) => enqueueAdminAudit(env, ctx, {
+      action: 'mail.send',
+      category: 'mail',
+      method: 'POST',
+      path: '/api/admin/mail',
+      status,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'mail.send',
+        method: 'POST',
+        path: '/api/admin/mail',
+        status,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: extra,
+    });
     let mail;
     try {
       mail = await parseAdminMailRequest(request);
     } catch (error) {
+      await logMailFailure(422, 'invalid mail request');
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
-    if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
-    if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
+    if (!mail.user_ids.length) {
+      await logMailFailure(422, 'no recipients');
+      return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    }
+    if (!mail.subject) {
+      await logMailFailure(422, 'subject required');
+      return jsonResponse({ detail: 'Subject is required.' }, 422);
+    }
+    if (!mail.html && !mail.text) {
+      await logMailFailure(422, 'body required');
+      return jsonResponse({ detail: 'Message body is required.' }, 422);
+    }
     if (resolveContactEmailProvider(env) !== 'resend') {
+      await logMailFailure(503, 'resend not configured');
       return jsonResponse({ detail: 'Mail requires Resend. Add RESEND_API_KEY in Cloudflare Pages secrets.' }, 503);
     }
     const sender = resolveAdminMailSender(auth.user);
-    if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
+    if (!sender.ok) {
+      await logMailFailure(422, sender.detail || 'invalid sender');
+      return jsonResponse({ detail: sender.detail }, 422);
+    }
 
     const placeholders = mail.user_ids.map(() => '?').join(', ');
     const rows = await env.DB.prepare(
       `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
     ).bind(...mail.user_ids).all();
     const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+    if (!users.length) {
+      await logMailFailure(422, 'no valid recipient emails');
+      return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+    }
 
     const results = [];
     for (const user of users) {
@@ -11927,9 +12402,9 @@ async function routeApi(request, env, url, ctx = null) {
       if (usage.length) {
         return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
       }
-      await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      await env.DB.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').bind(PHOTO_QUARANTINE_SORT, id).run();
       await purgeUploadCache(photo);
-      return jsonResponse({ ok: true });
+      return jsonResponse({ ok: true, quarantined: true });
     }
     const meta = normalizePhotoMetaPayload(await request.json(), photo);
     if (!meta.alt_text) return jsonResponse({ detail: 'Alt text is required' }, 422);
@@ -12028,11 +12503,13 @@ async function handleUploadGet(request, env, url, ctx = null) {
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
   let row;
   try {
-    row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
+    row = await env.DB.prepare('SELECT content_type, data_base64, sort_order FROM photos WHERE filename = ?').bind(key).first();
   } catch (error) {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   }
-  if (!row) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  if (!row || Number(row.sort_order) <= PHOTO_QUARANTINE_SORT) {
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
   try {
     const bytes = photoBytesFromStored(row.data_base64);
     if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
@@ -12071,46 +12548,83 @@ function renderLoginHtml(nextPath = '/admin') {
   );
 }
 
-async function handleLogin(request, env) {
+async function handleLogin(request, env, ctx = null) {
   await initDb(env);
   const requestUrl = new URL(request.url);
   if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
-    // Already authenticated users should not stay on the login form with a live session.
-    if (await currentUser(request, env)) return redirect(nextPath);
+    const session = await inspectSessionCookie(request, env);
+    if (session.expired) {
+      await logSessionExpired(env, request, session, { path: '/admin/login', method: 'GET', ctx });
+    }
+    if (session.user) return redirect(nextPath);
     return htmlResponse(renderLoginHtml(nextPath));
   }
   const form = await request.formData();
   const username = String(form.get('username') || '').trim();
   const password = String(form.get('password') || '');
   const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
-  const user = await getUserByUsername(env, username);
-  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
-    // Always clear any existing session on failed login so a stale cookie cannot
-    // keep granting access after an invalid password attempt.
-    await writeAdminAuditLog(env, {
-      action: 'login.failed',
+  const ip = requestClientIp(request);
+  const lock = inspectLoginLock(username, ip);
+  if (lock.locked) {
+    await enqueueAdminAudit(env, ctx, {
+      action: 'login.locked',
       category: 'auth',
       method: 'POST',
       path: '/admin/login',
-      status: 401,
+      status: 429,
       actor_username: username,
-      ip: requestClientIp(request),
+      ip,
+      country: requestCountry(request),
       user_agent: request.headers.get('user-agent') || '',
       summary: buildAuditSummary({
-        action: 'login.failed',
+        action: 'login.locked',
         method: 'POST',
         path: '/admin/login',
-        status: 401,
+        status: 429,
         actorUsername: username || 'unknown',
-        detail: 'invalid credentials',
+        detail: 'rate limited',
       }),
-      meta: { username, next: nextPath },
+      meta: { username, next: nextPath, failures: lock.failures },
     });
     return applyAuthCookies(
       htmlResponse(
-        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
-        401,
+        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"),
+        429,
+      ),
+      { token: '', maxAge: 0 },
+    );
+  }
+  const user = await getUserByUsername(env, username);
+  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
+    const nextLock = registerLoginFailure(username, ip);
+    const lockedNow = Boolean(nextLock.locked);
+    await enqueueAdminAudit(env, ctx, {
+      action: lockedNow ? 'login.locked' : 'login.failed',
+      category: 'auth',
+      method: 'POST',
+      path: '/admin/login',
+      status: lockedNow ? 429 : 401,
+      actor_username: username,
+      ip,
+      country: requestCountry(request),
+      user_agent: request.headers.get('user-agent') || '',
+      summary: buildAuditSummary({
+        action: lockedNow ? 'login.locked' : 'login.failed',
+        method: 'POST',
+        path: '/admin/login',
+        status: lockedNow ? 429 : 401,
+        actorUsername: username || 'unknown',
+        detail: lockedNow ? 'rate limited' : 'invalid credentials',
+      }),
+      meta: { username, next: nextPath, failures: nextLock.failures },
+    });
+    return applyAuthCookies(
+      htmlResponse(
+        renderLoginHtml(nextPath).replace('</form>', lockedNow
+          ? "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"
+          : "<p class='error'>Invalid username or password.</p></form>"),
+        lockedNow ? 429 : 401,
       ),
       { token: '', maxAge: 0 },
     );
@@ -12122,7 +12636,9 @@ async function handleLogin(request, env) {
   } catch {
     // Best-effort; login should still succeed if the column is missing mid-deploy.
   }
-  await writeAdminAuditLog(env, {
+  clearLoginFailures(username, ip);
+  const token = await makeSession(user, env);
+  await enqueueAdminAudit(env, ctx, {
     action: 'login',
     category: 'auth',
     method: 'POST',
@@ -12130,8 +12646,10 @@ async function handleLogin(request, env) {
     status: 302,
     actor_user_id: user.id,
     actor_username: user.username,
-    ip: requestClientIp(request),
+    ip,
+    country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: await sha256Hex(token),
     summary: buildAuditSummary({
       action: 'login',
       method: 'POST',
@@ -12148,7 +12666,7 @@ async function handleLogin(request, env) {
   });
   const response = redirect(nextPath);
   return applyAuthCookies(response, {
-    token: await makeSession(user, env),
+    token,
     maxAge: SESSION_TTL_SECONDS,
   });
 }
@@ -12160,9 +12678,13 @@ function renderAdminAppHtml(user) {
   }));
 }
 
-async function handleAdmin(request, env) {
+async function handleAdmin(request, env, ctx = null) {
   await initDb(env);
-  const user = await currentUser(request, env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.expired) {
+    await logSessionExpired(env, request, session, { path: '/admin', method: request.method, ctx });
+  }
+  const user = session.user;
   if (!user) return redirect('/admin/login');
   const url = new URL(request.url);
   if (url.searchParams.get('tab') === 'badge-creator' && !canAccessBadgeCreator(user)) {
@@ -12177,9 +12699,17 @@ async function handleAdmin(request, env) {
   return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
 }
 
-async function handleVisualEditorPage(request, env, slug) {
+async function handleVisualEditorPage(request, env, slug, ctx = null) {
   await initDb(env);
-  const user = await currentUser(request, env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.expired) {
+    await logSessionExpired(env, request, session, {
+      path: `/admin/visual/${String(slug || '').trim().toLowerCase()}`,
+      method: request.method,
+      ctx,
+    });
+  }
+  const user = session.user;
   if (!user) return redirect('/admin/login');
   const key = String(slug || '').trim().toLowerCase();
   if (!isVisualEditorSlug(key)) {
@@ -12218,7 +12748,9 @@ async function handleVisualEditorPage(request, env, slug) {
     actor_user_id: user.id,
     actor_username: user.username,
     ip: requestClientIp(request),
+    country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: session.session_id_hash || '',
     summary: buildAuditSummary({
       action: 'page.edit.open',
       method: 'GET',
@@ -12241,10 +12773,14 @@ async function handleVisualEditorPage(request, env, slug) {
   })), user);
 }
 
-async function logout(request, env) {
-  const user = await currentUser(request, env);
+async function logout(request, env, ctx = null) {
+  const session = await inspectSessionCookie(request, env);
+  if (session.expired) {
+    await logSessionExpired(env, request, session, { path: '/admin/logout', method: request.method, ctx });
+  }
+  const user = session.user;
   if (user) {
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'logout',
       category: 'auth',
       method: String(request?.method || 'POST').toUpperCase(),
@@ -12253,7 +12789,9 @@ async function logout(request, env) {
       actor_user_id: user.id,
       actor_username: user.username,
       ip: requestClientIp(request),
+      country: requestCountry(request),
       user_agent: request.headers.get('user-agent') || '',
+      session_id_hash: session.session_id_hash || '',
       summary: buildAuditSummary({
         action: 'logout',
         method: String(request?.method || 'POST').toUpperCase(),
@@ -12965,18 +13503,18 @@ async function dispatchWorker(request, env, ctx) {
       target.searchParams.set('donate', '1');
       return Response.redirect(target.toString(), 302);
     }
-    if (url.pathname === '/admin/login') return handleLogin(request, env);
+    if (url.pathname === '/admin/login') return handleLogin(request, env, ctx);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
-    if (url.pathname === '/admin/logout') return logout(request, env);
+    if (url.pathname === '/admin/logout') return logout(request, env, ctx);
     if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
     if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
-    if (url.pathname === '/admin') return handleAdmin(request, env);
+    if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
     const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
     if (visualEditorMatch) {
-      return handleVisualEditorPage(request, env, visualEditorMatch[1]);
+      return handleVisualEditorPage(request, env, visualEditorMatch[1], ctx);
     }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
@@ -13506,7 +14044,7 @@ __ADMIN_SIDEBAR__
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">
     <label>Month<select id="security-log-month">
@@ -13523,8 +14061,18 @@ __ADMIN_SIDEBAR__
   </div>
   <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. Free-text search runs on the decrypted rows on this page only.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
+  <p class="status" id="security-log-verify" aria-live="polite"></p>
   <p class="error" id="security-log-write-warning" hidden></p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
+  <details class="security-log-genesis">
+    <summary>Start a new log generation (Trevor authorization required)</summary>
+    <p class="muted">Keeps every old row. The next Cloudflare secret <code>AUDIT_LOG_KEY_Kn</code> must already be piped in with a CSPRNG. This writes <code>log.genesis</code> and continues the hash chain.</p>
+    <label>Reason<textarea id="security-log-genesis-reason" rows="2" maxlength="400" placeholder="Why this generation is starting"></textarea></label>
+    <label>Authorized by<input id="security-log-genesis-by" value="Trevor" autocomplete="off"></label>
+    <label class="checkline"><input type="checkbox" id="security-log-genesis-confirm"> I confirm START NEW LOG</label>
+    <button class="btn outline" type="button" id="security-log-genesis-start">Start new log</button>
+    <p class="status" id="security-log-genesis-status" aria-live="polite"></p>
+  </details>
 </div>
 <div class="admin-card">
   <div id="security-log-list" class="security-log-list" aria-live="polite"></div>
