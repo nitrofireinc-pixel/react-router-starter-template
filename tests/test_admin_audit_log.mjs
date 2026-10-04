@@ -20,6 +20,7 @@ import {
   easternMonthUtcBounds,
   encryptAuditPayload,
   enrichMailAuditMeta,
+  formatAuditTimestampEt,
   isSecurityLogPath,
   listAdminAuditLogs,
   maybeAuditAdminApiResponse,
@@ -142,6 +143,7 @@ test('audit helpers categorize paths and build export text', () => {
   assert.match(text, /admin@efhsband.org/);
   assert.match(text, /login ok/);
   assert.match(text, /SHA-256/);
+  assert.match(text, /When: Aug 13, 2026 6:00:00 PM ET/);
 });
 
 test('audit payload encrypts with AES-GCM and verifies SHA-256', async () => {
@@ -192,6 +194,7 @@ test('security audit log PDF export is a multi-page PDF', () => {
   assert.match(pdf, /Security Audit Log/);
   assert.match(pdf, /user0@efhsband\.org/);
   assert.match(pdf, /login ok 0/);
+  assert.match(pdf, / ET/);
 });
 
 test('D1-style triggers block UPDATE and DELETE on admin_audit_log', () => {
@@ -201,6 +204,7 @@ test('D1-style triggers block UPDATE and DELETE on admin_audit_log', () => {
   assert.match(sqlFile, /RAISE\(ABORT,\s*'append-only'\)/);
   assert.match(sqlFile, /idx_audit_created/);
   assert.match(sqlFile, /idx_audit_action_created/);
+  assert.doesNotMatch(sqlFile, /^\s*ALTER TABLE/m);
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE admin_audit_log (
@@ -252,7 +256,29 @@ test('month filter uses Eastern bounds and never LIKEs ciphertext', () => {
     meta: { slug: 'fundraising' },
   }, 'fundraising publish'), true);
   assert.equal(auditEntryMatchesQuery({ summary: 'login ok' }, 'fundraising'), false);
+  assert.equal(auditEntryMatchesQuery({
+    action: 'security.log.view',
+    summary: 'preview opened',
+    meta: { filters: { q: 'xyzzy-no-such-term' } },
+  }, 'xyzzy-no-such-term'), false);
+  assert.equal(formatAuditTimestampEt('2026-10-04T07:13:15.000Z'), 'Oct 4, 2026 3:13:15 AM ET');
 });
+
+function applyListFilters(rows, sql, binds) {
+  let result = rows.slice();
+  let index = 0;
+  if (sql.includes('action = ?')) {
+    const action = binds[index];
+    index += 1;
+    result = result.filter((row) => row.action === action);
+  }
+  if (sql.includes('LOWER(actor_username) LIKE ?')) {
+    const like = String(binds[index] || '').replace(/%/g, '').toLowerCase();
+    index += 1;
+    result = result.filter((row) => String(row.actor_username || '').toLowerCase().includes(like));
+  }
+  return { result, nextBind: index };
+}
 
 function createAuditDb(seedRows = []) {
   const rows = seedRows.slice();
@@ -272,18 +298,39 @@ function createAuditDb(seedRows = []) {
               const value = site.get(this.binds[0]);
               return value == null ? null : { value };
             }
-            if (q.includes('COUNT(*)')) return { total: rows.length };
+            if (q.includes('COUNT(*)')) {
+              return { total: applyListFilters(rows, q, this.binds).result.length };
+            }
             if (q.includes('WHERE id <')) {
-              const older = rows.filter((row) => Number(row.id) < Number(this.binds[0])).at(-1);
+              const older = rows
+                .filter((row) => Number(row.id) < Number(this.binds[0]))
+                .sort((a, b) => Number(b.id) - Number(a.id))[0];
               return older || null;
             }
             if (q.includes('ORDER BY id DESC LIMIT 1')) {
-              return rows.at(-1) || null;
+              return rows.slice().sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
             }
             return null;
           },
           async all() {
-            return { results: rows.slice().reverse() };
+            if (q.includes('id >= ?') && q.includes('id <= ?')) {
+              const minId = Number(this.binds[0]);
+              const maxId = Number(this.binds[1]);
+              return {
+                results: rows
+                  .filter((row) => Number(row.id) >= minId && Number(row.id) <= maxId)
+                  .sort((a, b) => Number(a.id) - Number(b.id)),
+              };
+            }
+            const filtered = applyListFilters(rows, q, this.binds).result
+              .slice()
+              .sort((a, b) => Number(b.id) - Number(a.id));
+            if (q.includes('LIMIT')) {
+              const limit = Number(this.binds.at(-2));
+              const offset = Number(this.binds.at(-1));
+              return { results: filtered.slice(offset, offset + limit) };
+            }
+            return { results: filtered };
           },
           async run() {
             if (q.includes('INSERT INTO site_content')) {
@@ -365,7 +412,8 @@ test('security log list is indexed, paginated, and decrypts only the current pag
   assert.equal(sqlLog.some((sql) => /created_at >= \?/.test(sql)), true);
   assert.equal(sqlLog.some((sql) => /ORDER BY created_at DESC, id DESC/.test(sql)), true);
   const d1Reads = sqlLog.filter((sql) => /SELECT /i.test(sql)).length;
-  assert.ok(d1Reads <= 4, `list used ${d1Reads} SELECTs`);
+  assert.ok(d1Reads <= 5, `list used ${d1Reads} SELECTs`);
+  assert.equal(sqlLog.some((sql) => /id >= \? AND id <= \?/.test(sql)), true);
 });
 
 test('failed audit writes increment a counter instead of disappearing', async () => {
@@ -378,6 +426,77 @@ test('failed audit writes increment a counter instead of disappearing', async ()
   assert.match(String(second.since), /T/);
   const listed = await listAdminAuditLogs(env, { year: 2026, month: 10 });
   assert.equal(listed.write_failures.count, 2);
+});
+
+test('hash chain uses the contiguous id range for filtered or scattered rows', async () => {
+  resetAuditWriteFailureState();
+  const seed = [
+    { id: 1, action: 'login', payload_sha256: 'h1', prev_sha256: '', created_at: '2026-10-04 16:00:00', actor_username: 'agent@efhsband.org' },
+    { id: 2, action: 'change.pages', payload_sha256: 'h2', prev_sha256: 'h1', created_at: '2026-10-04 16:01:00', actor_username: 'agent@efhsband.org' },
+    { id: 3, action: 'login', payload_sha256: 'h3', prev_sha256: 'h2', created_at: '2026-10-04 16:02:00', actor_username: 'agent@efhsband.org' },
+    { id: 4, action: 'change.pages', payload_sha256: 'h4', prev_sha256: 'h3', created_at: '2026-10-04 16:03:00', actor_username: 'agent@efhsband.org' },
+    { id: 5, action: 'login', payload_sha256: 'h5', prev_sha256: 'h4', created_at: '2026-10-04 16:04:00', actor_username: 'agent@efhsband.org' },
+  ];
+  const { env, rows } = createAuditDb(seed);
+  const filtered = await listAdminAuditLogs(env, { year: 2026, month: 10, action: 'login', limit: 25 });
+  assert.deepEqual(filtered.entries.map((entry) => entry.id), [5, 3, 1]);
+  assert.equal(filtered.chain_ok, true);
+  assert.equal(filtered.chain_status, 'Chain intact');
+  rows[3].prev_sha256 = 'tampered';
+  const broken = await listAdminAuditLogs(env, { year: 2026, month: 10, action: 'login', limit: 25 });
+  assert.deepEqual(broken.entries.map((entry) => entry.id), [5, 3, 1]);
+  assert.equal(broken.chain_ok, false);
+  assert.equal(broken.chain_status, 'Break at entry #4');
+  assert.equal(broken.chain_break_id, 4);
+});
+
+test('free-text search ignores security.log.view so a missing term matches nothing', async () => {
+  resetAuditWriteFailureState();
+  const { env } = createAuditDb([
+    {
+      id: 1,
+      action: 'login',
+      summary: 'login ok',
+      payload_sha256: 'h1',
+      prev_sha256: '',
+      created_at: '2026-10-04 16:00:00',
+      actor_username: 'agent@efhsband.org',
+    },
+    {
+      id: 2,
+      action: 'security.log.view',
+      summary: 'preview opened',
+      meta_json: JSON.stringify({ filters: { q: 'xyzzy-no-such-term' } }),
+      payload_sha256: 'h2',
+      prev_sha256: 'h1',
+      created_at: '2026-10-04 16:01:00',
+      actor_username: 'agent@efhsband.org',
+    },
+  ]);
+  const listed = await listAdminAuditLogs(env, { year: 2026, month: 10, q: 'xyzzy-no-such-term', limit: 25 });
+  assert.equal(listed.matched, 0);
+  assert.equal(listed.entries.length, 0);
+});
+
+test('2026-10-04.2.sql can be applied twice without ALTER', () => {
+  const sqlFile = readFileSync(join(root, 'migrations/2026-10-04.2.sql'), 'utf8');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      action TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL DEFAULT '',
+      prev_sha256 TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO admin_audit_log (action) VALUES ('login');
+  `);
+  db.exec(sqlFile);
+  db.exec(sqlFile);
+  const version = db.prepare("SELECT value FROM site_content WHERE key = 'schema_version'").get();
+  assert.equal(version.value, '2026-10-04.2');
+  db.close();
 });
 
 test('new audit rows store the previous payload hash', async () => {

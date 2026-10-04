@@ -5247,7 +5247,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
       list.innerHTML = '<p class="draft">No security log entries match this month or filter. Log in/out or save a CMS change to create a new entry.</p>';
     } else {
       list.innerHTML = entries.map((entry) => {
-        const when = escapeHtml(entry.created_at || '');
+        const when = escapeHtml(entry.created_at_et || entry.created_at || '');
         const who = escapeHtml(entry.actor_username || 'unknown');
         const summary = escapeHtml(entry.summary || entry.action || '');
         const route = escapeHtml(`${entry.method || ''} ${entry.path || ''}`.trim());

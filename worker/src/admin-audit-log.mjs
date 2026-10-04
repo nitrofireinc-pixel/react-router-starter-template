@@ -249,9 +249,50 @@ export function easternDayUtcBounds(dateValue = '') {
   };
 }
 
+export function parseAuditUtcDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(raw)) {
+    const iso = /[zZ]$/.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)
+      ? raw.replace(' ', 'T')
+      : `${raw.replace(' ', 'T')}Z`;
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatAuditTimestampEt(value) {
+  const date = parseAuditUtcDate(value);
+  if (!date) return String(value || '');
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: AUDIT_LOG_TIMEZONE,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const month = parts.month || '';
+  const day = parts.day || '';
+  const year = parts.year || '';
+  const hour = parts.hour || '';
+  const minute = parts.minute || '00';
+  const second = parts.second || '00';
+  const period = parts.dayPeriod || '';
+  return `${month} ${day}, ${year} ${hour}:${minute}:${second} ${period} ET`.replace(/\s+/g, ' ').trim();
+}
+
 export function auditEntryMatchesQuery(entry = {}, query = '') {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return true;
+  // Viewing the log writes security.log.view; that row must not match its own search.
+  if (String(entry.action || '') === 'security.log.view') return false;
   const metaText = entry?.meta && typeof entry.meta === 'object'
     ? JSON.stringify(entry.meta)
     : '';
@@ -265,7 +306,17 @@ export function auditEntryMatchesQuery(entry = {}, query = '') {
   return hay.includes(needle);
 }
 
+export function auditChainIdWindow(entries = []) {
+  const ids = (Array.isArray(entries) ? entries : [])
+    .map((row) => Number(row?.id) || 0)
+    .filter((id) => id > 0);
+  if (!ids.length) return null;
+  return { minId: Math.min(...ids), maxId: Math.max(...ids) };
+}
+
 export function verifyAuditHashChain(entries = [], olderNeighbor = null) {
+  // entries must be a contiguous id window (every stored row from min..max).
+  // Comparing filtered/scattered rows to each other produces false breaks.
   const rows = [...(Array.isArray(entries) ? entries : [])]
     .filter((row) => row && Number(row.id) > 0)
     .sort((a, b) => Number(a.id) - Number(b.id));
@@ -285,6 +336,24 @@ export function verifyAuditHashChain(entries = [], olderNeighbor = null) {
     chain_ok: true,
     chain_status: 'Chain intact',
     chain_break_id: null,
+  };
+}
+
+export async function fetchAuditHashChainRows(env, minId, maxId) {
+  const low = Number(minId) || 0;
+  const high = Number(maxId) || 0;
+  if (low <= 0 || high <= 0 || high < low) {
+    return { rows: [], olderNeighbor: null };
+  }
+  const windowSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id >= ? AND id <= ? ORDER BY id ASC`;
+  const neighborSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id < ? ORDER BY id DESC LIMIT 1`;
+  assertAuditSqlIsAppendOnly(windowSql);
+  assertAuditSqlIsAppendOnly(neighborSql);
+  const window = await env.DB.prepare(windowSql).bind(low, high).all();
+  const olderNeighbor = await env.DB.prepare(neighborSql).bind(low).first();
+  return {
+    rows: window?.results || [],
+    olderNeighbor: olderNeighbor || null,
   };
 }
 
@@ -665,6 +734,7 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
   const base = {
     id: Number(row.id) || 0,
     created_at: String(row.created_at || ''),
+    created_at_et: formatAuditTimestampEt(row.created_at),
     action: String(row.action || ''),
     category: String(row.category || ''),
     method: String(row.method || ''),
@@ -746,6 +816,7 @@ export function serializeAuditRow(row = {}) {
   return {
     id: Number(row.id) || 0,
     created_at: String(row.created_at || ''),
+    created_at_et: formatAuditTimestampEt(row.created_at),
     action: String(row.action || ''),
     category: String(row.category || ''),
     method: String(row.method || ''),
@@ -839,16 +910,10 @@ export async function listAdminAuditLogs(env, {
   const countRow = await env.DB.prepare(countSql).bind(...binds).first();
   const rows = await env.DB.prepare(listSql).bind(...binds, safeLimit, safeOffset).all();
   const rawRows = rows.results || [];
-  let olderNeighbor = null;
-  const oldestId = rawRows.reduce((min, row) => {
-    const id = Number(row.id) || 0;
-    return min === 0 || (id > 0 && id < min) ? id : min;
-  }, 0);
-  if (oldestId > 0) {
-    const neighborSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id < ? ORDER BY id DESC LIMIT 1`;
-    assertAuditSqlIsAppendOnly(neighborSql);
-    olderNeighbor = await env.DB.prepare(neighborSql).bind(oldestId).first();
-  }
+  const window = auditChainIdWindow(rawRows);
+  const chainRows = window
+    ? await fetchAuditHashChainRows(env, window.minId, window.maxId)
+    : { rows: [], olderNeighbor: null };
   const decrypted = [];
   for (const row of rawRows) {
     decrypted.push(await deserializeEncryptedAuditRow(env, row));
@@ -856,7 +921,7 @@ export async function listAdminAuditLogs(env, {
   const entries = query
     ? decrypted.filter((entry) => auditEntryMatchesQuery(entry, query))
     : decrypted;
-  const chain = verifyAuditHashChain(decrypted, olderNeighbor);
+  const chain = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
   const writeFailures = await readAuditWriteFailures(env);
   return {
     total: Number(countRow?.total) || 0,
@@ -895,7 +960,7 @@ export function buildAdminAuditExportText(entries = []) {
   ];
   for (const entry of entries) {
     lines.push('='.repeat(72));
-    lines.push(`When: ${entry.created_at || ''}`);
+    lines.push(`When: ${entry.created_at_et || formatAuditTimestampEt(entry.created_at)}`);
     lines.push(`Action: ${entry.action || ''}`);
     lines.push(`Category: ${entry.category || ''}`);
     lines.push(`User: ${entry.actor_username || 'unknown'}${entry.actor_user_id ? ` (#${entry.actor_user_id})` : ''}`);

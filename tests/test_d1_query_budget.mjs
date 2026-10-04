@@ -210,9 +210,11 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
   assert.equal(normalize(sqlFile).includes('CREATE TABLE IF NOT EXISTS visual_page_versions'), true);
   assert.equal(normalize(sqlFile).includes('CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update'), true);
   assert.equal(normalize(sqlFile).includes('idx_audit_created'), true);
-  assert.equal(normalize(sqlFile).includes('prev_sha256'), true);
+  assert.equal(sqlFile.includes('prev_sha256'), true);
   assert.equal(normalize(sqlFile).includes("schema_version"), true);
+  assert.equal(normalize(sqlFile).includes('ALTER TABLE'), false);
   for (const statement of incrementalSchemaStatements()) {
+    if (/^\s*ALTER TABLE/i.test(statement)) continue;
     assert.equal(normalize(sqlFile).includes(normalize(statement)), true, statement.slice(0, 60));
   }
   assert.equal(normalize(rendered).includes('visual_pages'), true);

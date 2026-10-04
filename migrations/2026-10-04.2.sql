@@ -1,12 +1,22 @@
 -- Incremental, idempotent DEV/prod-ready migration: 2026-10-04.1 → 2026-10-04.2
--- Security audit log: append-only triggers, lookup indexes, hash-chain column.
+-- Security audit log: append-only triggers and lookup indexes.
 -- Existing admin_audit_log rows are not updated or deleted.
--- Run at deploy time on the target D1 (DEV: efhsband-dev-db):
+--
+-- This file is safe to run twice. It contains only CREATE IF NOT EXISTS /
+-- INSERT ON CONFLICT statements. SQLite/D1 cannot ADD COLUMN IF NOT EXISTS,
+-- so prev_sha256 is added by Worker initDb / applyIncrementalSchema (ALTER
+-- wrapped in try/catch; duplicate-column is ignored).
+--
+-- DEV:
 --   npx wrangler d1 execute efhsband-dev-db --remote -c wrangler.dev.toml --file migrations/2026-10-04.2.sql
--- Safe to re-run. ALTER ADD COLUMN may report "duplicate column name" after the first run; ignore that.
--- Worker initDb applies the same statements when it sees an older schema.
-
-ALTER TABLE admin_audit_log ADD COLUMN prev_sha256 TEXT NOT NULL DEFAULT '';
+-- Prod (owner sign-off only, after merge to main):
+--   1. Deploy Worker efhsband-live from main.
+--   2. First request runs initDb → applyIncrementalSchema, which adds
+--      prev_sha256 if missing and applies the same indexes/triggers.
+--   3. Optional: run this file against efhsband-db for indexes/triggers only.
+--      Do not add an unguarded ALTER here.
+--
+-- Worker initDb applies the same IF NOT EXISTS statements when it sees an older schema.
 
 CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log (created_at, id);
 CREATE INDEX IF NOT EXISTS idx_audit_action_created ON admin_audit_log (action, created_at);
