@@ -74,6 +74,8 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /6\.15 Security log/);
   assert.match(html, /change\.pages/);
   assert.match(html, /page\.edit\.open/);
+  assert.match(html, /access\.denied/);
+  assert.match(html, /access\.unauthenticated/);
   assert.match(html, /25 entries per page/);
   assert.match(html, /Chain intact/);
   assert.doesNotMatch(html, /Not live on production yet/);

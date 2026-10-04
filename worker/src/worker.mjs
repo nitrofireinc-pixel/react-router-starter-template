@@ -58,7 +58,9 @@ import {
   inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
+  markRequestAuditWritten,
   maybeAuditAdminApiResponse,
+  maybeLogAccessDenial,
   parseAuditUtcDate,
   permissionListFromValue,
   registerLoginFailure,
@@ -407,7 +409,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004x';
+export const ASSET_VERSION = 'cms-p1-20261004y';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1960,6 +1962,7 @@ async function logSessionExpired(env, request, session, {
 } = {}) {
   if (!session?.expired) return;
   await enqueueAdminAudit(env, ctx, {
+    request,
     action: 'session.expired',
     category: 'auth',
     method: String(method || 'GET').toUpperCase(),
@@ -8190,6 +8193,7 @@ async function writeMaintenanceAudit(env, request, user, {
       enabled: enabled == null ? null : (enabled ? 1 : 0),
     },
   });
+  markRequestAuditWritten(request);
 }
 
 export async function sha256Hex(value) {
@@ -8241,6 +8245,7 @@ async function writeMinutesAudit(env, request, user, {
         : null,
     },
   });
+  markRequestAuditWritten(request);
 }
 
 export function renderMinutesDocumentHtml(site = {}, minutes = {}, { embed = false } = {}) {
@@ -8973,6 +8978,14 @@ async function handleApi(request, env, url, ctx = null) {
       ctx,
     });
   }
+  await maybeLogAccessDenial(env, {
+    request,
+    url,
+    response,
+    actor,
+    session,
+    ctx,
+  });
   if (response.ok && shouldInvalidatePublicReadCache(url.pathname, request.method)) {
     const cleared = invalidatePublicReadCache();
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cleared);
@@ -10393,12 +10406,6 @@ async function routeApi(request, env, url, ctx = null) {
       maintenance_mode: payload.maintenance_mode !== undefined ? payload.maintenance_mode : payload.enabled,
     });
     if (!canToggleMaintenanceMode(auth.user)) {
-      await writeMaintenanceAudit(env, request, auth.user, {
-        status: 403,
-        previous,
-        enabled,
-        detail: 'Only Super Admins can change maintenance mode.',
-      });
       return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
     }
     await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
@@ -10422,12 +10429,6 @@ async function routeApi(request, env, url, ctx = null) {
       const previous = isMaintenanceMode(site);
       const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode });
       if (!canToggleMaintenanceMode(auth.user)) {
-        await writeMaintenanceAudit(env, request, auth.user, {
-          status: 403,
-          previous,
-          enabled,
-          detail: 'Only Super Admins can change maintenance mode.',
-        });
         return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
       }
       if (enabled !== previous) {
@@ -11800,11 +11801,6 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      await writeMinutesAudit(env, request, auth.user, {
-        action: 'minutes.create',
-        status: 403,
-        detail: 'Permission required: minutes:edit',
-      });
       return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let payload;
@@ -11841,11 +11837,6 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      await writeMinutesAudit(env, request, auth.user, {
-        action: 'minutes.create',
-        status: 403,
-        detail: 'Permission required: minutes:edit',
-      });
       return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let form;
@@ -11923,14 +11914,6 @@ async function routeApi(request, env, url, ctx = null) {
     if (request.method === 'GET') return jsonResponse(existing);
     if (request.method === 'DELETE') {
       if (!canDeleteMeetingMinutes(auth.user)) {
-        await writeMinutesAudit(env, request, auth.user, {
-          action: 'minutes.delete',
-          status: 403,
-          minutes: existing,
-          before: await sha256Hex(existing.body_html || ''),
-          beforeHtml: existing.body_html || '',
-          detail: 'Only Super Admins can delete meeting minutes',
-        });
         return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
       }
       await env.DB.prepare('DELETE FROM booster_meeting_minutes WHERE id = ?').bind(id).run();
@@ -11945,14 +11928,6 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ ok: true });
     }
     if (!canManageMeetingMinutes(auth.user)) {
-      await writeMinutesAudit(env, request, auth.user, {
-        action: 'minutes.edit',
-        status: 403,
-        minutes: existing,
-        before: await sha256Hex(existing.body_html || ''),
-        beforeHtml: existing.body_html || '',
-        detail: 'Permission required: minutes:edit',
-      });
       return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     if (!canEditMeetingMinutes(auth.user, existing)) {
@@ -11964,6 +11939,7 @@ async function routeApi(request, env, url, ctx = null) {
         beforeHtml: existing.body_html || '',
         detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
       });
+      markRequestAuditWritten(request);
       return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
     }
     let payload;
@@ -12690,59 +12666,27 @@ async function handleLogin(request, env, ctx = null) {
   const ip = requestClientIp(request);
   const lock = inspectLoginLock(username, ip);
   if (lock.locked) {
-    await enqueueAdminAudit(env, ctx, {
-      action: 'login.locked',
-      category: 'auth',
-      method: 'POST',
-      path: '/admin/login',
-      status: 429,
-      actor_username: username,
-      ip,
-      country: requestCountry(request),
-      user_agent: request.headers.get('user-agent') || '',
-      summary: buildAuditSummary({
-        action: 'login.locked',
-        method: 'POST',
-        path: '/admin/login',
-        status: 429,
-        actorUsername: username || 'unknown',
-        detail: 'rate limited',
-      }),
-      meta: { username, next: nextPath, failures: lock.failures },
-    });
-    return applyAuthCookies(
+    const lockedResponse = applyAuthCookies(
       htmlResponse(
         renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"),
         429,
       ),
       { token: '', maxAge: 0 },
     );
+    await maybeLogAccessDenial(env, {
+      request,
+      url: requestUrl,
+      response: lockedResponse,
+      actor: username ? { username } : null,
+      ctx,
+    });
+    return lockedResponse;
   }
   const user = await getUserByUsername(env, username);
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     const nextLock = registerLoginFailure(username, ip);
     const lockedNow = Boolean(nextLock.locked);
-    await enqueueAdminAudit(env, ctx, {
-      action: lockedNow ? 'login.locked' : 'login.failed',
-      category: 'auth',
-      method: 'POST',
-      path: '/admin/login',
-      status: lockedNow ? 429 : 401,
-      actor_username: username,
-      ip,
-      country: requestCountry(request),
-      user_agent: request.headers.get('user-agent') || '',
-      summary: buildAuditSummary({
-        action: lockedNow ? 'login.locked' : 'login.failed',
-        method: 'POST',
-        path: '/admin/login',
-        status: lockedNow ? 429 : 401,
-        actorUsername: username || 'unknown',
-        detail: lockedNow ? 'rate limited' : 'invalid credentials',
-      }),
-      meta: { username, next: nextPath, failures: nextLock.failures },
-    });
-    return applyAuthCookies(
+    const failedResponse = applyAuthCookies(
       htmlResponse(
         renderLoginHtml(nextPath).replace('</form>', lockedNow
           ? "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"
@@ -12751,6 +12695,14 @@ async function handleLogin(request, env, ctx = null) {
       ),
       { token: '', maxAge: 0 },
     );
+    await maybeLogAccessDenial(env, {
+      request,
+      url: requestUrl,
+      response: failedResponse,
+      actor: username ? { username } : null,
+      ctx,
+    });
+    return failedResponse;
   }
   try {
     await env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
@@ -12762,6 +12714,7 @@ async function handleLogin(request, env, ctx = null) {
   clearLoginFailures(username, ip);
   const token = await makeSession(user, env);
   await enqueueAdminAudit(env, ctx, {
+    request,
     action: 'login',
     category: 'auth',
     method: 'POST',
@@ -12808,16 +12761,36 @@ async function handleAdmin(request, env, ctx = null) {
     await logSessionExpired(env, request, session, { path: '/admin', method: request.method, ctx });
   }
   const user = session.user;
-  if (!user) return redirect('/admin/login');
   const url = new URL(request.url);
+  if (!user) {
+    const loginRedirect = redirect('/admin/login');
+    await maybeLogAccessDenial(env, {
+      request,
+      url,
+      response: loginRedirect,
+      session,
+      ctx,
+    });
+    return loginRedirect;
+  }
   if (url.searchParams.get('tab') === 'badge-creator' && !canAccessBadgeCreator(user)) {
-    return attachLoginHintIfNeeded(request, await renderErrorPage(403, {
+    const denied = attachLoginHintIfNeeded(request, await renderErrorPage(403, {
       request,
       env,
       url,
       loggedIn: true,
       detail: 'Permission required: badges',
     }), user);
+    await maybeLogAccessDenial(env, {
+      request,
+      url,
+      response: denied,
+      actor: user,
+      session,
+      ctx,
+      forcedDetail: 'Permission required: badges',
+    });
+    return denied;
   }
   return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
 }
@@ -12833,7 +12806,17 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     });
   }
   const user = session.user;
-  if (!user) return redirect('/admin/login');
+  if (!user) {
+    const loginRedirect = redirect('/admin/login');
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: loginRedirect,
+      session,
+      ctx,
+    });
+    return loginRedirect;
+  }
   const key = String(slug || '').trim().toLowerCase();
   if (!isVisualEditorSlug(key)) {
     return renderErrorPage(404, {
@@ -12845,13 +12828,23 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     });
   }
   if (!canEditVisualPage(user, key, canEditPage)) {
-    return renderErrorPage(403, {
+    const denied = await renderErrorPage(403, {
       request,
       env,
       url: new URL(request.url),
       loggedIn: true,
       detail: `Permission required: page:${key}`,
     });
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: denied,
+      actor: user,
+      session,
+      ctx,
+      forcedDetail: `Permission required: page:${key}`,
+    });
+    return denied;
   }
   const cms = await getPageBySlug(env, key, true);
   if (!cms) {
@@ -12904,6 +12897,7 @@ async function logout(request, env, ctx = null) {
   const user = session.user;
   if (user) {
     await enqueueAdminAudit(env, ctx, {
+      request,
       action: 'logout',
       category: 'auth',
       method: String(request?.method || 'POST').toUpperCase(),
@@ -13663,6 +13657,12 @@ export default {
       }
       const opened = openD1Session(request, env);
       const response = await dispatchWorker(request, opened.env, ctx);
+      await maybeLogAccessDenial(opened.env, {
+        request,
+        url,
+        response,
+        ctx,
+      });
       return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
     } catch (error) {
       console.error('worker_exception', String(error?.stack || error?.message || error));

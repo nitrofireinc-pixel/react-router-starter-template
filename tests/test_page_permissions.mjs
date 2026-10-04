@@ -436,7 +436,10 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit.admin_after_window'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.delete'));
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004x'/);
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
+  assert.match(workerSrc, /maybeLogAccessDenial/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004y'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
@@ -598,7 +601,7 @@ test('site editors cannot toggle maintenance mode; Super Admin can', async () =>
               site.set('maintenance_mode', String(this.binds[1]));
             }
             if (q.includes('INSERT INTO admin_audit_log')) {
-              audits.push({ action: this.binds.find((value) => value === 'change.maintenance') || 'logged' });
+              audits.push({ action: this.binds[1] || 'logged' });
             }
             return { success: true };
           },
@@ -618,6 +621,7 @@ test('site editors cannot toggle maintenance mode; Super Admin can', async () =>
   assert.equal(denied.status, 403);
   assert.deepEqual(await denied.json(), { detail: 'Only Super Admins can change maintenance mode.' });
   assert.equal(site.get('maintenance_mode'), '0');
+  assert.deepEqual(audits.map((row) => row.action), ['access.denied']);
 
   const siteSave = await worker.fetch(new Request('https://efhsband.org/api/admin/site', {
     method: 'POST',
@@ -627,6 +631,7 @@ test('site editors cannot toggle maintenance mode; Super Admin can', async () =>
   assert.equal(siteSave.status, 403);
   assert.deepEqual(await siteSave.json(), { detail: 'Only Super Admins can change maintenance mode.' });
   assert.equal(site.get('maintenance_mode'), '0');
+  assert.deepEqual(audits.map((row) => row.action), ['access.denied', 'access.denied']);
 
   const adminCookie = `efband_session=${await makeSession({ id: admin.id, username: admin.username }, env)}`;
   const allowed = await worker.fetch(new Request('https://efhsband.org/api/admin/maintenance', {
@@ -638,6 +643,7 @@ test('site editors cannot toggle maintenance mode; Super Admin can', async () =>
   const saved = await allowed.json();
   assert.equal(Number(saved.maintenance_mode), 1);
   assert.equal(site.get('maintenance_mode'), '1');
+  assert.ok(audits.some((row) => row.action === 'change.maintenance'));
 });
 
 test('minutes PUT without minutes:edit returns Permission required, not the 48h window', async () => {
@@ -660,6 +666,7 @@ test('minutes PUT without minutes:edit returns Permission required, not the 48h 
     updated_at: '2026-10-04 21:00:00',
     created_by_name: 'Admin',
   };
+  const audits = [];
   const env = {
     EFBAND_SECRET: 'test-session-secret',
     DB: {
@@ -676,7 +683,12 @@ test('minutes PUT without minutes:edit returns Permission required, not the 48h 
             return null;
           },
           async all() { return { results: [] }; },
-          async run() { return { success: true }; },
+          async run() {
+            if (q.includes('INSERT INTO admin_audit_log')) {
+              audits.push({ action: this.binds[1] });
+            }
+            return { success: true };
+          },
         };
       },
       async batch() { return []; },
@@ -693,6 +705,7 @@ test('minutes PUT without minutes:edit returns Permission required, not the 48h 
   const payload = await response.json();
   assert.equal(payload.detail, 'Permission required: minutes:edit');
   assert.doesNotMatch(payload.detail, /48 hours/);
+  assert.deepEqual(audits.map((row) => row.action), ['access.denied']);
 });
 
 test('Badge Creator APIs and HTML tab 403 without badges', async () => {

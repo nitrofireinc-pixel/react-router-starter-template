@@ -31,8 +31,20 @@ import {
   inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
+  ACCESS_DENIED_THROTTLE_MS,
+  ADMIN_AUDIT_KNOWN_ACTIONS,
+  classifyAccessDenial,
+  decideAccessDeniedWrite,
+  inferRequiredPermissionFromPath,
+  isProtectedAuditPath,
+  isPublicHttpPath,
   maybeAuditAdminApiResponse,
+  maybeLogAccessDenial,
   nextAuditKeyId,
+  requestAlreadyWroteAudit,
+  requiredPermissionFromDetail,
+  resetAccessDeniedThrottleState,
+  sanitizeAuditPath,
   redactAuditObject,
   recordAuditWriteFailure,
   registerLoginFailure,
@@ -708,4 +720,305 @@ test('new-row encrypt plus chain hash stays well under the Workers 10ms budget i
   const elapsed = performance.now() - started;
   const perRow = elapsed / 5;
   assert.ok(perRow < 25, `audit write averaged ${perRow.toFixed(2)}ms in Node`);
+});
+
+test('access-denied helpers classify protected 401/403 and skip public 404s', () => {
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
+  assert.equal(sanitizeAuditPath('/api/admin/users?token=secret#frag'), '/api/admin/users');
+  assert.equal(sanitizeAuditPath('https://efhsband.org/admin/visual/home?next=/admin'), '/admin/visual/home');
+  assert.equal(isProtectedAuditPath('/admin'), true);
+  assert.equal(isProtectedAuditPath('/admin/login'), false);
+  assert.equal(isProtectedAuditPath('/api/admin/minutes/3'), true);
+  assert.equal(isPublicHttpPath('/ensembles.html'), true);
+  assert.equal(isPublicHttpPath('/api/site'), true);
+  assert.equal(requiredPermissionFromDetail('Permission required: layout:home'), 'layout:home');
+  assert.equal(requiredPermissionFromDetail('Only Super Admins can change maintenance mode.'), 'maintenance');
+  assert.equal(requiredPermissionFromDetail('Security log is Super Admin only'), 'security-log');
+  assert.equal(inferRequiredPermissionFromPath('/api/admin/badges'), 'badges');
+  assert.equal(
+    inferRequiredPermissionFromPath('/admin', { url: 'https://efhsband.org/admin?tab=badge-creator' }),
+    'badges',
+  );
+  assert.equal(classifyAccessDenial({
+    status: 404,
+    method: 'GET',
+    path: '/missing-page',
+  }), null);
+  assert.equal(classifyAccessDenial({
+    status: 403,
+    method: 'POST',
+    path: '/api/contact',
+    detail: 'Permission required: contact',
+  }), null);
+  assert.equal(classifyAccessDenial({
+    status: 401,
+    method: 'GET',
+    path: '/admin/login',
+  }), null);
+  assert.deepEqual(classifyAccessDenial({
+    status: 403,
+    method: 'PUT',
+    path: '/api/admin/users/3?next=1',
+    detail: 'Permission required: users',
+  }), {
+    action: 'access.denied',
+    category: 'security',
+    required: 'users',
+  });
+  assert.deepEqual(classifyAccessDenial({
+    status: 401,
+    method: 'GET',
+    path: '/api/admin/me',
+    detail: 'Login required',
+  }), {
+    action: 'access.unauthenticated',
+    category: 'security',
+    required: '',
+  });
+  assert.deepEqual(classifyAccessDenial({
+    status: 303,
+    method: 'GET',
+    path: '/admin',
+    location: '/admin/login',
+  }), {
+    action: 'access.unauthenticated',
+    category: 'security',
+    required: '',
+  });
+  assert.deepEqual(classifyAccessDenial({
+    status: 401,
+    method: 'POST',
+    path: '/admin/login',
+  }), {
+    action: 'login.failed',
+    category: 'auth',
+    required: '',
+  });
+  assert.deepEqual(classifyAccessDenial({
+    status: 429,
+    method: 'POST',
+    path: '/admin/login',
+  }), {
+    action: 'login.locked',
+    category: 'auth',
+    required: '',
+  });
+});
+
+test('access-denied throttle collapses repeats and appends a summary row', () => {
+  const store = new Map();
+  const first = decideAccessDeniedWrite(store, {
+    ip: '203.0.113.9',
+    path: '/api/admin/users?token=secret',
+    action: 'access.denied',
+    now: 1_000,
+  });
+  assert.equal(first.write, 'event');
+  assert.equal(first.count, 1);
+  const second = decideAccessDeniedWrite(store, {
+    ip: '203.0.113.9',
+    path: '/api/admin/users',
+    action: 'access.denied',
+    now: 2_000,
+  });
+  assert.equal(second.write, null);
+  assert.equal(second.suppressed, true);
+  assert.equal(second.count, 2);
+  const later = decideAccessDeniedWrite(store, {
+    ip: '203.0.113.9',
+    path: '/api/admin/users',
+    action: 'access.denied',
+    now: 1_000 + ACCESS_DENIED_THROTTLE_MS + 1,
+  });
+  assert.equal(later.write, 'summary');
+  assert.equal(later.count, 3);
+  assert.equal(later.prior_count, 2);
+  const other = decideAccessDeniedWrite(store, {
+    ip: '198.51.100.2',
+    path: '/api/admin/users',
+    action: 'access.denied',
+    now: 1_000,
+  });
+  assert.equal(other.write, 'event');
+});
+
+function denialRequest(path, {
+  method = 'GET',
+  ip = '203.0.113.9',
+  country = 'US',
+  ua = 'Mozilla/5.0 TestAgent',
+} = {}) {
+  return new Request(`https://efhsband.org${path}`, {
+    method,
+    headers: {
+      'cf-connecting-ip': ip,
+      'cf-ipcountry': country,
+      'user-agent': ua,
+    },
+  });
+}
+
+test('maybeLogAccessDenial writes one forensic row and skips public 404s', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  resetAccessDeniedThrottleState();
+  const { env, rows } = createAuditDb();
+  const request = denialRequest('/api/admin/users?token=abc');
+  const response = new Response(JSON.stringify({ detail: 'Permission required: users' }), {
+    status: 403,
+    headers: { 'content-type': 'application/json' },
+  });
+  const first = await maybeLogAccessDenial(env, {
+    request,
+    url: new URL(request.url),
+    response,
+    actor: { id: 9, username: 'editor@efhsband.org' },
+    session: { session_id_hash: 'a'.repeat(64), username: 'editor@efhsband.org', uid: 9 },
+  });
+  assert.equal(first.wrote, true);
+  assert.equal(first.action, 'access.denied');
+  assert.equal(rows.length, 1);
+  assert.equal(requestAlreadyWroteAudit(request), true);
+  const again = await maybeLogAccessDenial(env, {
+    request,
+    url: new URL(request.url),
+    response,
+    actor: { id: 9, username: 'editor@efhsband.org' },
+  });
+  assert.equal(again, null);
+  assert.equal(rows.length, 1);
+  const payload = JSON.parse(await decryptAuditPayload(env, rows[0].ciphertext));
+  assert.equal(payload.action, 'access.denied');
+  assert.equal(payload.category, 'security');
+  assert.equal(payload.method, 'GET');
+  assert.equal(payload.path, '/api/admin/users');
+  assert.equal(payload.status, 403);
+  assert.equal(payload.actor_user_id, 9);
+  assert.equal(payload.actor_username, 'editor@efhsband.org');
+  assert.equal(payload.ip, '203.0.113.9');
+  assert.equal(payload.country, 'US');
+  assert.equal(payload.user_agent, 'Mozilla/5.0 TestAgent');
+  assert.equal(payload.session_id_hash, 'a'.repeat(64));
+  assert.equal(payload.meta.required, 'users');
+  assert.equal(payload.meta.count, 1);
+  assert.match(String(payload.created_at || ''), /^\d{4}-\d{2}-\d{2} /);
+
+  const public404 = denialRequest('/ensembles.html');
+  const skipped = await maybeLogAccessDenial(env, {
+    request: public404,
+    url: new URL(public404.url),
+    response: new Response('missing', { status: 404, headers: { 'content-type': 'text/html' } }),
+  });
+  assert.equal(skipped, null);
+  assert.equal(rows.length, 1);
+
+  const publicApi = denialRequest('/api/contact', { method: 'POST' });
+  const publicDenied = await maybeLogAccessDenial(env, {
+    request: publicApi,
+    url: new URL(publicApi.url),
+    response: new Response(JSON.stringify({ detail: 'Permission required: contact' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+  assert.equal(publicDenied, null);
+  assert.equal(rows.length, 1);
+});
+
+test('maybeLogAccessDenial throttles failed logins and 401/403 generic audits', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  resetAccessDeniedThrottleState();
+  const { env, rows } = createAuditDb();
+  const now = Date.now();
+  for (let i = 0; i < 3; i += 1) {
+    const request = denialRequest('/admin/login', { method: 'POST' });
+    const result = await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: new Response('nope', { status: 401, headers: { 'content-type': 'text/html' } }),
+      actor: { username: 'guess@efhsband.org' },
+      now,
+    });
+    if (i === 0) {
+      assert.equal(result.wrote, true);
+      assert.equal(result.action, 'login.failed');
+    } else {
+      assert.equal(result.wrote, false);
+      assert.equal(result.suppressed, true);
+    }
+  }
+  assert.equal(rows.length, 1);
+  const loginRow = JSON.parse(await decryptAuditPayload(env, rows[0].ciphertext));
+  assert.equal(loginRow.action, 'login.failed');
+  assert.equal(loginRow.category, 'auth');
+  assert.equal(loginRow.actor_username, 'guess@efhsband.org');
+  assert.equal(loginRow.path, '/admin/login');
+
+  const summary = await maybeLogAccessDenial(env, {
+    request: denialRequest('/admin/login', { method: 'POST' }),
+    url: { pathname: '/admin/login' },
+    response: new Response('nope', { status: 401, headers: { 'content-type': 'text/html' } }),
+    actor: { username: 'guess@efhsband.org' },
+    now: now + ACCESS_DENIED_THROTTLE_MS + 5,
+  });
+  assert.equal(summary.wrote, true);
+  assert.equal(summary.collapsed, true);
+  assert.equal(summary.count, 4);
+  assert.equal(rows.length, 2);
+  const summaryRow = JSON.parse(await decryptAuditPayload(env, rows[1].ciphertext));
+  assert.equal(summaryRow.meta.collapsed, true);
+  assert.equal(summaryRow.meta.count, 4);
+
+  resetAccessDeniedThrottleState();
+  const before = rows.length;
+  await maybeAuditAdminApiResponse(env, {
+    request: denialRequest('/api/admin/pages/home', { method: 'PUT' }),
+    url: { pathname: '/api/admin/pages/home' },
+    response: { status: 403, headers: { get: () => '' } },
+    actor: { id: 2, username: 'editor@efhsband.org' },
+  });
+  await maybeAuditAdminApiResponse(env, {
+    request: denialRequest('/api/admin/me'),
+    url: { pathname: '/api/admin/me' },
+    response: { status: 401, headers: { get: () => '' } },
+    actor: null,
+  });
+  assert.equal(rows.length, before);
+});
+
+test('unauthenticated admin redirect and HTML 403 log once with required permission', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  resetAccessDeniedThrottleState();
+  const { env, rows } = createAuditDb();
+  const adminReq = denialRequest('/admin');
+  const redirect = new Response(null, { status: 303, headers: { location: '/admin/login' } });
+  const unauth = await maybeLogAccessDenial(env, {
+    request: adminReq,
+    url: new URL(adminReq.url),
+    response: redirect,
+  });
+  assert.equal(unauth.action, 'access.unauthenticated');
+  assert.equal(rows.length, 1);
+
+  resetAccessDeniedThrottleState();
+  const badgeReq = denialRequest('/admin?tab=badge-creator');
+  const html = await maybeLogAccessDenial(env, {
+    request: badgeReq,
+    url: new URL(badgeReq.url),
+    response: new Response('<p>Permission required: badges</p>', {
+      status: 403,
+      headers: { 'content-type': 'text/html' },
+    }),
+    actor: { id: 12, username: 'shirl@efhsband.org' },
+    session: { session_id_hash: 'b'.repeat(64) },
+    forcedDetail: 'Permission required: badges',
+  });
+  assert.equal(html.action, 'access.denied');
+  const badge = JSON.parse(await decryptAuditPayload(env, rows[1].ciphertext));
+  assert.equal(badge.meta.required, 'badges');
+  assert.equal(badge.path, '/admin');
+  assert.equal(badge.session_id_hash, 'b'.repeat(64));
 });

@@ -61,6 +61,8 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'security.log.export',
   'security.log.verify',
   'log.genesis',
+  'access.denied',
+  'access.unauthenticated',
 ]);
 export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
   { method: 'POST', path: '/api/admin/forms', logger: 'generic', action: 'change.forms' },
@@ -151,6 +153,159 @@ export function resetAuditWriteFailureState() {
 
 export function resetLoginLockState() {
   loginAttempts.clear();
+}
+
+export const ACCESS_DENIED_THROTTLE_MS = 10 * 60 * 1000;
+const accessDeniedThrottle = new Map();
+const requestAuditWrites = new WeakSet();
+
+export function resetAccessDeniedThrottleState() {
+  accessDeniedThrottle.clear();
+}
+
+export function markRequestAuditWritten(request) {
+  if (request) requestAuditWrites.add(request);
+}
+
+export function requestAlreadyWroteAudit(request) {
+  return Boolean(request && requestAuditWrites.has(request));
+}
+
+export function sanitizeAuditPath(pathOrUrl = '') {
+  const raw = String(pathOrUrl || '').trim();
+  if (!raw) return '';
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      return new URL(raw).pathname || '/';
+    }
+  } catch {
+    // fall through
+  }
+  const cut = raw.split('#')[0].split('?')[0].trim();
+  if (!cut.startsWith('/')) return `/${cut}`.replace(/\/{2,}/g, '/');
+  return cut.replace(/\/{2,}/g, '/') || '/';
+}
+
+export function isProtectedAuditPath(path = '') {
+  const clean = sanitizeAuditPath(path);
+  if (clean === '/admin/login' || clean.startsWith('/admin/login/')) return false;
+  if (clean === '/admin' || clean.startsWith('/admin/')) return true;
+  if (clean === '/api/admin' || clean.startsWith('/api/admin/')) return true;
+  return false;
+}
+
+export function isPublicHttpPath(path = '') {
+  const clean = sanitizeAuditPath(path);
+  if (clean.startsWith('/admin') || clean.startsWith('/api/admin')) return false;
+  return true;
+}
+
+export function requiredPermissionFromDetail(detail = '') {
+  const text = String(detail || '').trim();
+  const required = text.match(/Permission required:\s*([a-z0-9:_-]+)/i);
+  if (required) return required[1].toLowerCase();
+  if (/maintenance mode/i.test(text)) return 'maintenance';
+  if (/band dues/i.test(text)) return 'super-admin';
+  if (/security log/i.test(text)) return 'security-log';
+  if (/super admin/i.test(text)) return 'super-admin';
+  if (/login required/i.test(text)) return '';
+  return '';
+}
+
+export function inferRequiredPermissionFromPath(path = '', request = null) {
+  try {
+    if (request?.url) {
+      const url = new URL(request.url);
+      if (url.searchParams.get('tab') === 'badge-creator') return 'badges';
+    }
+  } catch {
+    // ignore
+  }
+  const clean = sanitizeAuditPath(path);
+  if (clean.includes('/maintenance')) return 'maintenance';
+  if (clean.includes('/security-log')) return 'security-log';
+  if (clean.includes('/minutes')) return 'minutes:edit';
+  if (clean.includes('/badges') || clean.includes('badge-creator')) return 'badges';
+  if (clean.includes('/users')) return 'users';
+  if (clean === '/api/admin/site' || clean.endsWith('/site')) return 'site';
+  if (clean.includes('/ensembles')) return 'page:ensembles';
+  const visual = clean.match(/\/admin\/visual\/([a-z0-9-]+)/) || clean.match(/\/visual-pages\/([a-z0-9-]+)/);
+  if (visual) return `page:${visual[1]}`;
+  if (clean.includes('/pages')) return 'pages';
+  return '';
+}
+
+export function accessDeniedThrottleKey(ip = '', path = '', action = '') {
+  return `${String(ip || '').trim()}|${sanitizeAuditPath(path)}|${String(action || '').trim()}`;
+}
+
+export function decideAccessDeniedWrite(store, {
+  ip = '',
+  path = '',
+  action = '',
+  now = Date.now(),
+} = {}) {
+  const map = store || accessDeniedThrottle;
+  const key = accessDeniedThrottleKey(ip, path, action);
+  const rec = map.get(key);
+  const ts = Number(now) || Date.now();
+  if (rec && ts - rec.windowStart < ACCESS_DENIED_THROTTLE_MS) {
+    rec.count += 1;
+    rec.lastAt = ts;
+    map.set(key, rec);
+    return { write: null, key, count: rec.count, suppressed: true };
+  }
+  const priorCount = rec ? Number(rec.count) || 0 : 0;
+  if (rec && priorCount > 1) {
+    map.delete(key);
+    return {
+      write: 'summary',
+      key,
+      count: priorCount + 1,
+      suppressed: false,
+      prior_count: priorCount,
+    };
+  }
+  map.set(key, { windowStart: ts, count: 1, lastAt: ts });
+  return { write: 'event', key, count: 1, suppressed: false, prior_count: priorCount };
+}
+
+export function classifyAccessDenial({
+  status = 0,
+  method = 'GET',
+  path = '',
+  detail = '',
+  location = '',
+} = {}) {
+  const code = Number(status) || 0;
+  const clean = sanitizeAuditPath(path);
+  const loc = sanitizeAuditPath(location);
+  const verb = String(method || 'GET').toUpperCase();
+  if (clean === '/admin/login' && verb === 'GET') return null;
+  if (isPublicHttpPath(clean) && !clean.startsWith('/api/admin')) return null;
+  if (clean === '/admin/login' && verb === 'POST' && (code === 401 || code === 429)) {
+    return {
+      action: code === 429 ? 'login.locked' : 'login.failed',
+      category: 'auth',
+      required: '',
+    };
+  }
+  const loginRedirect = (code === 302 || code === 303)
+    && (loc === '/admin/login' || loc.startsWith('/admin/login/'));
+  if (loginRedirect && isProtectedAuditPath(clean)) {
+    return { action: 'access.unauthenticated', category: 'security', required: '' };
+  }
+  if (code === 401 && isProtectedAuditPath(clean)) {
+    return { action: 'access.unauthenticated', category: 'security', required: '' };
+  }
+  if (code === 403 && isProtectedAuditPath(clean)) {
+    return {
+      action: 'access.denied',
+      category: 'security',
+      required: requiredPermissionFromDetail(detail) || inferRequiredPermissionFromPath(clean),
+    };
+  }
+  return null;
 }
 
 export function loginAttemptKey(username = '', ip = '') {
@@ -509,6 +664,7 @@ export function utcStampNow(now = new Date()) {
 }
 
 export async function enqueueAdminAudit(env, ctx, entry = {}) {
+  if (entry?.request) markRequestAuditWritten(entry.request);
   const write = writeAdminAuditLog(env, entry);
   if (ctx && typeof ctx.waitUntil === 'function') {
     ctx.waitUntil(write);
@@ -1236,6 +1392,7 @@ export async function maybeAuditAdminApiResponse(env, {
   const path = String(url?.pathname || '');
   const method = String(request?.method || '').toUpperCase();
   const status = Number(response?.status) || 0;
+  if (status === 401 || status === 403) return;
   const visual = visualPageAuditFromRequest(path, requestSummary, method);
   const category = visual?.category || auditCategoryFromPath(path);
   const action = visual?.action
@@ -1287,6 +1444,103 @@ export async function maybeAuditAdminApiResponse(env, {
     return;
   }
   await write;
+}
+
+async function peekDenialDetail(response) {
+  if (!response?.clone) return '';
+  const type = String(response.headers?.get?.('content-type') || '');
+  const json = type.includes('json');
+  const html = type.includes('html');
+  if (!json && !html) return '';
+  try {
+    const text = await response.clone().text();
+    const slice = String(text || '').slice(0, html ? 2500 : 800);
+    if (!slice) return '';
+    if (json) {
+      const data = JSON.parse(slice);
+      return String(data?.detail || '');
+    }
+    const required = slice.match(/Permission required:\s*([a-z0-9:_-]+)/i);
+    return required ? `Permission required: ${required[1]}` : '';
+  } catch {
+    return '';
+  }
+}
+
+export async function maybeLogAccessDenial(env, {
+  request,
+  url,
+  response,
+  actor = null,
+  session = null,
+  ctx = null,
+  now = Date.now(),
+  forcedAction = '',
+  forcedDetail = '',
+} = {}) {
+  if (!response || requestAlreadyWroteAudit(request)) return null;
+  const status = Number(response.status) || 0;
+  if (![401, 403, 429, 302, 303].includes(status)) return null;
+  const path = sanitizeAuditPath(url?.pathname || request?.url || '');
+  const method = String(request?.method || 'GET').toUpperCase();
+  const location = response.headers?.get?.('location') || '';
+  if (isPublicHttpPath(path) && status === 404) return null;
+  const detail = forcedDetail || (status === 403 ? await peekDenialDetail(response) : '');
+  const classified = classifyAccessDenial({
+    status,
+    method,
+    path,
+    detail,
+    location,
+  });
+  if (!classified && !forcedAction) return null;
+  const action = forcedAction || classified.action;
+  const category = forcedAction && forcedAction.startsWith('login.')
+    ? 'auth'
+    : (classified?.category || 'security');
+  const required = classified?.required
+    || requiredPermissionFromDetail(detail)
+    || inferRequiredPermissionFromPath(path, request);
+  const ip = requestClientIp(request);
+  const decision = decideAccessDeniedWrite(accessDeniedThrottle, { ip, path, action, now });
+  if (!decision.write) {
+    markRequestAuditWritten(request);
+    return { wrote: false, suppressed: true, count: decision.count, action };
+  }
+  const collapsed = decision.write === 'summary';
+  const write = enqueueAdminAudit(env, ctx, {
+    request,
+    action,
+    category,
+    method,
+    path,
+    status,
+    actor_user_id: actor?.id ?? session?.uid ?? null,
+    actor_username: actor?.username || session?.username || '',
+    ip,
+    country: requestCountry(request),
+    user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: session?.session_id_hash || '',
+    summary: buildAuditSummary({
+      action,
+      method,
+      path,
+      status,
+      actorUsername: actor?.username || session?.username || '',
+      detail: collapsed
+        ? `${decision.count} ${action} from same IP+path in 10 minutes`
+        : (required ? `required ${required}` : (detail || action)),
+    }),
+    meta: {
+      required: required || '',
+      count: decision.count,
+      collapsed,
+      prior_count: decision.prior_count || 0,
+    },
+  });
+  markRequestAuditWritten(request);
+  await write;
+  return { wrote: true, suppressed: false, count: decision.count, action, collapsed };
 }
 
 export async function deserializeEncryptedAuditRow(env, row = {}) {
