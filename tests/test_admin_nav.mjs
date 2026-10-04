@@ -28,7 +28,7 @@ test('collapsible admin nav chrome is shared by CMS and visual editor', () => {
 
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(workerSrc, /renderAdminChromeBar\(\)/);
-  assert.match(workerSrc, /renderAdminSidebarHtml\(ASSET_VERSION\)/);
+  assert.match(workerSrc, /renderAdminSidebarHtml\(ASSET_VERSION, \{/);
   assert.match(workerSrc, /admin-nav\.css\?v=\$\{ASSET_VERSION\}/);
   assert.match(workerSrc, /admin-nav\.js\?v=\$\{ASSET_VERSION\}/);
 

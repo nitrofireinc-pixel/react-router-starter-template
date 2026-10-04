@@ -50,6 +50,9 @@ test('shouldAuditAdminApiRequest logs mutations but skips reads and security-log
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/security-log.pdf', 'GET'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/mail', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes', 'POST'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes/9', 'PUT'), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes/upload', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/events', 'POST'), false);
 });
 

@@ -28,6 +28,10 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'change.staff',
   'change.boosters',
   'change.minutes',
+  'minutes.create',
+  'minutes.edit',
+  'minutes.edit.admin_after_window',
+  'minutes.delete',
   'change.photos',
   'change.contact',
   'change.site',
@@ -106,6 +110,8 @@ export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   if (path === '/api/admin/me') return false;
   // Staff mail is logged with recipient/body details in the mail handler.
   if (path === '/api/admin/mail') return false;
+  // Minutes mutations write minutes.create / minutes.edit / minutes.delete themselves.
+  if (path === '/api/admin/minutes' || path.startsWith('/api/admin/minutes/')) return false;
   return isMutatingHttpMethod(method);
 }
 

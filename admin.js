@@ -442,7 +442,12 @@ function eventCreatorLabel(event) {
 
 function canEditPage(pageOrSlug) {
   const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
-  return hasPermission('pages') || hasPermission(`page:${slug}`);
+  return hasPermission('pages') || hasPermission(`page:${slug}`) || hasPermission(`layout:${slug}`);
+}
+
+function canEditPageLayout(pageOrSlug) {
+  const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
+  return hasPermission('pages') || hasPermission(`layout:${slug}`);
 }
 
 function canEditSponsors() {
@@ -471,8 +476,7 @@ function canSendMail() {
 }
 
 function canManageMinutes() {
-  // Secretary permission only (`minutes`). Super Admins inherit via hasPermission().
-  return hasPermission('minutes');
+  return hasPermission('minutes:edit') || hasPermission('minutes') || Boolean(state.me?.capabilities?.minutes_edit);
 }
 
 function canViewMinutes() {
@@ -3896,9 +3900,55 @@ function editPage(slug, { skipGuard = false } = {}) {
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  const pages = ((state.pageCatalog?.length ? state.pageCatalog : state.pages) || [])
-    .filter((page) => !isFormMakerPage(page) && page.slug !== 'in-kind');
-  box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+  const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
+  const pagesGrant = document.querySelector('[data-pages-grant]');
+  box.innerHTML = `
+    <table class="page-grant-table" id="page-grant-table">
+      <thead><tr><th>Page</th><th>Slug</th><th>Edit content</th><th>Change layout</th></tr></thead>
+      <tbody>
+        ${pages.map((page) => `
+          <tr>
+            <td>${escapeHtml(page.title || page.slug)}</td>
+            <td><code>${escapeHtml(page.slug)}</code></td>
+            <td><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}" data-content-slug="${escapeHtml(page.slug)}" aria-label="Edit content: ${escapeHtml(page.title || page.slug)}"></td>
+            <td><input type="checkbox" name="permissions" value="layout:${escapeHtml(page.slug)}" data-layout-slug="${escapeHtml(page.slug)}" aria-label="Change layout: ${escapeHtml(page.title || page.slug)}"></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+  bindPageGrantTable(box, pagesGrant);
+}
+
+function bindPageGrantTable(root, pagesGrant) {
+  if (!root) return;
+  const syncRow = (layoutBox) => {
+    const slug = layoutBox.dataset.layoutSlug;
+    const content = root.querySelector(`[data-content-slug="${CSS.escape(slug)}"]`);
+    if (!content) return;
+    if (layoutBox.checked) {
+      content.checked = true;
+      content.disabled = true;
+    } else {
+      content.disabled = Boolean(pagesGrant?.checked);
+    }
+  };
+  const syncCovered = () => {
+    const table = root.querySelector('#page-grant-table');
+    const covered = Boolean(pagesGrant?.checked);
+    if (table) table.classList.toggle('is-covered', covered);
+    root.querySelectorAll('input[name="permissions"]').forEach((input) => {
+      if (covered) {
+        input.disabled = true;
+      } else if (input.dataset.layoutSlug) {
+        input.disabled = false;
+        syncRow(input);
+      }
+    });
+  };
+  root.querySelectorAll('[data-layout-slug]').forEach((layoutBox) => {
+    layoutBox.addEventListener('change', () => syncRow(layoutBox));
+  });
+  pagesGrant?.addEventListener('change', syncCovered);
+  syncCovered();
 }
 
 async function loadSponsorAdSettings() {
@@ -5391,9 +5441,12 @@ async function loadUsers() {
       role: user.role,
       password: '',
     });
+    const held = Array.isArray(user.permissions) ? user.permissions : [];
     form.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+      input.checked = held.includes(input.value)
+        || (input.value === 'minutes:edit' && held.includes('minutes'));
     });
+    bindPageGrantTable(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
     form.elements.active.checked = Boolean(user.active);
     const editingSelf = Number(user.id) === Number(state.me?.user?.id);
     const lockOwnPrivileges = editingSelf && !isSuperAdmin();
@@ -7245,7 +7298,7 @@ function renderMinutesView(item) {
   if (item.created_by_name) meta.push(`Recorded by ${item.created_by_name}`);
   if (item.created_at) meta.push(`Submitted ${new Date(item.created_at).toLocaleString()}`);
   if (item.can_edit && item.editable_until) {
-    meta.push(`Editable until ${new Date(item.editable_until).toLocaleDateString()} (10 days from meeting date)`);
+    meta.push(`Editable until ${new Date(item.editable_until).toLocaleString()} (48 hours from creation)`);
   } else if (!item.can_edit) {
     meta.push(isSuperAdmin() ? 'Locked for secretaries · Super Admin can still edit' : 'View only');
   }

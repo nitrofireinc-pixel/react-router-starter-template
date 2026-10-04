@@ -203,6 +203,7 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
   const sqlFile = [
     readFileSync(join(root, 'migrations/2026-10-04.1.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.2.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.3.sql'), 'utf8'),
   ].join('\n');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
@@ -226,6 +227,11 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
       DB: {
         prepare(sql) {
           return {
+            bind() { return this; },
+            async all() {
+              queries += 1;
+              return { results: [] };
+            },
             async run() {
               queries += 1;
               return { success: true };
@@ -264,6 +270,10 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
               return { value: PREVIOUS_DB_SCHEMA_VERSION };
             }
             return null;
+          },
+          async all() {
+            sharedQueries += 1;
+            return { results: [] };
           },
           async run() {
             sharedQueries += 1;

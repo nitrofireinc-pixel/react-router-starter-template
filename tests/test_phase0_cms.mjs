@@ -97,7 +97,8 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
   assert.equal(locked.is_home, 0);
   assert.equal(locked.active, 0);
   assert.match(locked.body_html, /Edited/);
-  assert.match(workerSrc, /if \(!canManagePageSettings\(auth\.user\)\)/);
+  assert.match(workerSrc, /if \(!canManagePageSettings\(auth\.user\) && pageSettingsChanged\(page, existing, rawPayload\)\)/);
+  assert.match(workerSrc, /Permission required: pages/);
   assert.match(workerSrc, /page = lockPageSettingsToExisting\(page, existing\)/);
 });
 
@@ -166,7 +167,8 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.doesNotMatch(workerSrc, /President, Vice President, and Super Admin editing for the public Calendar/);
   assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
   const chromeSrc = readFileSync(join(root, 'worker/src/admin-chrome.mjs'), 'utf8');
-  assert.match(chromeSrc, /data-tab="events" hidden/);
+  assert.match(chromeSrc, /data-tab="events"\$\{hide\('events'\)\}/);
+  assert.match(chromeSrc, /defaultHidden = new Set\(\['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log'\]\)/);
   assert.match(workerSrc, /canNotifyCalendarSubscribers\(auth\.user\)/);
   assert.doesNotMatch(adminSrc, /\['Calendar Events'/);
 });

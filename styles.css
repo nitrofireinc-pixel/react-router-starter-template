@@ -6430,3 +6430,12 @@ body.cms-caldev-editor-open .admin-workspace{
     justify-content:flex-start;
   }
 }
+
+.user-grant-group{margin:0 0 12px;padding:0;border:0}
+.user-grant-group legend{font-weight:800;color:#10233c;margin:0 0 8px}
+.page-grant-note{margin:0 0 10px}
+.page-grant-table{width:100%;border-collapse:collapse;font-size:.92rem}
+.page-grant-table th,.page-grant-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #d5deea;vertical-align:middle}
+.page-grant-table th{color:#64748b;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase}
+.page-grant-table.is-covered{opacity:.55}
+.page-grant-table input{width:18px;height:18px}

@@ -43,7 +43,7 @@ function createErrorEnv({
     if (throwOnDb) throw new Error('d1 exploded');
     const text = String(sql || '');
     if (type === 'first' && text.includes('FROM site_content WHERE key')) {
-      return { value: '2026-10-04.2' };
+      return { value: '2026-10-04.3' };
     }
     if (text.includes('FROM site_content WHERE key IN')) {
       const results = [
@@ -263,7 +263,7 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
-  assert.equal(ASSET_VERSION, 'cms-p1-20261004s');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261004t');
   assert.match(workerSrc, /export async function renderErrorPage/);
   assert.match(workerSrc, /liteErrorResponse\(500/);
   assert.match(workerSrc, /Error pages/);

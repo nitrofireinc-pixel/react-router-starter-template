@@ -51,6 +51,7 @@ import {
   isSecurityLogPath,
   listAdminAuditLogs,
   maybeAuditAdminApiResponse,
+  parseAuditUtcDate,
   requestClientIp,
   summarizeAdminRequestForAudit,
   writeAdminAuditLog,
@@ -113,6 +114,13 @@ import {
   auditLogSchemaStatements,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
+import {
+  migrateStoredUserPermissionGrants,
+  normalizePageGrants,
+  pageSettingsChanged,
+  parsePermissionList,
+  visualStructureSignature,
+} from './page-permissions.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
   DEFAULT_ERROR_PAGES,
@@ -139,6 +147,7 @@ export {
 };
 import {
   VISUAL_EDITOR_PATH_PREFIX,
+  canEditVisualLayout,
   canEditVisualPage,
   isVisualEditorSlug,
   isVisualPilotSlug,
@@ -379,11 +388,11 @@ export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view', 'forms'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'forms', 'fundraising'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004s';
+export const ASSET_VERSION = 'cms-p1-20261004t';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -550,19 +559,10 @@ export function normalizePageSlug(value) {
   return slug || 'page';
 }
 
+export { normalizePageGrants, pageSettingsChanged, visualStructureSignature };
+
 export function parsePermissions(value) {
-  const forbidden = new Set(['security-log', 'security', 'audit', 'audit-log', 'admin-audit']);
-  const filterSafe = (items) => items
-    .filter((item) => typeof item === 'string')
-    .map((item) => String(item).trim())
-    .filter((item) => item && !forbidden.has(item.toLowerCase()));
-  if (Array.isArray(value)) return filterSafe(value);
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? filterSafe(parsed) : [];
-  } catch {
-    return [];
-  }
+  return parsePermissionList(value);
 }
 
 export function isSuperAdmin(user) {
@@ -599,7 +599,14 @@ function permissionKey(item) {
 }
 
 export function actorHeldPermissionKeys(actor) {
-  return new Set(parsePermissions(actor?.permissions).map(permissionKey));
+  const keys = new Set(parsePermissions(actor?.permissions).map(permissionKey));
+  if (keys.has('minutes')) keys.add('minutes:edit');
+  if (keys.has('minutes:edit')) keys.add('minutes');
+  for (const key of [...keys]) {
+    const layout = key.match(/^layout:(.+)$/);
+    if (layout) keys.add(`page:${layout[1]}`);
+  }
+  return keys;
 }
 
 export function sanitizeAssignablePermissions(actor, permissions) {
@@ -1926,7 +1933,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.2';
+export const DB_SCHEMA_VERSION = '2026-10-04.3';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -7492,11 +7499,84 @@ export function formatUserLastLoginDisplay(value, {
   }
 }
 
-function canEditPage(user, slug) {
-  return hasPermission(user, 'pages') || hasPermission(user, `page:${slug}`);
+export function canEditPageContent(user, slug) {
+  const key = String(slug || '').trim().toLowerCase();
+  if (!key) return false;
+  return hasPermission(user, 'pages') || hasPermission(user, `page:${key}`) || hasPermission(user, `layout:${key}`);
 }
 
-export const MINUTES_EDIT_WINDOW_DAYS = 10;
+/** Content-only alias so existing callers keep their meaning. */
+export function canEditPage(user, slug) {
+  return canEditPageContent(user, slug);
+}
+
+export function canEditPageLayout(user, slug) {
+  const key = String(slug || '').trim().toLowerCase();
+  if (!key) return false;
+  return hasPermission(user, 'pages') || hasPermission(user, `layout:${key}`);
+}
+
+export function userPageCapabilities(user, slugs = []) {
+  const list = Array.isArray(slugs) ? slugs : [];
+  return {
+    pages: hasPermission(user, 'pages'),
+    content_slugs: list.filter((slug) => canEditPageContent(user, slug)),
+    layout_slugs: list.filter((slug) => canEditPageLayout(user, slug)),
+    minutes_edit: canManageMeetingMinutes(user),
+  };
+}
+
+export function adminSidebarAllows(user, tab) {
+  if (!user) return true;
+  switch (String(tab || '')) {
+    case 'dashboard':
+    case 'mail':
+    case 'minutes':
+      return true;
+    case 'staff':
+      return hasPermission(user, 'staff') || canEditPageContent(user, 'directors');
+    case 'ensembles':
+      return canEditPageContent(user, 'ensembles');
+    case 'booster-members':
+      return hasPermission(user, 'boosters') || canEditPageContent(user, 'boosters');
+    case 'badge-creator':
+      return canAccessBadgeCreator(user);
+    case 'events':
+      return hasPermission(user, 'events') || hasPermission(user, 'events:manage');
+    case 'sponsors':
+      return hasPermission(user, 'sponsors') || canEditPageContent(user, 'sponsors');
+    case 'sponsors-page':
+      return canEditPageContent(user, 'sponsors');
+    case 'become-a-sponsor':
+      return canEditPageContent(user, 'become-a-sponsor');
+    case 'contact':
+      return hasPermission(user, 'contact') || canEditPageContent(user, 'contact');
+    case 'forms':
+      return canAccessFormsPage(user);
+    case 'ledger':
+      return canAccessTreasurerLedger(user);
+    case 'checkout':
+      return canAccessCheckout(user);
+    case 'users':
+      return hasPermission(user, 'users');
+    case 'caldev':
+      return canAccessScheduleBoard(user);
+    case 'security-log':
+      return canAccessSecurityLog(user);
+    case 'social':
+    case 'site':
+      return hasPermission(user, 'site');
+    case 'photos':
+      return hasPermission(user, 'photos');
+    case 'pages':
+      return hasPermission(user, 'pages')
+        || parsePermissions(user.permissions).some((item) => /^(page|layout):/.test(String(item)));
+    default:
+      return true;
+  }
+}
+
+export const MINUTES_EDIT_WINDOW_HOURS = 48;
 
 export function parseMeetingDateInput(value) {
   const raw = String(value || '').trim();
@@ -7868,16 +7948,19 @@ export async function parseBoostersMinutesDocx(arrayBuffer, filename = '') {
   };
 }
 
-export function minutesEditableUntil(meetingDate) {
-  // 10-day secretary edit window starts on the meeting date (not upload/submit time).
-  const iso = parseMeetingDateInput(meetingDate) || (
-    String(meetingDate || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(meetingDate) : ''
-  );
-  if (!iso) return null;
-  const [year, month, day] = iso.split('-').map(Number);
-  const start = Date.UTC(year, month - 1, day);
-  if (Number.isNaN(start)) return null;
-  return new Date(start + (MINUTES_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+export function minutesEditableUntil(recordOrCreatedAt) {
+  const raw = recordOrCreatedAt && typeof recordOrCreatedAt === 'object'
+    ? recordOrCreatedAt.created_at
+    : recordOrCreatedAt;
+  const created = parseAuditUtcDate(raw);
+  if (!created) return null;
+  return new Date(created.getTime() + (MINUTES_EDIT_WINDOW_HOURS * 60 * 60 * 1000));
+}
+
+export function minutesWithinEditWindow(record, now = new Date()) {
+  const until = minutesEditableUntil(record);
+  if (!until) return false;
+  return now.getTime() <= until.getTime();
 }
 
 export function canViewMeetingMinutes(user) {
@@ -7886,24 +7969,67 @@ export function canViewMeetingMinutes(user) {
 }
 
 export function canManageMeetingMinutes(user) {
-  // Secretary / create-edit capability (time window applied separately).
   if (!user) return false;
-  return isSuperAdmin(user) || hasPermission(user, 'minutes');
+  return isSuperAdmin(user) || hasPermission(user, 'minutes:edit') || hasPermission(user, 'minutes');
 }
 
 export function canEditMeetingMinutes(user, record, now = new Date()) {
   if (!user || !record) return false;
-  if (!canManageMeetingMinutes(user)) return false;
   if (isSuperAdmin(user)) return true;
-  const until = minutesEditableUntil(record.meeting_date);
-  if (!until) return false;
-  return now.getTime() <= until.getTime();
+  if (!canManageMeetingMinutes(user)) return false;
+  return minutesWithinEditWindow(record, now);
 }
 
 export function canDeleteMeetingMinutes(user) {
   // Hard rule: secretaries and view-only users can never delete minutes.
   // Only users with the Super Admin role (role === 'admin') may delete.
   return Boolean(user) && isSuperAdmin(user);
+}
+
+export async function sha256Hex(value) {
+  const buf = await crypto.subtle.digest('SHA-256', TEXT.encode(String(value || '')));
+  return [...new Uint8Array(buf)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function writeMinutesAudit(env, request, user, {
+  action,
+  status,
+  minutes = null,
+  before = '',
+  after = '',
+  detail = '',
+} = {}) {
+  const path = (() => {
+    try { return new URL(request.url).pathname; } catch { return '/api/admin/minutes'; }
+  })();
+  const method = String(request?.method || 'POST').toUpperCase();
+  await writeAdminAuditLog(env, {
+    action,
+    category: 'minutes',
+    method,
+    path,
+    status,
+    actor_user_id: user?.id,
+    actor_username: user?.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action,
+      method,
+      path,
+      status,
+      actorUsername: user?.username,
+      detail,
+    }),
+    meta: {
+      minutes_id: minutes?.id || null,
+      meeting_date: minutes?.meeting_date || '',
+      created_at: minutes?.created_at || '',
+      within_window: minutesWithinEditWindow(minutes),
+      before_sha256: before,
+      after_sha256: after,
+    },
+  });
 }
 
 export function renderMinutesDocumentHtml(site = {}, minutes = {}, { embed = false } = {}) {
@@ -8052,7 +8178,7 @@ function serializeMinutesRow(row, user = null) {
     created_by_name: row.created_by_name || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
-    editable_until: minutesEditableUntil(row.meeting_date)?.toISOString() || null,
+    editable_until: minutesEditableUntil(row)?.toISOString() || null,
     can_view: canViewMeetingMinutes(user),
     can_edit: canEditMeetingMinutes(user, row),
     can_manage: canManageMeetingMinutes(user),
@@ -9591,11 +9717,13 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const formsAccessIds = await getFormsAccessUserIds(env);
+    const catalog = await getPages(env, true);
     return jsonResponse({
       user: publicUser(auth.user),
       permissions: GLOBAL_PERMISSIONS,
       forms_access: canAccessFormsPage(auth.user, formsAccessIds),
-      pages: (await getPages(env, true)).map((page) => ({
+      capabilities: userPageCapabilities(auth.user, catalog.map((page) => page.slug)),
+      pages: catalog.map((page) => ({
         slug: page.slug,
         title: page.title,
         path: page.path,
@@ -10187,7 +10315,8 @@ async function routeApi(request, env, url, ctx = null) {
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
     const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions)), payload.active === false ? 0 : 1).run();
+      const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       return jsonResponse(publicUser(created));
     } catch (error) {
@@ -10221,10 +10350,11 @@ async function routeApi(request, env, url, ctx = null) {
     const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
       ? (existing.role === 'admin' ? 'admin' : 'editor')
       : (wantsAdmin ? 'admin' : 'editor');
+    const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
     const permissions = JSON.stringify(
       Number(auth.user.id) === id && !isSuperAdmin(auth.user)
-        ? parsePermissions(existing.permissions)
-        : sanitizeAssignablePermissions(auth.user, nextPayload.permissions),
+        ? normalizePageGrants(parsePermissions(existing.permissions), slugs)
+        : normalizePageGrants(sanitizeAssignablePermissions(auth.user, nextPayload.permissions), slugs),
     );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
@@ -10259,7 +10389,11 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const state = await loadVisualPageState(env, slug);
     if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
-    return jsonResponse(state);
+    return jsonResponse({
+      ...state,
+      can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
+      can_settings: canManagePageSettings(auth.user),
+    });
   }
   if (visualPageMatch && request.method === 'PUT') {
     const auth = await requireLogin(request, env);
@@ -10280,10 +10414,18 @@ async function routeApi(request, env, url, ctx = null) {
         html: parsed.html,
         action: parsed.action,
         user: auth.user,
+        allowStructure: canEditPageLayout(auth.user, slug),
       });
-      return jsonResponse(state);
+      return jsonResponse({
+        ...state,
+        can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
+        can_settings: canManagePageSettings(auth.user),
+      });
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Save failed' }, Number(error.status) || 400);
+      return jsonResponse({
+        detail: error.message || 'Save failed',
+        ...(error.code ? { code: error.code } : {}),
+      }, Number(error.status) || 400);
     }
   }
   if (visualRestoreMatch && request.method === 'POST') {
@@ -10298,9 +10440,14 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const raw = await request.json().catch(() => ({}));
     try {
-      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user, slug));
+      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user, slug, {
+        allowStructure: canEditPageLayout(auth.user, slug),
+      }));
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Restore failed' }, Number(error.status) || 400);
+      return jsonResponse({
+        detail: error.message || 'Restore failed',
+        ...(error.code ? { code: error.code } : {}),
+      }, Number(error.status) || 400);
     }
   }
 
@@ -10337,8 +10484,21 @@ async function routeApi(request, env, url, ctx = null) {
     if (isVisualEditorSlug(existing.slug)) {
       page.body_html = existing.body_html;
     }
+    if (!canManagePageSettings(auth.user) && pageSettingsChanged(page, existing, rawPayload)) {
+      return jsonResponse({ detail: 'Permission required: pages' }, 403);
+    }
     if (!canManagePageSettings(auth.user)) {
       page = lockPageSettingsToExisting(page, existing);
+    }
+    if (
+      !isVisualEditorSlug(existing.slug)
+      && !canEditPageLayout(auth.user, existing.slug)
+      && visualStructureSignature(page.body_html) !== visualStructureSignature(existing.body_html)
+    ) {
+      return jsonResponse({
+        detail: `Permission required: layout:${existing.slug}`,
+        code: 'layout_required',
+      }, 403);
     }
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
@@ -10395,6 +10555,15 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const payload = await request.json().catch(() => ({}));
     const nextBody = applyEnsemblesBodyHtml(page.body_html || '', payload.body_html || '');
+    if (
+      !canEditPageLayout(auth.user, 'ensembles')
+      && visualStructureSignature(nextBody) !== visualStructureSignature(page.body_html)
+    ) {
+      return jsonResponse({
+        detail: 'Permission required: layout:ensembles',
+        code: 'layout_required',
+      }, 403);
+    }
     await env.DB.prepare(
       'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).bind(nextBody, page.id).run();
@@ -11109,7 +11278,12 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 403,
+        detail: 'Permission required: minutes:edit',
+      });
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let payload;
     try {
@@ -11128,6 +11302,13 @@ async function routeApi(request, env, url, ctx = null) {
       if (!created?.id) {
         return jsonResponse({ detail: 'Minutes saved but could not be reloaded. Refresh and check the list.' }, 500);
       }
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 201,
+        minutes: created,
+        after: await sha256Hex(created.body_html || ''),
+        detail: `${created.meeting_date} created`,
+      });
       return jsonResponse(created, 201);
     } catch (error) {
       return jsonResponse({ detail: `Could not save minutes: ${error?.message || error}` }, 500);
@@ -11137,7 +11318,12 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 403,
+        detail: 'Permission required: minutes:edit',
+      });
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let form;
     try {
@@ -11174,6 +11360,13 @@ async function routeApi(request, env, url, ctx = null) {
       if (!created?.id) {
         return jsonResponse({ detail: 'Minutes uploaded but could not be reloaded. Refresh and check the list.' }, 500);
       }
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 201,
+        minutes: created,
+        after: await sha256Hex(created.body_html || ''),
+        detail: `${created.meeting_date} uploaded`,
+      });
       return jsonResponse(created, 201);
     } catch (error) {
       return jsonResponse({ detail: `Could not save uploaded minutes: ${error?.message || error}` }, 500);
@@ -11206,13 +11399,34 @@ async function routeApi(request, env, url, ctx = null) {
     if (request.method === 'GET') return jsonResponse(existing);
     if (request.method === 'DELETE') {
       if (!canDeleteMeetingMinutes(auth.user)) {
+        await writeMinutesAudit(env, request, auth.user, {
+          action: 'minutes.delete',
+          status: 403,
+          minutes: existing,
+          before: await sha256Hex(existing.body_html || ''),
+          detail: 'Only Super Admins can delete meeting minutes',
+        });
         return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
       }
       await env.DB.prepare('DELETE FROM booster_meeting_minutes WHERE id = ?').bind(id).run();
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.delete',
+        status: 200,
+        minutes: existing,
+        before: await sha256Hex(existing.body_html || ''),
+        detail: `${existing.meeting_date} deleted`,
+      });
       return jsonResponse({ ok: true });
     }
     if (!canEditMeetingMinutes(auth.user, existing)) {
-      return jsonResponse({ detail: 'Meeting minutes can only be edited by the secretary within 10 days of the meeting date' }, 403);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.edit',
+        status: 403,
+        minutes: existing,
+        before: await sha256Hex(existing.body_html || ''),
+        detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
+      });
+      return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
     }
     let payload;
     try {
@@ -11223,10 +11437,21 @@ async function routeApi(request, env, url, ctx = null) {
     if (!payload.meeting_date) return jsonResponse({ detail: 'Meeting date is required' }, 422);
     if (!payload.body_html.replace(/<[^>]+>/g, '').trim()) return jsonResponse({ detail: 'Minutes content is required' }, 422);
     try {
+      const beforeSha = await sha256Hex(existing.body_html || '');
       await env.DB.prepare(
         'UPDATE booster_meeting_minutes SET meeting_date = ?, body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       ).bind(payload.meeting_date, payload.body_html, id).run();
-      return jsonResponse(await getMeetingMinutesById(env, id, auth.user));
+      const updated = await getMeetingMinutesById(env, id, auth.user);
+      const afterWindow = isSuperAdmin(auth.user) && !minutesWithinEditWindow(existing);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: afterWindow ? 'minutes.edit.admin_after_window' : 'minutes.edit',
+        status: 200,
+        minutes: updated || existing,
+        before: beforeSha,
+        after: await sha256Hex(updated?.body_html || payload.body_html || ''),
+        detail: afterWindow ? `${existing.meeting_date} edited after 48h` : `${existing.meeting_date} edited`,
+      });
+      return jsonResponse(updated);
     } catch (error) {
       return jsonResponse({ detail: `Could not update minutes: ${error?.message || error}` }, 500);
     }
@@ -11931,11 +12156,18 @@ async function handleLogin(request, env) {
   });
 }
 
+function renderAdminAppHtml(user) {
+  return ADMIN_HTML.replace('__ADMIN_SIDEBAR__', renderAdminSidebarHtml(ASSET_VERSION, {
+    user,
+    allow: (tab) => adminSidebarAllows(user, tab),
+  }));
+}
+
 async function handleAdmin(request, env) {
   await initDb(env);
   const user = await currentUser(request, env);
   if (!user) return redirect('/admin/login');
-  return attachLoginHintIfNeeded(request, htmlResponse(ADMIN_HTML), user);
+  return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
 }
 
 async function handleVisualEditorPage(request, env, slug) {
@@ -11995,6 +12227,10 @@ async function handleVisualEditorPage(request, env, slug) {
     slug: key,
     path: cms.path,
     active: cms.active,
+    user,
+    canLayout: canEditVisualLayout(user, key, canEditPageLayout),
+    canSettings: canManagePageSettings(user),
+    allow: (tab) => adminSidebarAllows(user, tab),
   })), user);
 }
 
@@ -12774,7 +13010,7 @@ const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 ${renderAdminChromeBar()}
 ${renderAdminSidebarBackdrop()}
-${renderAdminSidebarHtml(ASSET_VERSION)}
+__ADMIN_SIDEBAR__
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich="insertUnorderedList" title="Bulleted list">• List</button><button type="button" data-rich-insert-photo title="Insert a photo at the cursor">Photo</button></div><small class="rich-text-hint">Select text, then apply formatting. Use List to add or remove bullets. Click Photo to insert an image, then drag a corner to resize or Delete photo to remove it.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -13288,7 +13524,7 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms (create, edit, and delete public forms)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (create/edit, 48h)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

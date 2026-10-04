@@ -12,6 +12,7 @@
     return;
   }
   window.efhsAdminNav?.init?.();
+  const canLayout = document.body?.dataset?.canLayout !== '0';
   const statusEl = document.querySelector('[data-visual-status]');
   const addDrawer = document.querySelector('[data-visual-add-drawer]');
   const addGrid = document.querySelector('[data-visual-add-grid]');
@@ -306,15 +307,15 @@
       selectable: true,
       hoverable: true,
       highlightable: true,
-      draggable: true,
-      copyable: true,
-      removable: true,
+      draggable: canLayout,
+      copyable: canLayout,
+      removable: canLayout,
       editable: textTags.includes(tag),
-      droppable: ['section', 'div', 'article', 'aside', 'figure'].includes(tag),
-      resizable: {
+      droppable: canLayout && ['section', 'div', 'article', 'aside', 'figure'].includes(tag),
+      resizable: canLayout ? {
         tl: 1, tc: 1, tr: 1, cl: 1, cr: 1, bl: 1, bc: 1, br: 1,
         minDim: 24,
-      },
+      } : false,
     });
     if (isDetails) {
       comp.set({
