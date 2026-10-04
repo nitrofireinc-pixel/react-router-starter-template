@@ -1,4 +1,5 @@
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
+import { staffMailSchemaStatements } from './staff-mail.mjs';
 
 export const PREVIOUS_DB_SCHEMA_VERSION = '2026-10-03.1';
 export const MAX_D1_QUERIES_PER_INVOCATION = 40;
@@ -72,6 +73,7 @@ export function incrementalSchemaStatements() {
     VISUAL_PAGE_VERSIONS_INDEX_SQL,
     ...PUBLIC_READ_INDEX_SQL,
     ...auditLogSchemaStatements(),
+    ...staffMailSchemaStatements(),
   ];
 }
 
@@ -79,11 +81,11 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.2',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.3',
     '-- Run at deploy time (owner sign-off only):',
-    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.2.sql',
+    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.3.sql',
     '-- Do NOT run this against production from a laptop or Cloud Agent.',
-    '-- migrations/2026-10-04.2.sql is IF NOT EXISTS only (safe to re-run).',
+    '-- migrations/2026-10-04.3.sql is IF NOT EXISTS only (safe to re-run).',
     '-- prev_sha256 ALTER is applied by Worker initDb / applyIncrementalSchema.',
     '',
     ...statements.map((sql) => `${sql.replace(/\s+/g, ' ').trim()};`),

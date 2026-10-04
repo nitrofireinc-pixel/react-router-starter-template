@@ -3732,7 +3732,7 @@ function renderDashboard() {
   const cards = [
     isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
-    ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
+    ['Staff Email', 'Send rich-text email with To/Cc/Bcc, an address book, and attachments.', 'mail', 'Administration', 'tab'],
     canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
     canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
@@ -4939,6 +4939,236 @@ function bindSponsorDragAndDrop(list) {
   });
 }
 
+const MAIL_ATTACH_TOTAL_BYTES = 4_000_000;
+const MAIL_ATTACH_MAX_FILES = 5;
+const MAIL_ATTACH_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip',
+]);
+const MAIL_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+
+function mailDraftStorageKey() {
+  const id = Number(state.me?.user?.id) || 0;
+  return `efhsStaffMailDraft:${id || 'anon'}`;
+}
+
+function emptyMailChips() {
+  return { to: [], cc: [], bcc: [] };
+}
+
+function mailChipLists() {
+  if (!state.mailChips) state.mailChips = emptyMailChips();
+  return state.mailChips;
+}
+
+function mailBookEntries() {
+  return [...(state.mailBook?.entries || state.mailRecipients || [])];
+}
+
+function mailFileExtension(name) {
+  const raw = String(name || '').trim().toLowerCase();
+  const idx = raw.lastIndexOf('.');
+  return idx >= 0 ? raw.slice(idx) : '';
+}
+
+function renderMailChips() {
+  const lists = mailChipLists();
+  document.querySelectorAll('[data-mail-field]').forEach((field) => {
+    const name = field.dataset.mailField;
+    const mount = field.querySelector('[data-mail-chips]');
+    if (!mount) return;
+    const chips = lists[name] || [];
+    mount.innerHTML = chips.map((email) => `
+      <span class="mail-chip">
+        ${escapeHtml(email)}
+        <button type="button" data-mail-chip-remove="${escapeHtml(email)}" data-mail-chip-field="${name}" aria-label="Remove ${escapeHtml(email)}">×</button>
+      </span>
+    `).join('');
+    if (name === 'cc' || name === 'bcc') {
+      field.hidden = chips.length === 0 && field.dataset.mailForced !== '1';
+    }
+  });
+}
+
+function addMailChip(field, email, { persist = true } = {}) {
+  const clean = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return { ok: false, detail: `“${email}” is not a valid email.` };
+  const lists = mailChipLists();
+  const used = [...lists.to, ...lists.cc, ...lists.bcc];
+  if (used.includes(clean)) return { ok: true };
+  if (used.length >= 50) return { ok: false, detail: 'You can send to at most 50 unique addresses.' };
+  lists[field] = [...(lists[field] || []), clean];
+  renderMailChips();
+  if (persist) saveMailDraft();
+  return { ok: true };
+}
+
+function removeMailChip(field, email) {
+  const lists = mailChipLists();
+  lists[field] = (lists[field] || []).filter((item) => item !== email);
+  renderMailChips();
+  saveMailDraft();
+}
+
+function saveMailDraft() {
+  try {
+    const form = document.querySelector('#mail-form');
+    const editor = document.querySelector('#mail-body');
+    localStorage.setItem(mailDraftStorageKey(), JSON.stringify({
+      subject: String(form?.elements.subject?.value || ''),
+      html: editor?.innerHTML || '',
+      chips: mailChipLists(),
+    }));
+  } catch {
+    /* private mode */
+  }
+}
+
+function restoreMailDraft() {
+  try {
+    const raw = localStorage.getItem(mailDraftStorageKey());
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    const form = document.querySelector('#mail-form');
+    const editor = document.querySelector('#mail-body');
+    if (form?.elements.subject && draft.subject) form.elements.subject.value = draft.subject;
+    if (editor && draft.html) editor.innerHTML = draft.html;
+    if (draft.chips) state.mailChips = {
+      to: Array.isArray(draft.chips.to) ? draft.chips.to : [],
+      cc: Array.isArray(draft.chips.cc) ? draft.chips.cc : [],
+      bcc: Array.isArray(draft.chips.bcc) ? draft.chips.bcc : [],
+    };
+    renderMailChips();
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearMailDraft() {
+  try { localStorage.removeItem(mailDraftStorageKey()); } catch { /* ignore */ }
+  state.mailChips = emptyMailChips();
+  state.mailPreparedFiles = [];
+}
+
+function matchMailBook(query) {
+  const needle = String(query || '').trim().toLowerCase();
+  const entries = mailBookEntries();
+  if (!needle) return entries.slice(0, 8);
+  return entries.filter((item) => {
+    const email = String(item.email || '').toLowerCase();
+    const name = String(item.display_name || '').toLowerCase();
+    return email.includes(needle) || name.includes(needle);
+  }).slice(0, 8);
+}
+
+function renderMailSuggest(fieldEl, query) {
+  const box = fieldEl.querySelector('[data-mail-suggest]');
+  if (!box) return;
+  const matches = matchMailBook(query);
+  if (!matches.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = matches.map((item, index) => `
+    <button type="button" data-mail-suggest-email="${escapeHtml(item.email)}" aria-selected="${index === 0 ? 'true' : 'false'}">
+      <b>${escapeHtml(item.display_name || item.email)}</b>
+      <small>${escapeHtml(item.email)}${item.kind === 'user' ? ' · CMS user' : ''}</small>
+    </button>
+  `).join('');
+}
+
+function renderMailAddressBook() {
+  const list = document.querySelector('#mail-address-book-list');
+  if (!list) return;
+  const query = String(document.querySelector('#mail-book-search')?.value || '').trim().toLowerCase();
+  const entries = mailBookEntries().filter((item) => {
+    if (!query) return true;
+    return String(item.email || '').toLowerCase().includes(query)
+      || String(item.display_name || '').toLowerCase().includes(query);
+  });
+  if (!entries.length) {
+    list.innerHTML = '<p class="muted">No contacts yet. Type an address in To to save it to your book.</p>';
+    return;
+  }
+  list.innerHTML = entries.map((item) => `
+    <button type="button" class="mail-book-item" data-mail-book-email="${escapeHtml(item.email)}">
+      <b>${escapeHtml(item.display_name || item.email)}</b>
+      <small>${escapeHtml(item.email)}${item.kind === 'user' ? ' · CMS user' : ' · Saved'}</small>
+    </button>
+  `).join('');
+}
+
+function renderMailSent() {
+  const list = document.querySelector('#mail-sent-list');
+  if (!list) return;
+  const messages = state.mailSent || [];
+  if (!messages.length) {
+    list.innerHTML = '<p class="muted">Nothing sent yet.</p>';
+    return;
+  }
+  list.innerHTML = messages.map((item) => `
+    <button type="button" class="mail-sent-item" data-mail-sent-id="${item.id}">
+      <b>${escapeHtml(item.subject || '(no subject)')}</b>
+      <small>${escapeHtml((item.to || []).join(', ') || 'No To')}${item.status === 'failed' ? ' · failed' : ''}</small>
+    </button>
+  `).join('');
+}
+
+function renderMailAttachList() {
+  const list = document.querySelector('#mail-attach-list');
+  const files = state.mailPreparedFiles || [];
+  if (!list) return;
+  if (!files.length) {
+    list.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+  const total = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  list.hidden = false;
+  list.innerHTML = files.map((file) => `<li>${escapeHtml(file.name)} · ${Math.ceil(file.size / 1024)} KB</li>`).join('')
+    + `<li>Total ${Math.ceil(total / 1024)} KB of 4096 KB</li>`;
+}
+
+async function prepareMailAttachments(fileList) {
+  const incoming = [...(fileList || [])];
+  if (!incoming.length) {
+    state.mailPreparedFiles = [];
+    renderMailAttachList();
+    return [];
+  }
+  if (incoming.length > MAIL_ATTACH_MAX_FILES) {
+    throw new Error(`You can attach up to ${MAIL_ATTACH_MAX_FILES} files.`);
+  }
+  const prepared = [];
+  let used = 0;
+  for (const file of incoming) {
+    const ext = mailFileExtension(file.name);
+    if (!MAIL_ATTACH_EXTENSIONS.has(ext)) {
+      throw new Error(`“${file.name}” is not allowed. Use PDF, images, Office docs, or ZIP.`);
+    }
+    let next = file;
+    const remaining = MAIL_ATTACH_TOTAL_BYTES - used;
+    if (remaining <= 0) throw new Error('Attachments exceed the 4 MB total limit.');
+    if (MAIL_IMAGE_EXTENSIONS.has(ext) && Number(file.size || 0) > remaining) {
+      showSavedToast('This image will be reduced so the email stays under 4 MB.', { icon: 'envelope' });
+      next = await compressImageForGalleryUpload(file, {
+        maxBytes: Math.max(40_000, remaining),
+        maxEdge: 2000,
+      });
+    }
+    if (Number(next.size || 0) > remaining) {
+      throw new Error(`“${file.name}” would put this email over the 4 MB total limit.`);
+    }
+    used += Number(next.size || 0);
+    prepared.push(next);
+  }
+  state.mailPreparedFiles = prepared;
+  renderMailAttachList();
+  return prepared;
+}
+
 async function loadMailDeliveryStatus() {
   const status = document.querySelector('#mail-status');
   if (!status || !canSendMail()) return;
@@ -4957,30 +5187,37 @@ async function loadMailDeliveryStatus() {
   }
 }
 
-function renderMailRecipients() {
-  const list = document.querySelector('#mail-recipients-list');
-  if (!list) return;
-  if (!state.mailRecipients.length) {
-    list.innerHTML = '<p class="draft">No active users with email-style usernames are available.</p>';
-    return;
+async function rememberMailContact(email) {
+  const clean = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return;
+  const knownUser = mailBookEntries().some((item) => item.email === clean && item.kind === 'user');
+  if (knownUser) return;
+  try {
+    await jsonFetch('/api/admin/mail/contacts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: clean, source: 'typed' }),
+    });
+  } catch {
+    /* sending still works if the contact save fails */
   }
-  list.innerHTML = state.mailRecipients.map((user) => `
-    <label class="mail-recipient checkline">
-      <input type="checkbox" name="user_ids" value="${user.id}">
-      <span><b>${escapeHtml(user.display_name || user.email)}</b><small>${escapeHtml(user.email)} · ${isSuperAdmin(user) ? 'Super Admin' : 'Editor'}</small></span>
-    </label>
-  `).join('');
 }
 
-async function loadMailRecipients() {
+async function loadMailRecipients({ restoreDraft = true } = {}) {
   if (!canSendMail()) return;
-  state.mailRecipients = await jsonFetch('/api/admin/mail/recipients');
-  renderMailRecipients();
+  const [book, sent] = await Promise.all([
+    jsonFetch('/api/admin/mail/address-book').catch(() => ({ entries: [] })),
+    jsonFetch('/api/admin/mail/sent').catch(() => ({ messages: [] })),
+  ]);
+  state.mailBook = book;
+  state.mailRecipients = book.users || book.entries || [];
+  state.mailSent = sent.messages || [];
+  if (!state.mailChips) state.mailChips = emptyMailChips();
+  if (restoreDraft) restoreMailDraft();
+  renderMailChips();
+  renderMailAddressBook();
+  renderMailSent();
   await loadMailDeliveryStatus();
-}
-
-function selectedMailUserIds(form) {
-  return [...(form?.querySelectorAll('input[name="user_ids"]:checked') || [])].map((input) => Number(input.value)).filter(Boolean);
 }
 
 function bindMailComposer() {
@@ -4989,6 +5226,8 @@ function bindMailComposer() {
   const toolbar = document.querySelector('#mail-rich-toolbar');
   if (!form || !editor || form.dataset.bound === '1') return;
   form.dataset.bound = '1';
+  state.mailChips = emptyMailChips();
+  state.mailPreparedFiles = [];
 
   toolbar?.querySelectorAll('[data-mail-rich]').forEach((button) => {
     button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -4998,27 +5237,157 @@ function bindMailComposer() {
       document.execCommand(button.dataset.mailRich, false, null);
     });
   });
+  toolbar?.querySelectorAll('[data-mail-block]').forEach((button) => {
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => {
+      editor.focus();
+      document.execCommand('formatBlock', false, button.dataset.mailBlock);
+    });
+  });
+  toolbar?.querySelectorAll('[data-mail-align]').forEach((button) => {
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => {
+      editor.focus();
+      const cmd = button.dataset.mailAlign === 'center'
+        ? 'justifyCenter'
+        : button.dataset.mailAlign === 'right'
+          ? 'justifyRight'
+          : 'justifyLeft';
+      document.execCommand(cmd, false, null);
+    });
+  });
+  toolbar?.querySelector('[data-mail-cmd="link"]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-mail-cmd="link"]')?.addEventListener('click', () => {
+    const href = window.prompt('Link URL', 'https://');
+    if (!href) return;
+    editor.focus();
+    document.execCommand('createLink', false, href);
+  });
   document.querySelector('#mail-rich-color')?.addEventListener('input', (event) => {
     editor.focus();
     document.execCommand('styleWithCSS', false, true);
     document.execCommand('foreColor', false, event.target.value);
   });
 
-  document.querySelector('#mail-select-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = true; });
+  document.querySelector('#mail-show-cc')?.addEventListener('click', () => {
+    const field = form.querySelector('[data-mail-field="cc"]');
+    if (!field) return;
+    field.hidden = false;
+    field.dataset.mailForced = '1';
+    field.querySelector('[data-mail-chip-input]')?.focus();
   });
-  document.querySelector('#mail-clear-all')?.addEventListener('click', () => {
-    form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
+  document.querySelector('#mail-show-bcc')?.addEventListener('click', () => {
+    const field = form.querySelector('[data-mail-field="bcc"]');
+    if (!field) return;
+    field.hidden = false;
+    field.dataset.mailForced = '1';
+    field.querySelector('[data-mail-chip-input]')?.focus();
   });
+
+  form.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-mail-chip-remove]');
+    if (remove) {
+      removeMailChip(remove.dataset.mailChipField, remove.dataset.mailChipRemove);
+    }
+  });
+
+  form.querySelectorAll('[data-mail-field]').forEach((field) => {
+    const input = field.querySelector('[data-mail-chip-input]');
+    if (!input) return;
+    const commit = async () => {
+      const value = String(input.value || '').trim();
+      if (!value) return;
+      const result = addMailChip(field.dataset.mailField, value);
+      if (!result.ok) {
+        const status = document.querySelector('#mail-status');
+        if (status) status.textContent = result.detail;
+        return;
+      }
+      input.value = '';
+      field.querySelector('[data-mail-suggest]').hidden = true;
+      await rememberMailContact(value);
+      await loadMailRecipients({ restoreDraft: false });
+    };
+    input.addEventListener('input', () => renderMailSuggest(field, input.value));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ',' || event.key === 'Tab') {
+        if (String(input.value || '').trim()) {
+          event.preventDefault();
+          commit();
+        }
+      }
+      if (event.key === 'Backspace' && !input.value) {
+        const chips = mailChipLists()[field.dataset.mailField] || [];
+        if (chips.length) removeMailChip(field.dataset.mailField, chips[chips.length - 1]);
+      }
+      if (event.key === 'Escape') {
+        const box = field.querySelector('[data-mail-suggest]');
+        if (box) box.hidden = true;
+      }
+    });
+    input.addEventListener('blur', () => {
+      window.setTimeout(() => commit(), 120);
+    });
+    field.addEventListener('click', (event) => {
+      const suggestion = event.target.closest('[data-mail-suggest-email]');
+      if (!suggestion) return;
+      addMailChip(field.dataset.mailField, suggestion.dataset.mailSuggestEmail);
+      input.value = '';
+      field.querySelector('[data-mail-suggest]').hidden = true;
+    });
+  });
+
+  document.querySelector('#mail-book-search')?.addEventListener('input', renderMailAddressBook);
+  document.querySelector('#mail-address-book-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-mail-book-email]');
+    if (!button) return;
+    addMailChip('to', button.dataset.mailBookEmail);
+  });
+  document.querySelector('#mail-sent-list')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-mail-sent-id]');
+    if (!button) return;
+    try {
+      const item = await jsonFetch(`/api/admin/mail/sent?id=${encodeURIComponent(button.dataset.mailSentId)}`);
+      if (form.elements.subject) form.elements.subject.value = item.subject || '';
+      editor.innerHTML = item.html || '';
+      state.mailChips = {
+        to: item.to || [],
+        cc: item.cc || [],
+        bcc: item.bcc || [],
+      };
+      renderMailChips();
+      saveMailDraft();
+      const status = document.querySelector('#mail-status');
+      if (status) status.textContent = 'Loaded a sent message as a new draft. Attachments were not stored and need to be added again.';
+    } catch (error) {
+      const status = document.querySelector('#mail-status');
+      if (status) status.textContent = error.message || 'Could not open that message.';
+    }
+  });
+
+  form.elements.attachments?.addEventListener('change', async () => {
+    const status = document.querySelector('#mail-status');
+    try {
+      await prepareMailAttachments(form.elements.attachments.files);
+    } catch (error) {
+      state.mailPreparedFiles = [];
+      form.elements.attachments.value = '';
+      renderMailAttachList();
+      if (status) status.textContent = error.message || 'Could not attach that file.';
+    }
+  });
+
+  form.addEventListener('input', () => saveMailDraft());
+  editor.addEventListener('input', () => saveMailDraft());
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#mail-status');
     const subject = String(form.elements.subject?.value || '').trim();
     const html = sanitizeRichHtml(editor.innerHTML || '');
-    const userIds = selectedMailUserIds(form);
-    if (!userIds.length) {
-      if (status) status.textContent = 'Select at least one recipient.';
+    const chips = mailChipLists();
+    if (!chips.to.length) {
+      if (status) status.textContent = 'Add at least one To recipient.';
       return;
     }
     if (!subject) {
@@ -5030,11 +5399,23 @@ function bindMailComposer() {
       return;
     }
 
+    let files = state.mailPreparedFiles || [];
+    try {
+      if (!files.length && form.elements.attachments?.files?.length) {
+        files = await prepareMailAttachments(form.elements.attachments.files);
+      }
+    } catch (error) {
+      if (status) status.textContent = error.message;
+      return;
+    }
+
     const payload = new FormData();
     payload.set('subject', subject);
     payload.set('html', html);
-    userIds.forEach((id) => payload.append('user_ids', String(id)));
-    [...(form.elements.attachments?.files || [])].forEach((file) => payload.append('attachments', file));
+    chips.to.forEach((email) => payload.append('to', email));
+    chips.cc.forEach((email) => payload.append('cc', email));
+    chips.bcc.forEach((email) => payload.append('bcc', email));
+    files.forEach((file) => payload.append('attachments', file));
 
     if (status) status.textContent = 'Sending…';
     try {
@@ -5043,11 +5424,13 @@ function bindMailComposer() {
         if (form.elements.subject) form.elements.subject.value = '';
         editor.innerHTML = '';
         if (form.elements.attachments) form.elements.attachments.value = '';
-        form.querySelectorAll('input[name="user_ids"]').forEach((input) => { input.checked = false; });
         const colorInput = document.querySelector('#mail-rich-color');
         if (colorInput) colorInput.value = '#002142';
+        clearMailDraft();
+        renderMailChips();
+        renderMailAttachList();
         showSavedToast('Sent.', { icon: 'envelope' });
-        await loadMailDeliveryStatus();
+        await loadMailRecipients();
       } else if (status) {
         status.textContent = result.detail || 'Email sent.';
       }

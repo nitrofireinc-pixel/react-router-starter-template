@@ -113,6 +113,21 @@ import {
   auditLogSchemaStatements,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
+import {
+  MAIL_MAX_RECIPIENTS,
+  assertMailRecipientCap,
+  buildResendEmailPayload,
+  bytesToBase64,
+  evaluateStaffMailRate,
+  loadStaffMailRate,
+  normalizeAdminMailPayload as normalizeAdminMailFields,
+  normalizeMailAttachments,
+  normalizeMailContactPayload,
+  normalizeMailEmailList,
+  staffMailSchemaStatements,
+  summarizeMailMessageRow,
+  uniqueMailEmails,
+} from './staff-mail.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
   VISUAL_EDITOR_PATH_PREFIX,
@@ -359,7 +374,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004k';
+export const ASSET_VERSION = 'cms-p1-20261004l';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -378,13 +393,17 @@ const ZERNIO_INSTAGRAM_AUTOPOST_KEY = 'zernio_instagram_gallery_autopost';
 const PUBLIC_SITE_ORIGIN_DEFAULT = 'https://efhsband.org';
 const FORM_RICH_TOOLBAR = `<div class="form-rich-toolbar" data-form-rich-toolbar><button type="button" data-form-rich="bold" title="Bold"><b>B</b></button><button type="button" data-form-rich="italic" title="Italic"><i>I</i></button><button type="button" data-form-rich="underline" title="Underline"><u>U</u></button><label title="Text color"><span>Color</span><input type="color" data-form-rich-color value="#002142"></label><label title="Font size"><span>Size</span><select data-form-rich-size><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div>`;
 const MAINTENANCE_RETURN_COOKIE = 'efband_maintenance_return';
-const MAIL_ATTACHMENT_MAX_FILES = 5;
-const MAIL_ATTACHMENT_MAX_BYTES = 4_000_000;
-const MAIL_ATTACHMENT_TOTAL_BYTES = 10_000_000;
-const MAIL_ATTACHMENT_EXTENSIONS = new Set([
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip',
-]);
+export {
+  MAIL_ATTACHMENT_MAX_FILES,
+  MAIL_ATTACHMENT_TOTAL_BYTES,
+  MAIL_MAX_RECIPIENTS,
+  MAIL_RATE_DAY,
+  MAIL_RATE_HOUR,
+  bytesToBase64,
+  evaluateStaffMailRate,
+  normalizeMailAttachments,
+  uniqueMailEmails,
+} from './staff-mail.mjs';
 const IMAGE_UPLOAD_MAX_BYTES = 1_900_000;
 const IMAGE_UPLOAD_MAX_LABEL = '2 MB';
 const SPONSOR_APPLICATION_LOGO_SORT = -410;
@@ -956,13 +975,6 @@ export function isEmailListStopRequest({ subject = '', text = '', html = '' } = 
     .slice(0, 8);
   if (!lines.length) return false;
   return lines.some((line) => /^(stop|unsubscribe|cancel|end|quit)\b[.!]*$/i.test(line));
-}
-
-function bytesToBase64(bytes) {
-  let binary = '';
-  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  for (let i = 0; i < view.length; i += 1) binary += String.fromCharCode(view[i]);
-  return btoa(binary);
 }
 
 function base64ToBytes(value) {
@@ -1553,6 +1565,18 @@ export function canAccessScheduleBoard(user) {
   );
 }
 
+export function isScheduleBoardOnlyUser(user) {
+  if (isSuperAdmin(user) || !canAccessScheduleBoard(user)) return false;
+  const perms = parsePermissions(user.permissions).map((item) => String(item).trim().toLowerCase());
+  if (!perms.length) return false;
+  return perms.every((item) => item === 'events' || item === 'events:manage' || item === 'calendar');
+}
+
+/** Staff Email: every logged-in CMS user except schedule-only accounts. */
+export function canSendStaffMail(user) {
+  return Boolean(user) && !isScheduleBoardOnlyUser(user);
+}
+
 /** Subscriber "Finished" mail stays limited to today's senders. */
 export function canNotifyCalendarSubscribers(user) {
   return (
@@ -1894,7 +1918,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.2';
+export const DB_SCHEMA_VERSION = '2026-10-04.3';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1994,6 +2018,7 @@ async function migrateAndSeedDb(env) {
     env.DB.prepare(COMMITTEE_BADGES_TABLE_SQL),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    ...staffMailSchemaStatements().map((sql) => env.DB.prepare(sql)),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS email_subscribers (email TEXT PRIMARY KEY, topics TEXT NOT NULL DEFAULT \'["calendar","fundraising"]\', status TEXT NOT NULL DEFAULT \'active\', source TEXT NOT NULL DEFAULT \'website\', unsubscribe_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, unsubscribed_at TEXT)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -6752,23 +6777,19 @@ export function describeContactEmailProvider(provider) {
   };
 }
 
-async function sendViaResend(env, { to, replyTo, subject, text, html, fromEmail, fromName, attachments }) {
-  const recipients = (Array.isArray(to) ? to : [to]).map((value) => String(value || '').trim()).filter(Boolean);
-  const payload = {
-    from: `${fromName} <${fromEmail}>`,
-    to: recipients,
-    reply_to: replyTo || undefined,
+async function sendViaResend(env, { to, cc, bcc, replyTo, subject, text, html, fromEmail, fromName, attachments }) {
+  const payload = buildResendEmailPayload({
+    to,
+    cc,
+    bcc,
+    replyTo,
     subject,
     text,
-  };
-  if (html) payload.html = html;
-  if (Array.isArray(attachments) && attachments.length) {
-    payload.attachments = attachments.map((file) => ({
-      filename: file.filename,
-      content: file.content,
-      content_type: file.content_type || undefined,
-    }));
-  }
+    html,
+    fromEmail,
+    fromName,
+    attachments,
+  });
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -6784,7 +6805,8 @@ async function sendViaResend(env, { to, replyTo, subject, text, html, fromEmail,
     }
     throw new Error(`Resend error: ${body}`);
   }
-  return { provider: 'resend' };
+  const sent = await response.json().catch(() => ({}));
+  return { provider: 'resend', id: String(sent?.id || '') };
 }
 
 export function htmlToPlainText(html) {
@@ -6800,60 +6822,28 @@ export function htmlToPlainText(html) {
     .trim();
 }
 
-function extensionOfFilename(filename) {
-  const name = String(filename || '').trim().toLowerCase();
-  const idx = name.lastIndexOf('.');
-  return idx >= 0 ? name.slice(idx) : '';
-}
-
-export async function normalizeMailAttachments(files = []) {
-  const list = Array.isArray(files) ? files : [];
-  if (list.length > MAIL_ATTACHMENT_MAX_FILES) {
-    throw new Error(`You can attach up to ${MAIL_ATTACHMENT_MAX_FILES} files.`);
-  }
-  let total = 0;
-  const attachments = [];
-  for (const file of list) {
-    if (!file || typeof file.arrayBuffer !== 'function') continue;
-    const filename = String(file.name || 'attachment').trim() || 'attachment';
-    const ext = extensionOfFilename(filename);
-    if (!MAIL_ATTACHMENT_EXTENSIONS.has(ext)) {
-      throw new Error(`Unsupported attachment type for ${filename}. Allowed: PDF, Office, images, TXT, CSV, ZIP.`);
-    }
-    const size = Number(file.size || 0);
-    if (size <= 0) throw new Error(`Attachment ${filename} is empty.`);
-    if (size > MAIL_ATTACHMENT_MAX_BYTES) {
-      throw new Error(`Attachment ${filename} exceeds the 4 MB limit.`);
-    }
-    total += size;
-    if (total > MAIL_ATTACHMENT_TOTAL_BYTES) {
-      throw new Error('Attachments exceed the 10 MB total limit.');
-    }
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-    attachments.push({
-      filename,
-      content: btoa(binary),
-      content_type: String(file.type || '').trim() || undefined,
-      size,
-    });
-  }
-  return attachments;
-}
-
-export function normalizeAdminMailPayload({ subject, html, userIds } = {}) {
-  const cleanSubject = String(subject || '').trim();
-  const cleanHtml = sanitizeRichHtml(html || '');
-  const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
-    .map((value) => Number(value))
-    .filter((value) => Number.isInteger(value) && value > 0))];
+export function normalizeAdminMailPayload({ subject, html, text, to, cc, bcc, userIds } = {}) {
+  const mail = normalizeAdminMailFields({
+    subject,
+    html,
+    text,
+    to,
+    cc,
+    bcc,
+    userIds,
+    sanitizeHtml: sanitizeRichHtml,
+  });
   return {
-    subject: cleanSubject,
-    html: cleanHtml,
-    text: htmlToPlainText(cleanHtml),
-    user_ids: ids,
+    ...mail,
+    text: mail.text || htmlToPlainText(mail.html),
   };
+}
+
+function formEmailList(form, name) {
+  return [
+    ...form.getAll(name),
+    ...form.getAll(`${name}[]`),
+  ].flatMap((value) => String(value || '').split(/[,;\n]+/));
 }
 
 async function parseAdminMailRequest(request) {
@@ -6869,6 +6859,9 @@ async function parseAdminMailRequest(request) {
       ...normalizeAdminMailPayload({
         subject: form.get('subject'),
         html: form.get('html'),
+        to: formEmailList(form, 'to'),
+        cc: formEmailList(form, 'cc'),
+        bcc: formEmailList(form, 'bcc'),
         userIds,
       }),
       attachments: await normalizeMailAttachments(files),
@@ -6879,6 +6872,9 @@ async function parseAdminMailRequest(request) {
     ...normalizeAdminMailPayload({
       subject: payload.subject,
       html: payload.html || payload.body_html || payload.message,
+      to: payload.to,
+      cc: payload.cc,
+      bcc: payload.bcc,
       userIds: payload.user_ids || payload.userIds || [],
     }),
     attachments: [],
@@ -6901,15 +6897,18 @@ export function resolveAdminMailSender(user = {}) {
   };
 }
 
-async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attachments, fromName }) {
+async function sendAdminUserMail(env, { to, cc, bcc, replyTo, subject, html, text, attachments, fromName }) {
   const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
   const senderName = String(fromName || env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME).trim();
-  if (!isValidEmail(to)) throw new Error('Recipient email is invalid');
+  const recipients = uniqueMailEmails(to);
+  if (!recipients.length) throw new Error('Recipient email is invalid');
   if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured. Add RESEND_API_KEY in Cloudflare Pages secrets.');
   if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
   if (!isValidEmail(replyTo)) throw new Error('Sender Reply-To email is required');
   return sendViaResend(env, {
-    to,
+    to: recipients,
+    cc,
+    bcc,
     replyTo,
     subject,
     html,
@@ -6918,6 +6917,71 @@ async function sendAdminUserMail(env, { to, replyTo, subject, html, text, attach
     fromName: senderName,
     attachments,
   });
+}
+
+async function requireStaffMailAccess(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  if (!canSendStaffMail(auth.user)) {
+    return { response: jsonResponse({ detail: 'Staff Email is not available for this account.' }, 403), user: auth.user };
+  }
+  return auth;
+}
+
+async function upsertStaffMailContacts(env, ownerUserId, emails, { usersByEmail = new Map() } = {}) {
+  const list = uniqueMailEmails(emails);
+  if (!list.length) return;
+  for (const email of list) {
+    const user = usersByEmail.get(email);
+    const name = String(user?.display_name || '').trim();
+    const source = user ? 'user' : 'typed';
+    await env.DB.prepare(
+      `INSERT INTO mail_contacts (owner_user_id, email, display_name, source, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(owner_user_id, email) DO UPDATE SET
+         display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE mail_contacts.display_name END,
+         last_used_at = CURRENT_TIMESTAMP`,
+    ).bind(Number(ownerUserId), email, name, source).run();
+  }
+}
+
+async function recordStaffMailMessage(env, {
+  ownerUserId,
+  status,
+  subject,
+  html,
+  text,
+  to,
+  cc,
+  bcc,
+  attachments,
+  resendId,
+  error,
+}) {
+  const sentAt = status === 'sent' ? new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '') : null;
+  await env.DB.prepare(
+    `INSERT INTO mail_messages (
+      owner_user_id, status, subject, html, text, to_json, cc_json, bcc_json,
+      attachments_json, resend_id, error, created_at, updated_at, sent_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)`,
+  ).bind(
+    Number(ownerUserId),
+    status,
+    subject,
+    html,
+    text,
+    JSON.stringify(to || []),
+    JSON.stringify(cc || []),
+    JSON.stringify(bcc || []),
+    JSON.stringify((attachments || []).map((file) => ({
+      filename: file.filename,
+      size: Number(file.size) || 0,
+      type: file.content_type || file.type || '',
+    }))),
+    String(resendId || ''),
+    String(error || ''),
+    sentAt,
+  ).run();
 }
 
 async function sendViaMailchannels(env, { to, replyTo, subject, text, fromEmail, fromName }) {
@@ -8091,9 +8155,7 @@ export function validateSelfPasswordChange(payload = {}) {
 }
 
 function arrayBufferToBase64(buffer) {
-  let binary = '';
-  for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
-  return btoa(binary);
+  return bytesToBase64(buffer);
 }
 
 function base64ToArrayBuffer(value) {
@@ -8240,6 +8302,9 @@ function sanitizeStyleAttribute(attrs) {
     if (prop === 'font-size' && /^[\d.]+\s*(px|em|rem|%)$/i.test(value)) {
       parts.push(`font-size: ${value}`);
     }
+    if (prop === 'text-align' && /^(left|right|center|justify)$/i.test(value)) {
+      parts.push(`text-align: ${value.toLowerCase()}`);
+    }
   }
   return parts.join('; ');
 }
@@ -8372,11 +8437,15 @@ export function sanitizeRichHtml(dirty) {
     }
     if (tag === 'p') {
       const className = sanitizeRichHtmlClassList(attrs, ['cms-body-photo']);
-      return className ? `<p class="${className}">` : '<p>';
+      const style = sanitizeStyleAttribute(attrs);
+      const bits = [className ? `class="${className}"` : '', style ? `style="${style}"` : ''].filter(Boolean);
+      return bits.length ? `<p ${bits.join(' ')}>` : '<p>';
     }
     if (tag === 'div') {
       const className = sanitizeRichHtmlClassList(attrs, ['kicker', 'tag', 'draft', 'minutes-docx', 'cms-body-photo']);
-      return className ? `<div class="${className}">` : '<div>';
+      const style = sanitizeStyleAttribute(attrs);
+      const bits = [className ? `class="${className}"` : '', style ? `style="${style}"` : ''].filter(Boolean);
+      return bits.length ? `<div ${bits.join(' ')}>` : '<div>';
     }
     return `<${tag}>`;
   });
@@ -11192,7 +11261,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/mail/recipients' && request.method === 'GET') {
-    const auth = await requireLogin(request, env);
+    const auth = await requireStaffMailAccess(request, env);
     if (auth.response) return auth.response;
     const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
     const recipients = (rows.results || [])
@@ -11203,12 +11272,106 @@ async function routeApi(request, env, url, ctx = null) {
         role: user.role,
         email: String(user.username || '').trim().toLowerCase(),
         can_email: isValidEmail(user.username),
+        kind: 'user',
       }))
       .filter((user) => user.can_email);
     return jsonResponse(recipients);
   }
+  if (url.pathname === '/api/admin/mail/address-book' && request.method === 'GET') {
+    const auth = await requireStaffMailAccess(request, env);
+    if (auth.response) return auth.response;
+    const [usersResult, contactsResult] = await Promise.all([
+      env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all(),
+      env.DB.prepare(
+        'SELECT id, email, display_name, source, last_used_at FROM mail_contacts WHERE owner_user_id = ? ORDER BY last_used_at DESC, email',
+      ).bind(auth.user.id).all(),
+    ]);
+    const users = (usersResult.results || [])
+      .map((user) => ({
+        id: user.id,
+        user_id: user.id,
+        email: String(user.username || '').trim().toLowerCase(),
+        display_name: user.display_name,
+        role: user.role,
+        kind: 'user',
+        source: 'user',
+      }))
+      .filter((user) => isValidEmail(user.email));
+    const userEmails = new Set(users.map((user) => user.email));
+    const contacts = (contactsResult.results || [])
+      .map((row) => ({
+        id: row.id,
+        contact_id: row.id,
+        email: String(row.email || '').trim().toLowerCase(),
+        display_name: row.display_name,
+        kind: 'contact',
+        source: row.source || 'typed',
+        last_used_at: row.last_used_at,
+      }))
+      .filter((row) => isValidEmail(row.email) && !userEmails.has(row.email));
+    return jsonResponse({ users, contacts, entries: [...users, ...contacts] });
+  }
+  if (url.pathname === '/api/admin/mail/contacts' && request.method === 'POST') {
+    const auth = await requireStaffMailAccess(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const parsed = normalizeMailContactPayload(payload);
+    if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
+    await env.DB.prepare(
+      `INSERT INTO mail_contacts (owner_user_id, email, display_name, source, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(owner_user_id, email) DO UPDATE SET
+         display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE mail_contacts.display_name END,
+         last_used_at = CURRENT_TIMESTAMP`,
+    ).bind(auth.user.id, parsed.email, parsed.display_name, parsed.source).run();
+    const row = await env.DB.prepare(
+      'SELECT id, email, display_name, source, last_used_at FROM mail_contacts WHERE owner_user_id = ? AND email = ?',
+    ).bind(auth.user.id, parsed.email).first();
+    return jsonResponse({ ok: true, contact: row });
+  }
+  if (url.pathname === '/api/admin/mail/contacts' && request.method === 'DELETE') {
+    const auth = await requireStaffMailAccess(request, env);
+    if (auth.response) return auth.response;
+    const id = Number(url.searchParams.get('id') || '');
+    const email = String(url.searchParams.get('email') || '').trim().toLowerCase();
+    if (Number.isInteger(id) && id > 0) {
+      await env.DB.prepare('DELETE FROM mail_contacts WHERE id = ? AND owner_user_id = ?').bind(id, auth.user.id).run();
+    } else if (isValidEmail(email)) {
+      await env.DB.prepare('DELETE FROM mail_contacts WHERE owner_user_id = ? AND email = ?').bind(auth.user.id, email).run();
+    } else {
+      return jsonResponse({ detail: 'Provide a contact id or email.' }, 422);
+    }
+    return jsonResponse({ ok: true });
+  }
+  if (url.pathname === '/api/admin/mail/sent' && request.method === 'GET') {
+    const auth = await requireStaffMailAccess(request, env);
+    if (auth.response) return auth.response;
+    const id = Number(url.searchParams.get('id') || '');
+    if (Number.isInteger(id) && id > 0) {
+      const row = await env.DB.prepare(
+        'SELECT * FROM mail_messages WHERE id = ? AND owner_user_id = ?',
+      ).bind(id, auth.user.id).first();
+      if (!row) return jsonResponse({ detail: 'Message not found.' }, 404);
+      return jsonResponse(summarizeMailMessageRow(row));
+    }
+    const rows = await env.DB.prepare(
+      `SELECT id, status, subject, to_json, cc_json, bcc_json, attachments_json, error, created_at, sent_at
+       FROM mail_messages
+       WHERE owner_user_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 50`,
+    ).bind(auth.user.id).all();
+    return jsonResponse({
+      messages: (rows.results || []).map((row) => {
+        const item = summarizeMailMessageRow(row);
+        delete item.html;
+        delete item.text;
+        return item;
+      }),
+    });
+  }
   if (url.pathname === '/api/admin/mail/delivery' && request.method === 'GET') {
-    const auth = await requireLogin(request, env);
+    const auth = await requireStaffMailAccess(request, env);
     if (auth.response) return auth.response;
     const provider = resolveContactEmailProvider(env);
     const sender = resolveAdminMailSender(auth.user);
@@ -11308,7 +11471,7 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
-    const auth = await requireLogin(request, env);
+    const auth = await requireStaffMailAccess(request, env);
     if (auth.response) return auth.response;
     let mail;
     try {
@@ -11316,7 +11479,17 @@ async function routeApi(request, env, url, ctx = null) {
     } catch (error) {
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    if (mail.user_ids.length) {
+      const placeholders = mail.user_ids.map(() => '?').join(', ');
+      const idRows = await env.DB.prepare(
+        `SELECT id, username FROM users WHERE id IN (${placeholders}) AND active = 1`,
+      ).bind(...mail.user_ids).all();
+      mail.to = uniqueMailEmails(mail.to, (idRows.results || []).map((user) => user.username));
+      mail.unique = uniqueMailEmails(mail.to, mail.cc, mail.bcc);
+    }
+    const cap = assertMailRecipientCap(mail.unique.length, MAIL_MAX_RECIPIENTS);
+    if (!cap.ok) return jsonResponse({ detail: cap.detail }, cap.status);
+    if (!mail.to.length) return jsonResponse({ detail: 'Add at least one To recipient.' }, 422);
     if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
     if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
     if (resolveContactEmailProvider(env) !== 'resend') {
@@ -11325,34 +11498,57 @@ async function routeApi(request, env, url, ctx = null) {
     const sender = resolveAdminMailSender(auth.user);
     if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
 
-    const placeholders = mail.user_ids.map(() => '?').join(', ');
-    const rows = await env.DB.prepare(
-      `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
-    ).bind(...mail.user_ids).all();
-    const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+    const rate = await loadStaffMailRate(env, auth.user.id);
+    if (!rate.ok) return jsonResponse({ detail: rate.detail }, rate.status);
 
-    const results = [];
-    for (const user of users) {
-      const email = String(user.username).trim().toLowerCase();
-      try {
-        await sendAdminUserMail(env, {
-          to: email,
-          replyTo: sender.replyTo,
-          fromName: sender.fromName,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text || htmlToPlainText(mail.html),
-          attachments: mail.attachments,
-        });
-        results.push({ user_id: user.id, email, ok: true });
-      } catch (error) {
-        results.push({ user_id: user.id, email, ok: false, error: String(error?.message || error || 'Send failed') });
-      }
+    const userRows = await env.DB.prepare(
+      'SELECT id, username, display_name, active FROM users WHERE active = 1',
+    ).all();
+    const usersByEmail = new Map();
+    for (const user of userRows.results || []) {
+      const email = String(user.username || '').trim().toLowerCase();
+      if (isValidEmail(email)) usersByEmail.set(email, user);
     }
-    const sent = results.filter((item) => item.ok).length;
-    const failed = results.length - sent;
-    const status = failed && sent ? 207 : failed ? 502 : 200;
+
+    let sendResult = { ok: false, id: '' };
+    let sendError = '';
+    try {
+      sendResult = await sendAdminUserMail(env, {
+        to: mail.to,
+        cc: mail.cc,
+        bcc: mail.bcc,
+        replyTo: sender.replyTo,
+        fromName: sender.fromName,
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text || htmlToPlainText(mail.html),
+        attachments: mail.attachments,
+      });
+    } catch (error) {
+      sendError = String(error?.message || error || 'Send failed');
+    }
+
+    const ok = Boolean(sendResult?.ok !== false && !sendError);
+    const status = ok ? 200 : 502;
+    await recordStaffMailMessage(env, {
+      ownerUserId: auth.user.id,
+      status: ok ? 'sent' : 'failed',
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text || htmlToPlainText(mail.html),
+      to: mail.to,
+      cc: mail.cc,
+      bcc: mail.bcc,
+      attachments: mail.attachments,
+      resendId: sendResult?.id || '',
+      error: sendError,
+    });
+    await upsertStaffMailContacts(env, auth.user.id, mail.unique, { usersByEmail });
+
+    const recipients = mail.unique.map((email) => ({
+      user_id: usersByEmail.get(email)?.id ?? null,
+      email,
+    }));
     await writeAdminAuditLog(env, {
       action: 'mail.send',
       category: 'mail',
@@ -11369,27 +11565,32 @@ async function routeApi(request, env, url, ctx = null) {
         path: '/api/admin/mail',
         status,
         actorUsername: auth.user.username,
-        detail: `subject="${mail.subject}" sent=${sent} failed=${failed}`,
+        detail: `subject="${mail.subject}" to=${mail.to.length} cc=${mail.cc.length} bcc=${mail.bcc.length} ${ok ? 'sent' : 'failed'}`,
       }),
       meta: enrichMailAuditMeta({
         subject: mail.subject,
         html: mail.html,
         text: mail.text,
-        recipients: users.map((user) => ({ user_id: user.id, email: String(user.username).trim().toLowerCase() })),
+        recipients,
+        to: mail.to,
+        cc: mail.cc,
+        bcc: mail.bcc,
         attachments: mail.attachments,
         replyTo: sender.replyTo,
-        results,
+        results: [{ ok, error: sendError, resend_id: sendResult?.id || '' }],
       }),
     });
+    if (!ok) return jsonResponse({ ok: false, detail: sendError || 'Could not send email.' }, 502);
     return jsonResponse({
-      ok: failed === 0,
-      sent,
-      failed,
-      results,
-      detail: failed
-        ? `Sent ${sent} of ${results.length}. ${failed} failed.`
-        : `Sent to ${sent} recipient${sent === 1 ? '' : 's'}.`,
-    }, status);
+      ok: true,
+      sent: mail.unique.length,
+      failed: 0,
+      resend_id: sendResult?.id || '',
+      to: mail.to,
+      cc: mail.cc,
+      bcc: mail.bcc,
+      detail: `Sent to ${mail.unique.length} recipient${mail.unique.length === 1 ? '' : 's'}.`,
+    });
   }
 
   if (url.pathname === '/api/admin/events' && request.method === 'GET') {
@@ -12987,20 +13188,38 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
 </div>
 </section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create enlarged portrait badges (125% of CR80) for directors, officers, and committee members. Titles and names print larger for readability. Drag the photo in the live preview to center it, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form></div><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="947" height="1416" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">Print includes a 0.25 in white margin around the badge to avoid edge cropping. Drag the photo to center, then resize with the handle or slider.</p></div></aside>
 <div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><div class="badge-creator-list-toolbar"><p class="muted">Select up to 3 badges to print on one page (3 print in landscape). Or open one to edit, download, or print alone.</p><button class="btn primary" type="button" id="badge-creator-print-selected" disabled>Print selected <span id="badge-creator-print-selected-count"></span></button></div><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
-<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
-<div class="editor-layout">
+<div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with To, Cc, and Bcc. Replies go to your login email. Drafts stay in this browser only.</p></div></div>
+<div class="editor-layout mail-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
-<label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team"></label>
-<div class="mail-recipients">
-  <div class="mail-recipients-head">
-    <h2>Recipients</h2>
-    <div class="panel-actions">
-      <button class="btn outline" type="button" id="mail-select-all">Select all</button>
-      <button class="btn outline" type="button" id="mail-clear-all">Clear</button>
-    </div>
+<label>Subject<input name="subject" required maxlength="200" placeholder="Band update for the team" autocomplete="off"></label>
+<div class="mail-chip-field" data-mail-field="to">
+  <div class="mail-chip-head"><span>To</span></div>
+  <div class="mail-chip-row">
+    <div class="mail-chips" data-mail-chips></div>
+    <input type="text" data-mail-chip-input autocomplete="off" spellcheck="false" aria-label="To" placeholder="Name or email">
   </div>
-  <p class="muted">Users are emailed at their login username. Usernames must be valid email addresses.</p>
-  <div id="mail-recipients-list" class="mail-recipients-list"></div>
+  <p class="muted mail-to-hint">People in To and Cc can see each other. Use Bcc for a private send.</p>
+  <div class="mail-suggest" data-mail-suggest hidden></div>
+</div>
+<div class="mail-cc-bcc-toggle">
+  <button class="btn outline" type="button" id="mail-show-cc">Cc</button>
+  <button class="btn outline" type="button" id="mail-show-bcc">Bcc</button>
+</div>
+<div class="mail-chip-field" data-mail-field="cc" hidden>
+  <div class="mail-chip-head"><span>Cc</span></div>
+  <div class="mail-chip-row">
+    <div class="mail-chips" data-mail-chips></div>
+    <input type="text" data-mail-chip-input autocomplete="off" spellcheck="false" aria-label="Cc" placeholder="Name or email">
+  </div>
+  <div class="mail-suggest" data-mail-suggest hidden></div>
+</div>
+<div class="mail-chip-field" data-mail-field="bcc" hidden>
+  <div class="mail-chip-head"><span>Bcc</span></div>
+  <div class="mail-chip-row">
+    <div class="mail-chips" data-mail-chips></div>
+    <input type="text" data-mail-chip-input autocomplete="off" spellcheck="false" aria-label="Bcc" placeholder="Name or email">
+  </div>
+  <div class="mail-suggest" data-mail-suggest hidden></div>
 </div>
 <div class="mail-editor-block">
   <div class="mail-editor-label">Message</div>
@@ -13009,16 +13228,37 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
     <button type="button" data-mail-rich="italic" title="Italic"><i>I</i></button>
     <button type="button" data-mail-rich="underline" title="Underline"><u>U</u></button>
     <button type="button" data-mail-rich="insertUnorderedList" title="Bulleted list">• List</button>
+    <button type="button" data-mail-rich="insertOrderedList" title="Numbered list">1. List</button>
+    <button type="button" data-mail-cmd="link" title="Link">Link</button>
+    <button type="button" data-mail-block="h2" title="Heading">H2</button>
+    <button type="button" data-mail-block="h3" title="Subheading">H3</button>
+    <button type="button" data-mail-align="left" title="Align left">Left</button>
+    <button type="button" data-mail-align="center" title="Align center">Center</button>
+    <button type="button" data-mail-align="right" title="Align right">Right</button>
     <label class="rich-color" title="Text color"><span>Color</span><input type="color" id="mail-rich-color" value="#002142"></label>
+    <button type="button" data-mail-rich="removeFormat" title="Clear formatting">Clear</button>
   </div>
   <div id="mail-body" class="mail-body-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Email message" data-placeholder="Write your message…"></div>
 </div>
-<label class="full">Attachments <small>Optional · up to 5 files · 4 MB each · 10 MB total · PDF, Office, images, TXT, CSV, ZIP</small>
-  <input name="attachments" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,application/pdf,image/*">
+<label class="full">Attachments <small>Optional · up to 5 files · 4 MB total · PDF, images, Office, ZIP</small>
+  <input name="attachments" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.webp,.zip,application/pdf,image/*,application/zip">
 </label>
+<p class="muted" id="mail-attach-note">Drafts stay in this browser only. Attachments are not saved until you send.</p>
+<ul id="mail-attach-list" class="mail-attach-list" hidden></ul>
 <button class="btn primary" type="submit">Send email</button>
 <p class="status" id="mail-status"></p>
 </form>
+<aside class="admin-card stack mail-side">
+  <div class="mail-address-book">
+    <h2>Address book</h2>
+    <input id="mail-book-search" type="search" placeholder="Search people" autocomplete="off">
+    <div id="mail-address-book-list" class="mail-address-book-list"></div>
+  </div>
+  <div class="mail-sent">
+    <h2>Sent</h2>
+    <div id="mail-sent-list" class="mail-sent-list"></div>
+  </div>
+</aside>
 </div>
 </section>
 <section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>

@@ -985,17 +985,26 @@ export function enrichMailAuditMeta({
   html = '',
   text = '',
   recipients = [],
+  to = [],
+  cc = [],
+  bcc = [],
   attachments = [],
   replyTo = '',
   results = [],
 } = {}) {
   const bodyText = String(text || '').trim()
     || String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const emails = (list) => (Array.isArray(list) ? list : []).map((item) => (
+    String(typeof item === 'object' && item ? (item.email || '') : item).trim().toLowerCase()
+  )).filter(Boolean);
   return {
     subject: String(subject || '').trim(),
     reply_to: String(replyTo || '').trim(),
     body_excerpt: bodyText.slice(0, 1500),
     body_length: bodyText.length,
+    to: emails(to),
+    cc: emails(cc),
+    bcc: emails(bcc),
     recipients: (Array.isArray(recipients) ? recipients : []).map((item) => ({
       user_id: item?.user_id ?? null,
       email: String(item?.email || '').trim().toLowerCase(),
@@ -1010,6 +1019,7 @@ export function enrichMailAuditMeta({
       email: String(item?.email || '').trim().toLowerCase(),
       ok: Boolean(item?.ok),
       error: item?.error ? String(item.error) : '',
+      resend_id: item?.resend_id ? String(item.resend_id) : '',
     })),
   };
 }
