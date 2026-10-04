@@ -421,6 +421,9 @@ function maintenanceModeEnabled(site) {
 (function enforceMaintenanceMode() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   if (path === '/maintenance' || path.endsWith('/maintenance.html')) return;
+  // Server already decided this Super Admin may preview. Never bounce them
+  // to /maintenance.html or a missing efhs_li cookie starts a redirect loop.
+  if (document.body?.classList.contains('maintenance-preview')) return;
 
   const embedded = readBootstrapSite();
   const sitePromise = embedded
@@ -436,6 +439,7 @@ function maintenanceModeEnabled(site) {
       .then((session) => ({ enabled: true, session }));
   }).then((state) => {
     if (!state || !state.enabled) return;
+    if (document.body?.classList.contains('maintenance-preview')) return;
     if (state.session && state.session.is_super_admin) {
       ensureMaintenancePreviewBanner();
       return;

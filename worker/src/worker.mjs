@@ -348,7 +348,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-rc-20261004c';
+export const ASSET_VERSION = 'cms-rc-20261004d';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1813,6 +1813,13 @@ export function applyAuthCookies(response, { token = '', maxAge = 0 } = {}) {
   const age = loggedIn ? maxAge : 0;
   response.headers.append('Set-Cookie', sessionCookieHeader(token, { maxAge: age }));
   response.headers.append('Set-Cookie', loginHintCookieHeader(loggedIn, { maxAge: age }));
+  return response;
+}
+
+export function attachLoginHintIfNeeded(request, response, user) {
+  if (!response || !user) return response;
+  if (getCookie(request, LOGIN_HINT_COOKIE) === '1') return response;
+  response.headers.append('Set-Cookie', loginHintCookieHeader(true));
   return response;
 }
 
@@ -8666,6 +8673,8 @@ async function routeApi(request, env, url, ctx = null) {
     });
     if (!user) {
       response.headers.append('Set-Cookie', loginHintCookieHeader(false));
+    } else {
+      attachLoginHintIfNeeded(request, response, user);
     }
     return response;
   }
@@ -11572,9 +11581,13 @@ async function routeApi(request, env, url, ctx = null) {
 }
 
 const PHOTO_BYTE_CACHE_VERSION = 'blob-1';
-// Browsers may keep a copy for a day. s-maxage=0 keeps the CF edge from
-// holding student photos after delete; the Worker Cache API still decodes once per colo.
+// Client/edge: browsers may keep a day. s-maxage=0 keeps the CF HTTP cache from
+// holding deleted student photos. caches.default.put() honors Cache-Control, so
+// a stored copy must use its own TTL or the put is a no-op.
+// purgeUploadCache only clears this colo; PHOTO_CACHE_API_TTL is the cross-colo
+// bound after delete (keep it at 1 hour or less).
 export const PHOTO_BROWSER_CACHE = 'public, max-age=86400, s-maxage=0';
+export const PHOTO_CACHE_API_TTL = 'public, s-maxage=3600';
 
 function uploadFilenameFromUrl(url) {
   const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
@@ -11612,10 +11625,28 @@ export async function purgeUploadCache(photo = {}) {
   await Promise.all(keys.map((request) => caches.default.delete(request).catch(() => false)));
 }
 
+function uploadResponseHeaders(cacheControl, contentType) {
+  return {
+    'content-type': contentType || 'application/octet-stream',
+    'cache-control': cacheControl,
+  };
+}
+
+function clientUploadResponse(hit) {
+  if (!hit) return null;
+  const headers = new Headers(hit.headers);
+  headers.set('cache-control', PHOTO_BROWSER_CACHE);
+  return new Response(hit.body, {
+    status: hit.status,
+    statusText: hit.statusText,
+    headers,
+  });
+}
+
 export async function matchUploadCache(url) {
   if (typeof caches === 'undefined' || !caches?.default) return null;
   try {
-    return await caches.default.match(uploadCacheRequest(url)) || null;
+    return clientUploadResponse(await caches.default.match(uploadCacheRequest(url))) || null;
   } catch {
     return null;
   }
@@ -11642,14 +11673,15 @@ async function handleUploadGet(request, env, url, ctx = null) {
   try {
     const bytes = photoBytesFromStored(row.data_base64);
     if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+    const contentType = row.content_type || 'application/octet-stream';
     const response = new Response(bytes, {
-      headers: {
-        'content-type': row.content_type || 'application/octet-stream',
-        'cache-control': PHOTO_BROWSER_CACHE,
-      },
+      headers: uploadResponseHeaders(PHOTO_BROWSER_CACHE, contentType),
     });
     if (typeof caches !== 'undefined' && caches?.default) {
-      const stored = caches.default.put(cacheKey, response.clone()).catch(() => {});
+      const stored = caches.default.put(
+        cacheKey,
+        new Response(bytes, { headers: uploadResponseHeaders(PHOTO_CACHE_API_TTL, contentType) }),
+      ).catch(() => {});
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(stored);
     }
     return response;
@@ -11760,8 +11792,9 @@ async function handleLogin(request, env) {
 
 async function handleAdmin(request, env) {
   await initDb(env);
-  if (!(await currentUser(request, env))) return redirect('/admin/login');
-  return htmlResponse(ADMIN_HTML);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  return attachLoginHintIfNeeded(request, htmlResponse(ADMIN_HTML), user);
 }
 
 async function handleVisualEditorPage(request, env) {
@@ -11771,7 +11804,7 @@ async function handleVisualEditorPage(request, env) {
   if (!canEditVisualPilot(user, canEditPage)) {
     return htmlResponse('<!doctype html><title>Not allowed</title><p>Permission required: page:join</p>', 403);
   }
-  return htmlResponse(renderVisualEditorHtml(ASSET_VERSION));
+  return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION)), user);
 }
 
 async function logout(request, env) {
@@ -12169,42 +12202,43 @@ async function serveStaticOrCms(request, env, url) {
   const user = await currentUser(request, env);
   const loggedIn = Boolean(user);
   const superAdmin = loggedIn && isSuperAdmin(user);
+  const withHint = (response) => attachLoginHintIfNeeded(request, response, user);
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
       const returnTo = readMaintenanceReturnPath(request);
-      return new Response(null, {
+      return withHint(new Response(null, {
         status: 302,
         headers: {
           location: returnTo || '/',
           'cache-control': 'no-store',
           'set-cookie': clearMaintenanceReturnCookie(),
         },
-      });
+      }));
     }
     // Super admins preview the real site; everyone else stays on the public maintenance page.
     if (superAdmin) {
-      return new Response(null, {
+      return withHint(new Response(null, {
         status: 302,
         headers: {
           location: '/',
           'cache-control': 'no-store',
         },
-      });
+      }));
     }
-    return htmlResponse(renderMaintenancePage(site));
+    return withHint(htmlResponse(renderMaintenancePage(site)));
   }
   // Public + non-super-admin users get the maintenance page. Super admins can preview.
   if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
-    return new Response(null, {
+    return withHint(new Response(null, {
       status: 302,
       headers: {
         location: '/maintenance.html',
         'cache-control': 'no-store',
         'set-cookie': maintenanceReturnCookie(returnPath),
       },
-    });
+    }));
   }
   const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
@@ -12251,7 +12285,7 @@ async function serveStaticOrCms(request, env, url) {
       if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
         livePage.letterman_copy = await getLettermanFormCopy(env);
       }
-      return htmlResponse(renderCmsPage(livePage, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
+      return withHint(htmlResponse(renderCmsPage(livePage, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
         photos,
@@ -12267,7 +12301,7 @@ async function serveStaticOrCms(request, env, url) {
           deadlineBanners,
           square: publicSquarePublishableConfig(env),
         },
-      }));
+      })));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);

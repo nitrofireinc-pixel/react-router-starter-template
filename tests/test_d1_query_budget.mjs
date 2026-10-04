@@ -298,6 +298,7 @@ test('photo cache headers and purge rules stay on the Free-plan path', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const clientSrc = readFileSync(join(root, 'site-content.js'), 'utf8');
   assert.match(workerSrc, /max-age=86400, s-maxage=0/);
+  assert.match(workerSrc, /PHOTO_CACHE_API_TTL = 'public, s-maxage=3600'/);
   assert.match(workerSrc, /needsPhotos: pageIsLive && \(isHome \|\| page\.slug === 'gallery'\)/);
   assert.match(workerSrc, /shouldInvalidatePublicReadCache/);
   assert.match(workerSrc, /matchUploadCache/);

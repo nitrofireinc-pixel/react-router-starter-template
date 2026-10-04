@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache, isWorkerStaticAssetPath, publicPhotoUrl, shouldInvalidatePublicReadCache, loginHintCookieHeader, LOGIN_HINT_COOKIE, applyAuthCookies, uploadCacheRequest, uploadCacheKeysForPhoto, PHOTO_BROWSER_CACHE } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache, isWorkerStaticAssetPath, publicPhotoUrl, shouldInvalidatePublicReadCache, loginHintCookieHeader, LOGIN_HINT_COOKIE, applyAuthCookies, attachLoginHintIfNeeded, uploadCacheRequest, uploadCacheKeysForPhoto, PHOTO_BROWSER_CACHE, PHOTO_CACHE_API_TTL, makeSession } from '../worker/src/worker.mjs';
+import worker from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2328,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261004c'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-rc-20261004d'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3488,13 +3489,224 @@ test('upload cache keys ignore junk v and photo delete purges Cache API entries'
   assert.equal(plain.url, junk.url);
   assert.equal(plain.url, canon.url);
   assert.equal(PHOTO_BROWSER_CACHE, 'public, max-age=86400, s-maxage=0');
+  assert.equal(PHOTO_CACHE_API_TTL, 'public, s-maxage=3600');
   const photo = { id: 12, filename: 'flyer.jpg', created_at: '2026-10-03T12:00:00.000Z' };
   const keys = uploadCacheKeysForPhoto(photo).map((request) => request.url);
   assert.equal(keys.includes(plain.url), true);
   assert.equal(keys.some((url) => url.includes('v=12-')), true);
   assert.match(workerSrc, /await purgeUploadCache\(photo\)/);
+  assert.match(workerSrc, /PHOTO_CACHE_API_TTL/);
   assert.match(scriptSrc, /function hasLoginHint/);
   assert.match(scriptSrc, /if \(!hasLoginHint\(\)\) return;/);
+  assert.match(scriptSrc, /classList.contains\('maintenance-preview'\)/);
+});
+
+function setCookieList(response) {
+  if (typeof response.headers.getSetCookie === 'function') return response.headers.getSetCookie();
+  const raw = response.headers.get('set-cookie');
+  return raw ? [raw] : [];
+}
+
+function createMemoryCache() {
+  const store = new Map();
+  return {
+    store,
+    default: {
+      async match(request) {
+        const row = store.get(request.url);
+        if (!row) return null;
+        return new Response(row.body, { status: row.status, statusText: row.statusText, headers: new Headers(row.headers) });
+      },
+      async put(request, response) {
+        store.set(request.url, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: [...response.headers],
+          body: await response.arrayBuffer(),
+        });
+      },
+      async delete(request) {
+        return store.delete(request.url);
+      },
+    },
+  };
+}
+
+function createRcFixEnv({
+  maintenanceOn = false,
+  user = null,
+  photo = null,
+} = {}) {
+  let photoQueries = 0;
+  const page = {
+    id: 1,
+    slug: 'home',
+    path: '/',
+    title: 'Home',
+    body_html: '<section class="content"><div class="wrap"><p>Home</p></div></section>',
+    nav_order: 1,
+    is_home: 1,
+    active: 1,
+  };
+  const handleSql = (sql, type, binds = []) => {
+    const text = String(sql || '');
+    if (type === 'first' && text.includes('FROM site_content WHERE key')) {
+      return { value: '2026-10-03.1' };
+    }
+    if (text.includes('FROM site_content WHERE key IN')) {
+      return {
+        results: [
+          { key: 'title', value: 'East Forsyth Band' },
+          { key: 'maintenance_mode', value: maintenanceOn ? '1' : '0' },
+        ],
+      };
+    }
+    if (text.includes('FROM users WHERE id')) {
+      return user && Number(binds[0]) === Number(user.id) ? user : null;
+    }
+    if (text.includes('FROM cms_pages WHERE path')) {
+      const match = binds[0] === '/' ? page : null;
+      return type === 'first' ? match : { results: match ? [match] : [] };
+    }
+    if (text.includes('FROM cms_pages')) {
+      return type === 'first' ? page : { results: [page] };
+    }
+    if (text.includes('FROM photos WHERE filename')) {
+      photoQueries += 1;
+      return photo || null;
+    }
+    if (text.includes('FROM photos')) {
+      return type === 'first' ? null : { results: [] };
+    }
+    return type === 'first' ? null : { results: [] };
+  };
+  const statement = (sql) => ({
+    sql,
+    binds: [],
+    bind(...args) {
+      this.binds = args;
+      return this;
+    },
+    async first() {
+      return handleSql(this.sql, 'first', this.binds);
+    },
+    async all() {
+      return handleSql(this.sql, 'all', this.binds);
+    },
+    async run() {
+      return { success: true };
+    },
+  });
+  const session = {
+    prepare: (sql) => statement(sql),
+    async batch(items) {
+      return (items || []).map((item) => handleSql(item.sql, 'all', item.binds || []));
+    },
+    getBookmark() {
+      return 'bookmark';
+    },
+  };
+  return {
+    photoQueries: () => photoQueries,
+    resetPhotoQueries() {
+      photoQueries = 0;
+    },
+    env: {
+      EFBAND_SECRET: 'test-session-secret',
+      DB: {
+        withSession() {
+          return session;
+        },
+        prepare: session.prepare,
+        batch: session.batch,
+      },
+      ASSETS: {
+        async fetch() {
+          return new Response('missing', { status: 404 });
+        },
+      },
+    },
+  };
+}
+
+test('maintenance preview with a valid session and no hint cookie stays put and reissues efhs_li', async () => {
+  resetDbInitCache();
+  const user = {
+    id: 5,
+    username: 'agent@efhsband.org',
+    display_name: 'Agent',
+    password_hash: 'x',
+    role: 'admin',
+    permissions: '[]',
+    active: 1,
+  };
+  const boxed = createRcFixEnv({ maintenanceOn: true, user });
+  const token = await makeSession(user, boxed.env);
+  const request = new Request('https://efhsband-dev.example/', {
+    headers: { cookie: `efband_session=${token}` },
+  });
+  const response = await worker.fetch(request, boxed.env, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /maintenance-preview/);
+  assert.match(html, /data-maintenance-preview-banner/);
+  assert.doesNotMatch(html, /location\.replace\('\/maintenance\.html'\)/);
+  const cookies = setCookieList(response);
+  assert.equal(cookies.some((row) => row.startsWith('efhs_li=1') && /SameSite=Lax/.test(row) && /Secure/.test(row) && !/HttpOnly/.test(row)), true);
+
+  const bounced = await worker.fetch(new Request('https://efhsband-dev.example/maintenance.html', {
+    headers: { cookie: `efband_session=${token}` },
+  }), boxed.env, { waitUntil() {} });
+  assert.equal(bounced.status, 302);
+  assert.equal(bounced.headers.get('location'), '/');
+  assert.equal(setCookieList(bounced).some((row) => row.startsWith('efhs_li=1')), true);
+
+  const hinted = new Response(null);
+  attachLoginHintIfNeeded(request, hinted, user);
+  assert.equal(setCookieList(hinted).some((row) => row.startsWith('efhs_li=1')), true);
+  const already = new Request('https://efhsband-dev.example/', {
+    headers: { cookie: `efband_session=${token}; efhs_li=1` },
+  });
+  const skip = new Response(null);
+  attachLoginHintIfNeeded(already, skip, user);
+  assert.equal(setCookieList(skip).length, 0);
+});
+
+test('second /uploads fetch is served from Cache API with zero D1 queries', async () => {
+  resetDbInitCache();
+  const previousCaches = globalThis.caches;
+  const memory = createMemoryCache();
+  globalThis.caches = memory;
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const boxed = createRcFixEnv({
+    photo: { content_type: 'image/png', data_base64: bytes },
+  });
+  const pending = [];
+  const ctx = {
+    waitUntil(task) {
+      pending.push(Promise.resolve(task));
+    },
+  };
+  try {
+    const first = await worker.fetch(new Request('https://efhsband-dev.example/uploads/proof.png'), boxed.env, ctx);
+    await Promise.all(pending);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), PHOTO_BROWSER_CACHE);
+    assert.ok(boxed.photoQueries() >= 1);
+    const stored = [...memory.store.values()][0];
+    assert.ok(stored, 'Cache API should keep a photo copy');
+    assert.equal(new Headers(stored.headers).get('cache-control'), PHOTO_CACHE_API_TTL);
+
+    boxed.resetPhotoQueries();
+    pending.length = 0;
+    const second = await worker.fetch(new Request('https://efhsband-dev.example/uploads/proof.png?v=junk'), boxed.env, ctx);
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get('cache-control'), PHOTO_BROWSER_CACHE);
+    assert.equal(boxed.photoQueries(), 0, 'second fetch must not read D1');
+    assert.equal((await second.arrayBuffer()).byteLength, bytes.byteLength);
+  } finally {
+    globalThis.caches = previousCaches;
+  }
 });
 
 test('initDb migrates when site_content table is missing', async () => {
