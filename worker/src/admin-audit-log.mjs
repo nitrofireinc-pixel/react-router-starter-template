@@ -51,6 +51,7 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'change.photos',
   'change.contact',
   'change.site',
+  'change.maintenance',
   'change.mail',
   'change.badges',
   'change.forms',
@@ -67,6 +68,7 @@ export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
   { method: 'PUT', path: '/api/admin/forms/4', logger: 'generic', action: 'change.forms' },
   { method: 'DELETE', path: '/api/admin/forms/4', logger: 'generic', action: 'change.forms' },
   { method: 'POST', path: '/api/admin/site', logger: 'generic', action: 'change.site' },
+  { method: 'POST', path: '/api/admin/maintenance', logger: 'explicit', action: 'change.maintenance' },
   { method: 'PUT', path: '/api/admin/utility-links', logger: 'generic', action: 'change.site' },
   { method: 'PUT', path: '/api/admin/social-links', logger: 'generic', action: 'change.site' },
   { method: 'DELETE', path: '/api/admin/zernio/facebook', logger: 'generic', action: 'change.site' },
@@ -248,6 +250,7 @@ export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   // Password and user grant changes write explicit forensic rows.
   if (path === '/api/admin/password') return false;
   if (path === '/api/admin/users' || path.startsWith('/api/admin/users/')) return false;
+  if (path === '/api/admin/maintenance') return false;
   return isMutatingHttpMethod(method);
 }
 
@@ -271,7 +274,7 @@ export function auditCategoryFromPath(pathname = '') {
     || path.includes('/ensembles')
     || path.includes('/fundraising')
   ) return 'pages';
-  if (path.includes('/site') || path.includes('/logo') || path.includes('/utility-links') || path.includes('/social') || path.includes('/zernio')) return 'site';
+  if (path.includes('/maintenance') || path.includes('/site') || path.includes('/logo') || path.includes('/utility-links') || path.includes('/social') || path.includes('/zernio')) return 'site';
   return 'admin';
 }
 

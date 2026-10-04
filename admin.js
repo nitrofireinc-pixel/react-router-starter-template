@@ -557,7 +557,7 @@ function formPayload(form) {
   const active = formControl(form, 'active');
   if (active) payload.active = Boolean(active.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
-  if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
+  if (maintenanceMode) delete payload.maintenance_mode;
   const boostersDuesEnabled = formControl(form, 'boosters_dues_enabled');
   if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
   const notifyEmail = formControl(form, 'notify_email_subscribers');
@@ -3749,6 +3749,8 @@ async function loadSite() {
   state.site = await jsonFetch('/api/site');
   const duesSetting = document.querySelector('[data-boosters-dues-setting]');
   if (duesSetting) duesSetting.hidden = !isSuperAdmin();
+  const maintenanceSetting = document.querySelector('[data-maintenance-mode-setting]');
+  if (maintenanceSetting) maintenanceSetting.hidden = !isSuperAdmin();
   const form = document.querySelector('#site-form');
   fillForm(form, state.site);
   fillErrorPagesForm(form, state.site?.error_pages);
@@ -7758,9 +7760,11 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#site-status');
     const payload = formPayload(form);
-    payload.maintenance_mode = Boolean(form.elements.maintenance_mode?.checked);
-    if (form.elements.boosters_dues_enabled) {
+    delete payload.maintenance_mode;
+    if (isSuperAdmin() && form.elements.boosters_dues_enabled) {
       payload.boosters_dues_enabled = Boolean(form.elements.boosters_dues_enabled.checked);
+    } else {
+      delete payload.boosters_dues_enabled;
     }
     payload.error_pages = collectErrorPages(form);
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
@@ -7773,9 +7777,32 @@ function bindForms() {
           ? ' Band dues card is visible on Boosters.'
           : ' Band dues card is hidden on Boosters.')
         : '';
-      status.textContent = saved.maintenance_mode
-        ? `Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.${duesNote}`
-        : `Saved. The public site is live again.${duesNote}`;
+      status.textContent = `Saved.${duesNote}`;
+    }
+  });
+
+  const maintenanceToggle = document.querySelector('#site-form [name="maintenance_mode"]');
+  maintenanceToggle?.addEventListener('change', async () => {
+    if (!isSuperAdmin()) {
+      maintenanceToggle.checked = Boolean(state.site?.maintenance_mode);
+      return;
+    }
+    const status = document.querySelector('#site-status');
+    const enabled = Boolean(maintenanceToggle.checked);
+    try {
+      const saved = await jsonFetch('/api/admin/maintenance', {
+        method: 'POST',
+        body: JSON.stringify({ maintenance_mode: enabled }),
+      });
+      state.site = saved;
+      if (status) {
+        status.textContent = saved.maintenance_mode
+          ? 'Maintenance mode on. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
+          : 'Maintenance mode off. The public site is live again.';
+      }
+    } catch (error) {
+      maintenanceToggle.checked = Boolean(state.site?.maintenance_mode);
+      if (status) status.textContent = error?.message || 'Could not change maintenance mode.';
     }
   });
 

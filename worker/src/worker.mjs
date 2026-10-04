@@ -407,7 +407,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004w';
+export const ASSET_VERSION = 'cms-p1-20261004x';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -589,6 +589,11 @@ const PRIVILEGED_PERMISSIONS = new Set(['all']);
 /** Page slug, path, nav order, and home flag are Site Admin / Super Admin only. */
 export function canManagePageSettings(user) {
   return isSuperAdmin(user) || hasPermission(user, 'pages');
+}
+
+/** Maintenance mode is Super Admin only — never the `site` grant. */
+export function canToggleMaintenanceMode(user) {
+  return isSuperAdmin(user);
 }
 
 export function lockPageSettingsToExisting(page, existing) {
@@ -8153,6 +8158,40 @@ export function canDeleteMeetingMinutes(user) {
   return Boolean(user) && isSuperAdmin(user);
 }
 
+async function writeMaintenanceAudit(env, request, user, {
+  status,
+  previous = null,
+  enabled = null,
+  detail = '',
+} = {}) {
+  const path = (() => {
+    try { return new URL(request.url).pathname; } catch { return '/api/admin/maintenance'; }
+  })();
+  await writeAdminAuditLog(env, {
+    action: 'change.maintenance',
+    category: 'site',
+    method: String(request?.method || 'POST').toUpperCase(),
+    path,
+    status,
+    actor_user_id: user?.id,
+    actor_username: user?.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action: 'change.maintenance',
+      method: String(request?.method || 'POST').toUpperCase(),
+      path,
+      status,
+      actorUsername: user?.username,
+      detail,
+    }),
+    meta: {
+      previous: previous == null ? null : (previous ? 1 : 0),
+      enabled: enabled == null ? null : (enabled ? 1 : 0),
+    },
+  });
+}
+
 export async function sha256Hex(value) {
   const buf = await crypto.subtle.digest('SHA-256', TEXT.encode(String(value || '')));
   return [...new Uint8Array(buf)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -10344,10 +10383,65 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(started, 201);
   }
 
+  if (url.pathname === '/api/admin/maintenance' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const site = await getSite(env);
+    const previous = isMaintenanceMode(site);
+    const enabled = isMaintenanceMode({
+      maintenance_mode: payload.maintenance_mode !== undefined ? payload.maintenance_mode : payload.enabled,
+    });
+    if (!canToggleMaintenanceMode(auth.user)) {
+      await writeMaintenanceAudit(env, request, auth.user, {
+        status: 403,
+        previous,
+        enabled,
+        detail: 'Only Super Admins can change maintenance mode.',
+      });
+      return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
+    }
+    await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+      .bind('maintenance_mode', enabled ? '1' : '0')
+      .run();
+    await writeMaintenanceAudit(env, request, auth.user, {
+      status: 200,
+      previous,
+      enabled,
+      detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+    });
+    return jsonResponse(await getSite(env));
+  }
+
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const payload = await request.json();
+    if (payload.maintenance_mode !== undefined) {
+      const site = await getSite(env);
+      const previous = isMaintenanceMode(site);
+      const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode });
+      if (!canToggleMaintenanceMode(auth.user)) {
+        await writeMaintenanceAudit(env, request, auth.user, {
+          status: 403,
+          previous,
+          enabled,
+          detail: 'Only Super Admins can change maintenance mode.',
+        });
+        return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
+      }
+      if (enabled !== previous) {
+        await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+          .bind('maintenance_mode', enabled ? '1' : '0')
+          .run();
+        await writeMaintenanceAudit(env, request, auth.user, {
+          status: 200,
+          previous,
+          enabled,
+          detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+        });
+      }
+    }
     for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url']) {
       if (payload[key] === undefined) continue;
       let value = String(payload[key]);
@@ -10356,10 +10450,6 @@ async function routeApi(request, env, url, ctx = null) {
         value = looksLikeHtml(value) ? sanitizeRichHtml(value) : value;
       }
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run();
-    }
-    if (payload.maintenance_mode !== undefined) {
-      const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
-      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
     if (payload.error_pages !== undefined) {
       const packed = normalizeErrorPages(payload.error_pages);
@@ -13718,7 +13808,7 @@ __ADMIN_SIDEBAR__
     <label class="full">429 copy<input name="error_429_copy" maxlength="280"></label>
   </div>
 </div>
-<div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">

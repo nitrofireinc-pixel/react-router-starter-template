@@ -27,6 +27,7 @@ import worker, {
   canManageMeetingMinutes,
   canManagePageSettings,
   canPreviewUnpublishedCmsPage,
+  canToggleMaintenanceMode,
   canViewMeetingMinutes,
   DB_SCHEMA_VERSION,
   isDeliberateComingSoonPage,
@@ -435,7 +436,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit.admin_after_window'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.delete'));
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004w'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004x'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
@@ -524,6 +525,119 @@ test('inactive CMS pages 404 unless Coming Soon or an editor previews', () => {
   assert.equal(canPreviewUnpublishedCmsPage(stranger, ensembles), false);
   assert.match(workerSrc, /if \(!shouldServePublicCmsPage\(page, user\)\)/);
   assert.match(workerSrc, /renderPublicNotFound/);
+});
+
+test('maintenance mode is Super Admin only and hidden from site editors', () => {
+  assert.equal(canToggleMaintenanceMode({ role: 'admin', permissions: [] }), true);
+  assert.equal(canToggleMaintenanceMode({ role: 'editor', permissions: ['site'] }), false);
+  assert.equal(canToggleMaintenanceMode({ role: 'editor', permissions: ['pages'] }), false);
+  assert.equal(canToggleMaintenanceMode(null), false);
+  assert.equal(shouldAuditAdminApiRequest('/api/admin/maintenance', 'POST'), false);
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('change.maintenance'));
+  assert.match(workerSrc, /data-maintenance-mode-setting hidden/);
+  assert.match(workerSrc, /Only Super Admins can change maintenance mode/);
+  assert.match(adminJs, /data-maintenance-mode-setting/);
+  assert.match(adminJs, /maintenanceSetting\.hidden = !isSuperAdmin\(\)/);
+  assert.match(adminJs, /\/api\/admin\/maintenance/);
+  assert.match(adminJs, /delete payload\.maintenance_mode/);
+});
+
+test('site editors cannot toggle maintenance mode; Super Admin can', async () => {
+  resetDbInitCache();
+  const site = new Map([
+    ['maintenance_mode', '0'],
+    ['title', 'East Forsyth Band'],
+  ]);
+  const editor = {
+    id: 20,
+    username: 'site-editor@efhsband.org',
+    display_name: 'Site Editor',
+    password_hash: 'x',
+    role: 'editor',
+    permissions: JSON.stringify(['site']),
+    active: 1,
+  };
+  const admin = {
+    id: 1,
+    username: 'admin@efhsband.org',
+    display_name: 'Admin',
+    password_hash: 'x',
+    role: 'admin',
+    permissions: JSON.stringify([]),
+    active: 1,
+  };
+  const audits = [];
+  const users = new Map([[editor.id, editor], [admin.id, admin]]);
+  const env = {
+    EFBAND_SECRET: 'test-session-secret',
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (q.includes('FROM site_content WHERE key') && !q.includes('IN (')) {
+              return { value: DB_SCHEMA_VERSION };
+            }
+            if (q.includes('FROM users WHERE id')) return users.get(Number(this.binds[0])) || null;
+            if (q.includes('FROM site_content') && q.includes('key =')) {
+              return { value: site.get(this.binds[0]) || '' };
+            }
+            if (q.includes('FROM admin_audit_log')) return null;
+            return null;
+          },
+          async all() {
+            if (q.includes('FROM site_content')) {
+              return { results: [...site.entries()].map(([key, value]) => ({ key, value })) };
+            }
+            return { results: [] };
+          },
+          async run() {
+            if (q.includes('INSERT INTO site_content') && this.binds[0] === 'maintenance_mode') {
+              site.set('maintenance_mode', String(this.binds[1]));
+            }
+            if (q.includes('INSERT INTO admin_audit_log')) {
+              audits.push({ action: this.binds.find((value) => value === 'change.maintenance') || 'logged' });
+            }
+            return { success: true };
+          },
+        };
+      },
+      async batch() { return []; },
+    },
+    ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
+  };
+
+  const editorCookie = `efband_session=${await makeSession({ id: editor.id, username: editor.username }, env)}`;
+  const denied = await worker.fetch(new Request('https://efhsband.org/api/admin/maintenance', {
+    method: 'POST',
+    headers: { cookie: editorCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ maintenance_mode: true }),
+  }), env, { waitUntil() {} });
+  assert.equal(denied.status, 403);
+  assert.deepEqual(await denied.json(), { detail: 'Only Super Admins can change maintenance mode.' });
+  assert.equal(site.get('maintenance_mode'), '0');
+
+  const siteSave = await worker.fetch(new Request('https://efhsband.org/api/admin/site', {
+    method: 'POST',
+    headers: { cookie: editorCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Hack', maintenance_mode: true }),
+  }), env, { waitUntil() {} });
+  assert.equal(siteSave.status, 403);
+  assert.deepEqual(await siteSave.json(), { detail: 'Only Super Admins can change maintenance mode.' });
+  assert.equal(site.get('maintenance_mode'), '0');
+
+  const adminCookie = `efband_session=${await makeSession({ id: admin.id, username: admin.username }, env)}`;
+  const allowed = await worker.fetch(new Request('https://efhsband.org/api/admin/maintenance', {
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ maintenance_mode: true }),
+  }), env, { waitUntil() {} });
+  assert.equal(allowed.status, 200);
+  const saved = await allowed.json();
+  assert.equal(Number(saved.maintenance_mode), 1);
+  assert.equal(site.get('maintenance_mode'), '1');
 });
 
 test('minutes PUT without minutes:edit returns Permission required, not the 48h window', async () => {

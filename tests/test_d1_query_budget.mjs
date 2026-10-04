@@ -323,5 +323,6 @@ test('photo cache headers and purge rules stay on the Free-plan path', () => {
   assert.match(clientSrc, /data-photo-gallery/);
   assert.equal(shouldInvalidatePublicReadCache('/api/email-subscribe', 'POST'), false);
   assert.equal(shouldInvalidatePublicReadCache('/api/admin/site', 'POST'), true);
+  assert.equal(shouldInvalidatePublicReadCache('/api/admin/maintenance', 'POST'), true);
   assert.match(publicPhotoUrl({ id: 1, filename: 'a.jpg', created_at: '2026-01-01' }), /\?v=1-/);
 });
