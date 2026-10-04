@@ -456,7 +456,7 @@
   function renderVersions(versions) {
     if (!historyDrawer) return;
     const rows = Array.isArray(versions) ? versions : [];
-    historyDrawer.innerHTML = `<div class="visual-add-drawer-head"><h2>History</h2><button type="button" data-visual-history-close>Close</button></div>${
+    historyDrawer.innerHTML = `<div class="visual-add-drawer-head"><h2>History</h2><button type="button" data-visual-history-close>Close</button></div><p>Keeps the last 20 saves.</p>${
       rows.length
         ? rows.map((row) => (
           `<button type="button" data-restore="${row.id}"><b>${row.kind === 'publish' ? 'Published' : 'Draft'}</b> <small>${formatHistoryTime(row.created_at)}${row.created_by_name ? ` · ${row.created_by_name}` : ''}</small></button>`
@@ -773,7 +773,10 @@
     }
   }
   document.querySelector('[data-visual-draft]')?.addEventListener('click', () => save('draft'));
-  document.querySelector('[data-visual-publish]')?.addEventListener('click', () => save('publish'));
+  document.querySelector('[data-visual-publish]')?.addEventListener('click', () => {
+    if (!window.confirm("Publishing replaces this page's content on the live page.")) return;
+    save('publish');
+  });
 
   function selectedImage() {
     const selected = editor.getSelected();

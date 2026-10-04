@@ -6,7 +6,7 @@
 
 export const VISUAL_PILOT_SLUG = 'join';
 export const VISUAL_PILOT_PATH = '/join.html';
-export const VISUAL_VERSION_LIMIT = 8;
+export const VISUAL_VERSION_LIMIT = 20;
 export const VISUAL_EDITOR_PATH = '/admin/visual/join';
 
 export function isVisualPilotSlug(slug = '') {
@@ -197,7 +197,7 @@ export function sanitizeVisualCss(css = '') {
       const clean = sanitizeStyle(decls.replace(/[{}]/g, ''), tag);
       if (clean) rules.push(`${selector}{${clean}}`);
     }
-    return rules.join('');
+    return uniqueVisualCssRules(rules).join('');
   }
 
   while (index < source.length) {
@@ -224,7 +224,18 @@ export function sanitizeVisualCss(css = '') {
     const clean = sanitizeStyle(body.replace(/[{}]/g, ''), tag);
     if (clean) out.push(`${selector}{${clean}}`);
   }
-  return out.join('');
+  return uniqueVisualCssRules(out).join('');
+}
+
+function uniqueVisualCssRules(rules = []) {
+  const seen = new Set();
+  const unique = [];
+  for (const rule of rules) {
+    if (!rule || seen.has(rule)) continue;
+    seen.add(rule);
+    unique.push(rule);
+  }
+  return unique;
 }
 
 function attr(name, value) {

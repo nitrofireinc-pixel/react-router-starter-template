@@ -382,8 +382,13 @@ function applyStaffAuthNavState(loggedIn) {
   }
 }
 
+function hasLoginHint() {
+  return document.cookie.split(';').some((part) => part.trim() === 'efhs_li=1');
+}
+
 (function syncStaffAuthNavLink() {
   applyStaffAuthNavState(false);
+  if (!hasLoginHint()) return;
   fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
@@ -424,6 +429,7 @@ function maintenanceModeEnabled(site) {
   sitePromise.then((site) => {
     if (!maintenanceModeEnabled(site)) return { enabled: false };
     // Session is only needed when maintenance is on, to allow a Super Admin preview.
+    if (!hasLoginHint()) return { enabled: true, session: null };
     return fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
       .then((response) => (response.ok ? response.json() : null))
       .catch(() => null)

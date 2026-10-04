@@ -340,6 +340,7 @@ export function extractSponsorTierFields(html = '') {
 }
 
 const SESSION_COOKIE = 'efband_session';
+export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
@@ -347,7 +348,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-rc-20261004b';
+export const ASSET_VERSION = 'cms-rc-20261004c';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1797,6 +1798,22 @@ export function isSessionFresh(issuedAtSeconds, nowSeconds = Math.floor(Date.now
 export function sessionCookieHeader(token, { maxAge = SESSION_TTL_SECONDS } = {}) {
   const age = Math.max(0, Number(maxAge) || 0);
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+}
+
+export function loginHintCookieHeader(loggedIn, { maxAge = SESSION_TTL_SECONDS } = {}) {
+  if (loggedIn) {
+    const age = Math.max(1, Number(maxAge) || SESSION_TTL_SECONDS);
+    return `${LOGIN_HINT_COOKIE}=1; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+  }
+  return `${LOGIN_HINT_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+export function applyAuthCookies(response, { token = '', maxAge = 0 } = {}) {
+  const loggedIn = Boolean(token) && Number(maxAge) > 0;
+  const age = loggedIn ? maxAge : 0;
+  response.headers.append('Set-Cookie', sessionCookieHeader(token, { maxAge: age }));
+  response.headers.append('Set-Cookie', loginHintCookieHeader(loggedIn, { maxAge: age }));
+  return response;
 }
 
 async function currentUser(request, env) {
@@ -8643,10 +8660,14 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env);
-    return jsonResponse({
+    const response = jsonResponse({
       logged_in: Boolean(user),
       is_super_admin: Boolean(user) && isSuperAdmin(user),
     });
+    if (!user) {
+      response.headers.append('Set-Cookie', loginHintCookieHeader(false));
+    }
+    return response;
   }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     const today = easternTodayIso();
@@ -11535,6 +11556,7 @@ async function routeApi(request, env, url, ctx = null) {
         return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
       }
       await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      await purgeUploadCache(photo);
       return jsonResponse({ ok: true });
     }
     const meta = normalizePhotoMetaPayload(await request.json(), photo);
@@ -11550,13 +11572,44 @@ async function routeApi(request, env, url, ctx = null) {
 }
 
 const PHOTO_BYTE_CACHE_VERSION = 'blob-1';
-const PHOTO_BROWSER_CACHE = 'public, max-age=31536000, immutable';
+// Browsers may keep a copy for a day. s-maxage=0 keeps the CF edge from
+// holding student photos after delete; the Worker Cache API still decodes once per colo.
+export const PHOTO_BROWSER_CACHE = 'public, max-age=86400, s-maxage=0';
 
-export function uploadCacheRequest(url) {
+function uploadFilenameFromUrl(url) {
   const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
-  const filename = decodeURIComponent(parsed.pathname.replace(/^\/uploads\//, '').split('/')[0] || '');
+  return decodeURIComponent(parsed.pathname.replace(/^\/uploads\//, '').split('/')[0] || '');
+}
+
+function legacyUploadCacheRequest(url) {
+  const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
+  const filename = uploadFilenameFromUrl(parsed);
   const version = parsed.searchParams.get('v') || PHOTO_BYTE_CACHE_VERSION;
   return new Request(`https://efhsband.internal/uploads/${encodeURIComponent(filename)}?pcv=${PHOTO_BYTE_CACHE_VERSION}&v=${encodeURIComponent(version)}`);
+}
+
+export function uploadCacheRequest(url) {
+  const filename = uploadFilenameFromUrl(url);
+  return new Request(`https://efhsband.internal/uploads/${encodeURIComponent(filename)}?pcv=${PHOTO_BYTE_CACHE_VERSION}`);
+}
+
+export function uploadCacheKeysForPhoto(photo = {}) {
+  const filename = String(photo?.filename || '').trim();
+  if (!filename) return [];
+  const plain = `https://efhsband.internal/uploads/${encodeURIComponent(filename)}`;
+  const canonical = publicPhotoUrl(photo);
+  const keys = [
+    uploadCacheRequest(plain),
+    legacyUploadCacheRequest(plain),
+  ];
+  if (canonical) keys.push(legacyUploadCacheRequest(`https://efhsband.internal${canonical}`));
+  return keys;
+}
+
+export async function purgeUploadCache(photo = {}) {
+  if (typeof caches === 'undefined' || !caches?.default) return;
+  const keys = uploadCacheKeysForPhoto(photo);
+  await Promise.all(keys.map((request) => caches.default.delete(request).catch(() => false)));
 }
 
 export async function matchUploadCache(url) {
@@ -11585,10 +11638,10 @@ async function handleUploadGet(request, env, url, ctx = null) {
   } catch (error) {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   }
-  if (!row) return new Response('Not found', { status: 404 });
+  if (!row) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   try {
     const bytes = photoBytesFromStored(row.data_base64);
-    if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404 });
+    if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
     const response = new Response(bytes, {
       headers: {
         'content-type': row.content_type || 'application/octet-stream',
@@ -11659,10 +11712,12 @@ async function handleLogin(request, env) {
       }),
       meta: { username, next: nextPath },
     });
-    return htmlResponse(
-      renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
-      401,
-      { 'set-cookie': clearSessionCookie() },
+    return applyAuthCookies(
+      htmlResponse(
+        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
+        401,
+      ),
+      { token: '', maxAge: 0 },
     );
   }
   try {
@@ -11697,8 +11752,10 @@ async function handleLogin(request, env) {
     },
   });
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
-  return response;
+  return applyAuthCookies(response, {
+    token: await makeSession(user, env),
+    maxAge: SESSION_TTL_SECONDS,
+  });
 }
 
 async function handleAdmin(request, env) {
@@ -11742,8 +11799,7 @@ async function logout(request, env) {
     });
   }
   const response = redirect('/admin/login');
-  response.headers.set('set-cookie', clearSessionCookie());
-  return response;
+  return applyAuthCookies(response, { token: '', maxAge: 0 });
 }
 
 export function renderStaffAuthNavLink(loggedIn = false) {

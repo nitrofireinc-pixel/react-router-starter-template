@@ -121,10 +121,18 @@ test('extractEditableJoinHtml reads only main', () => {
 });
 
 test('visual versions keep the newest few', () => {
-  const rows = Array.from({ length: 12 }, (_, index) => ({ id: 12 - index }));
+  assert.equal(VISUAL_VERSION_LIMIT, 20);
+  const rows = Array.from({ length: 25 }, (_, index) => ({ id: 25 - index }));
   const trimmed = trimVisualVersions(rows, VISUAL_VERSION_LIMIT);
-  assert.equal(trimmed.keep.length, 8);
-  assert.deepEqual(trimmed.dropIds, [4, 3, 2, 1]);
+  assert.equal(trimmed.keep.length, 20);
+  assert.deepEqual(trimmed.dropIds, [5, 4, 3, 2, 1]);
+});
+
+test('visual CSS sanitizer drops duplicate GrapesJS body margin rules', () => {
+  const once = sanitizeVisualPageHtml('<style data-visual-css>body{margin: 0}</style><h1>Join</h1><p>Hi</p>');
+  const twice = sanitizeVisualPageHtml(`<style data-visual-css>body{margin: 0}</style>${once}`);
+  assert.equal(twice, once);
+  assert.equal((twice.match(/body\{margin: 0\}/g) || []).length, 1);
 });
 
 test('default Join starter uses site logos and no invented photos', () => {
@@ -153,6 +161,8 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(page, /Visitors still see the published page until you publish/);
   assert.doesNotMatch(page, /Preview Worker only/);
   assert.match(editorJs, /Published to the live page\./);
+  assert.match(editorJs, /Keeps the last 20 saves\./);
+  assert.match(editorJs, /Publishing replaces this page's content on the live page\./);
   assert.doesNotMatch(editorJs, /Published to the preview site/);
   assert.match(workerSrc, /\/api\/admin\/visual-pages\/join/);
   assert.match(workerSrc, /handleVisualEditorPage/);
