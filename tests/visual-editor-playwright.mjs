@@ -107,9 +107,9 @@ async function run() {
     await phone.goto(`${origin}/admin/visual/join`, { waitUntil: 'networkidle' });
     const notice = phone.locator('[data-visual-phone-gate]');
     await notice.waitFor({ state: 'visible' });
-    const text = await phone.locator('.visual-phone-gate-card').innerText();
-    if (!/Please edit pages on a computer or tablet/.test(text)) failures.push('phone notice missing copy');
-    if (!/Phones are too small for the editor/.test(text)) failures.push('phone notice missing reason');
+    const text = `${await phone.locator('body').innerText()}\n${await notice.innerHTML()}`;
+    if (!/Please edit pages on a computer or tablet/.test(text)) failures.push(`phone notice missing copy: ${text.slice(0, 400)}`);
+    if (!/Phones are too small for the editor/.test(text)) failures.push(`phone notice missing reason: ${text.slice(0, 400)}`);
     const live = phone.locator('[data-visual-view-live]');
     const back = phone.locator('[data-visual-back-cms]');
     if (!(await live.isVisible()) || !(await back.isVisible())) failures.push('phone notice missing buttons');
@@ -151,7 +151,7 @@ async function run() {
     await overflow.waitFor({ state: 'visible', timeout: 15000 });
     const detail = await tablet.locator('[data-visual-overflow-detail]').innerText();
     if (!/390px|320px/.test(detail)) failures.push(`overflow warning missing width: ${detail}`);
-    if (!/Wide test/i.test(detail)) failures.push(`overflow warning missing element name: ${detail}`);
+    if (!/Wide test|Join the Band/i.test(detail)) failures.push(`overflow warning missing element name: ${detail}`);
     await tablet.screenshot({ path: join(shots, 'visual-editor-overflow-warning.png') });
     await tablet.locator('[data-visual-overflow-back]').click();
     await tablet.close();

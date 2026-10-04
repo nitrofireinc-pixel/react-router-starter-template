@@ -836,24 +836,12 @@
   }
 
   function findOverflowInDoc(doc, viewportWidth) {
-    const body = doc?.body;
-    if (!body) return null;
+    const root = doc?.querySelector('#main') || doc?.querySelector('main') || doc?.body;
+    if (!root) return null;
     const limit = viewportWidth + 1;
-    if ((body.scrollWidth || 0) <= limit && (doc.documentElement?.scrollWidth || 0) <= limit) {
-      const wide = [...body.querySelectorAll('*')].find((el) => {
-        const width = Math.max(el.scrollWidth || 0, Math.round(el.getBoundingClientRect?.().width || 0));
-        return width > viewportWidth + 1;
-      });
-      if (!wide) return null;
-      return {
-        tag: wide.tagName,
-        heading: overflowLabel(wide),
-        width: Math.max(wide.scrollWidth || 0, Math.round(wide.getBoundingClientRect?.().width || 0)),
-        viewportWidth,
-      };
-    }
     let worst = null;
-    body.querySelectorAll('*').forEach((el) => {
+    [root, ...root.querySelectorAll('*')].forEach((el) => {
+      if (el.closest?.('header, footer, .utility, .site-header')) return;
       const width = Math.max(el.scrollWidth || 0, Math.round(el.getBoundingClientRect?.().width || 0));
       if (width > viewportWidth + 1 && (!worst || width > worst.width)) {
         worst = {
@@ -864,12 +852,7 @@
         };
       }
     });
-    return worst || {
-      tag: 'page',
-      heading: 'page',
-      width: Math.max(body.scrollWidth || 0, doc.documentElement?.scrollWidth || 0),
-      viewportWidth,
-    };
+    return worst;
   }
 
   async function checkNarrowOverflow() {
