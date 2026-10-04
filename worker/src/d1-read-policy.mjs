@@ -15,6 +15,7 @@
  */
 
 export const PUBLIC_READ_CACHE_TTL_MS = 60_000;
+export const PUBLIC_READ_PENDING_TIMEOUT_MS = 8_000;
 
 export const PUBLIC_READ_INDEX_SQL = Object.freeze([
   'CREATE INDEX IF NOT EXISTS idx_photos_filename ON photos (filename)',
@@ -135,16 +136,41 @@ export async function rememberPublicRead(key, value) {
     generation,
   });
   publicReadKeys.add(key);
-  if (generation === publicReadGeneration) await writeEdgeCache(key, value);
+  // Never await the Cache API on the request path — a stuck put would hang every waiter.
+  if (generation === publicReadGeneration) void writeEdgeCache(key, value);
   return value;
 }
 
-export async function readCachedPublicValue(key) {
+function evictIfPending(key, pending) {
+  const current = publicReadMemory.get(key);
+  if (current?.pending === pending) publicReadMemory.delete(key);
+}
+
+export function withPublicReadTimeout(promise, timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS) {
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`public-read-timeout:${ms}`)), ms);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+async function loadDirectPublicRead(loader, timeoutMs) {
+  return withPublicReadTimeout(Promise.resolve().then(() => loader()), timeoutMs);
+}
+
+export async function readCachedPublicValue(key, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS } = {}) {
   const existing = publicReadMemory.get(key);
   if (existing?.pending && existing.generation === publicReadGeneration) {
     try {
-      return { hit: true, value: await existing.pending };
+      return { hit: true, value: await withPublicReadTimeout(existing.pending, timeoutMs) };
     } catch {
+      evictIfPending(key, existing.pending);
       return { hit: false };
     }
   }
@@ -159,27 +185,51 @@ export async function readCachedPublicValue(key) {
   return { hit: true, value: edge };
 }
 
-export async function cachedPublicRead(key, loader) {
-  const cached = await readCachedPublicValue(key);
+export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PENDING_TIMEOUT_MS } = {}) {
+  const cached = await readCachedPublicValue(key, { timeoutMs });
   if (cached.hit) return cached.value;
   const generation = publicReadGeneration;
   const existing = publicReadMemory.get(key);
-  if (existing?.pending && existing.generation === generation) return existing.pending;
+  if (existing?.pending && existing.generation === generation) {
+    try {
+      return await withPublicReadTimeout(existing.pending, timeoutMs);
+    } catch {
+      evictIfPending(key, existing.pending);
+      return loadDirectPublicRead(loader, timeoutMs);
+    }
+  }
   let pending;
   pending = (async () => {
     const again = peekPublicRead(key);
     if (again.hit) return again.value;
     const value = await loader();
     if (publicReadGeneration !== generation) return value;
+    const current = publicReadMemory.get(key);
+    // A timed-out waiter may already have recovered; never overwrite that value.
+    if (current && current.pending !== pending) {
+      return current.pending ? value : current.value;
+    }
     await rememberPublicRead(key, value);
     return value;
   })().catch((error) => {
-    const current = publicReadMemory.get(key);
-    if (current?.pending === pending) publicReadMemory.delete(key);
+    evictIfPending(key, pending);
     throw error;
   });
   publicReadMemory.set(key, { pending, expires: 0, generation });
-  return pending;
+  try {
+    return await withPublicReadTimeout(pending, timeoutMs);
+  } catch (error) {
+    evictIfPending(key, pending);
+    const timedOut = String(error?.message || '').startsWith('public-read-timeout:');
+    if (!timedOut) throw error;
+    try {
+      const value = await loadDirectPublicRead(loader, timeoutMs);
+      if (publicReadGeneration === generation) await rememberPublicRead(key, value);
+      return value;
+    } catch {
+      throw error;
+    }
+  }
 }
 
 export async function invalidatePublicReadCache() {

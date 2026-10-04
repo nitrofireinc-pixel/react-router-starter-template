@@ -35,6 +35,8 @@ for (const name of [
   'caldev.js',
   'admin-caldev.js',
   'admin.js',
+  'admin-nav.js',
+  'admin-nav.css',
   'admin-visual.js',
   'admin-visual.css',
   'badge-creator.js',

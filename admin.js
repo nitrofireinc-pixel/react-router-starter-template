@@ -2740,16 +2740,12 @@ function setSelectValue(select, value) {
 }
 
 function setAdminNavOpen(open) {
-  const toggle = document.querySelector('.admin-nav-toggle');
-  const menu = document.querySelector('#admin-mobile-menu');
-  if (!toggle || !menu) return;
-  toggle.setAttribute('aria-expanded', String(open));
-  menu.hidden = !open;
-  document.querySelector('.admin-mobile-bar')?.classList.toggle('open', open);
+  if (open) window.efhsAdminNav?.open?.();
+  else window.efhsAdminNav?.close?.();
 }
 
 function closeAdminNav() {
-  setAdminNavOpen(false);
+  if (window.efhsAdminNav?.isOverlay?.()) window.efhsAdminNav.close();
 }
 
 function renderMobileAdminMenu() {
@@ -2760,13 +2756,20 @@ function renderMobileAdminMenu() {
   const sourceButtons = [];
   const parts = [];
 
-  const isVisibleButton = (button) => (
-    Boolean(button)
-    && !button.hidden
-    && !button.closest('[hidden]')
-    && !button.hasAttribute('data-sponsors-toggle')
-    && !button.hasAttribute('data-boosters-toggle')
-  );
+  const isCollapsedMenuSub = (node) => Boolean(node?.classList?.contains('admin-menu-sub'));
+
+  const isVisibleButton = (button) => {
+    if (!button || button.hidden) return false;
+    if (button.classList.contains('admin-menu-parent')) return false;
+    if (button.hasAttribute('data-sponsors-toggle') || button.hasAttribute('data-boosters-toggle')) return false;
+    let node = button.parentElement;
+    while (node) {
+      // Collapsed Boosters/Sponsors lists stay copyable; only skip permission-hidden groups.
+      if (node.hidden && !isCollapsedMenuSub(node)) return false;
+      node = node.parentElement;
+    }
+    return true;
+  };
 
   const pushButton = (button) => {
     if (!isVisibleButton(button)) return;
@@ -2996,7 +2999,11 @@ function pageLabel(slug) {
 
 function pageShortcutLabel(page) {
   const title = String(page?.title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim();
-  return title || pageLabel(page?.slug || '');
+  const label = title || pageLabel(page?.slug || '');
+  if (String(page?.slug || '').trim().toLowerCase() === 'sponsors') {
+    return /page layout/i.test(label) ? label : `${label} (page layout)`;
+  }
+  return label;
 }
 
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
@@ -3261,25 +3268,17 @@ function showAllowedPanels() {
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
+  window.efhsAdminNav?.revealOverlaySubmenus?.();
   renderDashboard();
-  activateTab(scheduleOnly ? 'caldev' : 'dashboard');
+  const requestedTab = new URLSearchParams(window.location.search).get('tab');
+  const startTab = scheduleOnly
+    ? 'caldev'
+    : (requestedTab && canOpenAdminTab(requestedTab) ? requestedTab : 'dashboard');
+  activateTab(startTab);
 }
 
 function bindAdminNavToggle() {
-  const toggle = document.querySelector('.admin-nav-toggle');
-  if (!toggle || toggle.dataset.bound === '1') return;
-  toggle.dataset.bound = '1';
-  toggle.addEventListener('click', event => {
-    event.stopPropagation();
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    if (open) renderMobileAdminMenu();
-    setAdminNavOpen(open);
-  });
-  document.addEventListener('click', event => {
-    const bar = document.querySelector('.admin-mobile-bar');
-    if (!bar || bar.hidden || !bar.classList.contains('open')) return;
-    if (!bar.contains(event.target)) closeAdminNav();
-  });
+  window.efhsAdminNav?.init?.();
 }
 
 async function loadMe() {

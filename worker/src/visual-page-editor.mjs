@@ -4,6 +4,12 @@
  * stay on the existing single cached page read.
  */
 
+import {
+  renderAdminChromeBar,
+  renderAdminSidebarBackdrop,
+  renderAdminSidebarHtml,
+} from './admin-chrome.mjs';
+
 export const VISUAL_PILOT_SLUG = 'join';
 export const VISUAL_PILOT_PATH = '/join.html';
 export const VISUAL_VERSION_LIMIT = 20;
@@ -851,9 +857,13 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Editing ${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css?v=${v}">
+  <link rel="stylesheet" href="/admin-nav.css?v=${v}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
 <body class="visual-editor-body" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}">
+  ${renderAdminChromeBar()}
+  ${renderAdminSidebarBackdrop()}
+  ${renderAdminSidebarHtml(v)}
   <div class="visual-phone-gate" data-visual-phone-gate>
     <div class="visual-phone-gate-card">
       <h1>Please edit pages on a computer or tablet.</h1>
@@ -864,6 +874,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
       </div>
     </div>
   </div>
+  <div class="visual-editor-main">
   <header class="visual-edit-banner" data-visual-banner>
     <p class="visual-edit-banner-label">${escapeHtml(bannerLabel)}</p>
     <div class="visual-edit-banner-title">
@@ -902,6 +913,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   </aside>
   <aside class="visual-history-drawer" data-visual-versions hidden></aside>
   </div>
+  </div>
   <div class="visual-modal" data-visual-image-modal hidden>
     <div class="visual-modal-card">
       <h2>Change image</h2>
@@ -934,6 +946,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
       </div>
     </div>
   </div>
+  <script src="/admin-nav.js?v=${v}"></script>
   <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>
 </body>
