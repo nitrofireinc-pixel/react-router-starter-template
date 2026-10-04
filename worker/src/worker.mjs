@@ -11623,7 +11623,7 @@ function renderLoginHtml(nextPath = '/admin') {
 async function handleLogin(request, env) {
   await initDb(env);
   const requestUrl = new URL(request.url);
-  if (request.method === 'GET') {
+  if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     // Already authenticated users should not stay on the login form with a live session.
     if (await currentUser(request, env)) return redirect(nextPath);

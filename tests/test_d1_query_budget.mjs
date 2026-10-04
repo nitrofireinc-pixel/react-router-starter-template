@@ -35,24 +35,39 @@ const PUBLIC_ROUTES = [
 
 function createCountingEnv(pages, { schemaVersion = DB_SCHEMA_VERSION } = {}) {
   let queries = 0;
+  let rows = 0;
   const pageByPath = new Map(pages.map((page) => [page.path, page]));
+  const countRows = (value, type) => {
+    if (type === 'first') {
+      if (value) rows += 1;
+      return;
+    }
+    rows += Array.isArray(value?.results) ? value.results.length : 0;
+  };
   const handleSql = (sql, type, binds = []) => {
     queries += 1;
     const text = String(sql || '');
+    let result;
     if (type === 'first' && text.includes('FROM site_content WHERE key')) {
-      return { value: schemaVersion };
-    }
-    if (text.includes('FROM cms_pages WHERE path')) {
+      result = { value: schemaVersion };
+    } else if (text.includes('FROM cms_pages WHERE path')) {
       const page = pageByPath.get(binds[0]) || pages.find((item) => item.path === binds[0]) || null;
-      return type === 'first' ? page : { results: page ? [page] : [] };
+      result = type === 'first' ? page : { results: page ? [page] : [] };
+    } else if (text.includes('FROM cms_pages')) {
+      result = type === 'first' ? pages[0] : { results: pages };
+    } else if (text.includes('FROM site_content')) {
+      result = type === 'first' ? { value: schemaVersion } : { results: [] };
+    } else if (text.includes('FROM photos')) {
+      result = type === 'first' ? { id: 1, filename: 'a.jpg' } : { results: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, filename: `${i}.jpg` })) };
+    } else if (text.includes('FROM sponsors')) {
+      result = type === 'first' ? { id: 1 } : { results: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `S${i}` })) };
+    } else if (text.includes('FROM caldev_events') || text.includes('FROM events')) {
+      result = type === 'first' ? { id: 1 } : { results: Array.from({ length: 5 }, (_, i) => ({ id: i + 1 })) };
+    } else {
+      result = type === 'first' ? null : { results: [] };
     }
-    if (text.includes('FROM cms_pages')) {
-      return type === 'first' ? pages[0] : { results: pages };
-    }
-    if (text.includes('FROM site_content')) {
-      return type === 'first' ? { value: schemaVersion } : { results: [] };
-    }
-    return type === 'first' ? null : { results: [] };
+    countRows(result, type);
+    return result;
   };
   const statement = (sql) => ({
     sql,
@@ -77,8 +92,7 @@ function createCountingEnv(pages, { schemaVersion = DB_SCHEMA_VERSION } = {}) {
       return statement(sql);
     },
     async batch(items) {
-      queries += items?.length || 0;
-      return (items || []).map(() => ({ results: [] }));
+      return (items || []).map((item) => handleSql(item.sql, 'all', item.binds || []));
     },
     getBookmark() {
       return 'bookmark';
@@ -86,8 +100,10 @@ function createCountingEnv(pages, { schemaVersion = DB_SCHEMA_VERSION } = {}) {
   };
   return {
     count: () => queries,
+    rows: () => rows,
     reset() {
       queries = 0;
+      rows = 0;
     },
     env: {
       DB: {
@@ -152,15 +168,24 @@ test('public GET routes stay at or under 10 D1 queries; no request exceeds 40', 
     const cold = await worker.fetch(request, boxed.env, { waitUntil() {} });
     assert.ok(cold.status < 500, `${route.path} cold status ${cold.status}`);
     const coldQueries = boxed.count();
+    const coldRows = boxed.rows();
     assert.ok(coldQueries <= PUBLIC_GET_BUDGET, `${route.path} cold used ${coldQueries} D1 queries`);
     assert.ok(coldQueries <= MAX_D1_QUERIES_PER_INVOCATION, `${route.path} cold exceeded 40`);
     boxed.reset();
     const warm = await worker.fetch(request, boxed.env, { waitUntil() {} });
     assert.ok(warm.status < 500, `${route.path} warm status ${warm.status}`);
     const warmQueries = boxed.count();
+    const warmRows = boxed.rows();
     assert.ok(warmQueries <= PUBLIC_GET_BUDGET, `${route.path} warm used ${warmQueries} D1 queries`);
-    counts[route.path] = { cold: coldQueries, warm: warmQueries, status: cold.status };
+    counts[route.path] = {
+      cold: coldQueries,
+      warm: warmQueries,
+      coldRows,
+      warmRows,
+      status: cold.status,
+    };
   }
+  console.log('d1_query_budget', JSON.stringify(counts));
   const contact = createCountingEnv(pages);
   resetDbInitCache();
   const posted = await worker.fetch(new Request('https://efhsband-dev.example/api/contact', {
@@ -244,6 +269,27 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
   };
   await Promise.all(Array.from({ length: 20 }, () => initDb(shared)));
   assert.ok(sharedQueries <= MAX_D1_QUERIES_PER_INVOCATION, `shared isolate used ${sharedQueries}`);
+});
+
+test('admin login gate answers GET and HEAD without invoking form parsing', async () => {
+  const boxed = createCountingEnv(PUBLIC_ROUTES.map((route) => ({
+    id: 1,
+    slug: route.slug,
+    path: route.path,
+    title: route.title,
+    body_html: '<p>x</p>',
+    nav_order: 1,
+    is_home: route.is_home,
+    active: 1,
+  })));
+  resetDbInitCache();
+  const get = await worker.fetch(new Request('https://efhsband-dev.example/admin/login'), boxed.env, { waitUntil() {} });
+  assert.equal(get.status, 200);
+  assert.match(await get.text(), /Admin Login/);
+  boxed.reset();
+  const head = await worker.fetch(new Request('https://efhsband-dev.example/admin/login', { method: 'HEAD' }), boxed.env, { waitUntil() {} });
+  assert.ok(head.status < 500, `HEAD /admin/login returned ${head.status}`);
+  assert.ok(boxed.count() <= MAX_D1_QUERIES_PER_INVOCATION);
 });
 
 test('photo cache headers and purge rules stay on the Free-plan path', () => {

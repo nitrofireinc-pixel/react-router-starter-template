@@ -30,12 +30,6 @@
 /*.woff2
   Cache-Control: public, max-age=31536000, immutable
 
-/assets/*
-  Cache-Control: public, max-age=31536000, immutable
-
-/vendor/*
-  Cache-Control: public, max-age=31536000, immutable
-
 /push-sw.js
   Cache-Control: no-store
   Content-Type: application/javascript; charset=utf-8
