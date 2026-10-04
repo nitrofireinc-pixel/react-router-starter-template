@@ -15,9 +15,10 @@ import {
   pageSettingsChanged,
   visualStructureSignature,
 } from '../worker/src/page-permissions.mjs';
-import {
+import worker, {
   applyEnsemblesBodyHtml,
   adminSidebarAllows,
+  canAccessBadgeCreator,
   canEditMeetingMinutes,
   canEditPage,
   canEditPageContent,
@@ -25,9 +26,12 @@ import {
   canManageMeetingMinutes,
   canManagePageSettings,
   canViewMeetingMinutes,
+  DB_SCHEMA_VERSION,
+  makeSession,
   MINUTES_EDIT_WINDOW_HOURS,
   minutesEditableUntil,
   minutesWithinEditWindow,
+  resetDbInitCache,
   sanitizeAssignablePermissions,
   userPageCapabilities,
 } from '../worker/src/worker.mjs';
@@ -381,7 +385,93 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit.admin_after_window'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.delete'));
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004t'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004u'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
+});
+
+test('Badge Creator is badges-or-admin only and hidden without the grant', () => {
+  assert.equal(canAccessBadgeCreator({ role: 'admin', permissions: [] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['badges'] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), false);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['vice-president'] }), false);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['boosters'] }), false);
+
+  const caps = userPageCapabilities({ role: 'editor', permissions: ['badges'] }, []);
+  assert.equal(caps.badges, true);
+  assert.equal(userPageCapabilities({ role: 'editor', permissions: ['president'] }, []).badges, false);
+
+  const president = { role: 'editor', permissions: ['president', 'users'] };
+  assert.deepEqual(sanitizeAssignablePermissions(president, ['badges', 'president']), ['president']);
+
+  const noBadge = { role: 'editor', permissions: ['page:sponsors', 'minutes:edit'] };
+  const allow = (tab) => adminSidebarAllows(noBadge, tab);
+  const html = renderAdminSidebarHtml('test', { user: noBadge, allow });
+  assert.equal(allow('badge-creator'), false);
+  assert.match(html, /data-tab="badge-creator" hidden/);
+  assert.match(html, /data-boosters-menu/);
+  assert.doesNotMatch(html, /data-boosters-menu hidden/);
+
+  const emptyBoosters = renderAdminSidebarHtml('test', {
+    allow: (tab) => tab !== 'booster-members' && tab !== 'minutes' && tab !== 'badge-creator',
+  });
+  assert.match(emptyBoosters, /data-boosters-menu hidden/);
+  assert.match(emptyBoosters, /data-tab="badge-creator" hidden/);
+
+  assert.match(workerSrc, /value="badges"> Badge Creator/);
+  assert.match(workerSrc, /'badges'/);
+  assert.match(adminJs, /hasPermission\('badges'\)/);
+});
+
+function badgeAuthEnv(user) {
+  const users = new Map([[Number(user.id), { ...user }]]);
+  return {
+    EFBAND_SECRET: 'test-session-secret',
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (q.includes('FROM site_content WHERE key')) return { value: DB_SCHEMA_VERSION };
+            if (q.includes('FROM users WHERE id')) return users.get(Number(this.binds[0])) || null;
+            return null;
+          },
+          async all() { return { results: [] }; },
+          async run() { return { success: true }; },
+        };
+      },
+      async batch() { return []; },
+    },
+    ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
+  };
+}
+
+test('Badge Creator APIs and HTML tab 403 without badges', async () => {
+  resetDbInitCache();
+  const editor = {
+    id: 12,
+    username: 'shirl@efhsband.org',
+    display_name: 'Shirl Johnson',
+    password_hash: 'x',
+    role: 'editor',
+    permissions: JSON.stringify(['vice-president']),
+    active: 1,
+  };
+  const env = badgeAuthEnv(editor);
+  const cookie = `efband_session=${await makeSession({ id: editor.id, username: editor.username }, env)}`;
+  const api = await worker.fetch(new Request('https://efhsband.org/api/admin/badges', {
+    headers: { cookie },
+  }), env, { waitUntil() {} });
+  assert.equal(api.status, 403);
+  assert.deepEqual(await api.json(), { detail: 'Permission required: badges' });
+
+  const html = await worker.fetch(new Request('https://efhsband.org/admin?tab=badge-creator', {
+    headers: { cookie },
+  }), env, { waitUntil() {} });
+  assert.equal(html.status, 403);
+  const body = await html.text();
+  assert.match(body, /error-page error-403/);
+  assert.match(body, /Permission required: badges|Access Denied|not allowed|Sign-In Needed|off limits|403/i);
 });

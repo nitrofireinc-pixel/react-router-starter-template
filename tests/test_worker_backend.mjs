@@ -1926,8 +1926,9 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), true);
 
   assert.equal(canAccessBadgeCreator({ role: 'admin', permissions: [] }), true);
-  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), true);
-  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['vice-president'] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['badges'] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), false);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['vice-president'] }), false);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['treasurer'] }), false);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['boosters'] }), false);
 
@@ -2332,7 +2333,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004t'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004u'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3789,6 +3790,8 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
   assert.match(workerSrc, /id="badge-creator-print"/);
   assert.match(workerSrc, /badge-creator\.js/);
   assert.match(workerSrc, /\/api\/admin\/badges/);
+  assert.match(workerSrc, /Permission required: badges/);
+  assert.match(workerSrc, /searchParams\.get\('tab'\) === 'badge-creator'/);
   assert.match(workerSrc, /CREATE TABLE IF NOT EXISTS committee_badges/);
   assert.match(workerSrc, /photo_url TEXT NOT NULL DEFAULT ''/);
   assert.doesNotMatch(workerSrc, /committee_badges[\s\S]{0,400}data_base64/);

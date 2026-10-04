@@ -401,7 +401,7 @@ function isScheduleBoardOnlyUser() {
 }
 
 function canAccessBadgeCreator() {
-  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+  return isSuperAdmin() || hasPermission('badges') || Boolean(state.me?.capabilities?.badges);
 }
 
 function canAccessForms() {

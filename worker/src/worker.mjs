@@ -388,11 +388,11 @@ export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'forms', 'fundraising'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004t';
+export const ASSET_VERSION = 'cms-p1-20261004u';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1601,13 +1601,9 @@ export function canNotifyCalendarSubscribers(user) {
   );
 }
 
-/** Badge Creator: Super Admin, President, or Vice President. */
+/** Badge Creator: Super Admin or the explicit badges grant. */
 export function canAccessBadgeCreator(user) {
-  return (
-    isSuperAdmin(user)
-    || hasPermission(user, 'president')
-    || hasPermission(user, 'vice-president')
-  );
+  return isSuperAdmin(user) || hasPermission(user, 'badges');
 }
 
 const COMMITTEE_BADGE_ROLES = [
@@ -7523,6 +7519,7 @@ export function userPageCapabilities(user, slugs = []) {
     content_slugs: list.filter((slug) => canEditPageContent(user, slug)),
     layout_slugs: list.filter((slug) => canEditPageLayout(user, slug)),
     minutes_edit: canManageMeetingMinutes(user),
+    badges: canAccessBadgeCreator(user),
   };
 }
 
@@ -11201,7 +11198,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     return jsonResponse(await getCommitteeBadges(env));
   }
@@ -11209,7 +11206,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     const badge = normalizeCommitteeBadgePayload(await request.json());
     if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
@@ -11236,7 +11233,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     await ensureCommitteeBadgesSchema(env);
     const id = Number(badgeMatch[1]);
@@ -12167,6 +12164,16 @@ async function handleAdmin(request, env) {
   await initDb(env);
   const user = await currentUser(request, env);
   if (!user) return redirect('/admin/login');
+  const url = new URL(request.url);
+  if (url.searchParams.get('tab') === 'badge-creator' && !canAccessBadgeCreator(user)) {
+    return attachLoginHintIfNeeded(request, await renderErrorPage(403, {
+      request,
+      env,
+      url,
+      loggedIn: true,
+      detail: 'Permission required: badges',
+    }), user);
+  }
   return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
 }
 
@@ -13524,7 +13531,7 @@ __ADMIN_SIDEBAR__
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (create/edit, 48h)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (create/edit, 48h)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>
