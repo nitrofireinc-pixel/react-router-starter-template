@@ -295,7 +295,18 @@ body.visual-editor-body .admin-brand-mark{display:block;width:54px;height:auto;f
 body.visual-editor-body .admin-user{display:grid;gap:2px;margin:0 6px;padding:13px 14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:15px}
 body.visual-editor-body .admin-user b{color:#fff;line-height:1.15}
 body.visual-editor-body .admin-user span{font-size:.73rem;color:#fbd7d9;text-transform:uppercase;letter-spacing:.1em;font-weight:900}
-body.visual-editor-body .admin-menu{display:grid;gap:5px;margin:0;flex:1 1 auto;min-height:0;overflow:auto}
+body.visual-editor-body .admin-menu{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  justify-items:stretch;
+  align-content:start;
+  gap:5px;
+  margin:0;
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+}
+body.visual-editor-body .admin-menu > *{grid-column:1/-1;min-width:0;max-width:100%}
 body.visual-editor-body .admin-menu button,
 body.visual-editor-body .admin-logout{
   width:100%;
@@ -307,6 +318,13 @@ body.visual-editor-body .admin-logout{
   font-weight:850;
   padding:10px 12px;
   cursor:pointer;
+  white-space:normal;
+  overflow-wrap:break-word;
+  word-break:normal;
+  hyphens:manual;
+  box-sizing:border-box;
+  min-width:0;
+  max-width:100%;
 }
 body.visual-editor-body .admin-menu button:hover,
 body.visual-editor-body .admin-menu button.active,
@@ -333,4 +351,49 @@ body.visual-editor-body .admin-change-password{
   font-weight:850;
   padding:10px 12px;
   cursor:pointer;
+}
+
+/* Overlay drawer and shared sidebar list stay one column under 1024px */
+@media (max-width:1023px){
+  .image-admin-shell .admin-menu,
+  .image-admin-shell .admin-tabs,
+  body.visual-editor-body .admin-menu{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    justify-items:stretch;
+    align-content:start;
+  }
+  .image-admin-shell .admin-menu > *,
+  .image-admin-shell .admin-tabs > *,
+  body.visual-editor-body .admin-menu > *{
+    grid-column:1/-1;
+    min-width:0;
+    max-width:100%;
+  }
+  .admin-sidebar .admin-menu-label{
+    display:block;
+    width:100%;
+    box-sizing:border-box;
+  }
+  .admin-sidebar .admin-page-row{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    min-width:0;
+    width:100%;
+    max-width:100%;
+  }
+  .admin-sidebar .admin-page-shortcuts a.admin-page-edit,
+  .admin-sidebar .admin-page-shortcuts button{
+    flex:1 1 auto;
+    min-width:0;
+    white-space:normal;
+    overflow-wrap:break-word;
+    word-break:normal;
+    hyphens:manual;
+  }
+  .admin-sidebar .admin-page-settings{
+    flex:0 0 36px;
+    margin-left:auto;
+  }
 }

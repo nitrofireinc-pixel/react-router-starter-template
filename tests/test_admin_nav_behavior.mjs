@@ -255,3 +255,135 @@ test('overlay open focuses the drawer after the transition and matches visual 76
     server.close();
   }
 });
+
+function prepareOverlayMenu() {
+  const pages = document.querySelector('#admin-page-shortcuts');
+  const pagesLabel = document.querySelector('[data-page-shortcuts-label]');
+  if (pagesLabel) pagesLabel.hidden = false;
+  if (pages) {
+    pages.innerHTML = `
+      <div class="admin-page-row"><a class="admin-page-edit" href="#fundraising">Fundraising</a><a class="admin-page-settings" href="#settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.5A3.5 3.5 0 1 1 12 15.5 3.5 3.5 0 0 1 12 8.5Z"/></svg></a></div>
+      <div class="admin-page-row"><a class="admin-page-edit" href="#sponsors">Sponsors (page layout)</a><a class="admin-page-settings" href="#settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.5A3.5 3.5 0 1 1 12 15.5 3.5 3.5 0 0 1 12 8.5Z"/></svg></a></div>
+      <div class="admin-page-row"><a class="admin-page-edit" href="#become">Become a Sponsor</a><a class="admin-page-settings" href="#settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.5A3.5 3.5 0 1 1 12 15.5 3.5 3.5 0 0 1 12 8.5Z"/></svg></a></div>
+      <div class="admin-page-row"><a class="admin-page-edit" href="#ensembles">Ensembles</a><a class="admin-page-settings" href="#settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.5A3.5 3.5 0 1 1 12 15.5 3.5 3.5 0 0 1 12 8.5Z"/></svg></a></div>
+    `;
+  }
+  const ensemble = document.querySelector('[data-tab="ensembles"]');
+  if (ensemble) ensemble.hidden = false;
+  const contact = document.querySelector('[data-tab="contact"]');
+  if (contact) contact.hidden = false;
+  document.querySelector('[data-sponsors-menu]').hidden = false;
+  document.querySelector('[data-boosters-menu]').hidden = false;
+  window.efhsAdminNav.open();
+  window.efhsAdminNav.revealOverlaySubmenus();
+}
+
+function measureOverlayStack() {
+  const sidebar = document.getElementById('admin-sidebar');
+  const menu = document.querySelector('.admin-menu');
+  const menuStyle = getComputedStyle(menu);
+  const items = [...menu.querySelectorAll('button, .admin-menu-label, .admin-page-edit')]
+    .filter((el) => {
+      if (el.hidden || el.closest('[hidden]')) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getBoundingClientRect().height > 0;
+    });
+  const boxes = items.map((el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      text: el.textContent.trim(),
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+    };
+  });
+  const sideBySide = [];
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (overlapY > 6 && Math.abs(a.left - b.left) > 48) {
+        sideBySide.push(`${a.text} || ${b.text}`);
+      }
+    }
+  }
+  const gears = [...document.querySelectorAll('.admin-page-row')].map((row) => {
+    const label = row.querySelector('.admin-page-edit, button');
+    const gear = row.querySelector('.admin-page-settings');
+    const labelRect = label?.getBoundingClientRect();
+    const gearRect = gear?.getBoundingClientRect();
+    return {
+      text: label?.textContent.trim() || '',
+      overlap: Boolean(labelRect && gearRect && labelRect.right > gearRect.left + 1),
+      gearLeft: gearRect?.left || 0,
+      labelRight: labelRect?.right || 0,
+    };
+  });
+  const wrapSample = document.querySelector('.admin-page-edit[href="#become"]') || items.find((el) => /Become a Sponsor/i.test(el.textContent));
+  let becomeLines = 0;
+  if (wrapSample) {
+    const range = document.createRange();
+    range.selectNodeContents(wrapSample);
+    becomeLines = range.getClientRects().length;
+  }
+  const becomeStyle = wrapSample ? getComputedStyle(wrapSample) : null;
+  return {
+    columns: menuStyle.gridTemplateColumns,
+    overflowX: Math.max(sidebar.scrollWidth - sidebar.clientWidth, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    sideBySide,
+    gears,
+    becomeLines,
+    wordBreak: becomeStyle?.wordBreak || '',
+    overflowWrap: becomeStyle?.overflowWrap || '',
+    order: boxes.map((box) => box.text),
+  };
+}
+
+test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t) => {
+  if (!existsSync(chromePath)) {
+    t.skip('Chrome is not installed for Playwright');
+    return;
+  }
+
+  const { server, origin } = await startServer();
+  let browser;
+  try {
+    browser = await chromium.launch({
+      executablePath: chromePath,
+      headless: true,
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    });
+
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.addInitScript(() => localStorage.removeItem('efhsAdminNavOpen'));
+    await page.goto(`${origin}/admin`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.efhsAdminNav);
+
+    for (const width of [360, 390, 768, 1000]) {
+      await page.setViewportSize({ width, height: width >= 768 ? 1024 : 844 });
+      await page.evaluate(prepareOverlayMenu);
+      await page.waitForTimeout(280);
+      const stack = await page.evaluate(measureOverlayStack);
+      assert.match(stack.columns, /^[0-9.]+px$/, `${width}px drawer should be one column, got ${stack.columns}`);
+      assert.equal(stack.sideBySide.length, 0, `${width}px side-by-side items: ${stack.sideBySide.join('; ')}`);
+      assert.ok(stack.overflowX <= 1, `${width}px overflowX ${stack.overflowX}`);
+      assert.equal(stack.wordBreak, 'normal', `${width}px word-break ${stack.wordBreak}`);
+      assert.equal(stack.overflowWrap, 'break-word', `${width}px overflow-wrap ${stack.overflowWrap}`);
+      assert.ok(stack.becomeLines > 0 && stack.becomeLines <= 3, `${width}px Become a Sponsor used ${stack.becomeLines} lines`);
+      const overlappingGear = stack.gears.find((row) => row.overlap);
+      assert.equal(overlappingGear, undefined, `${width}px gear overlap on ${overlappingGear?.text}`);
+      const joined = stack.order.join(' | ');
+      assert.match(joined, /Band Boosters[\s\S]*Booster Members[\s\S]*Meeting Minutes[\s\S]*Badge Creator/);
+      assert.match(joined, /Sponsors[\s\S]*Manage sponsors/);
+      assert.match(joined, /PAGES[\s\S]*Fundraising[\s\S]*Sponsors \(page layout\)/i);
+    }
+
+    await page.close();
+  } finally {
+    await browser?.close();
+    server.close();
+  }
+});

@@ -80,6 +80,10 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.doesNotMatch(css, /transition:[^;]*visibility var\(--admin-nav-duration\)/);
   const overlayBlock = css.slice(css.indexOf('@media (max-width:1023px)'));
   assert.match(overlayBlock, /html\.admin-nav-open[\s\S]*?--admin-nav-col:0px/);
+  assert.match(overlayBlock, /grid-template-columns:minmax\(0,1fr\)!important/);
+  assert.match(overlayBlock, /grid-column:1\/-1/);
+  assert.match(overlayBlock, /overflow-wrap:break-word/);
+  assert.match(overlayBlock, /word-break:normal/);
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   assert.match(syncSrc, /'admin-nav\.js'/);
   assert.match(syncSrc, /'admin-nav\.css'/);
@@ -87,6 +91,10 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.doesNotMatch(styles, /@media\(max-width:980px\)\{[\s\S]*?\.admin-sidebar\{display:none!important\}/);
   assert.match(styles, /@media\(min-width:1024px\) and \(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
   assert.doesNotMatch(styles, /@media\(max-width:1280px\)\{\.image-admin-shell\{grid-template-columns:var\(--admin-nav-col/);
+  assert.match(styles, /\.cms-shell:not\(\.image-admin-shell\) \.admin-tabs\{grid-template-columns:repeat\(2/);
+  assert.doesNotMatch(styles, /@media\(max-width:900px\)\{[\s\S]*?\.cms-shell \.admin-tabs\{grid-template-columns:repeat\(2/);
+  assert.match(styles, /\.admin-menu\{display:grid!important;grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(styles, /\.admin-page-row\{\s*display:flex/);
 });
 
 test('mobile admin menu copies collapsed children and labels Sponsors page layout', () => {
