@@ -304,10 +304,11 @@ body.visual-editor-body .admin-menu{
   margin:0;
   flex:1 1 auto;
   min-height:0;
-  overflow:auto;
+  overflow-x:hidden;
+  overflow-y:auto;
   grid-template-columns:minmax(0,1fr)!important;
 }
-body.visual-editor-body .admin-menu > :not([hidden]){display:block;width:100%;min-width:0;max-width:100%;flex:0 0 auto;grid-column:1/-1}
+body.visual-editor-body .admin-menu > :not([hidden]):not(.admin-menu-label){display:block;width:100%;min-width:0;max-width:100%;box-sizing:border-box;flex:0 0 auto;grid-column:1/-1}
 body.visual-editor-body .admin-menu [hidden]{display:none!important}
 body.visual-editor-body .admin-menu button,
 body.visual-editor-body .admin-logout{
@@ -332,6 +333,10 @@ body.visual-editor-body .admin-menu button:hover,
 body.visual-editor-body .admin-menu button.active,
 body.visual-editor-body .admin-logout:hover{background:rgba(255,255,255,.12);color:#fff}
 body.visual-editor-body .admin-menu-label{
+  width:auto;
+  max-width:calc(100% - 16px);
+  align-self:flex-start;
+  box-sizing:border-box;
   margin:12px 8px 4px;
   color:#8aa0b8;
   font-size:.68rem;
@@ -367,16 +372,19 @@ body.visual-editor-body .admin-change-password{
     flex-wrap:nowrap!important;
     align-items:stretch!important;
     grid-template-columns:minmax(0,1fr)!important;
+    overflow-x:hidden;
+    overflow-y:auto;
   }
-  #admin-sidebar .admin-menu > :not([hidden]),
-  #admin-sidebar .admin-tabs > :not([hidden]),
-  .image-admin-shell .admin-menu > :not([hidden]),
-  .image-admin-shell .admin-tabs > :not([hidden]),
-  body.visual-editor-body .admin-menu > :not([hidden]){
+  #admin-sidebar .admin-menu > :not([hidden]):not(.admin-menu-label),
+  #admin-sidebar .admin-tabs > :not([hidden]):not(.admin-menu-label),
+  .image-admin-shell .admin-menu > :not([hidden]):not(.admin-menu-label),
+  .image-admin-shell .admin-tabs > :not([hidden]):not(.admin-menu-label),
+  body.visual-editor-body .admin-menu > :not([hidden]):not(.admin-menu-label){
     display:block;
     width:100%;
     min-width:0;
     max-width:100%;
+    box-sizing:border-box;
     flex:0 0 auto;
     grid-column:1/-1;
   }
@@ -396,7 +404,9 @@ body.visual-editor-body .admin-change-password{
   }
   .admin-sidebar .admin-menu-label{
     display:block;
-    width:100%;
+    width:auto;
+    max-width:calc(100% - 16px);
+    align-self:flex-start;
     box-sizing:border-box;
   }
   .admin-sidebar .admin-page-row{

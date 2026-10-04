@@ -5,11 +5,13 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   PUBLIC_READ_INDEX_SQL,
+  PUBLIC_READ_PENDING_TIMEOUT_MS,
   attachD1Bookmark,
   cachedPublicRead,
   d1SessionBookmark,
   invalidatePublicReadCache,
   openD1Session,
+  peekPublicRead,
   readCachedQueryBatch,
   renderPublicReadBootstrap,
   resetPublicReadCache,
@@ -123,6 +125,61 @@ test('cache misses for one page load share a single D1 batch', async () => {
   assert.equal(second.get('photos')[0].sql, 'SELECT photos');
 });
 
+test('stuck pending public reads time out, evict, and fall back to a direct read', async () => {
+  resetPublicReadCache();
+  let loads = 0;
+  const result = await cachedPublicRead('stuck-site', async () => {
+    loads += 1;
+    if (loads === 1) return new Promise(() => {});
+    return { title: 'recovered' };
+  }, { timeoutMs: 40 });
+  assert.equal(result.title, 'recovered');
+  assert.equal(loads, 2);
+  assert.equal(peekPublicRead('stuck-site').hit, true);
+  assert.equal((await cachedPublicRead('stuck-site', async () => {
+    loads += 1;
+    return { title: 'should-not-run' };
+  }, { timeoutMs: 40 })).title, 'recovered');
+  assert.equal(loads, 2);
+});
+
+test('concurrent waiters on a stuck pending time out and fall back to a direct read', async () => {
+  resetPublicReadCache();
+  let loads = 0;
+  const loader = async () => {
+    loads += 1;
+    if (loads === 1) return new Promise(() => {});
+    return { title: `recovered-${loads}` };
+  };
+  const [first, second] = await Promise.all([
+    cachedPublicRead('shared-stuck', loader, { timeoutMs: 40 }),
+    cachedPublicRead('shared-stuck', loader, { timeoutMs: 40 }),
+  ]);
+  assert.match(first.title, /^recovered-/);
+  assert.match(second.title, /^recovered-/);
+  assert.ok(loads >= 2, `expected a fallback load, got ${loads}`);
+  assert.equal(peekPublicRead('shared-stuck').hit, true);
+});
+
+test('rejected public reads are evicted so the next caller can load again', async () => {
+  resetPublicReadCache();
+  let loads = 0;
+  await assert.rejects(
+    () => cachedPublicRead('bad-site', async () => {
+      loads += 1;
+      throw new Error('d1 failed');
+    }, { timeoutMs: 40 }),
+    /d1 failed|public-read-timeout/,
+  );
+  assert.equal(peekPublicRead('bad-site').hit, false);
+  const recovered = await cachedPublicRead('bad-site', async () => {
+    loads += 1;
+    return { title: 'ok' };
+  }, { timeoutMs: 40 });
+  assert.equal(recovered.title, 'ok');
+  assert.equal(loads, 2);
+});
+
 test('bootstrap JSON cannot close the script tag', () => {
   const html = renderPublicReadBootstrap({
     site: { title: 'East Forsyth Band' },
@@ -153,6 +210,11 @@ test('worker source follows the public D1 read policy', () => {
   assert.doesNotMatch(workerSrc, /datetime\(created_at\)/);
   assert.match(workerSrc, /PUBLIC_READ_INDEX_SQL\.map/);
   const policySrc = readFileSync(join(root, 'worker/src/d1-read-policy.mjs'), 'utf8');
+  assert.match(policySrc, /PUBLIC_READ_PENDING_TIMEOUT_MS/);
+  assert.equal(PUBLIC_READ_PENDING_TIMEOUT_MS >= 1000, true);
+  assert.match(policySrc, /public-read-timeout/);
+  assert.match(policySrc, /evictIfPending/);
+  assert.match(policySrc, /void writeEdgeCache/);
   for (const sql of PUBLIC_READ_INDEX_SQL) {
     assert.equal(policySrc.includes(sql), true, sql);
   }

@@ -85,6 +85,8 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.match(overlayBlock, /#admin-sidebar \.admin-menu/);
   assert.match(overlayBlock, /overflow-wrap:break-word/);
   assert.match(overlayBlock, /word-break:normal/);
+  assert.match(overlayBlock, /overflow-x:hidden/);
+  assert.match(css, /\.admin-menu-label\{\s*width:auto;/);
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   assert.match(syncSrc, /'admin-nav\.js'/);
   assert.match(syncSrc, /'admin-nav\.css'/);
@@ -95,6 +97,9 @@ test('admin nav CSS pushes at 1024 and overlays below, with reduced motion', () 
   assert.match(styles, /\.cms-shell:not\(\.image-admin-shell\) \.admin-tabs\{grid-template-columns:repeat\(2/);
   assert.doesNotMatch(styles, /@media\(max-width:900px\)\{[\s\S]*?\.cms-shell \.admin-tabs\{grid-template-columns:repeat\(2/);
   assert.match(styles, /\.admin-menu\{display:flex!important;flex-direction:column!important;flex-wrap:nowrap!important/);
+  assert.match(styles, /overflow-x:hidden/);
+  assert.match(styles, /\.admin-menu-label\{\s*width:auto;/);
+  assert.match(styles, /\.admin-menu > :not\(\[hidden\]\):not\(\.admin-menu-label\)/);
   assert.match(styles, /\.admin-menu \[hidden\]\{display:none!important\}/);
   assert.match(styles, /\.admin-page-row\{\s*display:flex/);
 });

@@ -336,7 +336,13 @@ function measureOverlayStack() {
     display: menuStyle.display,
     flexDirection: menuStyle.flexDirection,
     flexWrap: menuStyle.flexWrap,
-    overflowX: Math.max(sidebar.scrollWidth - sidebar.clientWidth, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    overflowX: Math.max(
+      sidebar.scrollWidth - sidebar.clientWidth,
+      menu.scrollWidth - menu.clientWidth,
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ),
+    menuScrollWidth: menu.scrollWidth,
+    menuClientWidth: menu.clientWidth,
     sideBySide,
     gears,
     becomeLines,
@@ -366,7 +372,7 @@ test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t
     await page.goto(`${origin}/admin`, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.efhsAdminNav);
 
-    for (const width of [360, 390, 768, 1000]) {
+    for (const width of [360, 390, 768, 1000, 1440]) {
       await page.setViewportSize({ width, height: width >= 768 ? 1024 : 844 });
       await page.evaluate(prepareOverlayMenu);
       await page.waitForTimeout(280);
@@ -375,7 +381,7 @@ test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t
       assert.equal(stack.flexDirection, 'column', `${width}px flex-direction ${stack.flexDirection}`);
       assert.equal(stack.flexWrap, 'nowrap', `${width}px flex-wrap ${stack.flexWrap}`);
       assert.equal(stack.sideBySide.length, 0, `${width}px side-by-side items: ${stack.sideBySide.join('; ')}`);
-      assert.ok(stack.overflowX <= 1, `${width}px overflowX ${stack.overflowX}`);
+      assert.ok(stack.overflowX <= 0, `${width}px menu overflow ${stack.overflowX} (${stack.menuScrollWidth}/${stack.menuClientWidth})`);
       assert.equal(stack.wordBreak, 'normal', `${width}px word-break ${stack.wordBreak}`);
       assert.equal(stack.overflowWrap, 'break-word', `${width}px overflow-wrap ${stack.overflowWrap}`);
       assert.ok(stack.becomeLines > 0 && stack.becomeLines <= 3, `${width}px Become a Sponsor used ${stack.becomeLines} lines`);
@@ -387,6 +393,16 @@ test('overlay drawer stays a single column at 360, 390, 768, and 1000', async (t
       assert.match(joined, /PAGES[\s\S]*Fundraising[\s\S]*Sponsors \(page layout\)/i);
       assert.doesNotMatch(joined, /Calendar Events/);
     }
+
+    const visual = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await visual.addInitScript(() => localStorage.removeItem('efhsAdminNavOpen'));
+    await visual.goto(`${origin}/admin/visual/join`, { waitUntil: 'networkidle' });
+    await visual.waitForFunction(() => window.efhsAdminNav);
+    await visual.evaluate(prepareOverlayMenu);
+    await visual.waitForTimeout(280);
+    const visualStack = await visual.evaluate(measureOverlayStack);
+    assert.ok(visualStack.overflowX <= 0, `visual 1440 menu overflow ${visualStack.overflowX} (${visualStack.menuScrollWidth}/${visualStack.menuClientWidth})`);
+    await visual.close();
 
     await page.close();
   } finally {
