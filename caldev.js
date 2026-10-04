@@ -3,7 +3,7 @@
     { id: 'game', label: 'Games', color: '#E71321' },
     { id: 'rehearsal', label: 'Rehearsals', color: '#014990' },
     { id: 'meeting', label: 'Meetings', color: '#002142' },
-    { id: 'deadline', label: 'Deadlines', color: '#FDD703', ink: '#002142' },
+    { id: 'deadline', label: 'IMPORTANT', color: '#FDD703', ink: '#002142' },
     { id: 'trip', label: 'Trips', color: '#7c3aed' },
     { id: 'other', label: 'Other', color: '#5b6472' },
   ];
@@ -18,6 +18,7 @@
     selectedId: null,
     loading: true,
     error: '',
+    didAutoOpen: false,
   };
 
   function startOfMonth(date) {
@@ -66,12 +67,144 @@
       .replace(/"/g, '&quot;');
   }
 
+  function normalizeLinkUrl(raw) {
+    const url = String(raw || '').trim();
+    if (!url || /[\s<>]/.test(url)) return '';
+    if (/^(javascript:|data:|vbscript:)/i.test(url)) return '';
+    if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+    if (url.startsWith('/') && !url.startsWith('//')) return url;
+    if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+    return '';
+  }
+
+  function unwrapNode(node, child) {
+    while (child.firstChild) node.insertBefore(child.firstChild, child);
+    node.removeChild(child);
+  }
+
+  function formatDescHtml(html) {
+    const allowed = /^(?:B|STRONG|I|EM|U|BR|SPAN|DIV|P|A)$/i;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    const walk = (node) => {
+      [...node.childNodes].forEach((child) => {
+        if (child.nodeType === 3) return;
+        if (child.nodeType !== 1 || !allowed.test(child.tagName)) {
+          unwrapNode(node, child);
+          return;
+        }
+        if (child.tagName === 'A') {
+          const href = normalizeLinkUrl(child.getAttribute('href') || '');
+          [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
+          if (!href) {
+            unwrapNode(node, child);
+            return;
+          }
+          child.setAttribute('href', href);
+          child.setAttribute('target', '_blank');
+          child.setAttribute('rel', 'noopener noreferrer');
+        } else if (child.tagName === 'SPAN') {
+          const color = String(child.style.color || '').trim();
+          const size = String(child.style.fontSize || '').trim();
+          child.removeAttribute('style');
+          child.removeAttribute('class');
+          const styles = [];
+          if (color && !/url\s*\(|expression/i.test(color)) styles.push(`color:${color}`);
+          if (size && /^\d+(\.\d+)?(px|pt|em|rem)$/i.test(size)) styles.push(`font-size:${size}`);
+          if (styles.length) child.setAttribute('style', styles.join(';'));
+          else {
+            unwrapNode(node, child);
+            return;
+          }
+        } else {
+          child.removeAttribute('style');
+          child.removeAttribute('class');
+        }
+        walk(child);
+      });
+    };
+    walk(wrap);
+    return wrap.innerHTML.trim();
+  }
+
+  function stripDescText(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    return String(wrap.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
   function visibleEvents() {
     return state.events;
   }
 
   function todayIso() {
-    return isoDate(new Date());
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const read = (type) => parts.find((part) => part.type === type)?.value;
+    return `${read('year')}-${read('month')}-${read('day')}`;
+  }
+
+  const DEADLINE_BANNER_LEAD_DAYS = 7;
+
+  function shiftIsoDate(iso, days) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return '';
+    const [year, month, day] = String(iso).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  function deadlineDueIso(event) {
+    const start = String(event?.start_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return '';
+    const end = String(event?.end_date || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(end) && end >= start) return end;
+    return start;
+  }
+
+  function activeDeadlineEvents(events, today) {
+    return (events || []).filter((event) => {
+      if (String(event?.track || '').toLowerCase() !== 'deadline') return false;
+      const due = deadlineDueIso(event);
+      if (!due) return false;
+      const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
+      return today >= windowStart && today <= due;
+    }).sort((a, b) => deadlineDueIso(a).localeCompare(deadlineDueIso(b))
+      || String(a.title || '').localeCompare(String(b.title || '')));
+  }
+
+  function formatDeadlineBannerDate(iso) {
+    const date = parseIso(iso);
+    if (!date) return '';
+    const day = date.getDate();
+    const suffix = (day % 100 >= 11 && day % 100 <= 13)
+      ? 'th'
+      : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
+    return `${MONTHS[date.getMonth()]} ${day}${suffix}, ${date.getFullYear()}`;
+  }
+
+  function firstDescLink(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(html || '');
+    const anchor = wrap.querySelector('a[href]');
+    return normalizeLinkUrl(anchor?.getAttribute('href') || '');
+  }
+
+  function renderDeadlineBanners() {
+    const items = activeDeadlineEvents(state.events, todayIso());
+    if (!items.length) return '';
+    return items.map((event) => {
+      const due = deadlineDueIso(event);
+      const href = firstDescLink(event.description);
+      const text = `IMPORTANT: ${escapeHtml(event.title || 'IMPORTANT')} ${escapeHtml(formatDeadlineBannerDate(due))}!`;
+      const cta = href
+        ? ` <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Click Here</a>`
+        : ` <button type="button" data-caldev-open="${event.id}">View details</button>`;
+      return `<div class="caldev-deadline-banner" role="status">${text}${cta}</div>`;
+    }).join('');
   }
 
   function eventsOnDate(iso) {
@@ -107,6 +240,55 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
+  function nextIsoDay(iso) {
+    const [year, month, day] = String(iso).split('-').map(Number);
+    return isoDate(new Date(year, month - 1, day + 1));
+  }
+
+  function findNextDayIsoWithEvents(fromIso = todayIso()) {
+    const dates = new Set();
+    for (const event of state.events) {
+      const start = String(event.start_date || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) continue;
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end_date || '')) && event.end_date >= start
+        ? event.end_date
+        : start;
+      let iso = start < fromIso ? fromIso : start;
+      while (iso <= end) {
+        dates.add(iso);
+        iso = nextIsoDay(iso);
+      }
+    }
+    return [...dates].sort()[0] || null;
+  }
+
+  function landingEventCopy(event) {
+    const bits = [eventTimeLabel(event)];
+    if (event.who) bits.push(event.who);
+    if (event.location) bits.push(event.location);
+    const head = bits.filter(Boolean).join(' · ');
+    const body = stripDescText(event.description);
+    return [head, body].filter(Boolean).join('\n\n');
+  }
+
+  function autoOpenLandingEvents() {
+    if (state.didAutoOpen) return;
+    if (typeof showCalendarDayToast !== 'function') {
+      state.didAutoOpen = true;
+      return;
+    }
+    const iso = findNextDayIsoWithEvents();
+    const dayEvents = iso ? eventsOnDate(iso) : [];
+    state.didAutoOpen = true;
+    if (!dayEvents.length) return;
+    window.setTimeout(() => {
+      showCalendarDayToast(formatLongDate(iso), dayEvents.map((event) => ({
+        title: event.title,
+        description: landingEventCopy(event),
+      })));
+    }, 80);
+  }
+
   async function loadEvents() {
     state.loading = true;
     state.error = '';
@@ -121,6 +303,7 @@
     } finally {
       state.loading = false;
       render();
+      autoOpenLandingEvents();
     }
   }
 
@@ -187,7 +370,7 @@
     const month = state.cursor.getMonth();
     const firstDow = new Date(year, month, 1).getDay();
     const dim = new Date(year, month + 1, 0).getDate();
-    const todayIso = isoDate(new Date());
+    const today = todayIso();
     const compact = isCompactLayout();
     const cells = [];
     for (let i = 0; i < firstDow; i += 1) cells.push('<div class="caldev-day is-spacer" aria-hidden="true"></div>');
@@ -198,8 +381,8 @@
       const dayEvents = all.slice(0, compact ? 8 : 4);
       const extra = Math.max(0, all.length - dayEvents.length);
       cells.push(`
-        <div class="caldev-day${iso === todayIso ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
-          <div class="caldev-day-head"><span>${compact ? `${WEEKDAYS[date.getDay()]} ${day}` : day}</span></div>
+        <div class="caldev-day${iso === today ? ' is-today' : ''}${dayEvents.length ? ' has-events' : ''}">
+          <div class="caldev-day-head"><span>${day}</span></div>
           <div class="caldev-day-events">
             ${dayEvents.map((event) => eventChip(event)).join('')}
             ${extra ? `<span class="caldev-more">+${extra} more</span>` : ''}
@@ -225,7 +408,7 @@
           const iso = isoDate(date);
           const dayEvents = iso < today ? [] : eventsOnDate(iso);
           return `
-            <section class="caldev-week-col${iso === today ? ' is-today' : ''}">
+            <div class="caldev-week-col${iso === today ? ' is-today' : ''}">
               <header>
                 <span>${WEEKDAYS[date.getDay()]}</span>
                 <strong>${date.getDate()}</strong>
@@ -243,7 +426,7 @@
                   }).join('')
                   : '<p class="draft">No Event Today!</p>'}
               </div>
-            </section>
+            </div>
           `;
         }).join('')}
       </div>
@@ -279,14 +462,14 @@
             <ul>
               ${events.map((event) => `
                 <li>
-                  <button type="button" class="caldev-rundown-item" data-caldev-open="${event.id}">
+                  <article class="caldev-rundown-item" data-caldev-open="${event.id}" role="button" tabindex="0">
                     ${trackChip(event.track)}
                     <span class="caldev-rundown-copy">
                       <strong>${escapeHtml(event.title)}</strong>
                       <small>${escapeHtml(eventTimeLabel(event))}${event.who ? ` · ${escapeHtml(event.who)}` : ''}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
-                      ${event.description ? `<span>${escapeHtml(event.description)}</span>` : ''}
+                      ${event.description ? `<span>${formatDescHtml(event.description)}</span>` : ''}
                     </span>
-                  </button>
+                  </article>
                 </li>
               `).join('')}
             </ul>
@@ -309,7 +492,7 @@
           <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
           ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
           ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
-          ${event.description ? `<p class="caldev-detail-body">${escapeHtml(event.description)}</p>` : '<p class="draft">No details yet.</p>'}
+          ${event.description ? `<div class="caldev-detail-body">${formatDescHtml(event.description)}</div>` : '<p class="draft">No details yet.</p>'}
         </div>
       </div>
     `;
@@ -354,9 +537,20 @@
       render();
     });
     root.querySelectorAll('[data-caldev-open]').forEach((button) => {
-      button.addEventListener('click', () => {
+      const openEvent = () => {
         state.selectedId = Number(button.dataset.caldevOpen);
         render();
+      };
+      button.addEventListener('click', (event) => {
+        if (event.target.closest('a')) return;
+        openEvent();
+      });
+      button.addEventListener('keydown', (event) => {
+        if (event.target.closest('a')) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openEvent();
+        }
       });
     });
     root.querySelectorAll('[data-caldev-close]').forEach((node) => {

@@ -1,5 +1,111 @@
+const COMPACT_NAV_MEDIA = '(max-width: 767px), (orientation: landscape) and (max-height: 500px)';
+const MIN_NAV_FONT_PX = 12;
+
+function mediaWantsCompactNav() {
+  return Boolean(window.matchMedia && window.matchMedia(COMPACT_NAV_MEDIA).matches);
+}
+
 function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+  return mediaWantsCompactNav() || document.documentElement.classList.contains('nav-use-hamburger');
+}
+
+function placeDonateInDrawer(nav, donate) {
+  if (!nav || !donate) return;
+  nav.insertBefore(donate, nav.firstChild);
+}
+
+function headerUtilityFits(el, header) {
+  if (!el || !header || el.hidden) return false;
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+    return false;
+  }
+  const box = el.getBoundingClientRect();
+  const headerBox = header.getBoundingClientRect();
+  if (box.width < 4 || box.height < 4) return false;
+  if (box.right > headerBox.right + 6 || box.left < headerBox.left - 6) return false;
+  if (box.bottom > headerBox.bottom + 10 || box.top < headerBox.top - 10) return false;
+  return true;
+}
+
+function placeUtilitiesInDrawer(nav, nodes) {
+  if (!nav) return;
+  nodes.forEach((node) => {
+    if (node) nav.appendChild(node);
+  });
+}
+
+function measureInlineNavFits() {
+  const header = document.querySelector('header.site-header');
+  const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
+  const donate = document.querySelector('.header-donate');
+  if (!header || !nav) return true;
+  const link = nav.querySelector('a, .nav-support-toggle');
+  if (link) {
+    const size = parseFloat(window.getComputedStyle(link).fontSize) || 0;
+    if (size && size < MIN_NAV_FONT_PX - 0.15) return false;
+  }
+  if (nav.scrollWidth > nav.clientWidth + 2) return false;
+  if (header.scrollWidth > header.clientWidth + 2) return false;
+  if (donate) {
+    const style = window.getComputedStyle(donate);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const donateBox = donate.getBoundingClientRect();
+    const headerBox = header.getBoundingClientRect();
+    if (donateBox.width < 4 || donateBox.height < 4) return false;
+    if (donateBox.right > headerBox.right + 4 || donateBox.left < headerBox.left - 4) return false;
+    if (donateBox.bottom > headerBox.bottom + 14 || donateBox.top < headerBox.top - 8) return false;
+  }
+  return true;
+}
+
+function syncStickyHeaderHeight() {
+  const chrome = document.querySelector('.site-chrome');
+  const header = document.querySelector('header.site-header');
+  const stack = chrome || header;
+  const height = stack ? Math.ceil(stack.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty(
+    '--efhs-sticky-header-height',
+    `${height || 84}px`,
+  );
+}
+
+let stickyStackObserver = null;
+function watchStickyStack() {
+  const chrome = document.querySelector('.site-chrome');
+  const header = document.querySelector('header.site-header');
+  const stack = chrome || header;
+  syncStickyHeaderHeight();
+  if (!stack || stickyStackObserver || typeof ResizeObserver !== 'function') return;
+  stickyStackObserver = new ResizeObserver(() => syncStickyHeaderHeight());
+  stickyStackObserver.observe(stack);
+}
+
+function syncNavMode() {
+  const html = document.documentElement;
+  if (mediaWantsCompactNav()) {
+    html.classList.remove('nav-use-hamburger');
+    placeHeaderQuickActions();
+    syncStickyHeaderHeight();
+    return;
+  }
+  const donate = document.querySelector('.header-donate');
+  const header = document.querySelector('header.site-header');
+  html.classList.remove('nav-use-hamburger');
+  if (donate && header && donate.parentElement !== header) header.appendChild(donate);
+  if (header) void header.offsetWidth;
+  if (!measureInlineNavFits()) html.classList.add('nav-use-hamburger');
+  placeHeaderQuickActions();
+  syncStickyHeaderHeight();
+}
+
+let navModeRaf = 0;
+function scheduleNavMode() {
+  if (navModeRaf) cancelAnimationFrame(navModeRaf);
+  navModeRaf = requestAnimationFrame(() => {
+    navModeRaf = 0;
+    syncNavMode();
+  });
 }
 
 function ensureNavBackdrop() {
@@ -75,30 +181,50 @@ function setMobileNavOpen(open) {
   }
 }
 
-function placeMenuButtonInTray() {
-  const tray = ensureMobileNavTray();
+function placeMenuButtonLeading() {
+  const header = document.querySelector('header.site-header');
   const button = document.querySelector('.menu-button');
-  if (!tray || !button) return button;
-  if (button.parentElement !== tray) {
-    tray.insertBefore(button, tray.firstChild);
+  if (!header || !button) return button;
+  if (header.firstElementChild !== button) {
+    header.insertBefore(button, header.firstElementChild);
   }
   return button;
+}
+
+function utilityAuthHost() {
+  return document.querySelector('.utility .wrap') || document.querySelector('.utility');
 }
 
 function placeHeaderQuickActions() {
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
   const actions = ensureHeaderQuickActions();
-  const menuButton = placeMenuButtonInTray();
+  const menuButton = placeMenuButtonLeading();
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
+  const staffAuth = document.querySelector('[data-staff-auth-link]') || document.querySelector('a.utility-auth');
+  const donate = document.querySelector('.header-donate');
+  const header = document.querySelector('header.site-header');
+  const utility = utilityAuthHost();
   if (isMobileNavViewport()) {
-    if (notify) actions.appendChild(notify);
-    if (addHome) actions.appendChild(addHome);
+    if (donate) placeDonateInDrawer(nav, donate);
+    const utilities = [staffAuth, notify, addHome].filter(Boolean);
+    utilities.forEach((el) => actions.appendChild(el));
+    if (header) void header.offsetWidth;
+    const trayHidden = (() => {
+      const style = window.getComputedStyle(actions);
+      return style.display === 'none' || style.visibility === 'hidden';
+    })();
+    const overflowed = utilities.filter((el) => trayHidden || !headerUtilityFits(el, header));
+    // Login/Notify/Add-to-Home must stay reachable whenever the hamburger is used.
+    if (staffAuth && !overflowed.includes(staffAuth)) overflowed.unshift(staffAuth);
+    placeUtilitiesInDrawer(nav, overflowed);
   } else {
     setMobileNavOpen(false);
+    if (staffAuth && utility) utility.appendChild(staffAuth);
     if (notify) nav.appendChild(notify);
     if (addHome) nav.appendChild(addHome);
+    if (donate && header && donate.parentElement !== header) header.appendChild(donate);
   }
   if (menuButton) enhanceMenuButton(menuButton);
 }
@@ -108,7 +234,8 @@ function placeHeaderQuickActions() {
   if (!nav) return;
   ensureNavBackdrop();
   ensureHeaderQuickActions();
-  placeHeaderQuickActions();
+  syncNavMode();
+  watchStickyStack();
   const button = document.querySelector('.menu-button');
   if (!button) return;
   enhanceMenuButton(button);
@@ -131,29 +258,114 @@ function placeHeaderQuickActions() {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setMobileNavOpen(false);
+    if (event.key !== 'Escape') return;
+    if (closeOpenSupportNav()) return;
+    setMobileNavOpen(false);
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 760px)');
-    const onChange = () => placeHeaderQuickActions();
+    const media = window.matchMedia(COMPACT_NAV_MEDIA);
+    const onChange = () => scheduleNavMode();
     if (media.addEventListener) media.addEventListener('change', onChange);
     else if (media.addListener) media.addListener(onChange);
   }
+  window.addEventListener('resize', scheduleNavMode);
+})();
+
+function setSupportNavOpen(root, open) {
+  if (!root) return;
+  const toggle = root.querySelector('.nav-support-toggle');
+  root.classList.toggle('is-open', Boolean(open));
+  if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+}
+
+function closeAllSupportNav(except) {
+  document.querySelectorAll('[data-nav-support]').forEach((root) => {
+    if (root !== except) setSupportNavOpen(root, false);
+  });
+}
+
+function closeOpenSupportNav() {
+  const open = document.querySelector('[data-nav-support].is-open');
+  if (!open) return false;
+  setSupportNavOpen(open, false);
+  const toggle = open.querySelector('.nav-support-toggle');
+  if (toggle) toggle.focus();
+  return true;
+}
+
+(function bindSupportNav() {
+  const roots = Array.from(document.querySelectorAll('[data-nav-support]'));
+  if (!roots.length) return;
+
+  roots.forEach((root) => {
+    const toggle = root.querySelector('.nav-support-toggle');
+    const menu = root.querySelector('.nav-support-menu');
+    if (!toggle || !menu) return;
+    let hoverLocked = false;
+
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const next = toggle.getAttribute('aria-expanded') !== 'true';
+      if (!next && !isMobileNavViewport()) hoverLocked = true;
+      closeAllSupportNav(root);
+      setSupportNavOpen(root, next);
+    });
+
+    toggle.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      hoverLocked = false;
+      closeAllSupportNav(root);
+      setSupportNavOpen(root, true);
+      const first = menu.querySelector('a');
+      if (first) first.focus();
+    });
+
+    root.addEventListener('mouseenter', () => {
+      if (isMobileNavViewport() || hoverLocked) return;
+      closeAllSupportNav(root);
+      setSupportNavOpen(root, true);
+    });
+    root.addEventListener('mouseleave', () => {
+      hoverLocked = false;
+      if (isMobileNavViewport()) return;
+      setSupportNavOpen(root, false);
+    });
+
+    root.addEventListener('focusout', () => {
+      requestAnimationFrame(() => {
+        if (root.contains(document.activeElement)) return;
+        if (isMobileNavViewport() && root.classList.contains('is-open')) return;
+        setSupportNavOpen(root, false);
+      });
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (roots.some((root) => root.contains(event.target))) return;
+    closeAllSupportNav();
+  });
 })();
 
 function ensureStaffAuthNavLink() {
-  const siteNav = document.querySelector('#site-nav');
-  if (!siteNav) return null;
-  let link = siteNav.querySelector('[data-staff-auth-link]');
+  let link = document.querySelector('[data-staff-auth-link]');
+  const utility = utilityAuthHost();
+  const actions = document.querySelector('[data-header-quick-actions]');
+  const host = isMobileNavViewport() ? (actions || utility) : (utility || actions);
   if (!link) {
+    if (!host) return null;
     link = document.createElement('a');
+    link.className = 'utility-auth';
     link.setAttribute('data-staff-auth-link', '');
     link.href = '/admin/login';
     link.textContent = 'Login';
-    const before = siteNav.querySelector('[data-notify-me], [data-add-home]');
-    if (before) siteNav.insertBefore(link, before);
-    else siteNav.appendChild(link);
+    host.appendChild(link);
+  } else {
+    link.classList.add('utility-auth');
+    const siteNav = document.querySelector('#site-nav');
+    if (siteNav && siteNav.contains(link) && host) host.appendChild(link);
   }
   return link;
 }
@@ -170,8 +382,13 @@ function applyStaffAuthNavState(loggedIn) {
   }
 }
 
+function hasLoginHint() {
+  return document.cookie.split(';').some((part) => part.trim() === 'efhs_li=1');
+}
+
 (function syncStaffAuthNavLink() {
   applyStaffAuthNavState(false);
+  if (!hasLoginHint()) return;
   fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
@@ -182,21 +399,48 @@ function applyStaffAuthNavState(loggedIn) {
     });
 })();
 
+function readBootstrapSite() {
+  const node = document.getElementById('efhs-public-read');
+  if (!node) return null;
+  try {
+    const parsed = JSON.parse(node.textContent || 'null');
+    return parsed && typeof parsed.site === 'object' ? parsed.site : null;
+  } catch {
+    return null;
+  }
+}
+
+function maintenanceModeEnabled(site) {
+  return Boolean(site) && (
+    site.maintenance_mode === true
+    || site.maintenance_mode === 1
+    || site.maintenance_mode === '1'
+  );
+}
+
 (function enforceMaintenanceMode() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   if (path === '/maintenance' || path.endsWith('/maintenance.html')) return;
+  // Server already decided this Super Admin may preview. Never bounce them
+  // to /maintenance.html or a missing efhs_li cookie starts a redirect loop.
+  if (document.body?.classList.contains('maintenance-preview')) return;
 
-  Promise.all([
-    fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null),
-    fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null),
-  ]).then(([site, session]) => {
-    if (!site) return;
-    const enabled = site.maintenance_mode === true
-      || site.maintenance_mode === 1
-      || site.maintenance_mode === '1';
-    if (!enabled) return;
-    // Only Super Admins may preview public pages during maintenance.
-    if (session && session.is_super_admin) {
+  const embedded = readBootstrapSite();
+  const sitePromise = embedded
+    ? Promise.resolve(embedded)
+    : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : null)).catch(() => null);
+  sitePromise.then((site) => {
+    if (!maintenanceModeEnabled(site)) return { enabled: false };
+    // Session is only needed when maintenance is on, to allow a Super Admin preview.
+    if (!hasLoginHint()) return { enabled: true, session: null };
+    return fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then((session) => ({ enabled: true, session }));
+  }).then((state) => {
+    if (!state || !state.enabled) return;
+    if (document.body?.classList.contains('maintenance-preview')) return;
+    if (state.session && state.session.is_super_admin) {
       ensureMaintenancePreviewBanner();
       return;
     }
@@ -680,7 +924,7 @@ function syncAddToHomeButtonState(button) {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 760px)');
+    const media = window.matchMedia('(max-width: 767px)');
     const onChange = () => {
       syncAddToHomeButtonState(button);
       placeHeaderQuickActions();
@@ -888,7 +1132,10 @@ function syncAddToHomeButtonState(button) {
   document.querySelectorAll('[data-email-list-open]').forEach((button) => {
     if (button.dataset.boundEmailListOpen === '1') return;
     button.dataset.boundEmailListOpen = '1';
-    button.addEventListener('click', () => openEmailListModal(button));
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      openEmailListModal(button);
+    });
   });
 
   function shouldAutoOpenSubscribe() {
@@ -934,4 +1181,39 @@ function syncAddToHomeButtonState(button) {
       window.setTimeout(() => openEmailListModal(trigger), 120);
     }
   }
+})();
+
+(function initIcalPlatformButtons() {
+  function detectCalendarPlatform() {
+    const ua = String(navigator.userAgent || '');
+    const platform = String(navigator.platform || '');
+    const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+    // iPadOS 13+ can report as MacIntel with touch.
+    const isIOS = /iPad|iPhone|iPod/i.test(ua)
+      || (platform === 'MacIntel' && maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+    if (isIOS) return 'ios';
+    if (isAndroid) return 'android';
+    return 'other';
+  }
+
+  function syncIcalButtons() {
+    const buttons = [...document.querySelectorAll('[data-ical-subscribe][data-ical-platform]')];
+    if (!buttons.length) return;
+    const platform = detectCalendarPlatform();
+    document.documentElement.dataset.calendarPlatform = platform;
+    buttons.forEach((button) => {
+      const target = String(button.getAttribute('data-ical-platform') || '').toLowerCase();
+      // Phone OS: only the matching button. Desktop/other: show neither phone-specific CTA.
+      const show = platform !== 'other' && target === platform;
+      button.hidden = !show;
+      button.setAttribute('aria-hidden', show ? 'false' : 'true');
+    });
+  }
+
+  syncIcalButtons();
+  document.addEventListener('DOMContentLoaded', () => {
+    syncIcalButtons();
+    watchStickyStack();
+  });
 })();

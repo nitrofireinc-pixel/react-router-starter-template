@@ -11,6 +11,31 @@
 
 export const ADMIN_AUDIT_TABLE = 'admin_audit_log';
 export const ADMIN_AUDIT_ENC_VERSION = 1;
+export const ADMIN_AUDIT_PAGE_SIZE = 25;
+export const AUDIT_LOG_TIMEZONE = 'America/New_York';
+export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
+export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
+  'login',
+  'login.failed',
+  'logout',
+  'page.edit.open',
+  'change.pages',
+  'change.admin',
+  'change.users',
+  'change.events',
+  'change.sponsors',
+  'change.ledger',
+  'change.staff',
+  'change.boosters',
+  'change.minutes',
+  'change.photos',
+  'change.contact',
+  'change.site',
+  'change.mail',
+  'mail.send',
+  'security.log.view',
+  'security.log.export',
+]);
 export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
   'security-log',
   'security',
@@ -18,6 +43,13 @@ export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
   'audit-log',
   'admin-audit',
 ]);
+
+const isolateWriteFailures = { count: 0, since: '' };
+
+export function resetAuditWriteFailureState() {
+  isolateWriteFailures.count = 0;
+  isolateWriteFailures.since = '';
+}
 
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
@@ -57,6 +89,8 @@ export function assertAuditSqlIsAppendOnly(sql = '') {
   if (normalized.startsWith('insert into')) return true;
   if (normalized.startsWith('select ')) return true;
   if (normalized.startsWith('create table if not exists')) return true;
+  if (normalized.startsWith('create index if not exists')) return true;
+  if (normalized.startsWith('create trigger if not exists')) return true;
   if (normalized.startsWith('alter table') && normalized.includes('add column')) return true;
   throw new Error('Security audit log is append-only (INSERT/SELECT only).');
 }
@@ -87,9 +121,240 @@ export function auditCategoryFromPath(pathname = '') {
   if (path.includes('/minutes')) return 'minutes';
   if (path.includes('/photos')) return 'photos';
   if (path.includes('/contact')) return 'contact';
-  if (path.includes('/pages') || path.includes('/ensembles') || path.includes('/fundraising')) return 'pages';
+  if (
+    path.includes('/pages')
+    || path.includes('/visual-pages')
+    || path.includes('/ensembles')
+    || path.includes('/fundraising')
+  ) return 'pages';
   if (path.includes('/site') || path.includes('/logo') || path.includes('/utility-links') || path.includes('/social') || path.includes('/zernio')) return 'site';
   return 'admin';
+}
+
+export function visualPageAuditFromRequest(pathname = '', requestSummary = null, method = '') {
+  const path = String(pathname || '');
+  const match = path.match(/\/api\/admin\/visual-pages\/([a-z0-9-]+)(\/restore)?/i);
+  if (!match) return null;
+  const slug = match[1];
+  const verb = String(method || '').toUpperCase();
+  let kind = 'draft';
+  if (match[2] || /\/restore$/i.test(path) || verb === 'POST' && /restore/i.test(path)) {
+    kind = 'restore';
+  } else {
+    const rawAction = String(requestSummary?.body?.action || requestSummary?.body?.kind || '').toLowerCase();
+    kind = rawAction === 'publish' ? 'publish' : 'draft';
+  }
+  return {
+    slug,
+    kind,
+    action: 'change.pages',
+    category: 'pages',
+    detail: `${slug} ${kind}`,
+  };
+}
+
+function pad2(value) {
+  return String(Number(value) || 0).padStart(2, '0');
+}
+
+export function currentEasternMonthYear(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: AUDIT_LOG_TIMEZONE,
+      year: 'numeric',
+      month: 'numeric',
+    }).formatToParts(now instanceof Date ? now : new Date(now)).map((part) => [part.type, part.value]),
+  );
+  return {
+    year: Number(parts.year) || new Date().getFullYear(),
+    month: Number(parts.month) || 1,
+  };
+}
+
+export function zonedLocalToUtcIso(
+  year,
+  month,
+  day,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  timeZone = AUDIT_LOG_TIMEZONE,
+) {
+  const isoLocal = `${Number(year)}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
+  const asUtc = Date.parse(`${isoLocal}Z`);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(asUtc)).map((part) => [part.type, part.value]),
+  );
+  const asTz = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return new Date(asUtc - (asTz - asUtc)).toISOString();
+}
+
+export function sqliteUtcStamp(iso = '') {
+  return String(iso || '')
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, '')
+    .replace(/Z$/, '');
+}
+
+export function easternMonthUtcBounds(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!Number.isFinite(y) || y < 2000 || y > 2100 || !Number.isFinite(m) || m < 1 || m > 12) {
+    return null;
+  }
+  const nextMonth = m === 12 ? 1 : m + 1;
+  const nextYear = m === 12 ? y + 1 : y;
+  const startIso = zonedLocalToUtcIso(y, m, 1, 0, 0, 0);
+  const endIso = zonedLocalToUtcIso(nextYear, nextMonth, 1, 0, 0, 0);
+  return {
+    start: sqliteUtcStamp(startIso),
+    end: sqliteUtcStamp(endIso),
+    start_iso: startIso,
+    end_iso: endIso,
+  };
+}
+
+export function easternDayUtcBounds(dateValue = '') {
+  const raw = String(dateValue || '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const startIso = zonedLocalToUtcIso(year, month, day, 0, 0, 0);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  const endIso = zonedLocalToUtcIso(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, 0, 0);
+  return {
+    start: sqliteUtcStamp(startIso),
+    end: sqliteUtcStamp(endIso),
+    start_iso: startIso,
+    end_iso: endIso,
+  };
+}
+
+export function parseAuditUtcDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(raw)) {
+    const iso = /[zZ]$/.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)
+      ? raw.replace(' ', 'T')
+      : `${raw.replace(' ', 'T')}Z`;
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatAuditTimestampEt(value) {
+  const date = parseAuditUtcDate(value);
+  if (!date) return String(value || '');
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: AUDIT_LOG_TIMEZONE,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const month = parts.month || '';
+  const day = parts.day || '';
+  const year = parts.year || '';
+  const hour = parts.hour || '';
+  const minute = parts.minute || '00';
+  const second = parts.second || '00';
+  const period = parts.dayPeriod || '';
+  return `${month} ${day}, ${year} ${hour}:${minute}:${second} ${period} ET`.replace(/\s+/g, ' ').trim();
+}
+
+export function auditEntryMatchesQuery(entry = {}, query = '') {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  // Viewing the log writes security.log.view; that row must not match its own search.
+  if (String(entry.action || '') === 'security.log.view') return false;
+  const metaText = entry?.meta && typeof entry.meta === 'object'
+    ? JSON.stringify(entry.meta)
+    : '';
+  const hay = [
+    entry.summary,
+    entry.path,
+    entry.action,
+    entry.actor_username,
+    metaText,
+  ].join(' ').toLowerCase();
+  return hay.includes(needle);
+}
+
+export function auditChainIdWindow(entries = []) {
+  const ids = (Array.isArray(entries) ? entries : [])
+    .map((row) => Number(row?.id) || 0)
+    .filter((id) => id > 0);
+  if (!ids.length) return null;
+  return { minId: Math.min(...ids), maxId: Math.max(...ids) };
+}
+
+export function verifyAuditHashChain(entries = [], olderNeighbor = null) {
+  // entries must be a contiguous id window (every stored row from min..max).
+  // Comparing filtered/scattered rows to each other produces false breaks.
+  const rows = [...(Array.isArray(entries) ? entries : [])]
+    .filter((row) => row && Number(row.id) > 0)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  let prevHash = String(olderNeighbor?.payload_sha256 || '');
+  for (const row of rows) {
+    const prev = String(row.prev_sha256 || '');
+    if (prev && prev !== prevHash) {
+      return {
+        chain_ok: false,
+        chain_status: `Break at entry #${row.id}`,
+        chain_break_id: Number(row.id),
+      };
+    }
+    prevHash = String(row.payload_sha256 || '');
+  }
+  return {
+    chain_ok: true,
+    chain_status: 'Chain intact',
+    chain_break_id: null,
+  };
+}
+
+export async function fetchAuditHashChainRows(env, minId, maxId) {
+  const low = Number(minId) || 0;
+  const high = Number(maxId) || 0;
+  if (low <= 0 || high <= 0 || high < low) {
+    return { rows: [], olderNeighbor: null };
+  }
+  const windowSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id >= ? AND id <= ? ORDER BY id ASC`;
+  const neighborSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id < ? ORDER BY id DESC LIMIT 1`;
+  assertAuditSqlIsAppendOnly(windowSql);
+  assertAuditSqlIsAppendOnly(neighborSql);
+  const window = await env.DB.prepare(windowSql).bind(low, high).all();
+  const olderNeighbor = await env.DB.prepare(neighborSql).bind(low).first();
+  return {
+    rows: window?.results || [],
+    olderNeighbor: olderNeighbor || null,
+  };
 }
 
 export function redactAuditValue(key, value, depth = 0) {
@@ -307,12 +572,22 @@ export async function writeAdminAuditLog(env, entry = {}) {
     ciphertext = await encryptAuditPayload(env, canonical);
   } catch (error) {
     console.error('admin audit log encrypt failed', error?.message || error);
+    await recordAuditWriteFailure(env, error);
     return null;
+  }
+  let prevSha256 = '';
+  try {
+    const prevSql = `SELECT payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
+    assertAuditSqlIsAppendOnly(prevSql);
+    const previous = await env.DB.prepare(prevSql).first();
+    prevSha256 = String(previous?.payload_sha256 || '');
+  } catch (error) {
+    console.error('admin audit log prev hash read failed', error?.message || error);
   }
   try {
     const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
-        (action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        (action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     assertAuditSqlIsAppendOnly(insertSql);
     const result = await env.DB.prepare(insertSql).bind(
       // Index fields only (needed for Super Admin filters). Details are sealed in ciphertext.
@@ -330,12 +605,71 @@ export async function writeAdminAuditLog(env, entry = {}) {
       payloadSha256,
       ciphertext,
       ADMIN_AUDIT_ENC_VERSION,
+      prevSha256,
     ).run();
-    return { id: result?.meta?.last_row_id || null, payload_sha256: payloadSha256 };
+    return {
+      id: result?.meta?.last_row_id || null,
+      payload_sha256: payloadSha256,
+      prev_sha256: prevSha256,
+    };
   } catch (error) {
     console.error('admin audit log write failed', error?.message || error);
+    await recordAuditWriteFailure(env, error);
     return null;
   }
+}
+
+export async function recordAuditWriteFailure(env, error) {
+  const now = new Date().toISOString();
+  isolateWriteFailures.count += 1;
+  isolateWriteFailures.since = isolateWriteFailures.since || now;
+  console.error('admin_audit_write_failed', {
+    count: isolateWriteFailures.count,
+    since: isolateWriteFailures.since,
+    error: String(error?.message || error || 'write failed'),
+  });
+  if (!env?.DB) return { ...isolateWriteFailures };
+  try {
+    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+      .bind(AUDIT_WRITE_FAILURES_KEY)
+      .first();
+    let stored = { count: 0, since: isolateWriteFailures.since };
+    try {
+      stored = JSON.parse(String(row?.value || '{}')) || stored;
+    } catch {
+      stored = { count: 0, since: isolateWriteFailures.since };
+    }
+    const next = {
+      count: Number(stored.count || 0) + 1,
+      since: String(stored.since || isolateWriteFailures.since || now),
+      updated_at: now,
+    };
+    await env.DB.prepare(
+      'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).bind(AUDIT_WRITE_FAILURES_KEY, JSON.stringify(next)).run();
+    return next;
+  } catch (persistError) {
+    console.error('admin_audit_write_failed_persist', persistError?.message || persistError);
+    return { ...isolateWriteFailures };
+  }
+}
+
+export async function readAuditWriteFailures(env) {
+  let stored = { count: 0, since: '' };
+  if (env?.DB) {
+    try {
+      const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+        .bind(AUDIT_WRITE_FAILURES_KEY)
+        .first();
+      stored = JSON.parse(String(row?.value || '{}')) || stored;
+    } catch {
+      stored = { count: 0, since: '' };
+    }
+  }
+  return {
+    count: Math.max(Number(stored.count || 0), isolateWriteFailures.count),
+    since: String(stored.since || isolateWriteFailures.since || ''),
+  };
 }
 
 export function requestClientIp(request) {
@@ -358,9 +692,13 @@ export async function maybeAuditAdminApiResponse(env, {
   const path = String(url?.pathname || '');
   const method = String(request?.method || '').toUpperCase();
   const status = Number(response?.status) || 0;
-  const category = auditCategoryFromPath(path);
-  const action = category === 'mail' && path.endsWith('/mail') ? 'mail.send' : `change.${category}`;
-  const detail = status >= 400 ? `failed (${status})` : 'saved';
+  const visual = visualPageAuditFromRequest(path, requestSummary, method);
+  const category = visual?.category || auditCategoryFromPath(path);
+  const action = visual?.action
+    || (category === 'mail' && path.endsWith('/mail') ? 'mail.send' : `change.${category}`);
+  const detail = status >= 400
+    ? `failed (${status})`
+    : (visual?.detail || 'saved');
   const write = writeAdminAuditLog(env, {
     action,
     category,
@@ -382,6 +720,7 @@ export async function maybeAuditAdminApiResponse(env, {
     meta: {
       request: requestSummary || null,
       actor_role: actor?.role || '',
+      ...(visual ? { slug: visual.slug, kind: visual.kind } : {}),
     },
   });
   if (ctx && typeof ctx.waitUntil === 'function') {
@@ -395,6 +734,7 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
   const base = {
     id: Number(row.id) || 0,
     created_at: String(row.created_at || ''),
+    created_at_et: formatAuditTimestampEt(row.created_at),
     action: String(row.action || ''),
     category: String(row.category || ''),
     method: String(row.method || ''),
@@ -407,6 +747,7 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
     summary: String(row.summary || ''),
     meta: {},
     payload_sha256: String(row.payload_sha256 || ''),
+    prev_sha256: String(row.prev_sha256 || ''),
     integrity_ok: false,
     encrypted: Boolean(row.ciphertext),
   };
@@ -475,6 +816,7 @@ export function serializeAuditRow(row = {}) {
   return {
     id: Number(row.id) || 0,
     created_at: String(row.created_at || ''),
+    created_at_et: formatAuditTimestampEt(row.created_at),
     action: String(row.action || ''),
     category: String(row.category || ''),
     method: String(row.method || ''),
@@ -487,23 +829,58 @@ export function serializeAuditRow(row = {}) {
     summary: String(row.summary || ''),
     meta,
     payload_sha256: String(row.payload_sha256 || ''),
+    prev_sha256: String(row.prev_sha256 || ''),
     integrity_ok: true,
     encrypted: Boolean(row.ciphertext),
   };
 }
 
+export function resolveAuditLogTimeRange({
+  year,
+  month,
+  from = '',
+  to = '',
+  now = new Date(),
+} = {}) {
+  const current = currentEasternMonthYear(now);
+  const y = Number(year);
+  const m = Number(month);
+  const useMonth = Number.isFinite(y) && y >= 2000 && Number.isFinite(m) && m >= 1 && m <= 12;
+  const monthBounds = easternMonthUtcBounds(useMonth ? y : current.year, useMonth ? m : current.month);
+  const fromBounds = easternDayUtcBounds(from);
+  const toBounds = easternDayUtcBounds(to);
+  let start = monthBounds?.start || '';
+  let end = monthBounds?.end || '';
+  if (fromBounds && fromBounds.start > start) start = fromBounds.start;
+  if (toBounds && toBounds.end < end) end = toBounds.end;
+  return {
+    year: useMonth ? y : current.year,
+    month: useMonth ? m : current.month,
+    start,
+    end,
+  };
+}
+
 export async function listAdminAuditLogs(env, {
-  limit = 200,
+  limit = ADMIN_AUDIT_PAGE_SIZE,
   offset = 0,
   action = '',
   actor = '',
+  year,
+  month,
+  from = '',
+  to = '',
+  q = '',
+  now = new Date(),
 } = {}) {
-  const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 2000);
+  const safeLimit = Math.min(Math.max(Number(limit) || ADMIN_AUDIT_PAGE_SIZE, 1), 2000);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   const clauses = [];
   const binds = [];
   const actionFilter = String(action || '').trim();
   const actorFilter = String(actor || '').trim().toLowerCase();
+  const query = String(q || '').trim();
+  const range = resolveAuditLogTimeRange({ year, month, from, to, now });
   if (actionFilter) {
     clauses.push('action = ?');
     binds.push(actionFilter);
@@ -512,27 +889,57 @@ export async function listAdminAuditLogs(env, {
     clauses.push('LOWER(actor_username) LIKE ?');
     binds.push(`%${actorFilter}%`);
   }
+  if (range.start) {
+    clauses.push('created_at >= ?');
+    binds.push(range.start);
+  }
+  if (range.end) {
+    clauses.push('created_at < ?');
+    binds.push(range.end);
+  }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const countSql = `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE} ${where}`;
   const listSql = `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
-            ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version
+            ip, user_agent, summary, meta_json, payload_sha256, prev_sha256, ciphertext, enc_version
      FROM ${ADMIN_AUDIT_TABLE}
      ${where}
-     ORDER BY datetime(created_at) DESC, id DESC
+     ORDER BY created_at DESC, id DESC
      LIMIT ? OFFSET ?`;
   assertAuditSqlIsAppendOnly(countSql);
   assertAuditSqlIsAppendOnly(listSql);
   const countRow = await env.DB.prepare(countSql).bind(...binds).first();
   const rows = await env.DB.prepare(listSql).bind(...binds, safeLimit, safeOffset).all();
-  const entries = [];
-  for (const row of rows.results || []) {
-    entries.push(await deserializeEncryptedAuditRow(env, row));
+  const rawRows = rows.results || [];
+  const window = auditChainIdWindow(rawRows);
+  const chainRows = window
+    ? await fetchAuditHashChainRows(env, window.minId, window.maxId)
+    : { rows: [], olderNeighbor: null };
+  const decrypted = [];
+  for (const row of rawRows) {
+    decrypted.push(await deserializeEncryptedAuditRow(env, row));
   }
+  const entries = query
+    ? decrypted.filter((entry) => auditEntryMatchesQuery(entry, query))
+    : decrypted;
+  const chain = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
+  const writeFailures = await readAuditWriteFailures(env);
   return {
     total: Number(countRow?.total) || 0,
     limit: safeLimit,
     offset: safeOffset,
+    year: range.year,
+    month: range.month,
+    from: String(from || '').trim(),
+    to: String(to || '').trim(),
+    q: query,
     entries,
+    fetched: decrypted.length,
+    matched: entries.length,
+    chain_ok: chain.chain_ok,
+    chain_status: chain.chain_status,
+    chain_break_id: chain.chain_break_id,
+    write_failures: writeFailures,
+    known_actions: [...ADMIN_AUDIT_KNOWN_ACTIONS],
     storage: 'encrypted-d1',
     integrity: 'sha-256',
     encryption: 'aes-256-gcm',
@@ -548,11 +955,12 @@ export function buildAdminAuditExportText(entries = []) {
     `Generated: ${new Date().toISOString()}`,
     'Access: Super Admin only — encrypted server-side database (AES-256-GCM + SHA-256 integrity).',
     'Mode: View / print only. Not editable.',
+    `Hash chain: ${entries.find((entry) => entry.chain_status)?.chain_status || 'checked on screen'}`,
     '',
   ];
   for (const entry of entries) {
     lines.push('='.repeat(72));
-    lines.push(`When: ${entry.created_at || ''}`);
+    lines.push(`When: ${entry.created_at_et || formatAuditTimestampEt(entry.created_at)}`);
     lines.push(`Action: ${entry.action || ''}`);
     lines.push(`Category: ${entry.category || ''}`);
     lines.push(`User: ${entry.actor_username || 'unknown'}${entry.actor_user_id ? ` (#${entry.actor_user_id})` : ''}`);
