@@ -439,7 +439,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004y'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004z'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
@@ -734,4 +734,44 @@ test('Badge Creator APIs and HTML tab 403 without badges', async () => {
   const body = await html.text();
   assert.match(body, /error-page error-403/);
   assert.match(body, /Permission required: badges|Access Denied|not allowed|Sign-In Needed|off limits|403/i);
+});
+
+test('login POST ignores junk device JSON and public pages do not collect it', async () => {
+  resetDbInitCache();
+  assert.match(workerSrc, /name="device"/);
+  assert.match(adminJs, /collectAdminDeviceSnapshot/);
+  assert.doesNotMatch(readFileSync(join(root, 'script.js'), 'utf8'), /collectAdminDeviceSnapshot/);
+  const env = {
+    EFBAND_SECRET: 'test-session-secret',
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (q.includes('FROM site_content WHERE key')) return { value: DB_SCHEMA_VERSION };
+            if (q.includes('FROM users')) return null;
+            if (q.includes('FROM admin_audit_log')) return null;
+            return null;
+          },
+          async all() { return { results: [] }; },
+          async run() { return { success: true }; },
+        };
+      },
+      async batch() { return []; },
+    },
+    ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
+  };
+  const response = await worker.fetch(new Request('https://efhsband.org/admin/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      username: 'nobody@efhsband.org',
+      password: 'nope',
+      device: `{${'x'.repeat(4000)}`,
+    }),
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 401);
+  assert.match(await response.text(), /Invalid username or password/);
 });

@@ -122,6 +122,13 @@ test('Worker HTML, admin, API, and uploads responses carry the security headers'
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff', path);
     assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN', path);
     assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin', path);
+    if (path === '/admin/login') {
+      assert.match(response.headers.get('accept-ch') || '', /Sec-CH-UA/);
+      assert.match(response.headers.get('critical-ch') || '', /Sec-CH-UA-Platform/);
+    } else {
+      assert.equal(response.headers.get('accept-ch'), null, path);
+      assert.equal(response.headers.get('critical-ch'), null, path);
+    }
   }
 });
 
@@ -138,7 +145,7 @@ test('every Worker-rendered CSS/JS reference carries the asset version param', (
       assert.match(match[0], /[?&]v=/, `unversioned Worker HTML ref ${match[0]}`);
     }
   }
-  assert.equal(ASSET_VERSION, 'cms-p1-20261004y');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261004z');
 });
 
 test('admin-visual canvas stylesheets append the public asset version', () => {

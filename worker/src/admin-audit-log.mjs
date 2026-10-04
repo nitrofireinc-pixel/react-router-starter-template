@@ -1,3 +1,8 @@
+import {
+  buildAuditDeviceMeta,
+  formatAuditDeviceSummary,
+} from './audit-device.mjs';
+
 /**
  * Super-admin-only CMS security audit log.
  *
@@ -1124,6 +1129,20 @@ export async function writeAdminAuditLog(env, entry = {}) {
   } catch {
     meta = {};
   }
+  try {
+    const device = buildAuditDeviceMeta({
+      request: entry.request,
+      userAgent,
+      client: entry.device_client,
+      includeClient: Boolean(entry.include_device_client),
+      sessionIdHash,
+    });
+    if (device && (device.os || device.browser || device.user_agent || device.client)) {
+      meta.device = device;
+    }
+  } catch {
+    // Device parsing must never block an audit write.
+  }
   const record = {
     action,
     category,
@@ -1409,6 +1428,7 @@ export async function maybeAuditAdminApiResponse(env, {
     content = await contentEvidenceHashed(beforeText, afterText);
   }
   const write = writeAdminAuditLog(env, {
+    request,
     action,
     category,
     method,
@@ -1477,6 +1497,7 @@ export async function maybeLogAccessDenial(env, {
   now = Date.now(),
   forcedAction = '',
   forcedDetail = '',
+  deviceClient = null,
 } = {}) {
   if (!response || requestAlreadyWroteAudit(request)) return null;
   const status = Number(response.status) || 0;
@@ -1531,6 +1552,8 @@ export async function maybeLogAccessDenial(env, {
         ? `${decision.count} ${action} from same IP+path in 10 minutes`
         : (required ? `required ${required}` : (detail || action)),
     }),
+    include_device_client: action.startsWith('login.'),
+    device_client: deviceClient || session?.device_client || null,
     meta: {
       required: required || '',
       count: decision.count,
@@ -1854,12 +1877,20 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
     'path',
     'status',
     'summary',
+    'os',
+    'os_version',
+    'browser',
+    'browser_version',
+    'device_type',
+    'user_agent',
+    'client_ref',
     'payload_sha256',
     'prev_sha256',
     'integrity_ok',
   ];
   const lines = [header.join(',')];
   for (const entry of entries) {
+    const device = entry.meta?.device || {};
     lines.push([
       entry.id,
       entry.created_at,
@@ -1875,6 +1906,13 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
       entry.path,
       entry.status,
       entry.summary,
+      device.os || '',
+      device.os_version || '',
+      device.browser || '',
+      device.browser_version || '',
+      device.device_type || '',
+      device.user_agent || entry.user_agent || '',
+      device.client?.ref || '',
       entry.payload_sha256,
       entry.prev_sha256,
       entry.integrity_ok,
@@ -1923,6 +1961,8 @@ export function buildAdminAuditExportText(entries = []) {
     if (entry.payload_sha256) lines.push(`SHA-256: ${entry.payload_sha256}`);
     if (entry.integrity_ok === false) lines.push('Integrity: FAILED');
     if (entry.user_agent) lines.push(`User-Agent: ${entry.user_agent}`);
+    const deviceLine = formatAuditDeviceSummary(entry.meta?.device || entry.device);
+    if (deviceLine) lines.push(`Device: ${deviceLine}`);
     if (entry.meta && Object.keys(entry.meta).length) {
       lines.push('Details:');
       lines.push(JSON.stringify(entry.meta, null, 2));

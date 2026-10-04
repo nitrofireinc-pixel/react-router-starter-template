@@ -2333,7 +2333,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004y'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004z'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3025,6 +3025,10 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /site-settings-switches/);
   assert.match(workerSrc, /data-password-toggle/);
   assert.match(workerSrc, /admin-password-toggle/);
+  assert.match(workerSrc, /name="device"/);
+  assert.match(workerSrc, /devicePixelRatio/);
+  assert.doesNotMatch(siteContent, /name="device"/);
+  assert.doesNotMatch(siteContent, /__cmsDeviceSnapshot/);
   assert.match(workerSrc, /ASSET_VERSION/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);

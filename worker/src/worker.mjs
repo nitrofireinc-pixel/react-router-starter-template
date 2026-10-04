@@ -138,6 +138,11 @@ import {
   visualStructureSignature,
   visualStyleSignature,
 } from './page-permissions.mjs';
+import {
+  compactSessionDevice,
+  expandSessionDevice,
+  sanitizeClientDeviceSnapshot,
+} from './audit-device.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
   DEFAULT_ERROR_PAGES,
@@ -409,7 +414,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004y';
+export const ASSET_VERSION = 'cms-p1-20261004z';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1860,8 +1865,11 @@ async function hmacSign(value, secret) {
   return base64Url(await crypto.subtle.sign('HMAC', key, TEXT.encode(value)));
 }
 
-export async function makeSession(user, env) {
-  const payload = base64Url(TEXT.encode(JSON.stringify({ uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) })));
+export async function makeSession(user, env, extras = {}) {
+  const payloadObj = { uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) };
+  const packed = compactSessionDevice(extras.device || extras.device_client || null);
+  if (packed) payloadObj.d = packed;
+  const payload = base64Url(TEXT.encode(JSON.stringify(payloadObj)));
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
 
@@ -1915,6 +1923,7 @@ async function inspectSessionCookie(request, env) {
   }
   try {
     const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    const deviceClient = expandSessionDevice(data.d);
     if (!isSessionFresh(data.t)) {
       return {
         user: null,
@@ -1923,6 +1932,7 @@ async function inspectSessionCookie(request, env) {
         username: String(data.u || ''),
         uid: data.uid ? Number(data.uid) : null,
         issued_at: data.t,
+        device_client: deviceClient,
       };
     }
     const user = data.uid
@@ -1934,6 +1944,7 @@ async function inspectSessionCookie(request, env) {
       session_id_hash: sessionIdHash,
       username: user?.username || data.u || '',
       uid: user?.id || data.uid || null,
+      device_client: deviceClient,
     };
   } catch {
     return { user: null, expired: false, session_id_hash: sessionIdHash, username: '', uid: null };
@@ -1952,6 +1963,7 @@ function auditRequestForensics(request, actor = null, session = null) {
     country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
     session_id_hash: session?.session_id_hash || '',
+    device_client: session?.device_client || null,
   };
 }
 
@@ -8171,6 +8183,7 @@ async function writeMaintenanceAudit(env, request, user, {
     try { return new URL(request.url).pathname; } catch { return '/api/admin/maintenance'; }
   })();
   await writeAdminAuditLog(env, {
+    request,
     action: 'change.maintenance',
     category: 'site',
     method: String(request?.method || 'POST').toUpperCase(),
@@ -8216,6 +8229,7 @@ async function writeMinutesAudit(env, request, user, {
   })();
   const method = String(request?.method || 'POST').toUpperCase();
   await writeAdminAuditLog(env, {
+    request,
     action,
     category: 'minutes',
     method,
@@ -12662,6 +12676,7 @@ async function handleLogin(request, env, ctx = null) {
   const form = await request.formData();
   const username = String(form.get('username') || '').trim();
   const password = String(form.get('password') || '');
+  const deviceClient = sanitizeClientDeviceSnapshot(form.get('device'));
   const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
   const ip = requestClientIp(request);
   const lock = inspectLoginLock(username, ip);
@@ -12679,6 +12694,7 @@ async function handleLogin(request, env, ctx = null) {
       response: lockedResponse,
       actor: username ? { username } : null,
       ctx,
+      deviceClient,
     });
     return lockedResponse;
   }
@@ -12701,6 +12717,7 @@ async function handleLogin(request, env, ctx = null) {
       response: failedResponse,
       actor: username ? { username } : null,
       ctx,
+      deviceClient,
     });
     return failedResponse;
   }
@@ -12712,7 +12729,7 @@ async function handleLogin(request, env, ctx = null) {
     // Best-effort; login should still succeed if the column is missing mid-deploy.
   }
   clearLoginFailures(username, ip);
-  const token = await makeSession(user, env);
+  const token = await makeSession(user, env, { device: deviceClient });
   await enqueueAdminAudit(env, ctx, {
     request,
     action: 'login',
@@ -12726,6 +12743,8 @@ async function handleLogin(request, env, ctx = null) {
     country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
     session_id_hash: await sha256Hex(token),
+    include_device_client: true,
+    device_client: deviceClient,
     summary: buildAuditSummary({
       action: 'login',
       method: 'POST',
@@ -12856,6 +12875,7 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     });
   }
   await writeAdminAuditLog(env, {
+    request,
     action: 'page.edit.open',
     category: 'pages',
     method: 'GET',
@@ -13649,11 +13669,11 @@ export default {
     try {
       const url = new URL(request.url);
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
-        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url));
+        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url), url.pathname);
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
         const cached = await matchUploadCache(url);
-        if (cached) return applyWorkerSecurityHeaders(cached);
+        if (cached) return applyWorkerSecurityHeaders(cached, url.pathname);
       }
       const opened = openD1Session(request, env);
       const response = await dispatchWorker(request, opened.env, ctx);
@@ -13663,15 +13683,15 @@ export default {
         response,
         ctx,
       });
-      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
+      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session), url.pathname);
     } catch (error) {
       console.error('worker_exception', String(error?.stack || error?.message || error));
       try {
         const failUrl = new URL(request.url);
         if (wantsJsonRequest(request, failUrl.pathname)) {
-          return applyWorkerSecurityHeaders(jsonResponse({ detail: 'Server error' }, 500));
+          return applyWorkerSecurityHeaders(jsonResponse({ detail: 'Server error' }, 500), failUrl.pathname);
         }
-        return applyWorkerSecurityHeaders(liteErrorResponse(500, { path: failUrl.pathname }));
+        return applyWorkerSecurityHeaders(liteErrorResponse(500, { path: failUrl.pathname }), failUrl.pathname);
       } catch {
         return applyWorkerSecurityHeaders(liteErrorResponse(500));
       }
@@ -13679,7 +13699,7 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="device" value="" autocomplete="off"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script><script>(function(){try{var field=document.querySelector("input[name=device]");if(!field)return;var fill=function(){try{field.value=JSON.stringify({screen:[screen.width||0,screen.height||0],dpr:window.devicePixelRatio||1,viewport:[window.innerWidth||0,window.innerHeight||0],tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),language:navigator.language||"",platform:navigator.platform||""});}catch(e){}};fill();var form=field.form;if(form)form.addEventListener("submit",fill);}catch(e){}})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 ${renderAdminChromeBar()}

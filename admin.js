@@ -1,3 +1,38 @@
+function collectAdminDeviceSnapshot() {
+  try {
+    return {
+      screen: [window.screen?.width || 0, window.screen?.height || 0],
+      dpr: window.devicePixelRatio || 1,
+      viewport: [window.innerWidth || 0, window.innerHeight || 0],
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      language: navigator.language || '',
+      platform: navigator.platform || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatSecurityLogDevice(entry) {
+  const device = entry?.meta?.device;
+  if (!device || typeof device !== 'object') return '';
+  const parts = [];
+  if (device.browser) parts.push([device.browser, device.browser_version].filter(Boolean).join(' '));
+  if (device.os) parts.push([device.os, device.os_version].filter(Boolean).join(' '));
+  if (device.device_type) parts.push(device.device_type);
+  if (device.client?.ref) {
+    parts.push(`client via session ${String(device.client.ref).slice(0, 12)}`);
+  } else if (device.client) {
+    if (device.client.screen) parts.push(`screen ${device.client.screen}`);
+    if (device.client.viewport) parts.push(`viewport ${device.client.viewport}`);
+    if (device.client.tz) parts.push(device.client.tz);
+    if (device.client.language) parts.push(device.client.language);
+  }
+  if (!parts.length && !device.user_agent) return '';
+  const ua = device.user_agent ? `<p class="muted mono">UA: ${escapeHtml(device.user_agent)}</p>` : '';
+  return `${parts.length ? `<p class="muted">Device: ${escapeHtml(parts.join(' · '))}</p>` : ''}${ua}`;
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -5365,6 +5400,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
           <p>${summary}</p>
           ${route ? `<p class="muted mono">${route}</p>` : ''}
           ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}${entry.country ? ` · ${escapeHtml(entry.country)}` : ''}</p>` : ''}
+          ${formatSecurityLogDevice(entry)}
           ${entry.session_id_hash ? `<p class="muted mono">Session: ${escapeHtml(entry.session_id_hash)}</p>` : ''}
           ${entry.key_id ? `<p class="muted mono">Key: ${escapeHtml(entry.key_id)}</p>` : ''}
           ${integrity}
@@ -8782,6 +8818,8 @@ window.jsonFetch = jsonFetch;
 window.prepareImageFileForUpload = prepareImageFileForUpload;
 window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
 window.canAccessBadgeCreator = canAccessBadgeCreator;
+
+try { window.__cmsDeviceSnapshot = collectAdminDeviceSnapshot(); } catch { /* admin-only; never block CMS */ }
 
 bindFormRichEditors();
 bindPageVisualEditor();

@@ -65,6 +65,16 @@ import {
   AUDIT_LOG_NO_DELETE_TRIGGER_SQL,
   AUDIT_LOG_NO_UPDATE_TRIGGER_SQL,
 } from '../worker/src/schema-upgrade.mjs';
+import {
+  buildAuditDeviceMeta,
+  compactSessionDevice,
+  expandSessionDevice,
+  formatAuditDeviceSummary,
+  parseSecChUa,
+  parseUserAgentDevice,
+  sanitizeClientDeviceSnapshot,
+  shouldRequestAdminClientHints,
+} from '../worker/src/audit-device.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1021,4 +1031,172 @@ test('unauthenticated admin redirect and HTML 403 log once with required permiss
   assert.equal(badge.meta.required, 'badges');
   assert.equal(badge.path, '/admin');
   assert.equal(badge.session_id_hash, 'b'.repeat(64));
+});
+
+test('lightweight UA and client-hint parser stays local and cheap', () => {
+  const chromeWin = parseUserAgentDevice(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  );
+  assert.equal(chromeWin.os, 'Windows');
+  assert.equal(chromeWin.browser, 'Chrome');
+  assert.equal(chromeWin.browser_version, '128.0');
+  assert.equal(chromeWin.device_type, 'desktop');
+
+  const safariMac = parseUserAgentDevice(
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+  );
+  assert.equal(safariMac.os, 'macOS');
+  assert.equal(safariMac.browser, 'Safari');
+  assert.equal(safariMac.device_type, 'desktop');
+
+  const iphone = parseUserAgentDevice(
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  );
+  assert.equal(iphone.os, 'iOS');
+  assert.equal(iphone.os_version, '17.5');
+  assert.equal(iphone.device_type, 'mobile');
+
+  const brands = parseSecChUa('"Google Chrome";v="128", "Chromium";v="128", "Not.A/Brand";v="99"');
+  const hinted = parseUserAgentDevice(
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+    { brands, mobile: false, platform: 'Windows' },
+  );
+  assert.equal(hinted.os, 'Windows');
+  assert.equal(hinted.browser, 'Google Chrome');
+  assert.equal(hinted.device_type, 'desktop');
+
+  const started = performance.now();
+  for (let i = 0; i < 200; i += 1) parseUserAgentDevice(chromeWin && 'Mozilla/5.0 Chrome/128.0.0.0');
+  assert.ok((performance.now() - started) < 10, 'parser exceeded 10ms for 200 UAs');
+});
+
+test('login device snapshot is size-limited and later rows only keep a session ref', () => {
+  assert.equal(sanitizeClientDeviceSnapshot('not-json'), null);
+  assert.equal(sanitizeClientDeviceSnapshot('x'.repeat(900)), null);
+  assert.equal(sanitizeClientDeviceSnapshot({ screen: [0, 0] }), null);
+  const clean = sanitizeClientDeviceSnapshot({
+    screen: [1920, 1080],
+    dpr: 2,
+    viewport: [1280, 720],
+    tz: 'America/New_York',
+    language: 'en-US',
+    platform: 'MacIntel',
+    extra: 'drop-me',
+  });
+  assert.deepEqual(clean, {
+    screen: '1920x1080',
+    viewport: '1280x720',
+    dpr: 2,
+    tz: 'America/New_York',
+    language: 'en-US',
+    platform: 'MacIntel',
+  });
+  const packed = compactSessionDevice(clean);
+  assert.deepEqual(expandSessionDevice(packed), clean);
+  assert.equal(shouldRequestAdminClientHints('/admin/login'), true);
+  assert.equal(shouldRequestAdminClientHints('/'), false);
+  assert.equal(shouldRequestAdminClientHints('/api/site'), false);
+
+  const loginDevice = buildAuditDeviceMeta({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15',
+    client: clean,
+    includeClient: true,
+    sessionIdHash: 'c'.repeat(64),
+  });
+  assert.equal(loginDevice.browser, 'Safari');
+  assert.equal(loginDevice.client.screen, '1920x1080');
+  const later = buildAuditDeviceMeta({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15',
+    client: clean,
+    includeClient: false,
+    sessionIdHash: 'c'.repeat(64),
+  });
+  assert.deepEqual(later.client, { ref: 'c'.repeat(64) });
+  assert.match(formatAuditDeviceSummary(loginDevice), /Safari/);
+  assert.match(formatAuditDeviceSummary(later), /client via session/);
+});
+
+test('audit writes encrypt device fields and exports them decoded', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, rows } = createAuditDb();
+  const request = new Request('https://efhsband.org/admin/login', {
+    method: 'POST',
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0.0.0 Safari/537.36',
+      'sec-ch-ua': '"Google Chrome";v="128", "Chromium";v="128", "Not.A/Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'cf-connecting-ip': '203.0.113.9',
+      'cf-ipcountry': 'US',
+    },
+  });
+  await writeAdminAuditLog(env, {
+    request,
+    action: 'login',
+    category: 'auth',
+    method: 'POST',
+    path: '/admin/login',
+    status: 302,
+    actor_username: 'agent@efhsband.org',
+    user_agent: request.headers.get('user-agent'),
+    session_id_hash: 'd'.repeat(64),
+    include_device_client: true,
+    device_client: {
+      screen: [1440, 900],
+      dpr: 2,
+      viewport: [1200, 800],
+      tz: 'America/New_York',
+      language: 'en-US',
+      platform: 'MacIntel',
+    },
+  });
+  const payload = JSON.parse(await decryptAuditPayload(env, rows[0].ciphertext));
+  assert.equal(payload.meta.device.os, 'Windows');
+  assert.equal(payload.meta.device.browser, 'Google Chrome');
+  assert.equal(payload.meta.device.client.screen, '1440x900');
+  assert.equal(payload.meta.device.client.tz, 'America/New_York');
+  const listed = {
+    ...payload,
+    meta: payload.meta,
+    user_agent: payload.user_agent,
+  };
+  const text = buildAdminAuditExportText([listed]);
+  assert.match(text, /Device: /);
+  assert.match(text, /Google Chrome/);
+  const csv = buildAdminAuditExportCsv([{
+    ...payload,
+    id: 1,
+    created_at: payload.created_at,
+    integrity_ok: true,
+  }]);
+  assert.match(csv, /os,os_version,browser/);
+  assert.match(csv, /Google Chrome/);
+});
+
+test('failed login rows keep the client snapshot and never throw on junk device JSON', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  resetAccessDeniedThrottleState();
+  const { env, rows } = createAuditDb();
+  const request = denialRequest('/admin/login', { method: 'POST' });
+  const result = await maybeLogAccessDenial(env, {
+    request,
+    url: new URL(request.url),
+    response: new Response('nope', { status: 401, headers: { 'content-type': 'text/html' } }),
+    actor: { username: 'guess@efhsband.org' },
+    deviceClient: sanitizeClientDeviceSnapshot({
+      screen: [390, 844],
+      dpr: 3,
+      viewport: [390, 700],
+      tz: 'America/New_York',
+      language: 'en-US',
+      platform: 'iPhone',
+    }),
+  });
+  assert.equal(result.action, 'login.failed');
+  const payload = JSON.parse(await decryptAuditPayload(env, rows[0].ciphertext));
+  assert.equal(payload.meta.device.client.screen, '390x844');
+  assert.equal(sanitizeClientDeviceSnapshot('{'), null);
+  assert.equal(sanitizeClientDeviceSnapshot({ tz: '../etc/passwd' }), null);
 });
