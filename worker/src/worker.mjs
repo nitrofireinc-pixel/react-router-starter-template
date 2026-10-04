@@ -1,5 +1,48 @@
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 import {
+  FORMS_ACCESS_KEY,
+  FORMS_RECIPIENT_KEY,
+  INKIND_CMS_PAGE,
+  buildInKindEmail,
+  buildInKindPdfBase64,
+  canAccessFormsPage,
+  formatInKindAddress,
+  normalizeInKindPayload,
+  parseFormsUserIds,
+  renderInKindPageBody,
+} from './inkind-forms.mjs';
+import {
+  LETTERMAN_CMS_PAGE,
+  LETTERMAN_FORM_KEY,
+  LETTERMAN_RECIPIENT_KEY,
+  DEFAULT_LETTERMAN_FORM,
+  buildLettermanEmail,
+  buildLettermanPdfBase64,
+  normalizeLettermanFormCopy,
+  normalizeLettermanPayload,
+  parseLettermanFormCopy,
+  renderLettermanDeadlineBanner,
+  renderLettermanPageBody,
+} from './letterman-jacket-form.mjs';
+import {
+  MAX_CMS_FORMS,
+  buildFormEmail,
+  buildFormPdfBase64,
+  emptyFormDefinition,
+  forgetFormRecord,
+  formPathFromSlug,
+  getFormById,
+  getFormBySlug,
+  isCmsFormPage,
+  isReservedFormSlug,
+  listCmsFormsSummary,
+  nextAvailableFormSlug,
+  normalizeFormDefinition,
+  normalizeFormPayload,
+  renderCmsFormPageBody,
+  slugFromFormTitle,
+} from './form-builder.mjs';
+import {
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
   enrichMailAuditMeta,
@@ -18,20 +61,94 @@ import {
 } from './web-push-browser/index.js';
 import {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
+  buildDeadlineBannerItems,
+  caldevEventToHighlight,
+  caldevEventsFromDateStatement,
   clearCaldevEvents,
+  deadlineCaldevStatement,
   deleteCaldevEvent,
+  mapCaldevRows,
+  easternTodayIso,
   ensureCaldevSchema,
   getCaldevEventById,
   insertCaldevEvent,
   listCaldevEvents,
+  listCaldevEventsFromDate,
+  listDeadlineCaldevEvents,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
+  renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
   updateCaldevEvent,
 } from './caldev.mjs';
+import {
+  APPROVED_HERO_SUBTITLE,
+  COMING_SOON_PAGES,
+  PREVIOUS_HERO_SUBTITLE,
+  comingSoonPageHtml,
+  decorateFundraisingPage,
+  decorateHomeRedesign,
+  injectComingSoonLogos,
+  plainHeroSubtitle,
+  renderHomeStickySupport,
+  upgradeHomeBody,
+} from './home-redesign.mjs';
+import {
+  CMS_PAGE_READ_COLUMNS,
+  PUBLIC_READ_INDEX_SQL,
+  attachD1Bookmark,
+  cachedPublicRead,
+  invalidatePublicReadCache,
+  openD1Session,
+  readCachedQueryBatch,
+  renderPublicReadBootstrap,
+  resetPublicReadCache,
+} from './d1-read-policy.mjs';
+import {
+  applyIncrementalSchema,
+  schemaNeedsIncrementalUpgrade,
+} from './schema-upgrade.mjs';
+import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
+import {
+  VISUAL_EDITOR_PATH,
+  canEditVisualPilot,
+  isVisualPilotSlug,
+  loadVisualPageState,
+  normalizeVisualSavePayload,
+  renderVisualEditorHtml,
+  restoreVisualVersion,
+  saveVisualPage,
+} from './visual-page-editor.mjs';
+import {
+  sanitizeCmsPageHtml as sanitizeCmsPageHtmlAllowlist,
+  sanitizeHomeAllowlistHtml,
+  sanitizePageSectionHtml as sanitizePageSectionHtmlAllowlist,
+} from './html-sanitizer.mjs';
+
+export {
+  sanitizeAllowlistHtml,
+  isSafeFormAction,
+  isSafeHref,
+  isSafeSrc,
+} from './html-sanitizer.mjs';
+
+export { applyWorkerSecurityHeaders, WORKER_SECURITY_HEADERS } from './worker-security-headers.mjs';
+
+export { isVisualPilotSlug };
 
 export {
   CALDEV_TRACKS,
+  CALDEV_UPCOMING_LIMIT_DEFAULT,
+  buildDeadlineBannerItems,
+  caldevEventToHighlight,
+  easternTodayIso,
+  listDeadlineCaldevEvents,
+  listUpcomingCaldevEvents,
   normalizeCaldevPayload,
+  parseCaldevUpcomingLimit,
+  renderSiteDeadlineBannersHtml,
   seedCaldevFromProduction,
 } from './caldev.mjs';
 
@@ -74,6 +191,9 @@ export const DEFAULT_SITE = {
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
 };
+
+/** Public `/api/site` and SSR chrome may only use these CMS fields. Secrets stay in site_content, not JSON. */
+export const PUBLIC_SITE_KEYS = Object.freeze(Object.keys(DEFAULT_SITE));
 
 export const DEFAULT_EVENTS = [
   { date_label: 'Aug', date_detail: '01', event_year: 2026, title: 'Band Camp / Preseason Prep', description: 'Placeholder: add official summer band camp dates, times, and location.', sort_order: 1 },
@@ -220,14 +340,17 @@ export function extractSponsorTierFields(html = '') {
 }
 
 const SESSION_COOKIE = 'efband_session';
+export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view', 'forms'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'fundraising-cms-photos-20260823';
+export const ASSET_VERSION = 'cms-rc-20261004d';
+/* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -293,6 +416,21 @@ export function escapeHtml(value) {
   }[char]));
 }
 
+/** Mobile header: "East Forsyth" over the rest of the site name, without an ellipsis. */
+export function formatHeaderBrandTitle(value) {
+  const plain = String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = plain.match(/^(East Forsyth)\s+(.+)$/i);
+  if (!match) return escapeHtml(plain);
+  return `<small>${escapeHtml(match[1])}</small><span class="brand-title-rest">${escapeHtml(match[2])}</span>`;
+}
+
 export function decodeBasicHtmlEntities(value) {
   let text = String(value ?? '');
   for (let i = 0; i < 3; i += 1) {
@@ -327,6 +465,42 @@ export function normalizeStaticPath(pathname) {
   return pathname.startsWith('/') ? pathname : `/${pathname}`;
 }
 
+const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
+const NO_STORE_STATIC_ASSETS = new Set([
+  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'caldev.js', 'site-content.js',
+  'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css',
+  'push-sw.js', 'manifest.webmanifest',
+]);
+
+/** CSS/JS/images/fonts must not open D1 or run migrateAndSeedDb. */
+export function isWorkerStaticAssetPath(pathname = '') {
+  const path = String(pathname || '').split('#')[0].split('?')[0];
+  if (!path || path === '/') return false;
+  if (path.startsWith('/admin') || path.startsWith('/api/') || path.startsWith('/uploads/')) return false;
+  if (isCmsWebsiteGuidePath(path)) return false;
+  return WORKER_STATIC_ASSET_EXT.test(path);
+}
+
+/** Map pretty URLs like /ensembles to the CMS path /ensembles.html without touching assets. */
+export function normalizePublicHtmlPath(pathname = '/') {
+  let path = String(pathname || '/').split('#')[0].split('?')[0];
+  if (!path || path === '/') return '/';
+  if (path.includes('..')) return '/';
+  if (!path.startsWith('/')) path = `/${path}`;
+  if (path.length > 1) path = path.replace(/\/+$/, '') || '/';
+  if (path === '/') return '/';
+  if (
+    path.startsWith('/admin')
+    || path.startsWith('/api/')
+    || path.startsWith('/uploads/')
+    || path.startsWith('/assets/')
+  ) {
+    return path;
+  }
+  if (!/\.[a-z0-9]+$/i.test(path)) path = `${path}.html`;
+  return path;
+}
+
 export function normalizePageSlug(value) {
   const raw = String(value || '').replace(/^\//, '').replace(/\.html$/i, '');
   const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -352,6 +526,102 @@ export function isSuperAdmin(user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
 }
 
+const PRIVILEGED_PERMISSIONS = new Set(['all']);
+
+/** Page slug, path, nav order, and home flag are Site Admin / Super Admin only. */
+export function canManagePageSettings(user) {
+  return isSuperAdmin(user) || hasPermission(user, 'pages');
+}
+
+export function lockPageSettingsToExisting(page, existing) {
+  if (!page || !existing) return page;
+  return {
+    ...page,
+    slug: existing.slug,
+    path: existing.is_home ? '/' : existing.path,
+    nav_order: Number(existing.nav_order),
+    is_home: existing.is_home ? 1 : 0,
+    active: Number(existing.active) === 1 ? 1 : 0,
+  };
+}
+
+export function requestedPrivilegedPermissions(permissions) {
+  return parsePermissions(permissions).filter((item) => (
+    PRIVILEGED_PERMISSIONS.has(String(item).trim().toLowerCase())
+  ));
+}
+
+function permissionKey(item) {
+  return String(item || '').trim().toLowerCase();
+}
+
+export function actorHeldPermissionKeys(actor) {
+  return new Set(parsePermissions(actor?.permissions).map(permissionKey));
+}
+
+export function sanitizeAssignablePermissions(actor, permissions) {
+  const parsed = parsePermissions(permissions);
+  if (isSuperAdmin(actor)) return parsed;
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  return parsed.filter((item) => {
+    const key = permissionKey(item);
+    if (!key || key === 'all' || key === 'users') return false;
+    return holdsAll || held.has(key);
+  });
+}
+
+export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
+  if (isSuperAdmin(actor)) return { ok: true };
+  if (String(payload.role || '').trim().toLowerCase() === 'admin') {
+    return { ok: false, status: 403, detail: 'Only Super Admins can assign the Super Admin role' };
+  }
+  const requested = parsePermissions(payload.permissions);
+  const held = actorHeldPermissionKeys(actor);
+  const holdsAll = held.has('all');
+  for (const item of requested) {
+    const key = permissionKey(item);
+    if (key === 'all' || requestedPrivilegedPermissions([item]).length) {
+      return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
+    }
+    if (key === 'users') {
+      return { ok: false, status: 403, detail: 'You cannot grant the Users permission' };
+    }
+    if (key && !holdsAll && !held.has(key)) {
+      return { ok: false, status: 403, detail: 'You can only grant permissions you already have' };
+    }
+  }
+  return { ok: true };
+}
+
+function samePermissionList(left, right) {
+  const a = parsePermissions(left).map((item) => String(item).trim().toLowerCase()).sort();
+  const b = parsePermissions(right).map((item) => String(item).trim().toLowerCase()).sort();
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+/** Users-permission holders cannot change their own role or permissions. */
+export function assertSafeSelfPrivilegeEdit(actor, targetId, payload = {}, existing = {}) {
+  if (isSuperAdmin(actor)) return { ok: true, payload };
+  if (Number(actor?.id) !== Number(targetId)) return { ok: true, payload };
+  const requestedRole = payload.role == null || payload.role === ''
+    ? String(existing.role || 'editor').trim().toLowerCase()
+    : String(payload.role).trim().toLowerCase();
+  const existingRole = String(existing.role || 'editor').trim().toLowerCase();
+  const permissionsProvided = Object.prototype.hasOwnProperty.call(payload, 'permissions');
+  if (requestedRole !== existingRole || (permissionsProvided && !samePermissionList(payload.permissions, existing.permissions))) {
+    return { ok: false, status: 403, detail: 'You cannot change your own role or permissions' };
+  }
+  return {
+    ok: true,
+    payload: {
+      ...payload,
+      role: existing.role,
+      permissions: parsePermissions(existing.permissions),
+    },
+  };
+}
+
 /** Security log is Super Admin only — never grantable via permissions. */
 export function canAccessSecurityLog(user) {
   return isSuperAdmin(user);
@@ -361,6 +631,10 @@ export function canAccessSecurityLog(user) {
 export function canAccessWebsiteGuide(user) {
   return isSuperAdmin(user);
 }
+
+export { canAccessFormsPage, normalizeInKindPayload, parseFormsUserIds, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64 } from './inkind-forms.mjs';
+export { DEFAULT_LETTERMAN_FORM, createLettermanField, normalizeLettermanFormCopy, normalizeLettermanPayload, parseLettermanFormCopy, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, priceForJacketSize } from './letterman-jacket-form.mjs';
+export { emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage } from './form-builder.mjs';
 
 export const CMS_WEBSITE_GUIDE_PDF_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.pdf';
 export const CMS_WEBSITE_GUIDE_HTML_PATH = '/assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html';
@@ -1245,13 +1519,155 @@ export function canAccessTreasurerLedger(user) {
   return hasPermission(user, 'treasurer') || hasPermission(user, 'president');
 }
 
-/** Schedule Board: Super Admin, President, or Vice President. */
+/** Schedule Board: Super Admin, President, VP, or calendar/events editors. */
 export function canAccessScheduleBoard(user) {
   return (
     isSuperAdmin(user)
     || hasPermission(user, 'president')
     || hasPermission(user, 'vice-president')
+    || hasPermission(user, 'events')
+    || hasPermission(user, 'events:manage')
+    || hasPermission(user, 'calendar')
   );
+}
+
+/** Subscriber "Finished" mail stays limited to today's senders. */
+export function canNotifyCalendarSubscribers(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
+}
+
+/** Badge Creator: Super Admin, President, or Vice President. */
+export function canAccessBadgeCreator(user) {
+  return (
+    isSuperAdmin(user)
+    || hasPermission(user, 'president')
+    || hasPermission(user, 'vice-president')
+  );
+}
+
+const COMMITTEE_BADGE_ROLES = [
+  'Director',
+  'Assistant Director',
+  'President',
+  'Vice-President',
+  'Secretary',
+  'Treasurer',
+  'Committee Member',
+];
+
+function sanitizeCommitteeBadgePhotoUrl(value) {
+  const src = String(value || '').trim();
+  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+  let next = src;
+  try {
+    if (/^https?:\/\//i.test(next)) {
+      const parsed = new URL(next);
+      next = parsed.pathname + (parsed.search || '');
+    }
+  } catch {
+    return '';
+  }
+  if (/^assets\//i.test(next)) next = `/${next}`;
+  if (!/^\/(?:uploads|assets)\//i.test(next)) return '';
+  if (/[<>"\s]/.test(next) || next.length > 500) return '';
+  return next;
+}
+
+export function normalizeCommitteeBadgePayload(payload = {}, existing = {}) {
+  const memberName = String(payload.member_name ?? existing.member_name ?? '').trim();
+  const roleRaw = String(payload.role ?? existing.role ?? 'Committee Member').trim();
+  const role = COMMITTEE_BADGE_ROLES.includes(roleRaw) ? roleRaw : 'Committee Member';
+  const schoolYear = String(payload.school_year ?? existing.school_year ?? '').trim();
+  const photoUrl = sanitizeCommitteeBadgePhotoUrl(payload.photo_url ?? existing.photo_url ?? '');
+  const photoZoomRaw = Number(payload.photo_zoom ?? existing.photo_zoom ?? 1);
+  const photoOffsetXRaw = Number(payload.photo_offset_x ?? existing.photo_offset_x ?? 0);
+  const photoOffsetYRaw = Number(payload.photo_offset_y ?? existing.photo_offset_y ?? 0);
+  const clamp = (value, min, max, fallback) => (
+    Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+  );
+  return {
+    member_name: memberName.slice(0, 120),
+    role,
+    school_year: schoolYear.slice(0, 32),
+    photo_url: photoUrl,
+    photo_zoom: clamp(photoZoomRaw, 1, 4, 1),
+    photo_offset_x: clamp(photoOffsetXRaw, -2, 2, 0),
+    photo_offset_y: clamp(photoOffsetYRaw, -2, 2, 0),
+  };
+}
+
+async function getCommitteeBadges(env) {
+  await ensureCommitteeBadgesSchema(env);
+  const { results } = await env.DB.prepare(
+    'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
+  ).all();
+  return (results || []).map((row) => ({
+    ...row,
+    photo_zoom: Number(row.photo_zoom ?? 1) || 1,
+    photo_offset_x: Number(row.photo_offset_x ?? 0) || 0,
+    photo_offset_y: Number(row.photo_offset_y ?? 0) || 0,
+  }));
+}
+
+const COMMITTEE_BADGES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS committee_badges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'Committee Member',
+  school_year TEXT NOT NULL DEFAULT '',
+  photo_url TEXT NOT NULL DEFAULT '',
+  photo_zoom REAL NOT NULL DEFAULT 1,
+  photo_offset_x REAL NOT NULL DEFAULT 0,
+  photo_offset_y REAL NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`;
+
+let committeeBadgesSchemaReady = false;
+let committeeBadgesSchemaPromise = null;
+
+/** Test helper — clears the in-isolate committee_badges schema memo. */
+export function resetCommitteeBadgesSchemaCache() {
+  committeeBadgesSchemaReady = false;
+  committeeBadgesSchemaPromise = null;
+}
+
+/**
+ * Create committee_badges if missing. Runs only from Badge Creator API routes
+ * (not every request) so we do not re-trigger the full migrate/seed that
+ * caused Cloudflare Worker Error 1102. Rows store photo paths only — never image bytes.
+ */
+export async function ensureCommitteeBadgesSchema(env) {
+  if (committeeBadgesSchemaReady) return;
+  if (!committeeBadgesSchemaPromise) {
+    committeeBadgesSchemaPromise = (async () => {
+      await env.DB.prepare(COMMITTEE_BADGES_TABLE_SQL).run();
+      for (const sql of [
+        'ALTER TABLE committee_badges ADD COLUMN photo_zoom REAL NOT NULL DEFAULT 1',
+        'ALTER TABLE committee_badges ADD COLUMN photo_offset_x REAL NOT NULL DEFAULT 0',
+        'ALTER TABLE committee_badges ADD COLUMN photo_offset_y REAL NOT NULL DEFAULT 0',
+      ]) {
+        try {
+          await env.DB.prepare(sql).run();
+        } catch {
+          // Column already exists on restored or previously migrated databases.
+        }
+      }
+      committeeBadgesSchemaReady = true;
+    })()
+      .catch((error) => {
+        committeeBadgesSchemaReady = false;
+        throw error;
+      })
+      .finally(() => {
+        committeeBadgesSchemaPromise = null;
+      });
+  }
+  await committeeBadgesSchemaPromise;
 }
 
 export function canManageAllEvents(user) {
@@ -1365,7 +1781,7 @@ async function hmacSign(value, secret) {
   return base64Url(await crypto.subtle.sign('HMAC', key, TEXT.encode(value)));
 }
 
-async function makeSession(user, env) {
+export async function makeSession(user, env) {
   const payload = base64Url(TEXT.encode(JSON.stringify({ uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) })));
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
@@ -1382,6 +1798,29 @@ export function isSessionFresh(issuedAtSeconds, nowSeconds = Math.floor(Date.now
 export function sessionCookieHeader(token, { maxAge = SESSION_TTL_SECONDS } = {}) {
   const age = Math.max(0, Number(maxAge) || 0);
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+}
+
+export function loginHintCookieHeader(loggedIn, { maxAge = SESSION_TTL_SECONDS } = {}) {
+  if (loggedIn) {
+    const age = Math.max(1, Number(maxAge) || SESSION_TTL_SECONDS);
+    return `${LOGIN_HINT_COOKIE}=1; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+  }
+  return `${LOGIN_HINT_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+export function applyAuthCookies(response, { token = '', maxAge = 0 } = {}) {
+  const loggedIn = Boolean(token) && Number(maxAge) > 0;
+  const age = loggedIn ? maxAge : 0;
+  response.headers.append('Set-Cookie', sessionCookieHeader(token, { maxAge: age }));
+  response.headers.append('Set-Cookie', loginHintCookieHeader(loggedIn, { maxAge: age }));
+  return response;
+}
+
+export function attachLoginHintIfNeeded(request, response, user) {
+  if (!response || !user) return response;
+  if (getCookie(request, LOGIN_HINT_COOKIE) === '1') return response;
+  response.headers.append('Set-Cookie', loginHintCookieHeader(true));
+  return response;
 }
 
 async function currentUser(request, env) {
@@ -1432,7 +1871,91 @@ async function verifyPassword(password, stored) {
   }
 }
 
-async function initDb(env) {
+/** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
+export const DB_SCHEMA_VERSION = '2026-10-03.1';
+const DB_SCHEMA_VERSION_KEY = 'schema_version';
+
+let dbInitVersion = null;
+let dbInitPromise = null;
+
+/** Test helper — clears the in-isolate initDb memo. */
+export function resetDbInitCache() {
+  dbInitVersion = null;
+  dbInitPromise = null;
+  resetPublicReadCache();
+}
+
+function isMissingSchemaTableError(error) {
+  return /no such table/i.test(String(error?.message || error || ''));
+}
+
+async function readDbSchemaVersion(env) {
+  try {
+    const row = await env.DB.prepare(
+      'SELECT value FROM site_content WHERE key = ?',
+    ).bind(DB_SCHEMA_VERSION_KEY).first();
+    return { ok: true, value: row?.value == null ? null : String(row.value), missingTable: false };
+  } catch (error) {
+    // Fresh databases have no site_content table. Transient D1 errors must not
+    // look like "needs migrate" or a cold burst will run migrateAndSeedDb in
+    // every new isolate and throw 1101s.
+    if (isMissingSchemaTableError(error)) return { ok: true, value: null, missingTable: true };
+    return { ok: false, error, missingTable: false };
+  }
+}
+
+async function writeDbSchemaVersion(env) {
+  await env.DB.prepare(
+    'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).bind(DB_SCHEMA_VERSION_KEY, DB_SCHEMA_VERSION).run();
+}
+
+/**
+ * Ensure schema/seed are applied. Heavy migrate/seed work runs only when
+ * site_content.schema_version differs from DB_SCHEMA_VERSION (or is missing).
+ * Warm Worker isolates skip D1 entirely after the first successful check.
+ */
+export async function initDb(env) {
+  if (dbInitVersion === DB_SCHEMA_VERSION) return;
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      const current = await readDbSchemaVersion(env);
+      if (!current.ok) {
+        console.warn('initDb_schema_read_failed', String(current.error?.message || current.error || 'd1 read failed'));
+        return;
+      }
+      if (current.value === DB_SCHEMA_VERSION) {
+        dbInitVersion = DB_SCHEMA_VERSION;
+        return;
+      }
+      if (current.missingTable) {
+        console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'full' });
+        await migrateAndSeedDb(env);
+      } else if (schemaNeedsIncrementalUpgrade(current.value, DB_SCHEMA_VERSION)) {
+        // Existing DBs (including production at 2026-10-02.1) only run the
+        // small idempotent upgrade — never the 70-query seed path.
+        console.log('initDb_migrate_start', { current: current.value, target: DB_SCHEMA_VERSION, mode: 'incremental' });
+        await applyIncrementalSchema(env);
+      } else {
+        dbInitVersion = DB_SCHEMA_VERSION;
+        return;
+      }
+      await writeDbSchemaVersion(env);
+      dbInitVersion = DB_SCHEMA_VERSION;
+    })()
+      .catch((error) => {
+        dbInitVersion = null;
+        console.error('initDb_failed', String(error?.stack || error?.message || error));
+        throw error;
+      })
+      .finally(() => {
+        dbInitPromise = null;
+      });
+  }
+  await dbInitPromise;
+}
+
+async function migrateAndSeedDb(env) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT NOT NULL, date_detail TEXT NOT NULL, event_year INTEGER NOT NULL DEFAULT 2026, title TEXT NOT NULL, description TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, show_on_boosters INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
@@ -1446,11 +1969,14 @@ async function initDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_topics (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, email TEXT NOT NULL DEFAULT \'\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, topic_label TEXT NOT NULL DEFAULT \'\', to_email TEXT NOT NULL DEFAULT \'\', name TEXT NOT NULL, email TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS booster_meeting_minutes (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', created_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare(COMMITTEE_BADGES_TABLE_SQL),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT \'\', password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'editor\', permissions TEXT NOT NULL DEFAULT \'[]\', active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS web_push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS email_subscribers (email TEXT PRIMARY KEY, topics TEXT NOT NULL DEFAULT \'["calendar","fundraising"]\', status TEXT NOT NULL DEFAULT \'active\', source TEXT NOT NULL DEFAULT \'website\', unsubscribe_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, unsubscribed_at TEXT)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_forms (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, definition_json TEXT NOT NULL DEFAULT \'{}\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', page_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
@@ -1632,6 +2158,7 @@ async function initDb(env) {
     const fallbackEmail = String(env.CONTACT_DEFAULT_EMAIL || '').trim();
     await env.DB.batch(DEFAULT_CONTACT_TOPICS.map((topic) => env.DB.prepare('INSERT INTO contact_topics (label, email, sort_order, active) VALUES (?, ?, ?, ?)').bind(topic.label, topic.email || fallbackEmail, topic.sort_order, topic.active)));
   }
+  await env.DB.prepare("UPDATE contact_topics SET label = 'Fundraising' WHERE label = 'Fundrasing'").run();
   const pageCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_pages').first();
   if (!pageCount?.count) {
     await env.DB.batch(DEFAULT_CMS_PAGES.map((page) => env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active)));
@@ -1645,83 +2172,40 @@ async function initDb(env) {
         .run();
     }
   }
-  const sponsorsPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'sponsors'").first();
-  if (sponsorsPageRow?.body_html) {
-    const nextSponsorsHtml = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(sponsorsPageRow.body_html)));
-    if (nextSponsorsHtml !== sponsorsPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextSponsorsHtml, sponsorsPageRow.id)
+  const existingInKind = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'in-kind'").first();
+  if (!existingInKind) {
+    await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(INKIND_CMS_PAGE.slug, INKIND_CMS_PAGE.path, INKIND_CMS_PAGE.title, INKIND_CMS_PAGE.body_html, INKIND_CMS_PAGE.nav_order, INKIND_CMS_PAGE.is_home, INKIND_CMS_PAGE.active)
+      .run();
+  }
+  const existingLetterman = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'letterman-jacket'").first();
+  if (!existingLetterman) {
+    await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(LETTERMAN_CMS_PAGE.slug, LETTERMAN_CMS_PAGE.path, LETTERMAN_CMS_PAGE.title, LETTERMAN_CMS_PAGE.body_html, LETTERMAN_CMS_PAGE.nav_order, LETTERMAN_CMS_PAGE.is_home, LETTERMAN_CMS_PAGE.active)
+      .run();
+  }
+  for (const soonPage of COMING_SOON_PAGES) {
+    const existingSoon = await env.DB.prepare('SELECT id FROM cms_pages WHERE slug = ?').bind(soonPage.slug).first();
+    if (!existingSoon) {
+      await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(soonPage.slug, soonPage.path, soonPage.title, comingSoonPageHtml(soonPage), 90, 0, 1)
         .run();
     }
   }
-  const fundraisingPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'fundraising'").first();
-  if (fundraisingPageRow?.body_html) {
-    const nextFundraisingHtml = ensureEmailListSignupSlot(
-      ensureFundraisingDonateSlot(fundraisingPageRow.body_html),
-      {
-        topics: ['fundraising', 'calendar'],
-        heading: 'Email fundraising updates',
-        detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextFundraisingHtml !== fundraisingPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextFundraisingHtml, fundraisingPageRow.id)
-        .run();
-    }
-  }
-  const boostersPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'boosters'").first();
-  if (boostersPageRow?.body_html) {
-    const siteForDues = await getSite(env);
-    const nextBoostersHtml = applyBoostersDuesVisibility(
-      ensureBoosterMembersSlot(ensureBoosterMeetingsSlot(boostersPageRow.body_html)),
-      isBoostersDuesEnabled(siteForDues),
-    );
-    if (nextBoostersHtml !== boostersPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextBoostersHtml, boostersPageRow.id)
-        .run();
-    }
-  }
-  const homePageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'home' OR is_home = 1 ORDER BY is_home DESC, id ASC LIMIT 1").first();
-  if (homePageRow?.body_html) {
-    const nextHomeHtml = ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(refreshHomeStartHereSection(homePageRow.body_html)));
-    if (nextHomeHtml !== homePageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextHomeHtml, homePageRow.id)
-        .run();
-    }
+  await seedCmsFormMaker(env);
+  // Never rewrite an existing cms_pages.body_html during schema/migration.
+  // Slot injectors still run at render time. Only insert a row when it is missing.
+  const storedSubtitle = await getSiteContentValue(env, 'hero_subtitle');
+  if (plainHeroSubtitle(storedSubtitle) === PREVIOUS_HERO_SUBTITLE) {
+    await setSiteContentValue(env, 'hero_subtitle', APPROVED_HERO_SUBTITLE);
   }
   const galleryPage = DEFAULT_CMS_PAGES.find((page) => page.slug === 'gallery');
   if (galleryPage) {
-    const existingGallery = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'gallery'").first();
+    const existingGallery = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'gallery'").first();
     if (!existingGallery) {
       await env.DB.prepare('UPDATE cms_pages SET nav_order = nav_order + 1 WHERE nav_order >= ?').bind(galleryPage.nav_order).run();
       await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(galleryPage.slug, galleryPage.path, galleryPage.title, galleryPage.body_html, galleryPage.nav_order, galleryPage.is_home, galleryPage.active)
-        .run();
-    } else if (existingGallery.body_html) {
-      const nextGalleryHtml = ensureGalleryPageSlot(existingGallery.body_html);
-      if (nextGalleryHtml !== existingGallery.body_html) {
-        await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-          .bind(nextGalleryHtml, existingGallery.id)
-          .run();
-      }
-    }
-  }
-  const calendarPageRow = await env.DB.prepare("SELECT id, body_html FROM cms_pages WHERE slug = 'calendar'").first();
-  if (calendarPageRow?.body_html) {
-    const nextCalendarHtml = ensureEmailListSignupSlot(
-      ensureCalendarMonthMount(calendarPageRow.body_html),
-      {
-        topics: ['calendar', 'fundraising'],
-        heading: 'Email calendar updates',
-        detail: 'Get calendar changes by email. Reply STOP to any message to unsubscribe.',
-      },
-    );
-    if (nextCalendarHtml !== calendarPageRow.body_html) {
-      await env.DB.prepare('UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(nextCalendarHtml, calendarPageRow.id)
         .run();
     }
   }
@@ -1732,6 +2216,14 @@ async function initDb(env) {
     await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, 1)').bind(adminUsername(env), 'Site Administrator', passwordHash, 'admin', JSON.stringify(['all'])).run();
     await env.DB.prepare("INSERT INTO auth_settings (key, value) VALUES ('admin_password_hash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(passwordHash).run();
   }
+  // Public-read indexes. CREATE INDEX IF NOT EXISTS runs once per schema version,
+  // on the first request after deploy, not on every page view.
+  await env.DB.batch(PUBLIC_READ_INDEX_SQL.map((sql) => env.DB.prepare(sql)));
+  await env.DB.prepare(`
+    UPDATE caldev_events
+    SET track = lower(trim(track))
+    WHERE track != lower(trim(track))
+  `).run();
 }
 
 export function isMaintenanceMode(site = {}) {
@@ -1752,7 +2244,7 @@ export function isMaintenancePath(pathname = '/') {
 
 export function isPublicHtmlPath(pathname = '/') {
   if (pathname === '/') return true;
-  const path = normalizeStaticPath(pathname);
+  const path = normalizePublicHtmlPath(pathname);
   return path.endsWith('.html');
 }
 
@@ -1781,7 +2273,7 @@ export function sanitizeMaintenanceReturnPath(value = '/') {
     return '/';
   }
   if (pathPart !== '/' && !isPublicHtmlPath(pathPart)) return '/';
-  const normalized = pathPart === '/' ? '/' : normalizeStaticPath(pathPart);
+  const normalized = pathPart === '/' ? '/' : normalizePublicHtmlPath(pathPart);
   const query = raw.includes('?') ? `?${raw.split('?').slice(1).join('?')}` : '';
   const base = normalized === '/index.html' ? '/' : normalized;
   if (base === '/') return query ? `/${query}` : '/';
@@ -1850,6 +2342,10 @@ export function normalizeSponsorTierKey(value) {
   return '';
 }
 
+export function isPublicPurchasableSponsorTier(value) {
+  return Boolean(normalizeSponsorTierKey(value));
+}
+
 export const SQUARE_SETTINGS_KEY = 'square_settings';
 
 export function emptySquareSettings() {
@@ -1894,6 +2390,19 @@ export function squareAccessToken(env = {}) {
 
 export function squareApplicationId(env = {}) {
   return String(env.SQUARE_APPLICATION_ID || env.SQUARE_APP_ID || '').trim();
+}
+
+/** Public browser values only. Never reads D1 and never returns the access token. */
+export function publicSquarePublishableConfig(env = {}) {
+  const application_id = squareApplicationId(env);
+  const location_id = String(env.SQUARE_LOCATION_ID || '').trim();
+  const environment = normalizeSquareEnvironment(env.SQUARE_ENVIRONMENT || env.SQUARE_ENV || 'production');
+  return {
+    application_id,
+    location_id,
+    environment,
+    web_payments: Boolean(application_id && location_id),
+  };
 }
 
 export function squareCheckoutConfigured(env = {}) {
@@ -2091,6 +2600,230 @@ export function formatSquareError(payload = {}, status = 0) {
   return parts.join(' · ') || 'Square request failed';
 }
 
+export function rewriteSponsorChoiceButtons(html) {
+  return String(html || '').replace(
+    /<a([^>]*?)href="(?:\/)?become-a-sponsor\.html"([^>]*)>([\s\S]*?)<\/a>/gi,
+    (match, before, after, inner) => {
+      const existing = `${before || ''} ${after || ''}`;
+      if (/\bdata-sponsor-choice-open\b/i.test(existing)) return match;
+      const classMatch = existing.match(/\bclass="([^"]*)"/i);
+      const classStr = String(classMatch?.[1] || '').trim();
+      const label = /become a sponsor/i.test(String(inner || '')) ? 'Sponsor/In-Kind' : String(inner || '').trim();
+      const leftover = existing.replace(/\s*class="[^"]*"/gi, '').trim();
+      if (/\bbtn\b/i.test(classStr)) {
+        return `<button type="button" class="${classStr}" data-sponsor-choice-open${leftover ? ` ${leftover}` : ''}>${escapeHtml(label)}</button>`;
+      }
+      return `<a href="/become-a-sponsor.html" data-sponsor-choice-open${leftover ? ` ${leftover}` : ''}${classStr ? ` class="${classStr}"` : ''}>${escapeHtml(label)}</a>`;
+    }
+  );
+}
+
+export async function getFormsAccessUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, FORMS_ACCESS_KEY));
+}
+
+export async function getFormsRecipientUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, FORMS_RECIPIENT_KEY));
+}
+
+export async function getLettermanRecipientUserIds(env) {
+  return parseFormsUserIds(await getSiteContentValue(env, LETTERMAN_RECIPIENT_KEY));
+}
+
+export async function getLettermanFormCopy(env) {
+  return parseLettermanFormCopy(await getSiteContentValue(env, LETTERMAN_FORM_KEY));
+}
+
+export async function saveLettermanFormCopy(env, copy) {
+  const next = normalizeLettermanFormCopy(copy);
+  await setSiteContentValue(env, LETTERMAN_FORM_KEY, JSON.stringify(next));
+  return next;
+}
+
+export async function resolveLettermanRecipientEmails(env) {
+  const ids = new Set(await getLettermanRecipientUserIds(env));
+  if (!ids.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => ids.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
+}
+
+export async function saveFormsUserIds(env, key, ids) {
+  await setSiteContentValue(env, key, JSON.stringify((ids || []).map((id) => Number(id)).filter((id) => id > 0)));
+}
+
+async function seedCmsFormMaker(env) {
+  const existing = await env.DB.prepare("SELECT id FROM cms_forms WHERE slug = 'letterman-jacket'").first();
+  const page = await env.DB.prepare("SELECT id FROM cms_pages WHERE slug = 'letterman-jacket'").first();
+  const copy = await getLettermanFormCopy(env);
+  const definition = normalizeFormDefinition(copy, LETTERMAN_CMS_PAGE.title);
+  const recipients = JSON.stringify(await getLettermanRecipientUserIds(env));
+  const body = renderCmsFormPageBody(LETTERMAN_CMS_PAGE, definition, 'letterman-jacket');
+  if (page?.id) {
+    await env.DB.prepare("UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (body_html IS NULL OR trim(body_html) = '')")
+      .bind(body, page.id)
+      .run();
+  }
+  if (existing?.id) return;
+  await env.DB.prepare(
+    'INSERT INTO cms_forms (slug, path, title, definition_json, recipient_user_ids, page_id) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(
+    LETTERMAN_CMS_PAGE.slug,
+    LETTERMAN_CMS_PAGE.path,
+    LETTERMAN_CMS_PAGE.title,
+    JSON.stringify(definition),
+    recipients,
+    page?.id || null,
+  ).run();
+}
+
+async function resolveFormRecipientEmails(env, ids = []) {
+  const wanted = new Set((ids || []).map((id) => Number(id)).filter((id) => id > 0));
+  if (!wanted.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => wanted.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
+}
+
+async function handleBuiltFormSubmit(request, env, slug) {
+  const formSlug = String(slug || '').trim().toLowerCase();
+  const page = await getPageBySlug(env, formSlug, true);
+  if (formSlug === 'letterman-jacket' || formSlug === 'in-kind' || page) {
+    const blocked = publicFormSubmitGate(page);
+    if (!blocked.ok) return jsonResponse({ detail: blocked.detail }, blocked.status);
+  }
+  const payload = await request.json().catch(() => ({}));
+  if (String(payload.company || '').trim()) return jsonResponse({ ok: true });
+  const record = await getFormBySlug(env, slug);
+  if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+  const normalized = normalizeFormPayload(payload, record.definition);
+  if (!normalized.ok) {
+    return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
+  }
+  const recipients = await resolveFormRecipientEmails(env, record.recipient_user_ids);
+  const site = await getSite(env).catch(() => ({}));
+  const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const mail = buildFormEmail({ data: normalized.data, siteTitle, definition: record.definition });
+  const pdf = buildFormPdfBase64(normalized.data, { definition: record.definition });
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
+  let delivered = 0;
+  let deliveryError = '';
+  try {
+    if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
+    if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
+    if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+    await sendViaResend(env, {
+      to: recipients,
+      replyTo: normalized.data.email || undefined,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      fromEmail,
+      fromName,
+      attachments: [{ filename: `${record.slug}.pdf`, content: pdf, content_type: 'application/pdf' }],
+    });
+    delivered = 1;
+  } catch (error) {
+    deliveryError = String(error?.message || error || 'Delivery failed');
+  }
+  const inserted = await env.DB.prepare(
+    'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
+  ).bind(record.slug, JSON.stringify(normalized.data), delivered, deliveryError).run();
+  return jsonResponse({
+    ok: true,
+    delivered: Boolean(delivered),
+    id: inserted?.meta?.last_row_id || null,
+    detail: delivered
+      ? `Thank you. Your ${record.title} was sent.`
+      : 'Form received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
+  });
+}
+
+async function writeCmsFormPage(env, { slug, path, title, definition }) {
+  const body = renderCmsFormPageBody({ title, slug }, definition, slug);
+  const page = await env.DB.prepare('SELECT id FROM cms_pages WHERE slug = ?').bind(slug).first();
+  if (page?.id) {
+    await env.DB.prepare('UPDATE cms_pages SET path = ?, title = ?, body_html = ?, active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .bind(path, title, body, page.id)
+      .run();
+    return page.id;
+  }
+  const inserted = await env.DB.prepare(
+    'INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, 99, 0, 1)',
+  ).bind(slug, path, title, body).run();
+  return inserted?.meta?.last_row_id || null;
+}
+
+export async function requireFormsAccess(request, env) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth;
+  const accessIds = await getFormsAccessUserIds(env);
+  if (!canAccessFormsPage(auth.user, accessIds)) {
+    return { user: auth.user, response: jsonResponse({ detail: 'Permission required: forms' }, 403) };
+  }
+  return auth;
+}
+
+function isSuperAdminUser(user) {
+  return String(user?.role || '').trim().toLowerCase() === 'admin';
+}
+
+async function listCmsFormUsers(env) {
+  const rows = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE active = 1 ORDER BY display_name, username').all();
+  return (rows.results || []).map((user) => ({
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    email: String(user.username || '').trim().toLowerCase(),
+    can_email: isValidEmail(user.username),
+  }));
+}
+
+export async function resolveFormsRecipientEmails(env) {
+  const ids = new Set(await getFormsRecipientUserIds(env));
+  if (!ids.size) return [];
+  return (await listCmsFormUsers(env))
+    .filter((user) => ids.has(Number(user.id)) && user.can_email)
+    .map((user) => user.email);
+}
+
+async function collectInKindLogoAttachments(files = []) {
+  const attachments = [];
+  const names = [];
+  for (const file of (files || []).slice(0, 2)) {
+    if (!file || typeof file.arrayBuffer !== 'function') continue;
+    const name = String(file.name || 'logo').replace(/[^\w.\- ()]+/g, '').trim().slice(0, 160) || 'logo.png';
+    const type = String(file.type || '');
+    if (!/^image\//i.test(type) && !/\.(png|jpe?g|webp|gif|svg)$/i.test(name)) continue;
+    const buffer = await file.arrayBuffer();
+    if (!buffer.byteLength || buffer.byteLength > 2 * 1024 * 1024) continue;
+    attachments.push({
+      filename: name,
+      content: bytesToBase64(new Uint8Array(buffer)),
+      content_type: type || 'image/png',
+    });
+    names.push(name);
+  }
+  return { attachments, names };
+}
+
+async function readInKindRequest(request) {
+  const contentType = String(request.headers.get('content-type') || '');
+  if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+    const form = await request.formData();
+    const payload = {};
+    for (const [key, value] of form.entries()) {
+      if (typeof value === 'string') payload[key] = value;
+    }
+    const files = form.getAll('logos').filter((file) => file && typeof file.arrayBuffer === 'function' && Number(file.size || 0) > 0);
+    return { payload, files };
+  }
+  const payload = await request.json().catch(() => ({}));
+  return { payload, files: [] };
+}
+
 export function pickSquareLocationId(locations = [], preferredId = '') {
   const preferred = String(preferredId || '').trim();
   const list = Array.isArray(locations) ? locations : [];
@@ -2253,8 +2986,8 @@ function canManageUtilityLinks(user) {
   return hasPermission(user, 'site') || hasPermission(user, 'pages') || canEditPage(user, 'home');
 }
 
-function renderUtilityLinks(site = {}) {
-  return normalizeUtilityLinks(site.utility_links)
+export function renderUtilityLinks(site = {}, { loggedIn = false } = {}) {
+  const links = normalizeUtilityLinks(site.utility_links)
     .map((link) => {
       const targetAttr = link.target === '_blank'
         ? ' target="_blank" rel="noopener noreferrer"'
@@ -2262,6 +2995,7 @@ function renderUtilityLinks(site = {}) {
       return `<a href="${escapeAttr(link.href)}"${targetAttr}>${escapeHtml(link.label)}</a>`;
     })
     .join('');
+  return `<span class="utility-links">${links}</span>${renderStaffAuthNavLink(loggedIn)}`;
 }
 
 export function normalizeSocialHref(value) {
@@ -2433,16 +3167,36 @@ export function applyHomeFeatureCards(html = '', cards = {}) {
   return `${source}\n${section}`;
 }
 
-async function getSite(env) {
-  const rows = await env.DB.prepare('SELECT key, value FROM site_content').all();
-  const payload = { ...DEFAULT_SITE };
-  for (const row of rows.results || []) payload[row.key] = row.value;
+export function publicSitePayload(site = {}) {
+  const source = site && typeof site === 'object' && !Array.isArray(site) ? site : {};
+  const payload = {};
+  for (const key of PUBLIC_SITE_KEYS) {
+    payload[key] = source[key] ?? DEFAULT_SITE[key];
+  }
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
   payload.boosters_dues_enabled = isBoostersDuesEnabled(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   return payload;
+}
+
+function siteFromContentRows(rows = []) {
+  const payload = { ...DEFAULT_SITE };
+  const allowed = new Set(PUBLIC_SITE_KEYS);
+  for (const row of rows || []) {
+    if (allowed.has(row.key)) payload[row.key] = row.value;
+  }
+  return publicSitePayload(payload);
+}
+
+async function getSite(env) {
+  // Primary-key lookups for the public allowlist. Secret rows stay unread.
+  const placeholders = PUBLIC_SITE_KEYS.map(() => '?').join(', ');
+  const rows = await env.DB.prepare(
+    `SELECT key, value FROM site_content WHERE key IN (${placeholders})`,
+  ).bind(...PUBLIC_SITE_KEYS).all();
+  return siteFromContentRows(rows.results);
 }
 
 async function getSiteContentValue(env, key) {
@@ -3785,14 +4539,35 @@ async function getEventById(env, id) {
 }
 
 /** Replace legacy event timelines / month grids with the Schedule Board mount on the Calendar page. */
+function ensureCaldevLayoutClasses(html) {
+  let next = String(html || '');
+  next = next.replace(
+    /<section\b([^>]*\bclass=")([^"]*\bcontent\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-section\b/.test(cls)) return match;
+      return `<section${pre}${cls} caldev-section${post}`;
+    },
+  );
+  next = next.replace(
+    /(<section\b[^>]*\bcaldev-section\b[^>]*>[\s\S]*?<div\b[^>]*\bclass=")([^"]*\bwrap\b[^"]*)(")/i,
+    (match, pre, cls, post) => {
+      if (/\bcaldev-wrap\b/.test(cls)) return match;
+      return `${pre}${cls} caldev-wrap${post}`;
+    },
+  );
+  return next;
+}
+
 export function ensureCalendarMonthMount(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
   const mount = '<div id="caldev-app" class="caldev-app" aria-live="polite"></div>';
   if (/id=["']caldev-app["']/i.test(source) || /\bcaldev-app\b/i.test(source)) {
-    return source
-      .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
-      .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, '');
+    return ensureCaldevLayoutClasses(
+      source
+        .replace(/(?:<div\b[^>]*\bid=["']caldev-app["'][^>]*>\s*<\/div>\s*){2,}/gi, `${mount}\n`)
+        .replace(/<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi, ''),
+    );
   }
   const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
   const ranges = [];
@@ -3825,19 +4600,91 @@ export function ensureCalendarMonthMount(html) {
       /<div class="month-calendar"[^>]*data-month-calendar[^>]*>\s*<\/div>/gi,
       mount,
     );
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(?:<div id="caldev-app" class="caldev-app" aria-live="polite"><\/div>\s*){2,}/gi,
       `${mount}\n`,
-    );
+    ));
   }
-  if (/id=["']caldev-app["']/i.test(next)) return next;
+  if (/id=["']caldev-app["']/i.test(next)) return ensureCaldevLayoutClasses(next);
   if (/<div class="wrap">/i.test(next)) {
-    return next.replace(
+    return ensureCaldevLayoutClasses(next.replace(
       /(<div class="wrap">)([\s\S]*?)(<\/div>\s*<\/section>)/i,
       `$1$2${mount}$3`,
-    );
+    ));
   }
-  return `${next}${mount}`;
+  return ensureCaldevLayoutClasses(`${next}${mount}`);
+}
+
+function findDataEventsRanges(source) {
+  const html = String(source || '');
+  const openRe = /<div\b[^>]*\bdata-events\b[^>]*>/gi;
+  const ranges = [];
+  let match;
+  while ((match = openRe.exec(html)) !== null) {
+    const start = match.index;
+    const openEnd = start + match[0].length;
+    let depth = 1;
+    let i = openEnd;
+    while (i < html.length && depth > 0) {
+      const nextOpen = html.toLowerCase().indexOf('<div', i);
+      const nextClose = html.toLowerCase().indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+        if (depth === 0) {
+          ranges.push({
+            start,
+            openEnd,
+            closeStart: nextClose,
+            end: i,
+            openTag: match[0],
+          });
+        }
+      }
+    }
+  }
+  return ranges;
+}
+
+export function homeEventsLimitFromHtml(html, fallback = CALDEV_UPCOMING_LIMIT_DEFAULT) {
+  const ranges = findDataEventsRanges(html);
+  if (!ranges.length) return parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+  let max = 0;
+  for (const range of ranges) {
+    const match = String(range.openTag || '').match(/\bdata-limit=["']?(\d+)/i);
+    max = Math.max(max, parseCaldevUpcomingLimit(match?.[1], fallback));
+  }
+  return max || parseCaldevUpcomingLimit(fallback, CALDEV_UPCOMING_LIMIT_DEFAULT);
+}
+
+export function renderCalendarHighlightArticles(events = []) {
+  const items = (Array.isArray(events) ? events : []).map(caldevEventToHighlight);
+  if (!items.length) {
+    return '<p class="draft">No upcoming events have been published yet.</p>';
+  }
+  return items.map((event) => `
+      <article class="event">
+        <div class="datebox">${escapeHtml(event.date_label)} <span>${escapeHtml(event.date_detail)}</span></div>
+        <div><h3>${formatInlineRichText(event.title)}</h3><div class="event-description">${formatRichText(event.description)}</div></div>
+      </article>`).join('');
+}
+
+/** Replace homepage [data-events] placeholders with Schedule Board highlights. */
+export function applyHomeCalendarHighlights(html, events = []) {
+  const source = String(html || '');
+  const ranges = findDataEventsRanges(source);
+  if (!ranges.length) return source;
+  const inner = renderCalendarHighlightArticles(events);
+  let next = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index];
+    next = `${next.slice(0, range.openEnd)}${inner}${next.slice(range.closeStart)}`;
+  }
+  return next;
 }
 
 export function ensureBoosterMeetingsSlot(html) {
@@ -3918,14 +4765,25 @@ export function refreshHomeStartHereSection(html) {
     );
 }
 
-export function refreshHomeHeroBrandMark(html, markUrl = PUBLIC_BRAND_MARK) {
-  const source = String(html || '');
-  if (!source.trim() || !/<aside\b[^>]*\bhero-card\b/i.test(source)) return source;
-  const mark = String(markUrl || PUBLIC_BRAND_MARK || BLUE_REGIMENT_MARK_PATH).trim() || BLUE_REGIMENT_MARK_PATH;
-  return source.replace(
-    /(<aside\b[^>]*\bhero-card\b[^>]*>[\s\S]*?<img\b[^>]*?\bsrc=["'])([^"']+)(["'])/i,
-    `$1${mark}$3`,
-  );
+/** Keep CMS Band information card HTML as saved. Do not rewrite the first image. */
+export function refreshHomeHeroBrandMark(html, _markUrl = PUBLIC_BRAND_MARK) {
+  return String(html || '');
+}
+
+const HOME_HERO_BRAND_MARK_SRC_RE = /(?:efhs-logo|efhs-blue-regiment-mark|efhs-admin-mark)\.png/i;
+const HOME_HERO_UPLOAD_ALT_RE = /^(\d{10,}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Photo used to change only alt, leaving the regiment mark src. Restore the upload. */
+export function restoreHomeHeroCardUploadSrc(html = '') {
+  return String(html || '').replace(/(<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>)/gi, (block) => (
+    block.replace(/<img\b([^>]*)>/gi, (tag, attrs) => {
+      const src = /\bsrc\s*=\s*(["'])([^"']*)\1/i.exec(attrs)?.[2] || '';
+      const alt = String(/\balt\s*=\s*(["'])([^"']*)\1/i.exec(attrs)?.[2] || '').trim();
+      if (!HOME_HERO_BRAND_MARK_SRC_RE.test(src) || !HOME_HERO_UPLOAD_ALT_RE.test(alt)) return tag;
+      const nextAttrs = attrs.replace(/\bsrc\s*=\s*(["'])[^"']*\1/i, `src="/uploads/${alt}.jpg"`);
+      return `<img${nextAttrs}>`;
+    })
+  ));
 }
 
 export function ensureHomePhotoGallerySlot(html) {
@@ -4392,8 +5250,10 @@ export function hydrateSponsor(sponsor) {
   };
 }
 
-async function getSponsors(env, includeInactive = false) {
-  const where = includeInactive ? '' : 'WHERE active = 1';
+async function getSponsors(env, includePageHidden = false) {
+  // `active` means "show on the public Sponsors page". Marquee and fly-in
+  // still use page-hidden bronze/silver/gold sponsors, so public reads include them.
+  const where = includePageHidden ? '' : 'WHERE active = 1';
   const rows = await env.DB.prepare(`SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ${where} ORDER BY sort_order, id`).all();
   return (rows.results || []).map((row) => hydrateSponsor(row));
 }
@@ -4403,6 +5263,7 @@ export function normalizeSponsorTier(level = '') {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return '';
 }
 
@@ -4410,6 +5271,7 @@ export function sponsorTierLabel(tier = '') {
   if (tier === 'gold') return 'Gold';
   if (tier === 'silver') return 'Silver';
   if (tier === 'bronze') return 'Bronze';
+  if (tier === 'honorable') return 'Honorable Mention';
   return 'Sponsor';
 }
 
@@ -4417,6 +5279,7 @@ export function normalizeSponsorLevel(level = '', { homepageAd } = {}) {
   let tier = normalizeSponsorTier(level);
   if (!tier && (homepageAd === true || homepageAd === 1 || homepageAd === '1')) tier = 'silver';
   if (!tier) tier = 'bronze';
+  if (tier === 'honorable') return 'Honorable Mention';
   return `${sponsorTierLabel(tier)} Sponsor`;
 }
 
@@ -4431,15 +5294,36 @@ export function sponsorBenefitsFromLevel(level = '') {
   };
 }
 
+export function paidSponsorsFirst(sponsors = []) {
+  const list = Array.isArray(sponsors) ? sponsors : [];
+  const paid = [];
+  const mention = [];
+  for (const sponsor of list) {
+    if (normalizeSponsorTier(sponsor?.tier || sponsor?.level) === 'honorable') mention.push(sponsor);
+    else paid.push(sponsor);
+  }
+  return [...paid, ...mention];
+}
+
+export function sponsorShowsOnPage(sponsor = {}) {
+  return Number(sponsor.active) !== 0;
+}
+
 export function sponsorShowsMarquee(sponsor = {}) {
-  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
-  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+  return /\b(bronze|silver|gold|honorable)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+}
+
+export function publicPageShowsSponsorMarquee(page = {}) {
+  const slug = String(page?.slug || '').trim();
+  if (page?.is_home || slug === 'home') return true;
+  if (slug === 'calendar' || slug === 'fundraising' || slug === 'sponsors') return true;
+  return COMING_SOON_PAGES.some((item) => item.slug === slug);
 }
 
 export function renderSponsorMarqueeSection(sponsors = []) {
-  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  const items = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee));
   if (!items.length) {
     return '<section class="sponsor-marquee-section" data-sponsor-marquee aria-label="Sponsor marquee" hidden></section>';
   }
@@ -4899,6 +5783,35 @@ export async function recordDuesFailedLedger(env, dues = {}) {
   return refreshPaymentLedgerXml(env);
 }
 
+export function buildInKindLedgerEntry(data = {}, { id = 0, paidAt = '' } = {}) {
+  const items = String(data.items || '').trim();
+  const value = String(data.value || '').trim();
+  const amountCents = parseSponsorAmountCents(value);
+  const contact = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+  const noteParts = [contact, data.email, data.phone].filter(Boolean);
+  if (items.length > 80) noteParts.push(items);
+  return {
+    kind: 'sponsor',
+    refType: 'inkind_form',
+    refId: Number(id) || null,
+    name: String(data.business_name || '').trim(),
+    address: formatInKindAddress(data).split('\n').filter(Boolean).join(', '),
+    amountCents,
+    amountDisplay: value || formatLedgerAmountDisplay(amountCents),
+    packageLabel: (items || 'In-kind donation').slice(0, 80),
+    note: noteParts.join(' · ').slice(0, 500),
+    moneyExchanged: false,
+    paidAt: paidAt || new Date().toISOString(),
+  };
+}
+
+export async function recordInKindFormLedger(env, data = {}, submissionId = 0) {
+  const id = Number(submissionId || data.id || 0);
+  if (!id) return null;
+  await upsertPaymentLedgerEntry(env, buildInKindLedgerEntry(data, { id }));
+  return refreshPaymentLedgerXml(env);
+}
+
 export function buildDuesReceipt(dues = {}, { failed = false } = {}) {
   const studentName = String(dues.student_name || '').trim() || 'Student';
   const email = String(dues.email || '').trim().toLowerCase();
@@ -5275,10 +6188,11 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
 }
 
 export function renderSponsorsDirectory(sponsors = []) {
-  if (!sponsors.length) {
+  const visible = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsOnPage));
+  if (!visible.length) {
     return '<div class="sponsor-empty"><h3>Sponsor spots are available.</h3><p>Use the admin Sponsors page to add businesses, logos, and addresses.</p></div>';
   }
-  return sponsors.map((sponsor, index) => {
+  return visible.map((sponsor, index) => {
     const item = hydrateSponsor(sponsor);
     const featured = index === 0 ? ' sponsor-featured' : '';
     const logo = item.logo_url
@@ -5295,7 +6209,9 @@ export function renderSponsorTiersHtml(payload = {}) {
   const fields = normalizeSponsorTierFields(payload);
   const card = (id, labelKey, titleKey, blurbKey, benefitsKey, amountKey) => {
     const benefits = sponsorTierBenefitsHtml(fields[benefitsKey], SPONSOR_TIER_FIELD_DEFAULTS[benefitsKey]);
-    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}">
+    const amountCents = parseSponsorAmountCents(fields[amountKey]);
+    const amountAttr = amountCents ? ` data-amount-cents="${amountCents}"` : '';
+    return `<article class="sponsor-tier sponsor-tier-${escapeAttr(id)}" data-tier="${escapeAttr(id)}"${amountAttr}>
       <span class="sponsor-tier-label" data-cms-field="${escapeAttr(labelKey)}">${formatInlineRichText(fields[labelKey])}</span>
       <h3 data-cms-field="${escapeAttr(titleKey)}">${formatInlineRichText(fields[titleKey])}</h3>
       <p data-cms-field="${escapeAttr(blurbKey)}">${formatInlineRichText(fields[blurbKey])}</p>
@@ -5343,36 +6259,37 @@ export function rewriteBecomeSponsorLinks(html) {
     .replace(/href=(["'])(?:\.\/)?(?:\/)?sponsors\.html\1(?=[^>]*>\s*(?:Become a sponsor|Ask about sponsoring))/gi, 'href="/become-a-sponsor.html"');
 }
 
-export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><a class="btn primary" href="/become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
+export const SPONSOR_INTRO_ACTIONS_HTML = '<div class="sponsor-intro-actions"><button type="button" class="btn primary" data-sponsor-choice-open>Sponsor/In-Kind</button><button type="button" class="btn outline" data-donate-open>Donate</button></div>';
 
 export function ensureSponsorDonateButton(html) {
   const source = String(html || '');
   if (!source.trim()) return source;
-  if (/data-donate-open/i.test(source)) return source;
-  if (/sponsor-intro-actions/i.test(source)) return source;
-  // Wrap the primary Become a sponsor control in the intro with a Donate button.
-  const wrapped = source.replace(
-    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
-    `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
-  );
-  if (wrapped !== source) return wrapped;
-  // Fallback: insert actions before the sponsor directory when intro link was already removed/customized.
-  return source.replace(
-    /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
-    `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
-  );
+  let next = source;
+  if (!/data-donate-open/i.test(source) && !/sponsor-intro-actions/i.test(source)) {
+    const wrapped = source.replace(
+      /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<a\b[^>]*class="[^"]*\bbtn primary\b[^"]*"[^>]*href="[^"]*become-a-sponsor\.html"[^>]*>\s*Become a sponsor\s*<\/a>)/i,
+      `$1<div class="sponsor-intro-actions">$2<button type="button" class="btn outline" data-donate-open>Donate</button></div>`,
+    );
+    next = wrapped !== source
+      ? wrapped
+      : source.replace(
+        /(<div[^>]*class="[^"]*\bsponsor-intro\b[^"]*"[^>]*>[\s\S]*?)(<\/div>\s*<div[^>]*class="[^"]*\bsponsor-directory)/i,
+        `$1${SPONSOR_INTRO_ACTIONS_HTML}$2`,
+      );
+  }
+  return rewriteSponsorChoiceButtons(next);
 }
 
 function renderSponsorPageBody(page, sponsors) {
   const directory = `<div class="sponsor-directory" data-sponsors>${renderSponsorsDirectory(sponsors)}</div>`;
-  let html = ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || '')));
+  let html = rewriteSponsorChoiceButtons(ensureSponsorDonateButton(rewriteBecomeSponsorLinks(stripSponsorTiersSection(page.body_html || ''))));
   if (html.includes('data-sponsors')) {
     return replaceMarkedDirectory(html, 'data-sponsors', directory) || `${html}${directory}`;
   }
   if (html.includes('class="sponsor-directory"')) {
     return html.replace(/<div class=\"sponsor-directory\">[\s\S]*?<\/div><aside class=\"sponsor-cta\">/, `${directory}<aside class="sponsor-cta">`);
   }
-  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside></div></section>`;
+  return `<section class="page-hero sponsor-hero" data-cms-layout="sponsors"><div class="page-title"><div class="kicker" data-cms-field="kicker">Community Partners</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Sponsors')}</h1><p data-cms-field="intro">Local businesses, alumni, and families make opportunities possible for every East Forsyth Band student.</p></div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text"><div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p></div>${SPONSOR_INTRO_ACTIONS_HTML}</div>${directory}<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">Want your business here?</h2><div data-cms-field="callout_text"><p>Review Bronze, Silver, and Gold packages, then send a sponsor inquiry.</p></div></div><button type="button" class="btn secondary" data-sponsor-choice-open>Sponsor/In-Kind</button></aside></div></section>`;
 }
 
 function renderBecomeSponsorPageBody(page) {
@@ -5632,7 +6549,7 @@ export function serializeContactTopic(row = {}, recipientInfo = null) {
   const recipients = recipientInfo?.recipients || [];
   return {
     id: row.id,
-    label: row.label,
+    label: String(row.label || '').trim() === 'Fundrasing' ? 'Fundraising' : row.label,
     email: emails.join(', '),
     emails,
     recipient_user_ids: recipientInfo?.recipient_user_ids || recipient_user_ids,
@@ -5714,10 +6631,26 @@ function resolveContactTopicRecipientsSync(topic = {}, users = []) {
   return { recipients, emails, recipient_user_ids: recipients.map((user) => user.id).filter(Boolean) };
 }
 
+export function isDefaultContactTopicLabel(label) {
+  return /^general\s+questions?$/i.test(String(label || '').trim());
+}
+
+export function defaultContactTopicId(topics = []) {
+  const match = (Array.isArray(topics) ? topics : []).find((topic) => isDefaultContactTopicLabel(topic?.label));
+  return match?.id ?? null;
+}
+
+function contactTopicSelectOptions(topics = []) {
+  if (!topics.length) return '<option value="" disabled selected>Contact topics coming soon</option>';
+  const selectedId = defaultContactTopicId(topics);
+  return topics.map((topic) => {
+    const selected = selectedId != null && Number(topic.id) === Number(selectedId) ? ' selected' : '';
+    return `<option value="${escapeAttr(topic.id)}"${selected}>${escapeHtml(topic.label)}</option>`;
+  }).join('');
+}
+
 export function renderContactForm(topics = []) {
-  const options = topics.length
-    ? topics.map((topic) => `<option value="${escapeAttr(topic.id)}">${escapeHtml(topic.label)}</option>`).join('')
-    : '<option value="" disabled selected>Contact topics coming soon</option>';
+  const options = contactTopicSelectOptions(topics);
   const disabled = topics.length ? '' : ' disabled';
   return `<form class="card contact-form" data-contact-form novalidate>
   <span class="tag">Contact</span>
@@ -6033,12 +6966,41 @@ async function sendContactEmail(env, { to, replyTo, subject, text, name }) {
 }
 
 export function sanitizePageSectionHtml(dirty = '') {
-  return String(dirty || '')
-    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '')
-    .trim();
+  return sanitizePageSectionHtmlAllowlist(dirty);
+}
+
+/** Full-page save sanitizer: allowlist tags/attrs only, after entity decode. */
+export function sanitizeCmsPageHtml(dirty = '') {
+  return sanitizeCmsPageHtmlAllowlist(dirty);
+}
+
+export function isPublicCmsPageActive(page) {
+  return Boolean(page) && Number(page.active) === 1;
+}
+
+/** Public form POST must follow Coming Soon when the CMS page is inactive. */
+export function publicFormSubmitGate(page) {
+  if (page && isPublicCmsPageActive(page)) return { ok: true };
+  return { ok: false, status: 403, detail: 'Coming soon' };
+}
+
+async function rejectInactivePublicFormPage(env, slug) {
+  const page = await getPageBySlug(env, slug, true);
+  const gate = publicFormSubmitGate(page);
+  if (gate.ok) return null;
+  return jsonResponse({ detail: gate.detail }, gate.status);
+}
+
+export function publicCmsPageForRender(page) {
+  if (!page) return null;
+  if (isPublicCmsPageActive(page)) return page;
+  return {
+    ...page,
+    body_html: comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }),
+  };
 }
 
 export function extractEnsemblesBodyHtml(pageHtml = '') {
@@ -6074,9 +7036,21 @@ export function applyEnsemblesBodyHtml(pageHtml = '', bodyInnerHtml = '') {
   return source ? `${source}${wrapped}` : wrapped;
 }
 
-function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null) {
+export function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], site = null, extras = {}) {
+  if (!isPublicCmsPageActive(page)) {
+    return injectComingSoonLogos(comingSoonPageHtml({
+      heading: page.title || 'Coming soon',
+      intro: 'This page is on the way.',
+    }), {
+      logo: site?.logo_url || '/assets/efhs-logo.png',
+      mark: PUBLIC_BRAND_MARK,
+    });
+  }
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
+  if (page.slug === 'in-kind') return renderInKindPageBody(page);
+  if (isCmsFormPage(page)) return page.body_html;
+  if (page.slug === 'letterman-jacket') return renderLettermanPageBody(page, page.letterman_copy);
   if (page.slug === 'directors') return renderDirectorsPageBody(page, staff);
   if (page.slug === 'contact') return renderContactPageBody(page);
   if (page.slug === 'boosters') {
@@ -6085,7 +7059,10 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'fundraising') {
-    return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(page.body_html), {
+    const decorated = decorateFundraisingPage(page.body_html, {
+      events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [],
+    });
+    return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(decorated), {
       topics: ['fundraising', 'calendar'],
       heading: 'Email fundraising updates',
       detail: 'Get campaign notes by email. Reply STOP to any message to unsubscribe.',
@@ -6099,17 +7076,44 @@ function renderPageBody(page, sponsors = [], staff = [], boosterMembers = [], si
     });
   }
   if (page.slug === 'gallery') return ensureGalleryPageSlot(page.body_html);
-  if (page.slug === 'home' || page.is_home) return ensureHomePhotoGallerySlot(refreshHomeHeroBrandMark(page.body_html));
+  if (COMING_SOON_PAGES.some((item) => item.slug === page.slug)) {
+    const source = page.body_html || comingSoonPageHtml(page);
+    return injectComingSoonLogos(source, {
+      logo: site?.logo_url || '/assets/efhs-logo.png',
+      mark: PUBLIC_BRAND_MARK,
+    });
+  }
+  if (page.slug === 'home' || page.is_home) {
+    const html = upgradeHomeBody(ensureHomePhotoGallerySlot(restoreHomeHeroCardUploadSrc(page.body_html)));
+    return decorateHomeRedesign(html, extras.home || {});
+  }
   return page.body_html;
 }
 
-async function getPhotos(env) {
+function photoListStatement(env) {
   // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
-  // Manual drag order uses sort_order; created_at breaks ties for older rows still at 0.
-  const rows = await env.DB.prepare(
-    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY sort_order ASC, datetime(created_at) DESC, id DESC',
-  ).all();
-  return (rows.results || []).map((photo) => ({ ...photo, url: `/uploads/${encodeURIComponent(photo.filename)}` }));
+  // sort_order, created_at, id matches idx_photos_gallery_sort. created_at is stored as
+  // sortable text, so the column is ordered directly and can use the index.
+  return env.DB.prepare(
+    'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE sort_order >= 0 ORDER BY sort_order ASC, created_at DESC, id DESC',
+  );
+}
+
+export function publicPhotoUrl(photo = {}) {
+  const filename = encodeURIComponent(String(photo?.filename || '').trim());
+  if (!filename) return '';
+  const stamp = String(photo?.created_at || photo?.id || '1').replace(/[^\dA-Za-z]/g, '').slice(0, 18) || '1';
+  const id = Number(photo?.id) || 0;
+  return `/uploads/${filename}?v=${id || 'x'}-${stamp}`;
+}
+
+function mapPhotoRows(rows = []) {
+  return (rows || []).map((photo) => ({ ...photo, url: publicPhotoUrl(photo) }));
+}
+
+async function getPhotos(env) {
+  const rows = await photoListStatement(env).all();
+  return mapPhotoRows(rows.results);
 }
 
 async function nextGalleryPhotoSortOrder(env) {
@@ -6147,19 +7151,198 @@ async function photoUsageLabels(env, filename) {
   return labels;
 }
 
+function mapCmsPage(page) {
+  if (!page) return page;
+  return {
+    ...page,
+    is_form: Number(page.is_form) === 1 || isCmsFormPage(page) || page.slug === 'letterman-jacket',
+  };
+}
+
 async function getPages(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
-  const rows = await env.DB.prepare(`SELECT id, slug, path, title, body_html, nav_order, is_home, active, updated_at FROM cms_pages ${where} ORDER BY nav_order, id`).all();
-  return rows.results || [];
+  const rows = await env.DB.prepare(`SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages ${where} ORDER BY nav_order, id`).all();
+  return (rows.results || []).map((page) => mapCmsPage(page));
+}
+
+function navPagesStatement(env) {
+  // Nav does not need page bodies. instr() still visits each active row, but the
+  // Worker receives a 0/1 flag instead of every body_html string.
+  return env.DB.prepare(`
+    SELECT id, slug, path, title, nav_order, is_home, active, updated_at,
+           CASE WHEN instr(body_html, 'data-cms-form=') > 0 THEN 1 ELSE 0 END AS is_form
+    FROM cms_pages
+    WHERE active = 1
+    ORDER BY nav_order, id
+  `);
+}
+
+function pageByPathStatement(env, path) {
+  return env.DB.prepare(
+    `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ?`,
+  ).bind(path);
+}
+
+function homeSourcePagesStatement(env) {
+  return env.DB.prepare(
+    `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug IN ('fundraising', 'become-a-sponsor')`,
+  );
+}
+
+function sponsorsStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, address, city, state, logo_url, level, mark_text, sort_order, active, homepage_ad FROM sponsors ORDER BY sort_order, id',
+  );
+}
+
+function activeBoosterMembersStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members WHERE active = 1 ORDER BY sort_order, id',
+  );
+}
+
+function activeStaffStatement(env) {
+  return env.DB.prepare(
+    'SELECT id, name, role, bio, photo_url, sort_order, active FROM staff_members WHERE active = 1 ORDER BY sort_order, id',
+  );
 }
 
 async function getPageBySlug(env, slug, includeInactive = false) {
-  const sql = includeInactive ? 'SELECT * FROM cms_pages WHERE slug = ?' : 'SELECT * FROM cms_pages WHERE slug = ? AND active = 1';
+  const sql = includeInactive
+    ? `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug = ?`
+    : `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug = ? AND active = 1`;
   return env.DB.prepare(sql).bind(slug).first();
 }
 
-async function getPageByPath(env, path) {
-  return env.DB.prepare('SELECT * FROM cms_pages WHERE path = ? AND active = 1').bind(path).first();
+async function getPageByPath(env, path, includeInactive = false) {
+  const sql = includeInactive
+    ? `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ?`
+    : `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE path = ? AND active = 1`;
+  return env.DB.prepare(sql).bind(path).first();
+}
+
+function rowsOf(result) {
+  return result?.results || [];
+}
+
+export function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false, needsPhotos = false } = {}) {
+  const jobs = [
+    {
+      key: 'site',
+      statement: () => {
+        const placeholders = PUBLIC_SITE_KEYS.map(() => '?').join(', ');
+        return env.DB.prepare(
+          `SELECT key, value FROM site_content WHERE key IN (${placeholders})`,
+        ).bind(...PUBLIC_SITE_KEYS);
+      },
+      parse: (result) => siteFromContentRows(rowsOf(result)),
+    },
+    {
+      key: `page-path:${path}`,
+      statement: () => pageByPathStatement(env, path),
+      parse: (result) => mapCmsPage(rowsOf(result)[0] || null),
+    },
+    {
+      key: 'pages-nav',
+      statement: () => navPagesStatement(env),
+      parse: (result) => rowsOf(result).map((page) => mapCmsPage(page)),
+    },
+    {
+      key: 'sponsors',
+      statement: () => sponsorsStatement(env),
+      parse: (result) => rowsOf(result).map((row) => hydrateSponsor(row)),
+    },
+    {
+      key: `deadline-events:${today}`,
+      optional: true,
+      fallback: [],
+      statement: () => deadlineCaldevStatement(env),
+      parse: (result) => mapCaldevRows(result),
+    },
+  ];
+  if (needsPhotos) {
+    jobs.push({
+      key: 'photos',
+      optional: true,
+      fallback: [],
+      statement: () => photoListStatement(env),
+      parse: (result) => mapPhotoRows(rowsOf(result)),
+    });
+  }
+  if (needsBoosters) {
+    jobs.push({
+      key: 'booster-members',
+      statement: () => activeBoosterMembersStatement(env),
+      parse: (result) => rowsOf(result),
+    });
+  }
+  if (needsStaff) {
+    jobs.push({
+      key: 'staff-active',
+      statement: () => activeStaffStatement(env),
+      parse: (result) => rowsOf(result),
+    });
+  }
+  if (isHome || needsEvents) {
+    jobs.push({
+      key: `home-events:${today}`,
+      optional: true,
+      fallback: [],
+      statement: () => caldevEventsFromDateStatement(env, { todayIso: today, limit: 80 }),
+      parse: (result) => mapCaldevRows(result),
+    });
+  }
+  if (isHome) {
+    jobs.push({
+      key: 'home-source-pages',
+      optional: true,
+      fallback: { fundraising: null, sponsor: null },
+      statement: () => homeSourcePagesStatement(env),
+      parse: (result) => {
+        const bySlug = new Map(rowsOf(result).map((page) => [page.slug, page]));
+        return {
+          fundraising: bySlug.get('fundraising') || null,
+          sponsor: bySlug.get('become-a-sponsor') || null,
+        };
+      },
+    });
+  }
+  return jobs;
+}
+
+async function loadPublicCmsReads(env, options) {
+  const jobs = publicReadJobs(env, options);
+  const values = await readCachedQueryBatch(env, jobs);
+  const read = (key, fallback = null) => (values.has(key) ? values.get(key) : fallback);
+  return {
+    site: read('site', siteFromContentRows([])),
+    page: read(`page-path:${options.path}`, null),
+    pages: read('pages-nav', []),
+    sponsors: read('sponsors', []),
+    photos: read('photos', []),
+    deadlineEvents: read(`deadline-events:${options.today}`, []),
+    boosterMembers: read('booster-members', []),
+    staff: read('staff-active', []),
+    homeEvents: read(`home-events:${options.today}`, []),
+    homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
+  };
+}
+
+async function loadPublicChromeReads(env, today) {
+  // Reuse the public page cache keys. The marquee is the sponsors list from this batch.
+  const jobs = publicReadJobs(env, { path: '/', today, isHome: false }).filter((job) => (
+    job.key === 'site'
+    || job.key === 'pages-nav'
+    || job.key === 'sponsors'
+    || job.key === `deadline-events:${today}`
+  ));
+  const values = await readCachedQueryBatch(env, jobs);
+  return {
+    site: values.get('site') || siteFromContentRows([]),
+    pages: values.get('pages-nav') || [],
+    sponsors: values.get('sponsors') || [],
+    deadlineEvents: values.get(`deadline-events:${today}`) || [],
+  };
 }
 
 async function getUserByUsername(env, username) {
@@ -6820,7 +8003,7 @@ export async function requireScheduleBoardAccess(request, env) {
   if (auth.response) return auth;
   if (!canAccessScheduleBoard(auth.user)) {
     return {
-      response: jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403),
+      response: jsonResponse({ detail: 'Permission required: calendar or events' }, 403),
       user: auth.user,
     };
   }
@@ -6882,10 +8065,13 @@ function base64ToArrayBuffer(value) {
 function photoBytesFromStored(value) {
   if (value == null || value === '') return null;
   if (typeof value === 'string') {
+    const trimmed = value.trim();
     try {
-      return new Uint8Array(base64ToArrayBuffer(value));
+      return new Uint8Array(base64ToArrayBuffer(trimmed));
     } catch {
-      // Older/odd rows may store raw binary in a text field.
+      // Older/odd rows may store raw binary in a text field. Do not walk
+      // multi-megabyte non-base64 strings — that burns isolate CPU (1101).
+      if (value.length > 64 * 1024) return null;
       const bytes = new Uint8Array(value.length);
       for (let i = 0; i < value.length; i += 1) bytes[i] = value.charCodeAt(i) & 0xff;
       return bytes;
@@ -6962,7 +8148,11 @@ async function storeImageUpload(env, file, altText = '', caption = '', sortOrder
       caption: cleanCaption,
       sort_order: resolvedSort,
       created_at: createdAt,
-      url: `/uploads/${encodeURIComponent(filename)}`,
+      url: publicPhotoUrl({
+        id: result.meta.last_row_id,
+        filename,
+        created_at: createdAt,
+      }),
     };
   } catch (error) {
     const detail = String(error?.message || error || 'Database error');
@@ -7075,21 +8265,32 @@ function sanitizeRichImageFloatClass(attrs = '') {
   return 'cms-body-photo-block';
 }
 
-function sanitizeRichImageTag(attrs = '') {
-  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
-  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+function isAllowedRichImageSrc(src) {
+  const value = String(src || '').trim();
+  return /^\/uploads\//i.test(value) || /^\/?assets\//i.test(value);
+}
+
+function normalizeRichImageSrc(src) {
+  let value = String(src || '').trim();
+  if (!value || /^(javascript:|data:)/i.test(value)) return '';
   try {
-    if (/^https?:\/\//i.test(src)) {
-      const parsed = new URL(src);
-      if (!parsed.pathname.startsWith('/uploads/')) return '';
-      src = parsed.pathname + (parsed.search || '');
+    if (/^https?:\/\//i.test(value)) {
+      const parsed = new URL(value);
+      value = parsed.pathname + (parsed.search || '');
     }
   } catch {
     return '';
   }
-  if (!src.startsWith('/uploads/')) return '';
-  if (/[<>"\s]/.test(src)) return '';
+  if (/^assets\//i.test(value)) value = `/${value}`;
+  if (!isAllowedRichImageSrc(value)) return '';
+  if (/[<>"\s]/.test(value)) return '';
+  return value;
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const src = normalizeRichImageSrc(srcMatch?.[1] || srcMatch?.[2] || '');
+  if (!src) return '';
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
   const floatClass = sanitizeRichImageFloatClass(attrs);
@@ -7229,7 +8430,7 @@ export function generateStructuredPageHtml(payload = {}) {
 
   if (layout === 'sponsors') {
     const sponsorCallout = calloutTitle || calloutText
-      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><a class="btn secondary" href="/become-a-sponsor.html">Become a sponsor</a></aside>`
+      ? `<aside class="sponsor-cta" data-cms-block="callout"><div><span class="sponsor-level">Sponsor opportunities</span><h2 data-cms-field="callout_title">${calloutTitle || 'Sponsor opportunities'}</h2><div data-cms-field="callout_text">${formatRichText(calloutText)}</div></div><button type="button" class="btn secondary" data-sponsor-choice-open>Sponsor/In-Kind</button></aside>`
       : '';
     return `<section class="page-hero sponsor-hero" data-cms-layout="${escapeAttr(layout)}"><div class="page-title"><div class="kicker" data-cms-field="kicker">${kicker}</div><h1 data-cms-field="heading">${heading}</h1>${intro ? `<p data-cms-field="intro">${intro}</p>` : ''}</div></section><section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro"><div data-cms-field="body_text">${body}</div>${SPONSOR_INTRO_ACTIONS_HTML}</div><div class="sponsor-directory" data-sponsors></div>${sponsorCallout}</div></section>`;
   }
@@ -7242,16 +8443,16 @@ export function generateStructuredPageHtml(payload = {}) {
 }
 
 export function sanitizeHomeBodyHtml(html = '') {
-  let source = String(html || '')
+  let source = restoreHomeHeroCardUploadSrc(html || '')
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\scontenteditable\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:role|spellcheck|aria-label|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:spellcheck|aria-multiline|data-placeholder|data-edit-label|data-cms-home-field|data-cms-field|data-cms-href|data-cms-dynamic-label)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\sclass="([^"]*)"/gi, (_, classes) => {
       const cleaned = String(classes || '')
         .split(/\s+/)
-        .filter((name) => name && !['cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic'].includes(name))
+        .filter((name) => name && !['cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic', 'cms-home-hero-card', 'is-selected'].includes(name))
         .join(' ');
       return cleaned ? ` class="${cleaned}"` : '';
     })
@@ -7259,8 +8460,17 @@ export function sanitizeHomeBodyHtml(html = '') {
   source = source
     .replace(/<div class="cms-home-preview-note"[\s\S]*?<\/div>/gi, '')
     .replace(/<label class="cms-home-href-field"[\s\S]*?<\/label>/gi, '')
-    .replace(/<span class="cms-home-link-edit">([\s\S]*?)<\/span>/gi, '$1');
-  return source.trim();
+    .replace(/<span class="cms-home-link-edit">([\s\S]*?)<\/span>/gi, '$1')
+    .replace(/(<aside\b[^>]*\bhero-card\b[\s\S]*?<\/aside>)/gi, (block) => {
+      let next = block
+        .replace(/<li\b[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s)*<\/li>/gi, '')
+        .replace(/<(ul|ol)\b[^>]*>\s*<\/\1>/gi, '');
+      if (/\/uploads\//i.test(next)) {
+        next = next.replace(/<img\b[^>]*\bsrc=["'][^"']*(?:efhs-logo|efhs-blue-regiment-mark|efhs-admin-mark)\.png[^"']*["'][^>]*>/gi, '');
+      }
+      return next;
+    });
+  return sanitizeHomeAllowlistHtml(source);
 }
 
 export function serializePagePayload(payload, existing = null) {
@@ -7283,6 +8493,9 @@ export function serializePagePayload(payload, existing = null) {
     body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
   } else {
     body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+  }
+  if (slug !== 'home') {
+    body_html = sanitizeCmsPageHtml(body_html);
   }
   return {
     slug,
@@ -7313,6 +8526,11 @@ async function handleApi(request, env, url, ctx = null) {
     requestSummary,
     ctx,
   });
+  if (response.ok && shouldInvalidatePublicReadCache(url.pathname, request.method)) {
+    const cleared = invalidatePublicReadCache();
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cleared);
+    else await cleared;
+  }
   return response;
 }
 
@@ -7327,7 +8545,9 @@ async function routeApi(request, env, url, ctx = null) {
       editable: false,
     }, 405);
   }
-  if (url.pathname === '/api/site' && request.method === 'GET') return jsonResponse(await getSite(env));
+  if (url.pathname === '/api/site' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('site', () => getSite(env)));
+  }
 
   if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
     const state = await getCalendarPushState(env);
@@ -7447,35 +8667,55 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env);
-    return jsonResponse({
+    const response = jsonResponse({
       logged_in: Boolean(user),
       is_super_admin: Boolean(user) && isSuperAdmin(user),
     });
+    if (!user) {
+      response.headers.append('Set-Cookie', loginHintCookieHeader(false));
+    } else {
+      attachLoginHintIfNeeded(request, response, user);
+    }
+    return response;
   }
   if (url.pathname === '/api/events' && request.method === 'GET') {
-    return jsonResponse(await getEvents(env, { upcomingOnly: true, expandRepeats: true }));
+    const today = easternTodayIso();
+    return jsonResponse(await cachedPublicRead(`events-upcoming:${today}`, () => getEvents(env, { upcomingOnly: true, expandRepeats: true })));
   }
   if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
     // Full month view needs past and future months, not only upcoming rows.
-    return jsonResponse(await getEvents(env, { upcomingOnly: false, expandRepeats: true }));
+    return jsonResponse(await cachedPublicRead('events-all', () => getEvents(env, { upcomingOnly: false, expandRepeats: true })));
+  }
+  if (url.pathname === '/api/caldev/deadline-banners' && request.method === 'GET') {
+    try {
+      const today = easternTodayIso();
+      const events = await cachedPublicRead(`deadline-events:${today}`, () => listDeadlineCaldevEvents(env));
+      return jsonResponse(buildDeadlineBannerItems(events, today));
+    } catch {
+      return jsonResponse([]);
+    }
   }
   if (url.pathname === '/api/caldev/events' && request.method === 'GET') {
     await ensureCaldevSchema(env);
-    let events = await listCaldevEvents(env);
-    if (!events.length) {
-      try {
-        await seedCaldevFromProduction(env, { getEvents, clear: true });
-        events = await listCaldevEvents(env);
-      } catch {
-        // Seeding is best-effort for the lab page.
-      }
+    const upcoming = url.searchParams.get('upcoming') === '1' || url.searchParams.get('highlights') === '1';
+    if (upcoming) {
+      const today = easternTodayIso();
+      const limit = parseCaldevUpcomingLimit(url.searchParams.get('limit'));
+      const events = await cachedPublicRead(`caldev-upcoming:${today}:${limit}`, () => listUpcomingCaldevEvents(env, {
+        todayIso: today,
+        limit,
+      }));
+      return jsonResponse(events.map(caldevEventToHighlight));
     }
+    const events = await cachedPublicRead('caldev-events', () => listCaldevEvents(env));
     return jsonResponse(events);
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
     return jsonResponse(CALDEV_TRACKS);
   }
-  if (url.pathname === '/api/sponsors' && request.method === 'GET') return jsonResponse(await getSponsors(env));
+  if (url.pathname === '/api/sponsors' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('sponsors', () => getSponsors(env, true)));
+  }
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
     const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
     if (query.length < 3) {
@@ -7497,6 +8737,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(config);
   }
   if (url.pathname === '/api/sponsor-applications' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'become-a-sponsor');
+    if (blocked) return blocked;
     const contentType = String(request.headers.get('content-type') || '');
     let businessName = '';
     let address = '';
@@ -7513,6 +8755,7 @@ async function routeApi(request, env, url, ctx = null) {
       phone = String(form.get('phone') || '').trim();
       email = String(form.get('email') || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(form.get('tier'));
+      if (/honorable/.test(String(form.get('tier') || '').toLowerCase())) tier = '';
       amountDisplay = String(form.get('amount_display') || '').trim();
       amountCents = resolveSponsorAmountCents({
         amountCents: form.get('amount_cents'),
@@ -7527,6 +8770,7 @@ async function routeApi(request, env, url, ctx = null) {
       phone = String(payload.phone || '').trim();
       email = String(payload.email || '').trim().toLowerCase();
       tier = normalizeSponsorTierKey(payload.tier);
+      if (/honorable/.test(String(payload.tier || '').toLowerCase())) tier = '';
       amountDisplay = String(payload.amount_display || '').trim();
       amountCents = resolveSponsorAmountCents({
         amountCents: payload.amount_cents,
@@ -7759,6 +9003,8 @@ async function routeApi(request, env, url, ctx = null) {
     }
   }
   if (url.pathname === '/api/donations' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'fundraising');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const donorName = String(payload.donor_name || payload.name || '').trim();
     const amountDisplay = String(payload.amount_display || '').trim();
@@ -7893,6 +9139,8 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/dues' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'boosters');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     const studentName = String(payload.student_name || payload.child_name || payload.name || '').trim();
     const email = String(payload.email || '').trim().toLowerCase();
@@ -8093,6 +9341,8 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(topics.map((topic) => ({ id: topic.id, label: topic.label, sort_order: topic.sort_order })));
   }
   if (url.pathname === '/api/contact' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'contact');
+    if (blocked) return blocked;
     const payload = await request.json().catch(() => ({}));
     if (String(payload.company || '').trim()) {
       return jsonResponse({ ok: true }); // honeypot
@@ -8143,8 +9393,100 @@ async function routeApi(request, env, url, ctx = null) {
     }
     return jsonResponse({ ok: true, delivered: true, detail: 'Message sent. Thank you!' });
   }
-  if (url.pathname === '/api/photos' && request.method === 'GET') return jsonResponse(await getPhotos(env));
-  if (url.pathname === '/api/pages' && request.method === 'GET') return jsonResponse((await getPages(env)).map(({ body_html, ...page }) => page));
+  if (url.pathname === '/api/inkind' && request.method === 'POST') {
+    const blocked = await rejectInactivePublicFormPage(env, 'in-kind');
+    if (blocked) return blocked;
+    const { payload, files } = await readInKindRequest(request);
+    if (String(payload.company || '').trim()) {
+      return jsonResponse({ ok: true });
+    }
+    const logos = await collectInKindLogoAttachments(files);
+    const normalized = normalizeInKindPayload({ ...payload, logo_names: logos.names });
+    if (!normalized.ok) {
+      return jsonResponse({ detail: normalized.errors[0] || 'Please complete the required fields.', errors: normalized.errors }, 422);
+    }
+    const recipients = await resolveFormsRecipientEmails(env);
+    const site = await getSite(env).catch(() => ({}));
+    const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+    const mail = buildInKindEmail({ data: normalized.data, siteTitle });
+    const pdf = buildInKindPdfBase64(normalized.data);
+    const attachments = [
+      { filename: 'efhs-in-kind-donation.pdf', content: pdf, content_type: 'application/pdf' },
+      ...logos.attachments,
+    ];
+    const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+    const fromName = String(env.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || siteTitle).trim();
+    let delivered = 0;
+    let deliveryError = '';
+    try {
+      if (!recipients.length) throw new Error('No CMS form recipients are selected yet.');
+      if (!env.RESEND_API_KEY) throw new Error('Email delivery is not configured.');
+      if (!isValidEmail(fromEmail)) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address on your Resend domain');
+      await sendViaResend(env, {
+        to: recipients,
+        replyTo: normalized.data.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        fromEmail,
+        fromName,
+        attachments,
+      });
+      delivered = 1;
+    } catch (error) {
+      deliveryError = String(error?.message || error || 'Delivery failed');
+    }
+    const inserted = await env.DB.prepare(
+      'INSERT INTO form_submissions (kind, payload_json, delivered, delivery_error) VALUES (?, ?, ?, ?)',
+    ).bind('inkind', JSON.stringify(normalized.data), delivered, deliveryError).run();
+    const submissionId = inserted?.meta?.last_row_id || null;
+    try {
+      await recordInKindFormLedger(env, normalized.data, submissionId);
+    } catch { /* ledger is best-effort */ }
+    if (!delivered) {
+      return jsonResponse({
+        ok: true,
+        delivered: false,
+        id: submissionId,
+        detail: 'Form received. Staff can review it in the CMS Forms tab while email delivery is being configured.',
+      });
+    }
+    return jsonResponse({
+      ok: true,
+      delivered: true,
+      id: submissionId,
+      detail: 'Thank you. Your in-kind donation form was sent.',
+    });
+  }
+  const publicFormMatch = url.pathname.match(/^\/api\/forms\/([a-z0-9-]+)$/);
+  if (publicFormMatch && request.method === 'GET') {
+    const record = await getFormBySlug(env, publicFormMatch[1]);
+    if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+    return jsonResponse({ slug: record.slug, path: record.path, title: record.title, definition: record.definition });
+  }
+  if (publicFormMatch && request.method === 'POST') {
+    return handleBuiltFormSubmit(request, env, publicFormMatch[1]);
+  }
+  if (url.pathname === '/api/letterman-jacket' && request.method === 'GET') {
+    const record = await getFormBySlug(env, 'letterman-jacket');
+    return jsonResponse({
+      copy: record?.definition || await getLettermanFormCopy(env),
+      sizes: ['S', 'M', 'L', 'XL', '2XL', '3XL'],
+      payment_methods: ['Cash', 'Check'],
+    });
+  }
+  if (url.pathname === '/api/letterman-jacket' && request.method === 'POST') {
+    return handleBuiltFormSubmit(request, env, 'letterman-jacket');
+  }
+  if (url.pathname === '/api/photos' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('photos', () => getPhotos(env)));
+  }
+  if (url.pathname === '/api/pages' && request.method === 'GET') {
+    return jsonResponse(await cachedPublicRead('pages-nav', async () => {
+      const rows = await navPagesStatement(env).all();
+      return (rows.results || []).map((page) => mapCmsPage(page));
+    }));
+  }
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
   if (publicPageMatch && request.method === 'GET') {
     const page = await getPageBySlug(env, publicPageMatch[1]);
@@ -8154,7 +9496,188 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/me') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    return jsonResponse({ user: publicUser(auth.user), permissions: GLOBAL_PERMISSIONS, pages: (await getPages(env, true)).map((page) => ({ slug: page.slug, title: page.title, path: page.path, active: Boolean(page.active), nav_order: page.nav_order })) });
+    const formsAccessIds = await getFormsAccessUserIds(env);
+    return jsonResponse({
+      user: publicUser(auth.user),
+      permissions: GLOBAL_PERMISSIONS,
+      forms_access: canAccessFormsPage(auth.user, formsAccessIds),
+      pages: (await getPages(env, true)).map((page) => ({
+        slug: page.slug,
+        title: page.title,
+        path: page.path,
+        active: Boolean(page.active),
+        nav_order: page.nav_order,
+        is_form: Boolean(page.is_form),
+      })),
+    });
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const [accessIds, recipientIds, users, forms, rows] = await Promise.all([
+      getFormsAccessUserIds(env),
+      getFormsRecipientUserIds(env),
+      listCmsFormUsers(env),
+      listCmsFormsSummary(env),
+      env.DB.prepare('SELECT id, kind, payload_json, delivered, delivery_error, created_at FROM form_submissions ORDER BY id DESC LIMIT 40').all(),
+    ]);
+    const submissions = (rows.results || []).map((row) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(row.payload_json || '{}') || {};
+      } catch {
+        payload = {};
+      }
+      const jacket = row.kind === 'letterman-jacket';
+      return {
+        id: row.id,
+        kind: row.kind,
+        title: payload.student_name || payload.name || payload.business_name || row.kind,
+        name: jacket
+          ? (payload.parent_name || '')
+          : `${payload.first_name || ''} ${payload.last_name || ''}`.trim(),
+        email: payload.email || '',
+        value: payload.amount_enclosed || payload.jacket_size || payload.value || '',
+        delivered: Boolean(row.delivered),
+        delivery_error: row.delivery_error || '',
+        created_at: row.created_at,
+      };
+    });
+    return jsonResponse({
+      access_user_ids: accessIds,
+      recipient_user_ids: recipientIds,
+      can_edit_access: isSuperAdminUser(auth.user),
+      field_types: ['heading', 'text', 'textarea', 'email', 'phone', 'number', 'date', 'dropdown', 'choice', 'checkbox', 'note', 'pricing'],
+      users,
+      forms,
+      submissions,
+    });
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'POST') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_forms').first();
+    if (Number(count?.count || 0) >= MAX_CMS_FORMS) {
+      return jsonResponse({ detail: `You can create up to ${MAX_CMS_FORMS} forms.` }, 422);
+    }
+    const payload = await request.json().catch(() => ({}));
+    const title = String(payload.title || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    if (!title) return jsonResponse({ detail: 'Form title is required.' }, 422);
+    const slug = await nextAvailableFormSlug(env, title);
+    const path = formPathFromSlug(slug);
+    const definition = emptyFormDefinition(title);
+    const pageId = await writeCmsFormPage(env, { slug, path, title, definition });
+    const inserted = await env.DB.prepare(
+      'INSERT INTO cms_forms (slug, path, title, definition_json, recipient_user_ids, page_id) VALUES (?, ?, ?, ?, ?, ?)',
+    ).bind(slug, path, title, JSON.stringify(definition), '[]', pageId).run();
+    const record = await getFormById(env, inserted?.meta?.last_row_id);
+    return jsonResponse(record, 201);
+  }
+  if (url.pathname === '/api/admin/forms' && request.method === 'PUT') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    if (Object.prototype.hasOwnProperty.call(payload, 'access_user_ids')) {
+      if (!isSuperAdminUser(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admin can change who may open Forms.' }, 403);
+      }
+      await saveFormsUserIds(env, FORMS_ACCESS_KEY, parseFormsUserIds(payload.access_user_ids));
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'recipient_user_ids')) {
+      await saveFormsUserIds(env, FORMS_RECIPIENT_KEY, parseFormsUserIds(payload.recipient_user_ids));
+    }
+    return jsonResponse({
+      ok: true,
+      access_user_ids: await getFormsAccessUserIds(env),
+      recipient_user_ids: await getFormsRecipientUserIds(env),
+    });
+  }
+  const adminFormMatch = url.pathname.match(/^\/api\/admin\/forms\/(\d+)$/);
+  if (adminFormMatch && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const record = await getFormById(env, adminFormMatch[1]);
+    if (!record) return jsonResponse({ detail: 'Form not found' }, 404);
+    return jsonResponse(record);
+  }
+  if (adminFormMatch && request.method === 'PUT') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const existing = await getFormById(env, adminFormMatch[1]);
+    if (!existing) return jsonResponse({ detail: 'Form not found' }, 404);
+    const payload = await request.json().catch(() => ({}));
+    const title = String(payload.title || existing.title).replace(/\s+/g, ' ').trim().slice(0, 160) || existing.title;
+    const definition = normalizeFormDefinition(payload.definition || existing.definition, title);
+    definition.title = title;
+    const recipients = parseFormsUserIds(payload.recipient_user_ids ?? existing.recipient_user_ids);
+    let slug = existing.slug;
+    let path = existing.path;
+    if (title !== existing.title && existing.slug !== 'letterman-jacket') {
+      const wanted = slugFromFormTitle(title);
+      if (wanted !== existing.slug && !isReservedFormSlug(wanted)) {
+        const clash = await env.DB.prepare('SELECT id FROM cms_forms WHERE slug = ? AND id != ?').bind(wanted, existing.id).first();
+        const pageClash = await env.DB.prepare('SELECT id FROM cms_pages WHERE (slug = ? OR path = ?) AND id != ?')
+          .bind(wanted, formPathFromSlug(wanted), existing.page_id || 0).first();
+        if (!clash && !pageClash) {
+          slug = wanted;
+          path = formPathFromSlug(wanted);
+        }
+      }
+    }
+    forgetFormRecord(existing.slug);
+    const pageId = await writeCmsFormPage(env, { slug, path, title, definition });
+    if (existing.page_id && existing.slug !== slug) {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE id = ? AND slug = ?').bind(existing.page_id, existing.slug).run();
+    }
+    await env.DB.prepare(
+      'UPDATE cms_forms SET slug = ?, path = ?, title = ?, definition_json = ?, recipient_user_ids = ?, page_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(slug, path, title, JSON.stringify(definition), JSON.stringify(recipients), pageId, existing.id).run();
+    if (slug === 'letterman-jacket') {
+      await saveLettermanFormCopy(env, definition);
+      await saveFormsUserIds(env, LETTERMAN_RECIPIENT_KEY, recipients);
+    }
+    return jsonResponse(await getFormById(env, existing.id));
+  }
+  if (adminFormMatch && request.method === 'DELETE') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const existing = await getFormById(env, adminFormMatch[1]);
+    if (!existing) return jsonResponse({ detail: 'Form not found' }, 404);
+    forgetFormRecord(existing.slug);
+    if (existing.page_id) {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE id = ?').bind(existing.page_id).run();
+    } else {
+      await env.DB.prepare('DELETE FROM cms_pages WHERE slug = ? OR path = ?').bind(existing.slug, existing.path).run();
+    }
+    await env.DB.prepare('DELETE FROM cms_forms WHERE id = ?').bind(existing.id).run();
+    return jsonResponse({ ok: true });
+  }
+  const formsPdfMatch = url.pathname.match(/^\/api\/admin\/forms\/submissions\/(\d+)\.pdf$/);
+  if (formsPdfMatch && request.method === 'GET') {
+    const auth = await requireFormsAccess(request, env);
+    if (auth.response) return auth.response;
+    const row = await env.DB.prepare('SELECT id, kind, payload_json FROM form_submissions WHERE id = ?').bind(Number(formsPdfMatch[1])).first();
+    if (!row) return jsonResponse({ detail: 'Submission not found' }, 404);
+    let payload = {};
+    try {
+      payload = JSON.parse(row.payload_json || '{}') || {};
+    } catch {
+      payload = {};
+    }
+    const record = row.kind !== 'inkind' ? await getFormBySlug(env, row.kind) : null;
+    const pdf = record
+      ? buildFormPdfBase64(payload, { definition: record.definition })
+      : row.kind === 'letterman-jacket'
+        ? buildLettermanPdfBase64(payload, { copy: await getLettermanFormCopy(env) })
+        : buildInKindPdfBase64(payload, { submittedAt: '' });
+    return new Response(base64ToBytes(pdf), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'cache-control': 'no-store',
+        'content-disposition': `attachment; filename="${record ? record.slug : (row.kind === 'letterman-jacket' ? 'efhs-letterman-jacket' : 'efhs-in-kind')}-${row.id}.pdf"`,
+      },
+    });
   }
   if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
@@ -8541,12 +10064,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can create Super Admin accounts' }, 403);
-    }
+    const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(parsePermissions(payload.permissions)), payload.active === false ? 0 : 1).run();
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       return jsonResponse(publicUser(created));
     } catch (error) {
@@ -8568,16 +10090,27 @@ async function routeApi(request, env, url, ctx = null) {
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can edit Super Admin accounts' }, 403);
     }
-    const wantsAdmin = payload.role === 'admin';
-    if (wantsAdmin && !isSuperAdmin(auth.user)) {
-      return jsonResponse({ detail: 'Only Super Admins can assign the Super Admin role' }, 403);
-    }
-    const role = wantsAdmin ? 'admin' : 'editor';
-    const permissions = JSON.stringify(parsePermissions(payload.permissions));
+    const selfEdit = assertSafeSelfPrivilegeEdit(auth.user, id, payload, existing);
+    if (!selfEdit.ok) return jsonResponse({ detail: selfEdit.detail }, selfEdit.status);
+    const nextPayload = selfEdit.payload;
+    const editingSelf = Number(auth.user.id) === id && !isSuperAdmin(auth.user);
+    const privilege = editingSelf
+      ? { ok: true }
+      : assertSafeUserPrivilegeGrant(auth.user, nextPayload);
+    if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
+    const wantsAdmin = nextPayload.role === 'admin' && isSuperAdmin(auth.user);
+    const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+      ? (existing.role === 'admin' ? 'admin' : 'editor')
+      : (wantsAdmin ? 'admin' : 'editor');
+    const permissions = JSON.stringify(
+      Number(auth.user.id) === id && !isSuperAdmin(auth.user)
+        ? parsePermissions(existing.permissions)
+        : sanitizeAssignablePermissions(auth.user, nextPayload.permissions),
+    );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
-    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(payload.username || existing.username).trim(), displayName, role, permissions, payload.active === false ? 0 : 1, id).run();
-    if (payload.password) await updatePassword(env, id, payload.password);
+    await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
+    if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
     return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
   }
   if (userMatch && request.method === 'DELETE') {
@@ -8591,6 +10124,44 @@ async function routeApi(request, env, url, ctx = null) {
     }
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
     return jsonResponse({ ok: true });
+  }
+
+  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    return jsonResponse(await loadVisualPageState(env));
+  }
+  if (url.pathname === '/api/admin/visual-pages/join' && request.method === 'PUT') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = normalizeVisualSavePayload(raw);
+    if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
+    const state = await saveVisualPage(env, {
+      html: parsed.html,
+      action: parsed.action,
+      user: auth.user,
+    });
+    return jsonResponse(state);
+  }
+  if (url.pathname === '/api/admin/visual-pages/join/restore' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canEditVisualPilot(auth.user, canEditPage)) {
+      return jsonResponse({ detail: 'Permission required: page:join' }, 403);
+    }
+    const raw = await request.json().catch(() => ({}));
+    try {
+      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user));
+    } catch (error) {
+      return jsonResponse({ detail: error.message || 'Restore failed' }, Number(error.status) || 400);
+    }
   }
 
   if (url.pathname === '/api/admin/pages' && request.method === 'GET') {
@@ -8609,7 +10180,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     const page = serializePagePayload(await request.json());
     const result = await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active).run();
-    return jsonResponse(await env.DB.prepare('SELECT * FROM cms_pages WHERE id = ?').bind(result.meta.last_row_id).first());
+    return jsonResponse(await env.DB.prepare(`SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE id = ?`).bind(result.meta.last_row_id).first());
   }
   const pageMatch = url.pathname.match(/^\/api\/admin\/pages\/([a-z0-9-]+)$/);
   if (pageMatch && request.method === 'PUT') {
@@ -8622,7 +10193,15 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
-    const page = serializePagePayload(rawPayload, existing);
+    if (isVisualPilotSlug(existing.slug)) {
+      return jsonResponse({
+        detail: 'Join the Band is edited in the visual editor. Open the Join visual editor to save this page.',
+      }, 409);
+    }
+    let page = serializePagePayload(rawPayload, existing);
+    if (!canManagePageSettings(auth.user)) {
+      page = lockPageSettingsToExisting(page, existing);
+    }
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
     await env.DB.prepare('UPDATE cms_pages SET slug = ?, path = ?, title = ?, body_html = ?, nav_order = ?, is_home = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(page.slug, page.path, page.title, page.body_html, page.nav_order, page.is_home, page.active, existing.id).run();
@@ -9308,6 +10887,75 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(rows.results || []);
   }
 
+  if (url.pathname === '/api/admin/badges' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    return jsonResponse(await getCommitteeBadges(env));
+  }
+  if (url.pathname === '/api/admin/badges' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    const badge = normalizeCommitteeBadgePayload(await request.json());
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    await ensureCommitteeBadgesSchema(env);
+    const result = await env.DB.prepare(
+      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      auth.user.id || null,
+    ).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(result.meta.last_row_id).first());
+  }
+  const badgeMatch = url.pathname.match(/^\/api\/admin\/badges\/(\d+)$/);
+  if (badgeMatch && ['PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canAccessBadgeCreator(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+    }
+    await ensureCommitteeBadgesSchema(env);
+    const id = Number(badgeMatch[1]);
+    if (request.method === 'DELETE') {
+      await env.DB.prepare('DELETE FROM committee_badges WHERE id = ?').bind(id).run();
+      return jsonResponse({ ok: true });
+    }
+    const existing = await env.DB.prepare('SELECT * FROM committee_badges WHERE id = ?').bind(id).first();
+    if (!existing) return jsonResponse({ detail: 'Badge not found' }, 404);
+    const badge = normalizeCommitteeBadgePayload(await request.json(), existing);
+    if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
+    if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
+    await env.DB.prepare(
+      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, photo_zoom = ?, photo_offset_x = ?, photo_offset_y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).bind(
+      badge.member_name,
+      badge.role,
+      badge.school_year,
+      badge.photo_url,
+      badge.photo_zoom,
+      badge.photo_offset_x,
+      badge.photo_offset_y,
+      id,
+    ).run();
+    return jsonResponse(await env.DB.prepare(
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+    ).bind(id).first());
+  }
+
   if (url.pathname === '/api/admin/minutes' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -9706,8 +11354,11 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/caldev/notify-finished' && request.method === 'POST') {
-    const auth = await requireScheduleBoardAccess(request, env);
+    const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    if (!canNotifyCalendarSubscribers(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: president, vice-president, or Super Admin' }, 403);
+    }
     let email_list = null;
     try {
       email_list = await notifyEmailSubscribers(env, { topic: 'calendar', action: 'finished' });
@@ -9847,6 +11498,9 @@ async function routeApi(request, env, url, ctx = null) {
       || canEditPage(auth.user, 'directors')
       || hasPermission(auth.user, 'boosters')
       || canEditPage(auth.user, 'boosters')
+      || canEditPage(auth.user, 'fundraising')
+      || canEditPage(auth.user, 'join')
+      || hasPermission(auth.user, 'pages')
       || hasPermission(auth.user, 'site');
     if (!canUpload) return jsonResponse({ detail: 'Permission required: photos' }, 403);
     const form = await request.formData();
@@ -9911,6 +11565,7 @@ async function routeApi(request, env, url, ctx = null) {
         return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
       }
       await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      await purgeUploadCache(photo);
       return jsonResponse({ ok: true });
     }
     const meta = normalizePhotoMetaPayload(await request.json(), photo);
@@ -9919,26 +11574,117 @@ async function routeApi(request, env, url, ctx = null) {
     const updated = await env.DB.prepare(
       'SELECT id, filename, original_name, alt_text, caption, sort_order, created_at FROM photos WHERE id = ?',
     ).bind(id).first();
-    return jsonResponse({ ...updated, url: `/uploads/${encodeURIComponent(updated.filename)}` });
+    return jsonResponse({ ...updated, url: publicPhotoUrl(updated) });
   }
 
   return jsonResponse({ detail: 'Not found' }, 404);
 }
 
-async function handleUploadGet(env, url) {
-  await initDb(env);
+const PHOTO_BYTE_CACHE_VERSION = 'blob-1';
+// Client/edge: browsers may keep a day. s-maxage=0 keeps the CF HTTP cache from
+// holding deleted student photos. caches.default.put() honors Cache-Control, so
+// a stored copy must use its own TTL or the put is a no-op.
+// purgeUploadCache only clears this colo; PHOTO_CACHE_API_TTL is the cross-colo
+// bound after delete (keep it at 1 hour or less).
+export const PHOTO_BROWSER_CACHE = 'public, max-age=86400, s-maxage=0';
+export const PHOTO_CACHE_API_TTL = 'public, s-maxage=3600';
+
+function uploadFilenameFromUrl(url) {
+  const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
+  return decodeURIComponent(parsed.pathname.replace(/^\/uploads\//, '').split('/')[0] || '');
+}
+
+function legacyUploadCacheRequest(url) {
+  const parsed = url instanceof URL ? url : new URL(String(url || 'https://efhsband.internal/'));
+  const filename = uploadFilenameFromUrl(parsed);
+  const version = parsed.searchParams.get('v') || PHOTO_BYTE_CACHE_VERSION;
+  return new Request(`https://efhsband.internal/uploads/${encodeURIComponent(filename)}?pcv=${PHOTO_BYTE_CACHE_VERSION}&v=${encodeURIComponent(version)}`);
+}
+
+export function uploadCacheRequest(url) {
+  const filename = uploadFilenameFromUrl(url);
+  return new Request(`https://efhsband.internal/uploads/${encodeURIComponent(filename)}?pcv=${PHOTO_BYTE_CACHE_VERSION}`);
+}
+
+export function uploadCacheKeysForPhoto(photo = {}) {
+  const filename = String(photo?.filename || '').trim();
+  if (!filename) return [];
+  const plain = `https://efhsband.internal/uploads/${encodeURIComponent(filename)}`;
+  const canonical = publicPhotoUrl(photo);
+  const keys = [
+    uploadCacheRequest(plain),
+    legacyUploadCacheRequest(plain),
+  ];
+  if (canonical) keys.push(legacyUploadCacheRequest(`https://efhsband.internal${canonical}`));
+  return keys;
+}
+
+export async function purgeUploadCache(photo = {}) {
+  if (typeof caches === 'undefined' || !caches?.default) return;
+  const keys = uploadCacheKeysForPhoto(photo);
+  await Promise.all(keys.map((request) => caches.default.delete(request).catch(() => false)));
+}
+
+function uploadResponseHeaders(cacheControl, contentType) {
+  return {
+    'content-type': contentType || 'application/octet-stream',
+    'cache-control': cacheControl,
+  };
+}
+
+function clientUploadResponse(hit) {
+  if (!hit) return null;
+  const headers = new Headers(hit.headers);
+  headers.set('cache-control', PHOTO_BROWSER_CACHE);
+  return new Response(hit.body, {
+    status: hit.status,
+    statusText: hit.statusText,
+    headers,
+  });
+}
+
+export async function matchUploadCache(url) {
+  if (typeof caches === 'undefined' || !caches?.default) return null;
+  try {
+    return clientUploadResponse(await caches.default.match(uploadCacheRequest(url))) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function shouldInvalidatePublicReadCache(pathname = '', method = 'GET') {
+  const verb = String(method || 'GET').toUpperCase();
+  if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS') return false;
+  return String(pathname || '').startsWith('/api/admin');
+}
+
+async function handleUploadGet(request, env, url, ctx = null) {
+  const cacheKey = uploadCacheRequest(url);
+  const hit = await matchUploadCache(url);
+  if (hit) return hit;
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
-  const row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
-  if (!row) return new Response('Not found', { status: 404 });
+  let row;
+  try {
+    row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
+  } catch (error) {
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
+  if (!row) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   try {
     const bytes = photoBytesFromStored(row.data_base64);
-    if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404 });
-    return new Response(bytes, {
-      headers: {
-        'content-type': row.content_type || 'application/octet-stream',
-        'cache-control': 'public, max-age=3600',
-      },
+    if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+    const contentType = row.content_type || 'application/octet-stream';
+    const response = new Response(bytes, {
+      headers: uploadResponseHeaders(PHOTO_BROWSER_CACHE, contentType),
     });
+    if (typeof caches !== 'undefined' && caches?.default) {
+      const stored = caches.default.put(
+        cacheKey,
+        new Response(bytes, { headers: uploadResponseHeaders(PHOTO_CACHE_API_TTL, contentType) }),
+      ).catch(() => {});
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(stored);
+    }
+    return response;
   } catch (error) {
     return jsonResponse({
       detail: 'Could not read stored image bytes',
@@ -9965,7 +11711,7 @@ function renderLoginHtml(nextPath = '/admin') {
 async function handleLogin(request, env) {
   await initDb(env);
   const requestUrl = new URL(request.url);
-  if (request.method === 'GET') {
+  if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     // Already authenticated users should not stay on the login form with a live session.
     if (await currentUser(request, env)) return redirect(nextPath);
@@ -9998,10 +11744,12 @@ async function handleLogin(request, env) {
       }),
       meta: { username, next: nextPath },
     });
-    return htmlResponse(
-      renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
-      401,
-      { 'set-cookie': clearSessionCookie() },
+    return applyAuthCookies(
+      htmlResponse(
+        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
+        401,
+      ),
+      { token: '', maxAge: 0 },
     );
   }
   try {
@@ -10036,14 +11784,27 @@ async function handleLogin(request, env) {
     },
   });
   const response = redirect(nextPath);
-  response.headers.set('set-cookie', sessionCookieHeader(await makeSession(user, env)));
-  return response;
+  return applyAuthCookies(response, {
+    token: await makeSession(user, env),
+    maxAge: SESSION_TTL_SECONDS,
+  });
 }
 
 async function handleAdmin(request, env) {
   await initDb(env);
-  if (!(await currentUser(request, env))) return redirect('/admin/login');
-  return htmlResponse(ADMIN_HTML);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  return attachLoginHintIfNeeded(request, htmlResponse(ADMIN_HTML), user);
+}
+
+async function handleVisualEditorPage(request, env) {
+  await initDb(env);
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/admin/login');
+  if (!canEditVisualPilot(user, canEditPage)) {
+    return htmlResponse('<!doctype html><title>Not allowed</title><p>Permission required: page:join</p>', 403);
+  }
+  return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION)), user);
 }
 
 async function logout(request, env) {
@@ -10071,38 +11832,181 @@ async function logout(request, env) {
     });
   }
   const response = redirect('/admin/login');
-  response.headers.set('set-cookie', clearSessionCookie());
-  return response;
+  return applyAuthCookies(response, { token: '', maxAge: 0 });
 }
 
 export function renderStaffAuthNavLink(loggedIn = false) {
   if (loggedIn) {
-    return '<a href="/admin" data-staff-auth-link>Staff Menu</a>';
+    return '<a class="utility-auth" href="/admin" data-staff-auth-link>Staff Menu</a>';
   }
-  return '<a href="/admin/login" data-staff-auth-link>Login</a>';
+  return '<a class="utility-auth" href="/admin/login" data-staff-auth-link>Login</a>';
 }
 
-export function renderNav(pages, { loggedIn = false } = {}) {
-  const pageLinks = pages
-    .filter((page) => page.slug !== 'become-a-sponsor')
-    .map((page) => `<a href="${escapeAttr(page.path)}">${escapeHtml(page.title.replace(/\s*\|\s*East Forsyth Band$/, ''))}</a>`).join('');
-  return `${pageLinks}${renderStaffAuthNavLink(loggedIn)}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+const SUPPORT_NAV_SLUGS = ['boosters', 'fundraising', 'sponsors'];
+
+function isHiddenPublicNavPage(page = {}) {
+  return page.slug === 'become-a-sponsor'
+    || page.slug === 'in-kind'
+    || page.slug === 'letterman-jacket'
+    || page.slug === 'coming-soon'
+    || page.slug === 'join'
+    || page.slug === 'volunteer'
+    || page.is_form
+    || isCmsFormPage(page);
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false } = {}) {
-  const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
-  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site);
-  const marqueeHtml = renderSponsorMarqueeSection(
-    Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors,
+function publicNavPageLabel(page = {}) {
+  return String(page.title || '').replace(/\s*\|\s*East Forsyth Band$/, '');
+}
+
+function isCurrentPublicNavPath(page, currentPath = '') {
+  const href = String(page?.path || '');
+  const current = String(currentPath || '');
+  if (!href || !current) return false;
+  return href === current || (current === '/' && (page.slug === 'home' || page.is_home));
+}
+
+function renderPublicNavLink(page, currentPath = '') {
+  const href = String(page.path || '');
+  const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+  return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+}
+
+function renderSupportNavHtml(pages = [], currentPath = '') {
+  const items = (Array.isArray(pages) ? pages : []).filter((page) => page?.path);
+  if (!items.length) return '';
+  const childCurrent = items.some((page) => isCurrentPublicNavPath(page, currentPath));
+  const links = items.map((page) => {
+    const href = String(page.path || '');
+    const active = isCurrentPublicNavPath(page, currentPath) ? ' aria-current="page"' : '';
+    return `<a href="${escapeAttr(href)}"${active}>${escapeHtml(publicNavPageLabel(page))}</a>`;
+  }).join('');
+  return `<div class="nav-support${childCurrent ? ' is-current' : ''}" data-nav-support><button type="button" class="nav-support-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="nav-support-menu">Support the Band <span class="nav-support-caret" aria-hidden="true"></span></button><div id="nav-support-menu" class="nav-support-menu">${links}</div></div>`;
+}
+
+export function renderNav(pages, { loggedIn = false, currentPath = '' } = {}) {
+  const current = String(currentPath || '');
+  const visible = (Array.isArray(pages) ? pages : []).filter((page) => !isHiddenPublicNavPage(page));
+  const supportBySlug = new Map(
+    visible
+      .filter((page) => SUPPORT_NAV_SLUGS.includes(String(page.slug || '')))
+      .map((page) => [page.slug, page]),
   );
+  const supportPages = SUPPORT_NAV_SLUGS.map((slug) => supportBySlug.get(slug)).filter(Boolean);
+  const parts = [];
+  let supportInserted = false;
+  for (const page of visible) {
+    if (SUPPORT_NAV_SLUGS.includes(String(page.slug || ''))) {
+      if (!supportInserted && supportPages.length) {
+        parts.push(renderSupportNavHtml(supportPages, current));
+        supportInserted = true;
+      }
+      continue;
+    }
+    parts.push(renderPublicNavLink(page, current));
+  }
+  if (!supportInserted && supportPages.length) parts.push(renderSupportNavHtml(supportPages, current));
+  return `${parts.join('')}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
+}
+
+export function safePublicThemePhotoUrl(url = '') {
+  const value = String(url || '').trim();
+  if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
+  if (/["');\s<>\\]/.test(value)) return '';
+  return value;
+}
+
+function themePhotoSearchText(photo = {}) {
+  return `${photo.alt_text || ''} ${photo.caption || ''} ${photo.original_name || ''} ${photo.filename || ''}`;
+}
+
+function hashThemeSlug(slug = '') {
+  const source = String(slug || '');
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+export function pickPublicThemePhotoVars(photos = [], { slug = 'home' } = {}) {
+  const list = (Array.isArray(photos) ? photos : [])
+    .map((photo) => ({ ...photo, url: safePublicThemePhotoUrl(photo?.url) }))
+    .filter((photo) => photo.url);
+  const urls = list.map((photo) => photo.url);
+  const at = (index) => (urls.length ? urls[index % urls.length] : '');
+  const find = (pattern) => list.find((photo) => pattern.test(themePhotoSearchText(photo)))?.url || '';
+  const pageSlug = String(slug || 'home');
+  const hero = HOME_HERO_PHOTO;
+  let page = at(hashThemeSlug(pageSlug));
+  if (pageSlug === 'directors' || pageSlug === 'staff') page = find(/band 2024|band 2025|staff|director/i) || page;
+  if (pageSlug === 'calendar') page = find(/game|rehearsal|calendar/i) || page;
+  if (pageSlug === 'gallery') page = find(/gallery|photo|performance/i) || page;
+  if (pageSlug === 'ensembles') page = find(/ensemble|marching|concert|guard|jazz|percussion/i) || page;
+  return {
+    hero,
+    page,
+    cards: [at(0), at(1), at(2)],
+  };
+}
+
+export function renderPublicThemePhotoStyle(vars = {}) {
+  const cssUrl = (value) => {
+    const safe = safePublicThemePhotoUrl(value);
+    return safe ? `url("${safe}")` : 'none';
+  };
+  return `<style id="efhs-theme-photos">:root{--efhs-hero-photo:${cssUrl(vars.hero)};--efhs-page-photo:${cssUrl(vars.page)};--efhs-card-photo-1:${cssUrl(vars.cards?.[0])};--efhs-card-photo-2:${cssUrl(vars.cards?.[1])};--efhs-card-photo-3:${cssUrl(vars.cards?.[2])};}</style>`;
+}
+
+function mergePublicFundraiserEvents(primary = [], fallback = []) {
+  const seen = new Set();
+  const merged = [];
+  for (const event of [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(fallback) ? fallback : [])]) {
+    if (!event) continue;
+    const key = event.id != null ? `id:${event.id}` : `t:${event.title || ''}|${event.start_date || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(event);
+  }
+  return merged;
+}
+
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [] } = {}) {
+  const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
+  const isHomePage = page.slug === 'home' || Boolean(page.is_home);
+  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
+    || !isPublicCmsPageActive(page);
+  const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
+    calendarHighlights,
+    home,
+    deadlineEvents,
+    fundraiserEvents,
+  });
+  const showMarquee = showSponsorMarquee == null
+    ? publicPageShowsSponsorMarquee(page)
+    : Boolean(showSponsorMarquee);
+  const marqueeHtml = showMarquee
+    ? renderSponsorMarqueeSection(Array.isArray(marqueeSponsors) ? marqueeSponsors : sponsors)
+    : '';
+  const deadlineHtml = deadlineBannersHtml || renderSiteDeadlineBannersHtml([]);
   const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
-  const bodyClass = maintenancePreview ? ' class="maintenance-preview"' : '';
+  const bodyClasses = ['efhs-theme'];
+  if (maintenancePreview) bodyClasses.push('maintenance-preview');
+  if (page.slug === 'calendar') bodyClasses.push('caldev-body');
+  if (isHomePage) bodyClasses.push('home-page');
+  if (page.slug === 'fundraising') bodyClasses.push('fundraising-page');
+  if (isComingSoonPage) bodyClasses.push('coming-soon-page');
+  if (page.slug === 'not-found') bodyClasses.push('not-found-page');
+  const bodyClass = ` class="${bodyClasses.join(' ')}"`;
+  const marqueeFlag = showMarquee ? 'on' : 'off';
+  const themePhotoStyle = renderPublicThemePhotoStyle(pickPublicThemePhotoVars(photos, { slug: page.slug || (page.is_home ? 'home' : '') }));
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="${escapeAttr(site.title)} website.">
+  ${page.slug === 'not-found' ? '<meta name="robots" content="noindex">' : ''}
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
   <link rel="apple-touch-icon" href="${escapeAttr(PUBLIC_BRAND_MARK)}">
@@ -10113,17 +12017,23 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta name="apple-mobile-web-app-title" content="EFHS Band">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:ital,wght@0,500;0,600;0,700;1,700&family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
+  <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
+  <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
+  ${themePhotoStyle}
 </head>
-<body${bodyClass}>
+<body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
 <a class="skip-link" href="#main">Skip to content</a>
-<div class="utility"><div class="wrap">${renderUtilityLinks(site)}</div></div>
-<header class="site-header"><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${escapeHtml(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn })}</nav></header>
+<div class="utility"><div class="wrap">${renderUtilityLinks(site, { loggedIn })}</div></div>
+<header class="site-header"><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${formatHeaderBrandTitle(site.title)}</span><img class="brand-mark" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn, currentPath: page.path })}</nav><a class="btn gold header-donate" href="/fundraising.html" data-donate-open><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.1 5.4 3 1.8-1.9 3.3-3 5.4-3 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>Donate</a>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
+${deadlineHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><p data-site-field="footer_note">${formatRichText(site.footer_note)}</p><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html">Become a Sponsor</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+${isHomePage ? renderHomeStickySupport() : ''}
+${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
@@ -10201,66 +12111,197 @@ function renderMaintenancePage(site = {}) {
 </html>`;
 }
 
+function isPublicDocumentRequest(pathname = '/') {
+  const path = String(pathname || '/');
+  if (
+    path.startsWith('/api')
+    || path.startsWith('/admin')
+    || path.startsWith('/uploads')
+    || path.startsWith('/assets')
+    || path.startsWith('/vendor')
+  ) return false;
+  const leaf = path.split('/').filter(Boolean).pop() || '';
+  if (leaf.includes('.') && !leaf.endsWith('.html')) return false;
+  return true;
+}
+
+const PUBLIC_NOT_FOUND_BODY = `<section class="page-hero"><div class="page-title"><div class="kicker">404</div><h1>Page not found</h1><p>That address is not on the East Forsyth Band site.</p></div></section><section class="content"><div class="wrap"><p><a class="btn primary" href="/">Back to home</a></p></div></section>`;
+
+async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
+  const today = easternTodayIso();
+  const chrome = await loadPublicChromeReads(env, today);
+  const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents, today);
+  const html = renderCmsPage({
+    slug: 'not-found',
+    path: url.pathname,
+    title: 'Page not found',
+    is_home: 0,
+    body_html: PUBLIC_NOT_FOUND_BODY,
+  }, chrome.site, chrome.pages, [], [], [], chrome.sponsors, {
+    loggedIn,
+    photos: [],
+    showSponsorMarquee: true,
+    deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+    publicRead: {
+      site: chrome.site,
+      sponsors: chrome.sponsors,
+      photos: [],
+      deadlineBanners,
+      square: publicSquarePublishableConfig(env),
+    },
+  });
+  return htmlResponse(html, 404);
+}
+
+async function serveBundledStaticAsset(request, env, url) {
+  if (url.pathname === '/push-sw.js') {
+    const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
+    if (asset.ok) {
+      const headers = new Headers(asset.headers);
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('cache-control', 'no-store');
+      headers.set('service-worker-allowed', '/');
+      return new Response(asset.body, { status: 200, headers });
+    }
+  }
+  if (url.pathname === '/manifest.webmanifest') {
+    const asset = await env.ASSETS.fetch(new Request(new URL('/manifest.webmanifest', request.url), request));
+    if (asset.ok) {
+      const headers = new Headers(asset.headers);
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
+      headers.set('cache-control', 'no-store');
+      return new Response(asset.body, { status: 200, headers });
+    }
+  }
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = normalizeStaticPath(url.pathname);
+  const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+  const assetName = assetUrl.pathname.split('/').pop() || '';
+  if (NO_STORE_STATIC_ASSETS.has(assetName)) {
+    const headers = new Headers(assetResponse.headers);
+    headers.set('cache-control', 'no-store');
+    if (assetName === 'push-sw.js') {
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.set('service-worker-allowed', '/');
+    }
+    if (assetName === 'manifest.webmanifest') {
+      headers.set('content-type', 'application/manifest+json; charset=utf-8');
+    }
+    return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
+  }
+  return assetResponse;
+}
+
 async function serveStaticOrCms(request, env, url) {
+  if (isWorkerStaticAssetPath(url.pathname)) {
+    return serveBundledStaticAsset(request, env, url);
+  }
   await initDb(env);
-  const site = await getSite(env);
+  const site = await cachedPublicRead('site', () => getSite(env));
   const maintenanceOn = isMaintenanceMode(site);
   const user = await currentUser(request, env);
   const loggedIn = Boolean(user);
   const superAdmin = loggedIn && isSuperAdmin(user);
+  const withHint = (response) => attachLoginHintIfNeeded(request, response, user);
   if (isMaintenancePath(url.pathname)) {
     // When live again, bounce people off the maintenance URL so browsers don't stay stuck there.
     if (!maintenanceOn) {
       const returnTo = readMaintenanceReturnPath(request);
-      return new Response(null, {
+      return withHint(new Response(null, {
         status: 302,
         headers: {
           location: returnTo || '/',
           'cache-control': 'no-store',
           'set-cookie': clearMaintenanceReturnCookie(),
         },
-      });
+      }));
     }
     // Super admins preview the real site; everyone else stays on the public maintenance page.
     if (superAdmin) {
-      return new Response(null, {
+      return withHint(new Response(null, {
         status: 302,
         headers: {
           location: '/',
           'cache-control': 'no-store',
         },
-      });
+      }));
     }
-    return htmlResponse(renderMaintenancePage(site));
+    return withHint(htmlResponse(renderMaintenancePage(site)));
   }
   // Public + non-super-admin users get the maintenance page. Super admins can preview.
   if (shouldRedirectToMaintenance(url.pathname, site, { bypass: superAdmin })) {
     const returnPath = `${url.pathname || '/'}${url.search || ''}`;
-    return new Response(null, {
+    return withHint(new Response(null, {
       status: 302,
       headers: {
         location: '/maintenance.html',
         'cache-control': 'no-store',
         'set-cookie': maintenanceReturnCookie(returnPath),
       },
-    });
+    }));
   }
-  const path = url.pathname === '/' ? '/' : normalizeStaticPath(url.pathname);
+  const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
-    const page = await getPageByPath(env, path);
+    // Include inactive rows so unpublished CMS pages (ensembles) still use renderCmsPage
+    // instead of falling through to the unthemed static HTML draft.
+    const today = easternTodayIso();
+    const page = await cachedPublicRead(`page-path:${path}`, async () => {
+      const result = await pageByPathStatement(env, path).all();
+      return mapCmsPage((result.results || [])[0] || null);
+    });
     if (page) {
-      const [site, pages, allSponsors, staff, boosterMembers] = await Promise.all([
-        getSite(env),
-        getPages(env),
-        getSponsors(env),
-        page.slug === 'directors' ? getStaff(env) : Promise.resolve([]),
-        page.slug === 'boosters' ? getBoosterMembers(env) : Promise.resolve([]),
-      ]);
-      const sponsors = page.slug === 'sponsors' ? allSponsors : [];
-      return htmlResponse(renderCmsPage(page, site, pages, sponsors, staff, boosterMembers, allSponsors, {
+      const livePage = publicCmsPageForRender(page);
+      const pageIsLive = isPublicCmsPageActive(page);
+      const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
+      const isFundraising = pageIsLive && page.slug === 'fundraising';
+      const reads = await loadPublicCmsReads(env, {
+        path,
+        today,
+        isHome,
+        needsEvents: isHome || isFundraising,
+        needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
+        needsStaff: pageIsLive && page.slug === 'directors',
+        needsPhotos: pageIsLive && (isHome || page.slug === 'gallery'),
+      });
+      const pages = reads.pages;
+      const allSponsors = reads.sponsors;
+      const staff = reads.staff;
+      const boosterMembers = reads.boosterMembers;
+      const photos = reads.photos;
+      const homeSources = reads.homeSources || {};
+      const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
+      const sponsors = pageIsLive && page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
+      const home = isHome ? {
+        events: reads.homeEvents,
+        members: boosterMembers,
+        fundraisingHtml: homeSources.fundraising?.body_html || '',
+        tiers: extractSponsorTierFields(homeSources.sponsor?.body_html || ''),
+        sponsors: allSponsors.filter((sponsor) => sponsorShowsMarquee(sponsor) || sponsorShowsOnPage(sponsor)),
+        instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
+      } : null;
+      const fundraiserEvents = isFundraising
+        ? mergePublicFundraiserEvents(reads.homeEvents, reads.deadlineEvents)
+        : [];
+      if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
+        livePage.letterman_copy = await getLettermanFormCopy(env);
+      }
+      return withHint(htmlResponse(renderCmsPage(livePage, reads.site, pages, sponsors, staff, boosterMembers, allSponsors, {
         maintenancePreview: maintenanceOn && superAdmin,
         loggedIn,
-      }));
+        photos,
+        deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+        calendarHighlights: null,
+        home,
+        deadlineEvents: reads.deadlineEvents,
+        fundraiserEvents,
+        publicRead: {
+          site: reads.site,
+          sponsors: allSponsors,
+          photos,
+          deadlineBanners,
+          square: publicSquarePublishableConfig(env),
+        },
+      })));
     }
   }
   if (url.pathname === '/') return env.ASSETS.fetch(request);
@@ -10291,9 +12332,12 @@ async function serveStaticOrCms(request, env, url) {
     return new Response(guideAsset.body, { status: guideAsset.status, statusText: guideAsset.statusText, headers });
   }
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+  if (assetResponse.status === 404 && isPublicDocumentRequest(url.pathname)) {
+    return renderPublicNotFound(env, url, { loggedIn });
+  }
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
-  if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
+  if (['admin.js', 'admin-caldev.js', 'caldev.js', 'site-content.js', 'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'push-sw.js', 'manifest.webmanifest'].includes(assetName)) {
     const headers = new Headers(assetResponse.headers);
     headers.set('cache-control', 'no-store');
     if (assetName === 'push-sw.js') {
@@ -10313,8 +12357,7 @@ export function renderPushServiceWorker() {
   return '';
 }
 
-export default {
-  async fetch(request, env, ctx) {
+async function dispatchWorker(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/push-sw.js') {
       const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
@@ -10350,6 +12393,12 @@ export default {
     if (url.pathname === '/sponsor' || url.pathname === '/sponsor/') {
       return Response.redirect(new URL('/become-a-sponsor.html', url.origin).toString(), 302);
     }
+    if (url.pathname === '/in-kind' || url.pathname === '/in-kind/') {
+      return Response.redirect(new URL('/in-kind.html', url.origin).toString(), 302);
+    }
+    if (url.pathname === '/letterman-jacket' || url.pathname === '/letterman-jacket/') {
+      return Response.redirect(new URL('/letterman-jacket.html', url.origin).toString(), 302);
+    }
     if (url.pathname === '/donate' || url.pathname === '/donate/') {
       const target = new URL('/sponsors.html', url.origin);
       target.searchParams.set('donate', '1');
@@ -10364,15 +12413,38 @@ export default {
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env);
+    if (url.pathname === VISUAL_EDITOR_PATH || url.pathname === `${VISUAL_EDITOR_PATH}/`) {
+      return handleVisualEditorPage(request, env);
+    }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
-    if (url.pathname.startsWith('/uploads/')) return handleUploadGet(env, url);
+    if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
     return serveStaticOrCms(request, env, url);
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      const url = new URL(request.url);
+      if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
+        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url));
+      }
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
+        const cached = await matchUploadCache(url);
+        if (cached) return applyWorkerSecurityHeaders(cached);
+      }
+      const opened = openD1Session(request, env);
+      const response = await dispatchWorker(request, opened.env, ctx);
+      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
+    } catch (error) {
+      console.error('worker_exception', String(error?.stack || error?.message || error));
+      throw error;
+    }
   },
 };
 
 const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
 
-const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
+const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 <div class="admin-mobile-bar">
 <div class="admin-mobile-bar-top">
 <button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-mobile-menu">Menu</button>
@@ -10382,12 +12454,12 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </div>
 <nav id="admin-mobile-menu" class="admin-mobile-menu" hidden aria-label="CMS mobile navigation"></nav>
 </div>
-<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
+<aside id="admin-sidebar" class="admin-sidebar"><div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div><div id="current-user" class="admin-user"></div><nav class="admin-tabs admin-menu" aria-label="CMS navigation"><button type="button" data-tab="dashboard">Dashboard</button><button type="button" data-tab="mail">Staff Email</button><p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts"></div><a class="admin-visual-pilot-link" href="/admin/visual/join" data-visual-pilot-link hidden>Join visual editor</a><p class="admin-menu-label">Manage</p><button type="button" data-tab="staff">Directors & Staff</button><button type="button" data-tab="ensembles" hidden>Ensemble</button><div class="admin-menu-group" data-boosters-menu hidden><button type="button" class="admin-menu-parent" data-boosters-toggle aria-expanded="false">Band Boosters</button><div class="admin-menu-sub" data-boosters-sub hidden><button type="button" data-tab="booster-members">Booster Members</button><button type="button" data-tab="minutes">Meeting Minutes</button><button type="button" data-tab="badge-creator">Badge Creator</button></div></div><button type="button" data-tab="events" hidden>Calendar Events</button><div class="admin-menu-group" data-sponsors-menu hidden><button type="button" class="admin-menu-parent" data-sponsors-toggle aria-expanded="false">Sponsors</button><div class="admin-menu-sub" data-sponsors-sub hidden><button type="button" data-tab="sponsors">Manage sponsors</button><button type="button" data-sponsor-nav="sponsors-page">Sponsors page</button><button type="button" data-sponsor-nav="become-a-sponsor">Become a Sponsor</button></div></div><button type="button" data-tab="contact">Contact Form</button><button type="button" data-tab="forms">Forms</button><button type="button" data-tab="ledger" hidden>Ledger</button><button type="button" data-tab="checkout" hidden>Checkout</button><button type="button" data-tab="users">Users</button><button type="button" data-tab="caldev" hidden>Schedule Board</button><button type="button" data-tab="security-log" hidden>Security Log</button><button type="button" data-tab="social">Social Media</button><button type="button" data-tab="site">Site Settings</button><button type="button" data-tab="photos">Photos</button></nav><div class="admin-sidebar-footer"><form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout"><button class="admin-logout" type="submit">Log Out</button></form><button type="button" class="admin-change-password" data-open-password>Change Password</button></div></aside>
 <section class="admin-workspace">
-<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/" target="_blank" rel="noreferrer">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
-<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label></div><small class="rich-text-hint">Select heading, intro, or body text in the preview, then apply formatting.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
+<section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
+<section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich="insertUnorderedList" title="Bulleted list">• List</button><button type="button" data-rich-insert-photo title="Insert a photo at the cursor">Photo</button></div><small class="rich-text-hint">Select text, then apply formatting. Use List to add or remove bullets. Click Photo to insert an image, then drag a corner to resize or Delete photo to remove it.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
 <button type="button" class="page-editor-resizer" id="page-editor-resizer" aria-label="Resize page preview" title="Drag to resize preview" hidden></button>
-<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Schedule Board tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Pay dues opens on the public page. Booster meetings come from Schedule Board Meetings, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>The Gallery page text controls the header and intro. Photos are managed in the Photos tab. Visitors can click any photo to open a larger viewer.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit the Boosters and Launch note cards in the live preview.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><label class="toggle-line" data-fundraising-notify hidden><input type="checkbox" name="notify_email_subscribers" value="1" checked><span><b>Notify email list</b><small>Email fundraising subscribers about this save (on by default). Turn off for grammar-only edits.</small></span></label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
+<form id="page-form" class="admin-card stack page-settings-card" hidden><h2>Page settings</h2><p class="notice" data-calendar-hint hidden>The Calendar page text controls the header/instructions. Events are managed in the Schedule Board tab.</p><p class="notice" data-sponsors-hint hidden>The Sponsors page text controls the header, intro, and callout. To add, edit, or remove sponsor businesses, open Sponsors → Manage sponsors.</p><p class="notice" data-become-sponsor-hint hidden>Click the Bronze, Silver, and Gold package cards in the preview to edit labels, titles, descriptions, benefits, and dollar amounts. Contact topics and delivery emails are managed in the Contact Form tab.</p><p class="notice" data-boosters-hint hidden>Edit the Boosters page intro and main content card here. Pay dues opens on the public page. Booster meetings come from Schedule Board Meetings, members from Band Boosters → Booster Members, and minutes from Meeting Minutes.</p><p class="notice" data-contact-hint hidden>The Contact page text controls the header and intro. Contact topics and delivery emails are managed in the Contact tab.</p><p class="notice" data-gallery-hint hidden>The Gallery page text controls the header and intro. Photos are managed in the Photos tab. Visitors can click any photo to open a larger viewer.</p><p class="notice" data-home-hint hidden>Hero headline and top utility links are in Site Settings. Edit home section text in the live preview, including the Coming Soon pages for Join and Volunteer. Fundraisers, the calendar list, sponsor packages, sponsor logos, booster officers, and gallery photos are filled from Schedule Board, Become a Sponsor, Sponsors, Booster Members, and Photos.</p><input type="hidden" name="original_slug"><input type="hidden" name="kicker"><input type="hidden" name="heading"><input type="hidden" name="intro"><input type="hidden" name="body_text"><input type="hidden" name="callout_title"><input type="hidden" name="callout_text"><input type="hidden" name="boosters_tag"><input type="hidden" name="boosters_heading"><input type="hidden" name="boosters_body"><input type="hidden" name="boosters_button"><input type="hidden" name="boosters_href"><input type="hidden" name="launch_tag"><input type="hidden" name="launch_heading"><input type="hidden" name="launch_body"><input type="hidden" name="launch_footer"><input type="hidden" name="tiers_kicker"><input type="hidden" name="tiers_heading"><input type="hidden" name="tiers_intro"><input type="hidden" name="bronze_label"><input type="hidden" name="bronze_title"><input type="hidden" name="bronze_blurb"><input type="hidden" name="bronze_benefits"><input type="hidden" name="bronze_amount"><input type="hidden" name="silver_label"><input type="hidden" name="silver_title"><input type="hidden" name="silver_blurb"><input type="hidden" name="silver_benefits"><input type="hidden" name="silver_amount"><input type="hidden" name="gold_label"><input type="hidden" name="gold_title"><input type="hidden" name="gold_blurb"><input type="hidden" name="gold_benefits"><input type="hidden" name="gold_amount"><div class="form-grid page-meta-grid"><label>Page title<input name="title" required></label><label>Slug<input name="slug" placeholder="booster-info" required></label><label>Path<input name="path" placeholder="/booster-info.html"></label><label>Navigation order<input name="nav_order" type="number" value="99"></label><label class="full">Page layout<select name="layout"><option value="home" hidden>Home page</option><option value="standard">Standard information page</option><option value="calendar">Calendar page with event list</option><option value="contact">Contact/details page</option><option value="directory">Directors &amp; staff directory</option><option value="sponsors">Sponsors page with directory</option><option value="become-sponsor">Become a sponsor packages page</option><option value="boosters">Boosters page with meetings &amp; members</option></select></label></div><label class="checkline page-active-line"><input name="active" type="checkbox" checked> Active / visible on the public site</label><label class="toggle-line" data-fundraising-notify hidden><input type="checkbox" name="notify_email_subscribers" value="1" checked><span><b>Notify email list</b><small>Email fundraising subscribers about this save (on by default). Turn off for grammar-only edits.</small></span></label><div class="page-settings-actions"><button class="btn primary" type="submit">Save Changes</button><button class="btn outline" type="button" id="add-page-callout">Add callout</button></div><p class="status" id="page-status"></p></form></div></section>
 <section id="tab-staff" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">People</p><h1>Directors &amp; Staff</h1><p>Add a photo, name, role, and short description for each staff member. Drag rows to reorder the public directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-directors-page">Edit page text</button><button class="btn primary" type="button" id="new-staff">Add Staff Member</button></div></div><div class="editor-layout"><form id="staff-form" class="admin-card stack"><input type="hidden" name="staff_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Band Director" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, office hours, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/director.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Directors &amp; Staff page</label></div><button class="btn primary">Save Staff Member</button><p class="status" id="staff-status"></p></form><div><div id="staff-list" class="admin-list staff-list" aria-label="Staff list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="staff-preview" class="directory"></div></div></div></div></section>
 <section id="tab-booster-members" class="cms-panel staff-panel"><div class="panel-head"><div><p class="kicker">Families</p><h1>Booster Members</h1><p>Add a photo, name, role, and short description for each booster officer or member. Drag rows to reorder the public Boosters page directory.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-boosters-page">Edit Boosters page</button><button class="btn primary" type="button" id="new-booster-member">Add Booster Member</button></div></div><div class="editor-layout"><form id="booster-member-form" class="admin-card stack"><input type="hidden" name="booster_member_id" value=""><div class="form-grid"><label>Name<input name="name" required placeholder="Jordan Smith"></label><label class="full form-rich-label"><span>Role / title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="role" data-rich-mode="inline" data-placeholder="Booster President" aria-label="Role / title"></div><input type="hidden" name="role"></label><label class="full form-rich-label"><span>Short description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="bio" data-rich-mode="block" data-placeholder="Email, meeting notes, or a short bio." aria-label="Short description"></div><input type="hidden" name="bio"></label><label class="full">Photo URL<input name="photo_url" placeholder="/uploads/booster.jpg or https://..."></label><label class="full">Upload photo<input name="photo_file" type="file" accept="image/*"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on Boosters page</label></div><button class="btn primary">Save Booster Member</button><p class="status" id="booster-member-status"></p></form><div><div id="booster-members-list" class="admin-list staff-list" aria-label="Booster members list. Drag rows to reorder."></div><div class="live-preview staff-live-preview"><span>Live Preview</span><div id="booster-members-preview" class="directory"></div></div></div></div></section>
 <section id="tab-sponsors" class="cms-panel sponsors-panel"><div class="panel-head"><div><p class="kicker">Community</p><h1>Manage sponsors</h1><p>Add, edit, reorder, or remove sponsor businesses. Assign Bronze, Silver, or Gold to control marquee, fly-in, and public advertising.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="new-sponsor">Add Sponsor</button></div></div><div class="editor-layout"><div class="admin-card stack gold-sponsors-print-card">
@@ -10397,7 +12469,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
 </div>
-<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div></div></div></section>
+<form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option><option value="Honorable Mention">Honorable Mention</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><p class="muted">Uncheck to hide the directory card only. Bronze, Silver, Gold, and Honorable Mention still appear on the site-wide marquee.</p></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form><div><div id="sponsors-list" class="admin-list sponsor-list"></div></div></div></section>
 <section id="tab-ledger" class="cms-panel ledger-panel" hidden><div class="panel-head"><div><p class="kicker">Treasurer</p><h1>Ledger</h1><p>Accountant view for donors, sponsors, fundraisers, dues, and expenses. Cash and in-kind entries update the downloadable Excel ledger.</p></div><div class="panel-actions"><a class="btn outline" id="download-ledger-excel" href="/api/admin/ledger.xls">Download Excel</a><button class="btn outline" type="button" id="refresh-ledger">Refresh</button><button class="btn primary" type="button" id="new-ledger-entry">Add entry</button></div></div>
 <div class="ledger-summary-grid" id="ledger-summary" aria-live="polite"></div>
 <div class="admin-card stack ledger-table-card">
@@ -10564,6 +12636,71 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <div id="zernio-posts-list" class="admin-list zernio-posts-list"></div>
   <p class="status" id="zernio-posts-status"></p>
 </div>
+</div>
+</section>
+<section id="tab-forms" class="cms-panel" hidden>
+<div class="panel-head"><div><p class="kicker">Manage</p><h1>Form Builder</h1><p>Create public forms the same way Jotform does: add fields from the left, click the canvas to edit, and drag to reorder. The form title becomes its web page. Super Admin sets who can open this builder.</p></div></div>
+<div id="forms-list-view" class="editor-layout">
+<form id="forms-settings-form" class="admin-card stack">
+<fieldset class="contact-topic-recipients" data-forms-access-fieldset>
+  <legend>Who can use Form Builder</legend>
+  <p class="muted">Super Admin, President, and users with the Forms role always have access. Super Admin can also grant extra users here.</p>
+  <div id="forms-access-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
+<fieldset class="contact-topic-recipients">
+  <legend>Email in-kind PDFs to</legend>
+  <p class="muted">Selected users receive completed in-kind donation PDFs at their login email.</p>
+  <div id="forms-recipient-boxes" class="contact-recipient-boxes"></div>
+</fieldset>
+<button class="btn primary" type="submit">Save access settings</button>
+<p class="status" id="forms-settings-status"></p>
+</form>
+<form id="forms-create-form" class="admin-card stack">
+<h2>Create a form</h2>
+<p class="muted">The title becomes the public page, for example <code>Band Trip Form</code> → <code>/band-trip-form.html</code>.</p>
+<label class="full">Form title<input name="title" required maxlength="160" placeholder="Letterman Jacket Order Form"></label>
+<button class="btn primary" type="submit">Create form</button>
+<p class="status" id="forms-create-status"></p>
+</form>
+<div class="admin-card"><h2>Your forms</h2><p class="muted">Edit a form in the builder, or remove it to delete its public HTML page.</p><div id="cms-forms-list" class="admin-list"></div></div>
+<div class="admin-card"><h2>Recent submissions</h2><p class="muted">Download the PDF that was emailed to the selected users.</p><div id="forms-submissions-list" class="admin-list"></div></div>
+</div>
+<div id="forms-builder-view" class="form-builder-shell" hidden>
+  <div class="form-builder-top">
+    <button class="btn outline" type="button" id="form-builder-back">← All forms</button>
+    <label class="form-builder-title">Form title<input id="form-builder-title" maxlength="160"></label>
+    <a class="btn outline" id="form-builder-open" href="/letterman-jacket.html" target="_blank" rel="noreferrer">Open page</a>
+    <button class="btn primary" type="button" id="form-builder-save">Save form</button>
+  </div>
+  <p class="form-builder-path-hint" id="form-builder-path"></p>
+  <p class="status" id="form-builder-status"></p>
+  <div class="form-builder-workspace">
+    <aside class="form-builder-palette" aria-label="Add form elements">
+      <h3>Add Form Element</h3>
+      <p class="muted">Click to add. Drag fields on the form to move them.</p>
+      <div id="form-builder-palette" class="form-builder-palette-list"></div>
+    </aside>
+    <section class="form-builder-canvas" aria-label="Form preview">
+      <article class="card letterman-card form-builder-preview">
+        <span class="tag" id="form-builder-kicker-preview">Band Boosters</span>
+        <h2 id="form-builder-heading-preview">East Forsyth Band</h2>
+        <label class="full">Intro<textarea id="form-builder-intro" rows="2" maxlength="800" placeholder="Optional intro shown above the fields"></textarea></label>
+        <div id="form-builder-canvas" class="form-builder-canvas-list"></div>
+        <div class="full inkind-form-actions">
+          <button class="btn primary" type="button" id="form-builder-submit-preview" disabled>Submit</button>
+        </div>
+      </article>
+    </section>
+    <aside class="form-builder-props" aria-label="Field properties">
+      <h3>Properties</h3>
+      <div id="form-builder-props" class="form-builder-props-body"><p class="muted">Select a field on the form to edit its title, choices, and required setting.</p></div>
+      <fieldset class="contact-topic-recipients" style="margin-top:18px">
+        <legend>Email this form to</legend>
+        <p class="muted">Selected CMS users receive the completed PDF.</p>
+        <div id="form-builder-recipients" class="contact-recipient-boxes"></div>
+      </fieldset>
+    </aside>
+  </div>
 </div>
 </section>
 <section id="tab-contact" class="cms-panel">
@@ -10741,7 +12878,8 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </form>
   </div>
 </div>
-</section><section id="tab-mail" class="cms-panel mail-panel">
+</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create enlarged portrait badges (125% of CR80) for directors, officers, and committee members. Titles and names print larger for readability. Drag the photo in the live preview to center it, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form></div><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="947" height="1416" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">Print includes a 0.25 in white margin around the badge to avoid edge cropping. Drag the photo to center, then resize with the handle or slider.</p></div></aside>
+<div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><div class="badge-creator-list-toolbar"><p class="muted">Select up to 3 badges to print on one page (3 print in landscape). Or open one to edit, download, or print alone.</p><button class="btn primary" type="button" id="badge-creator-print-selected" disabled>Print selected <span id="badge-creator-print-selected-count"></span></button></div><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">
 <form id="mail-form" class="admin-card stack mail-compose">
@@ -10776,7 +12914,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>President, Vice President, and Super Admin editing for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with Who set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid">
     <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
@@ -10790,7 +12928,7 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms (create, edit, and delete public forms)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>
@@ -10852,4 +12990,4 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
     </div>
   </form>
 </dialog>
-<script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;
+<script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ASSET_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ASSET_VERSION}"></script></body></html>`;

@@ -10,11 +10,34 @@ routes = [
 [assets]
 directory = "./worker/public"
 binding = "ASSETS"
-run_worker_first = true
+run_worker_first = [
+  "/",
+  "/*.html",
+  "/admin",
+  "/admin/*",
+  "/api/*",
+  "/uploads/*",
+  "/health",
+  "/subscribe",
+  "/subscribe/",
+  "/caldev",
+  "/caldev/",
+  "/calendar",
+  "/calendar/",
+  "/sponsor",
+  "/sponsor/",
+  "/in-kind",
+  "/in-kind/",
+  "/letterman-jacket",
+  "/letterman-jacket/",
+  "/donate",
+  "/donate/",
+  "/assets/downloads/*",
+]
+html_handling = "none"
 
 [vars]
 EFBAND_ADMIN_USERNAME = "admin@efhsband.org"
-EFBAND_ADMIN_PASSWORD = "admin123$"
 CONTACT_FROM_EMAIL = "no-reply@efhsband.org"
 CONTACT_FROM_NAME = "East Forsyth Band Boosters"
 CONTACT_DEFAULT_EMAIL = ""

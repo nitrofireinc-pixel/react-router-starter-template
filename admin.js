@@ -18,6 +18,7 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/facebook/pages',
   '/api/admin/zernio/instagram',
   '/api/admin/zernio/instagram/settings',
+  '/api/admin/photos',
 ];
 
 let savedToastTimer = null;
@@ -380,7 +381,32 @@ function canAccessLedger() {
 }
 
 function canAccessScheduleBoard() {
+  return isSuperAdmin()
+    || hasPermission('president')
+    || hasPermission('vice-president')
+    || hasPermission('events')
+    || hasPermission('events:manage')
+    || hasPermission('calendar');
+}
+
+function canNotifyCalendarSubscribers() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
+function isScheduleBoardOnlyUser() {
+  if (isSuperAdmin() || !canAccessScheduleBoard()) return false;
+  const perms = (state.me?.user?.permissions || []).map((item) => String(item).trim().toLowerCase());
+  if (!perms.length) return false;
+  return perms.every((item) => item === 'events' || item === 'events:manage' || item === 'calendar');
+}
+
+function canAccessBadgeCreator() {
+  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
+function canAccessForms() {
+  if (isSuperAdmin() || hasPermission('president') || hasPermission('forms')) return true;
+  return Boolean(state.me?.forms_access);
 }
 
 function canManageAllEvents() {
@@ -659,11 +685,13 @@ function sponsorTierFromLevel(level = '') {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return 'bronze';
 }
 
 function sponsorTierBenefitsText(level = '') {
   const tier = sponsorTierFromLevel(level);
+  if (tier === 'honorable') return 'Thank-you mention on the site-wide marquee (white chip). Not offered as a public package.';
   if (tier === 'gold') return 'Includes website marquee, homepage fly-in ad, and public advertising.';
   if (tier === 'silver') return 'Includes website marquee and homepage fly-in ad.';
   return 'Includes website marquee logo feature.';
@@ -775,21 +803,36 @@ function sanitizeRichImageFloatClass(attrs = '') {
   return 'cms-body-photo-block';
 }
 
-function sanitizeRichImageTag(attrs = '') {
-  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-  let src = String(srcMatch?.[1] || srcMatch?.[2] || '').trim();
-  if (!src || /^(javascript:|data:)/i.test(src)) return '';
+function isAllowedRichImageSrc(src) {
+  const value = String(src || '').trim();
+  return /^\/uploads\//i.test(value) || /^\/?assets\//i.test(value);
+}
+
+function normalizeRichImageSrc(src) {
+  let value = String(src || '').trim();
+  if (!value || /^(javascript:|data:)/i.test(value)) return '';
   try {
-    if (/^https?:\/\//i.test(src)) {
-      const parsed = new URL(src);
-      if (!parsed.pathname.startsWith('/uploads/')) return '';
-      src = parsed.pathname + (parsed.search || '');
+    if (/^https?:\/\//i.test(value)) {
+      const parsed = new URL(value);
+      value = parsed.pathname + (parsed.search || '');
     }
   } catch {
     return '';
   }
-  if (!src.startsWith('/uploads/')) return '';
-  if (/[<>"\s]/.test(src)) return '';
+  if (/^assets\//i.test(value)) value = `/${value}`;
+  if (!isAllowedRichImageSrc(value)) return '';
+  if (/[<>"\s]/.test(value)) return '';
+  return value;
+}
+
+function sanitizeHomeHeroPasteHtml(dirty) {
+  return sanitizeRichHtml(dirty);
+}
+
+function sanitizeRichImageTag(attrs = '') {
+  const srcMatch = String(attrs || '').match(/src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  const src = normalizeRichImageSrc(srcMatch?.[1] || srcMatch?.[2] || '');
+  if (!src) return '';
   const altMatch = String(attrs || '').match(/alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
   const alt = escapeHtml(String(altMatch?.[1] || altMatch?.[2] || '').trim() || 'Photo');
   const floatClass = sanitizeRichImageFloatClass(attrs);
@@ -1143,9 +1186,19 @@ function markHomeHtmlEditable(html = '') {
   const template = document.createElement('template');
   template.innerHTML = String(html || '').trim();
   const root = template.content;
-  root.querySelectorAll('[data-events]').forEach((node) => {
+  root.querySelectorAll('[data-events], [data-home-dynamic]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
-    node.setAttribute('data-cms-dynamic-label', 'Managed in Calendar Events');
+    if (!node.getAttribute('data-cms-dynamic-label')) {
+      const slot = node.getAttribute('data-home-slot') || '';
+      const label = slot === 'sponsor-tiers'
+        ? 'Managed on Become a Sponsor'
+        : slot === 'sponsor-thanks'
+          ? 'Managed in Sponsors'
+          : slot === 'officers'
+            ? 'Managed in Booster Members'
+            : 'Managed in Schedule Board';
+      node.setAttribute('data-cms-dynamic-label', label);
+    }
   });
   root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
@@ -1156,11 +1209,24 @@ function markHomeHtmlEditable(html = '') {
     node.setAttribute('data-cms-dynamic-label', 'Links to Gallery page');
   });
 
+  root.querySelectorAll('.hero-card').forEach((card) => {
+    if (card.closest('[data-events], [data-photo-gallery], [data-home-dynamic], .cms-home-preview-note, .gallery-more')) return;
+    card.classList.add('cms-edit-field', 'cms-edit-rich', 'cms-home-hero-card');
+    card.setAttribute('contenteditable', 'true');
+    card.setAttribute('role', 'textbox');
+    card.setAttribute('spellcheck', 'true');
+    card.setAttribute('aria-multiline', 'true');
+    card.setAttribute('aria-label', 'Band information card');
+    card.dataset.editLabel = 'Band information card';
+    card.dataset.cmsHomeField = 'hero-card';
+  });
+
   const targets = root.querySelectorAll('.eyebrow, .kicker, .tag, h1, h2, h3, p, li, a.btn, figcaption');
   let index = 0;
   targets.forEach((el) => {
     if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
-    if (el.closest('.cms-edit-field')) return;
+    if (el.closest('[data-home-dynamic]') && !el.matches('[data-home-deal]')) return;
+    if (el.closest('.hero-card, .cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
     const inline = !['P', 'LI'].includes(el.tagName);
@@ -1183,7 +1249,7 @@ function markHomeHtmlEditable(html = '') {
     }
   });
 
-  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
+  const note = `<div class="cms-home-preview-note"><p class="kicker">Full homepage editor</p><p>Click any text to edit. The Band information card is one live editor: press Enter to add a bullet, Backspace on an empty bullet to remove it, or use List on the Formatting bar. Select text for bold, color, and size. Click a photo to resize or delete it, or use Photo to add one. Button URLs appear under each button. Calendar events and gallery photos are managed in their own tabs.</p></div>`;
   return note + template.innerHTML;
 }
 
@@ -1202,6 +1268,7 @@ function serializeHomePreviewHtml(preview) {
   });
   const clone = preview.cloneNode(true);
   clone.querySelectorAll('.cms-home-preview-note, .cms-home-href-field').forEach((node) => node.remove());
+  clone.querySelectorAll('img.is-selected').forEach((img) => img.classList.remove('is-selected'));
   clone.querySelectorAll('[contenteditable], [data-cms-home-field], .cms-edit-field').forEach((el) => {
     el.removeAttribute('contenteditable');
     el.removeAttribute('role');
@@ -1213,7 +1280,23 @@ function serializeHomePreviewHtml(preview) {
     el.removeAttribute('data-cms-field');
     el.removeAttribute('data-cms-href');
     el.removeAttribute('data-cms-dynamic-label');
-    el.classList.remove('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic');
+    el.classList.remove('cms-edit-field', 'cms-edit-rich', 'cms-edit-inline', 'is-focused', 'cms-home-dynamic', 'cms-home-hero-card');
+  });
+  clone.querySelectorAll('.hero-card li').forEach((li) => {
+    if (li.querySelector('img')) return;
+    if (!String(li.textContent || '').replace(/\u00a0/g, ' ').trim()) li.remove();
+  });
+  clone.querySelectorAll('.hero-card ul, .hero-card ol').forEach((list) => {
+    if (!list.children.length) list.remove();
+  });
+  restoreHomeHeroCardImages(clone);
+  clone.querySelectorAll('.hero-card').forEach((card) => {
+    const imgs = [...card.querySelectorAll('img')];
+    const hasUpload = imgs.some((img) => /^\/uploads\//i.test(img.getAttribute('src') || ''));
+    if (!hasUpload) return;
+    imgs.forEach((img) => {
+      if (isHomeHeroBrandMarkSrc(img.getAttribute('src') || '')) img.remove();
+    });
   });
   return clone.innerHTML.trim();
 }
@@ -1271,7 +1354,7 @@ function buildEditablePagePreview(payload = {}) {
     ? '<div id="caldev-app" class="caldev-app cms-events-placeholder" aria-live="polite"><p class="draft">Public visitors see the Schedule Board here. Manage events in the Schedule Board tab. Meetings also appear on Boosters.</p></div>'
     : '';
   const sponsorsCallout = showCallout
-    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><a class="btn secondary" href="become-a-sponsor.html">Become a sponsor</a></aside>`
+    ? `<aside class="sponsor-cta cms-edit-block" data-cms-block="callout"><div class="cms-edit-block-bar"><span>Sponsor callout</span><button type="button" class="cms-edit-remove" data-remove-callout>Remove</button></div><div><span class="sponsor-level">Sponsor opportunities</span>${editableField('callout_title', 'h2', calloutTitle || 'Sponsor opportunities', 'Callout title')}${editableRichField('callout_text', calloutText, 'Callout details')}</div><button type="button" class="btn secondary" data-sponsor-choice-open disabled title="Opens on the public page">Sponsor/In-Kind</button></aside>`
     : `<button type="button" class="cms-add-callout" data-add-callout>+ Add sponsor callout</button>`;
 
   if (layout === 'calendar') {
@@ -1299,7 +1382,7 @@ function buildEditablePagePreview(payload = {}) {
     return `${hero}<section class="content"><div class="wrap"><div class="card">${editableRichField('body_text', body || '<p>Placeholder for monthly meeting schedule, location, board members, bylaws, and minutes.</p>', 'Boosters page content')}</div>${duesCard}<article class="card cms-boosters-meetings-placeholder"><span class="tag">Meetings</span><h3>Booster Meetings</h3><p class="booster-meetings-intro">Upcoming booster meetings come from Schedule Board Meetings (and legacy Calendar Events marked for Boosters).</p><div class="timeline booster-meetings" data-booster-meetings></div></article>${callout}</div></section><section class="content soft"><div class="wrap"><div class="section-head"><span class="kicker">People</span><h2>Booster Members</h2><p>Officers and volunteers are managed under Band Boosters → Booster Members.</p></div><div class="directory cms-boosters-placeholder" data-booster-members><article class="person"><div class="avatar"></div><div class="person-copy"><h3>Booster directory</h3><p class="person-role">Managed in Booster Members</p><p>Photos, names, and roles appear here on the public page.</p></div></article></div></div></section>`;
   }
   if (layout === 'sponsors') {
-    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><a class="btn primary" href="become-a-sponsor.html">Become a sponsor</a><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
+    return `${hero}<section class="content sponsor-content"><div class="wrap"><div class="sponsor-intro">${editableRichField('body_text', body || '<div class="kicker">Thank you</div><h2>Community support takes center stage.</h2><p>Our sponsors help provide instruments, instruction, travel, meals, uniforms, and unforgettable performance opportunities.</p>', 'Sponsor intro content')}<div class="sponsor-intro-actions"><button type="button" class="btn primary" data-sponsor-choice-open disabled title="Opens on the public page">Sponsor/In-Kind</button><button type="button" class="btn outline" data-donate-open disabled title="Donate opens on the public page">Donate</button></div></div><div class="sponsor-directory cms-sponsors-placeholder" data-sponsors><article class="sponsor-card"><span class="sponsor-mark">★</span><div><span class="sponsor-level">Sponsor directory</span><h3>Managed in Sponsors</h3><p>Logos, names, and addresses appear here on the public page.</p></div></article></div>${sponsorsCallout}</div></section>`;
   }
   if (layout === 'become-sponsor') {
     const tier = (key) => String(payload[key] || DEFAULT_SPONSOR_TIER_FIELDS[key] || '');
@@ -1618,7 +1701,7 @@ async function discardPageEdits() {
     const page = state.pages.find(item => item.slug === slug);
     if (page) {
       const isHomePage = Boolean(page.is_home) || page.slug === 'home';
-      state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
+      state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
       fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
       form.elements.active.checked = Boolean(page.active);
       syncPreviewFromForm();
@@ -1637,6 +1720,12 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
+  if (original === 'join' || payload.slug === 'join') {
+    if (status) {
+      status.innerHTML = 'Join the Band is edited in the visual editor. <a href="/admin/visual/join">Open the Join visual editor</a> to save this page.';
+    }
+    return false;
+  }
   const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
   if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
@@ -1710,12 +1799,675 @@ function syncFieldFromPreview(field) {
   if (!pageEditor.rebuilding && !pageEditor.capturing) refreshPageDirtyState();
 }
 
+function currentEditorPageSlug() {
+  const form = document.querySelector('#page-form');
+  return String(form?.elements?.original_slug?.value || form?.elements?.slug?.value || '').trim();
+}
+
+function canInsertPageBodyPhotos() {
+  const slug = currentEditorPageSlug();
+  if (!slug) return canEditPage('fundraising');
+  return canEditPage(slug);
+}
+
+function syncPagePhotoToolbar() {
+  const button = document.querySelector('#rich-text-toolbar [data-rich-insert-photo]');
+  if (!button) return;
+  // Always keep Photo on the Formatting bar while a page is open.
+  button.hidden = false;
+  button.removeAttribute('hidden');
+}
+
 function setRichToolbarVisible(activeField = false) {
   const toolbar = document.querySelector('#rich-text-toolbar');
   if (!toolbar) return;
   // Sticky Formatting bar stays under Live page preview; highlight while editing.
   if (activeField) toolbar.hidden = false;
   toolbar.classList.toggle('is-active', Boolean(activeField));
+  syncPagePhotoToolbar();
+}
+
+function getActivePageRichField({ multilineOnly = false } = {}) {
+  const preview = document.querySelector('#page-preview');
+  if (!preview) return null;
+  const field = preview.querySelector('.cms-edit-rich.is-focused')
+    || preview.querySelector('.cms-edit-rich:focus')
+    || (document.activeElement?.closest?.('.cms-edit-rich') || null);
+  if (!field || !preview.contains(field)) return null;
+  if (multilineOnly && field.classList.contains('cms-edit-inline')) return null;
+  return field;
+}
+
+const pageRichSelection = { field: null, range: null, offset: null };
+
+function getCaretCharacterOffsetWithin(element) {
+  const selection = window.getSelection();
+  if (!element || !selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) return null;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(element);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function setCaretCharacterOffsetWithin(element, offset) {
+  if (!element) return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const target = Math.max(0, Number(offset) || 0);
+  let current = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode();
+  while (node) {
+    const next = current + node.textContent.length;
+    if (target <= next) {
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, target - current));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+    current = next;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function clearPageRichCaretMarks(root = null) {
+  const roots = root
+    ? [root]
+    : [...document.querySelectorAll('#page-preview .cms-edit-rich')];
+  roots.forEach((node) => {
+    node?.querySelectorAll?.('[data-cms-caret-mark]').forEach((mark) => mark.remove());
+  });
+}
+
+function placePageRichCaretMark(field) {
+  if (!field) return false;
+  clearPageRichCaretMarks(field);
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  if (!selection) return false;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    if (pageRichSelection.range) {
+      try {
+        selection.removeAllRanges();
+        selection.addRange(pageRichSelection.range);
+      } catch {
+        /* fall through */
+      }
+    } else if (pageRichSelection.offset != null) {
+      setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) return false;
+  const range = selection.getRangeAt(0);
+  range.collapse(true);
+  const mark = document.createElement('span');
+  mark.setAttribute('data-cms-caret-mark', '1');
+  mark.setAttribute('aria-hidden', 'true');
+  mark.style.cssText = 'display:inline-block;width:0;height:0;overflow:hidden;font-size:0;line-height:0;';
+  mark.appendChild(document.createTextNode('\u200b'));
+  range.insertNode(mark);
+  const after = document.createRange();
+  after.setStartAfter(mark);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
+  pageRichSelection.field = field;
+  return true;
+}
+
+function savePageRichSelection(field = getActivePageRichField()) {
+  pageRichSelection.field = field || null;
+  pageRichSelection.range = null;
+  pageRichSelection.offset = null;
+  if (!field) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!field.contains(range.commonAncestorContainer)) return;
+  try {
+    pageRichSelection.range = range.cloneRange();
+  } catch {
+    pageRichSelection.range = null;
+  }
+  pageRichSelection.offset = getCaretCharacterOffsetWithin(field);
+}
+
+function restorePageRichSelection() {
+  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  if (!field) return null;
+  field.focus();
+  field.classList.add('is-focused');
+  const selection = window.getSelection();
+  const mark = field.querySelector('[data-cms-caret-mark]');
+  if (mark && selection) {
+    const range = document.createRange();
+    range.setStartBefore(mark);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    mark.remove();
+    return field;
+  }
+  let restored = false;
+  if (pageRichSelection.range && selection) {
+    try {
+      selection.removeAllRanges();
+      selection.addRange(pageRichSelection.range);
+      restored = field.contains(selection.anchorNode);
+    } catch {
+      restored = false;
+    }
+  }
+  if (!restored && pageRichSelection.offset != null) {
+    restored = setCaretCharacterOffsetWithin(field, pageRichSelection.offset);
+  }
+  if (!restored && selection) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  return field;
+}
+
+function insertHtmlAtCaret(field, html) {
+  if (!field || !html) return null;
+  restorePageRichSelection();
+  field.focus();
+  const selection = window.getSelection();
+  if (!selection) return null;
+  if (!selection.rangeCount || !field.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  let node = null;
+  try {
+    const frag = range.createContextualFragment(html);
+    node = frag.lastChild;
+    range.insertNode(frag);
+  } catch {
+    document.execCommand('insertHTML', false, html);
+    node = [...field.querySelectorAll('img.cms-body-photo')].pop() || null;
+  }
+  if (node) {
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(after);
+  }
+  savePageRichSelection(field);
+  return node;
+}
+
+function isHomeHeroBrandMarkSrc(src = '') {
+  return /efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/i.test(String(src || ''));
+}
+
+function isHomeHeroUploadAlt(alt = '') {
+  return /^\d{10,}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(alt || '').trim());
+}
+
+function restoreHomeHeroCardImages(root) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll('.hero-card img').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    const alt = String(img.getAttribute('alt') || '').trim();
+    if (!isHomeHeroBrandMarkSrc(src) || !isHomeHeroUploadAlt(alt)) return;
+    const nextSrc = `/uploads/${alt}.jpg`;
+    img.setAttribute('src', nextSrc);
+    img.src = nextSrc;
+  });
+}
+
+function restoreHomeHeroCardUploadSrc(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  restoreHomeHeroCardImages(template.content);
+  return template.innerHTML;
+}
+
+function insertPhotoIntoPageBody(url, altText = 'Photo', widthPx = 0) {
+  const field = pageRichSelection.field || getActivePageRichField({ multilineOnly: true });
+  if (!field) return false;
+  const inHeroCard = field.matches?.('.hero-card');
+  let selectedImg = (pagePhotoResize.img && field.contains(pagePhotoResize.img))
+    ? pagePhotoResize.img
+    : null;
+  if (inHeroCard && !selectedImg) {
+    selectedImg = [...field.querySelectorAll('img')].find((img) => (
+      isHomeHeroBrandMarkSrc(img.getAttribute('src') || img.src || '')
+    )) || field.querySelector('img');
+  }
+  const selectedWidth = selectedImg
+    ? Number.parseFloat(selectedImg.getAttribute('data-photo-width') || selectedImg.style.width || '')
+    : NaN;
+  const width = Number(widthPx) > 0
+    ? Math.round(Number(widthPx))
+    : (Number.isFinite(selectedWidth) && selectedWidth > 0 ? Math.round(selectedWidth) : (inHeroCard ? 170 : 280));
+  const floatClass = inHeroCard ? 'cms-body-photo-block' : 'cms-body-photo-left';
+  const cleaned = sanitizeRichHtml(
+    `<img src="${escapeAttr(url)}" alt="${escapeAttr(altText || 'Photo')}" class="cms-body-photo ${floatClass}" style="width: ${width}px; height: auto;" data-photo-width="${width}">`,
+  );
+  if (!cleaned || !/<img\b/i.test(cleaned)) return false;
+  const html = cleaned.replace(/^<p>([\s\S]*)<\/p>$/i, '$1').trim();
+  let inserted = null;
+  if (selectedImg) {
+    selectedImg.setAttribute('src', url);
+    selectedImg.src = url;
+    selectedImg.setAttribute('alt', altText || 'Photo');
+    selectedImg.alt = altText || 'Photo';
+    selectedImg.classList.add('cms-body-photo', floatClass);
+    if (width > 0) {
+      selectedImg.style.width = `${width}px`;
+      selectedImg.style.height = 'auto';
+      selectedImg.setAttribute('data-photo-width', String(width));
+    }
+    inserted = selectedImg;
+  } else {
+    const insertedNode = insertHtmlAtCaret(field, html);
+    inserted = insertedNode?.nodeType === Node.ELEMENT_NODE && insertedNode.matches?.('img')
+      ? insertedNode
+      : (insertedNode?.querySelector?.('img.cms-body-photo') || [...field.querySelectorAll('img.cms-body-photo')].pop() || null);
+  }
+  if (inHeroCard && /^\/uploads\//i.test(url)) {
+    [...field.querySelectorAll('img')].forEach((img) => {
+      if (img !== inserted && isHomeHeroBrandMarkSrc(img.getAttribute('src') || img.src || '')) img.remove();
+    });
+  }
+  syncFieldFromPreview(field);
+  const preview = document.querySelector('#page-preview');
+  if (inHeroCard && preview) state.homeBodyHtml = serializeHomePreviewHtml(preview);
+  if (inserted) selectPageBodyPhoto(inserted);
+  savePageRichSelection(field);
+  return Boolean(inserted || html);
+}
+
+const pagePhotoResize = {
+  img: null,
+  dragging: false,
+  handle: 'se',
+  startX: 0,
+  startWidth: 0,
+};
+
+let pagePhotoToastLeaveTimer = null;
+
+function ensurePagePhotoResizeHandles() {
+  let root = document.querySelector('#cms-photo-resize-handles');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'cms-photo-resize-handles';
+  root.className = 'cms-photo-resize-handles';
+  root.hidden = true;
+  root.innerHTML = `
+    <div class="cms-photo-resize-toolbar">
+      <button type="button" class="cms-photo-delete-btn" data-photo-delete>Delete photo</button>
+    </div>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="nw" aria-label="Resize from top left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="ne" aria-label="Resize from top right"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="sw" aria-label="Resize from bottom left"></button>
+    <button type="button" class="cms-photo-resize-handle" data-photo-handle="se" aria-label="Resize from bottom right"></button>
+  `;
+  document.body.appendChild(root);
+  root.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  root.querySelector('[data-photo-delete]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteSelectedPageBodyPhoto();
+  });
+  root.querySelectorAll('[data-photo-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (!pagePhotoResize.img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const img = pagePhotoResize.img;
+      pagePhotoResize.dragging = true;
+      pagePhotoResize.handle = handle.dataset.photoHandle || 'se';
+      pagePhotoResize.startX = event.clientX;
+      pagePhotoResize.startWidth = img.getBoundingClientRect().width || Number.parseFloat(img.style.width) || 280;
+      try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    });
+  });
+  window.addEventListener('pointermove', (event) => {
+    if (!pagePhotoResize.dragging || !pagePhotoResize.img) return;
+    event.preventDefault();
+    const img = pagePhotoResize.img;
+    const editor = img.closest('.cms-edit-rich');
+    const maxWidth = Math.max(120, Math.floor((editor?.clientWidth || 640) - 16));
+    const delta = event.clientX - pagePhotoResize.startX;
+    const outward = /e$/i.test(pagePhotoResize.handle || 'se') ? delta : -delta;
+    const next = Math.max(80, Math.min(maxWidth, Math.round(pagePhotoResize.startWidth + outward)));
+    img.style.width = `${next}px`;
+    img.style.height = 'auto';
+    img.setAttribute('data-photo-width', String(next));
+    positionPageBodyPhotoResizeHandles();
+  }, { passive: false });
+  window.addEventListener('pointerup', () => {
+    if (!pagePhotoResize.dragging) return;
+    pagePhotoResize.dragging = false;
+    const field = pagePhotoResize.img?.closest?.('.cms-edit-rich');
+    if (field) syncFieldFromPreview(field);
+    positionPageBodyPhotoResizeHandles();
+  });
+  window.addEventListener('scroll', () => positionPageBodyPhotoResizeHandles(), true);
+  window.addEventListener('resize', () => positionPageBodyPhotoResizeHandles());
+  return root;
+}
+
+function deleteSelectedPageBodyPhoto() {
+  const img = pagePhotoResize.img;
+  const field = img?.closest?.('.cms-edit-rich');
+  if (!img || !field) return false;
+  img.remove();
+  clearPageBodyPhotoSelection();
+  syncFieldFromPreview(field);
+  field.focus();
+  savePageRichSelection(field);
+  return true;
+}
+
+function clearPageBodyPhotoSelection() {
+  document.querySelectorAll('#page-preview img.cms-body-photo.is-selected').forEach((img) => {
+    img.classList.remove('is-selected');
+  });
+  pagePhotoResize.img = null;
+  pagePhotoResize.dragging = false;
+  const handles = document.querySelector('#cms-photo-resize-handles');
+  if (handles) {
+    handles.hidden = true;
+    handles.setAttribute('hidden', '');
+  }
+}
+
+function positionPageBodyPhotoResizeHandles() {
+  const root = ensurePagePhotoResizeHandles();
+  const img = pagePhotoResize.img;
+  if (!img || !document.body.contains(img) || !document.querySelector('#page-preview')?.contains(img)) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  const rect = img.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) {
+    root.hidden = true;
+    root.setAttribute('hidden', '');
+    return;
+  }
+  root.hidden = false;
+  root.removeAttribute('hidden');
+  root.style.left = `${Math.round(rect.left)}px`;
+  root.style.top = `${Math.round(rect.top)}px`;
+  root.style.width = `${Math.round(rect.width)}px`;
+  root.style.height = `${Math.round(rect.height)}px`;
+}
+
+function selectPageBodyPhoto(img) {
+  if (!img) return;
+  const preview = document.querySelector('#page-preview');
+  const field = img.closest('.cms-edit-rich');
+  if (!preview || !field || field.classList.contains('cms-edit-inline') || !preview.contains(img)) return;
+  if (!img.classList.contains('cms-body-photo')) img.classList.add('cms-body-photo');
+  if (img.closest('.hero-card')) {
+    img.classList.remove('cms-body-photo-left', 'cms-body-photo-right');
+    img.classList.add('cms-body-photo-block');
+  } else if (!img.classList.contains('cms-body-photo-left')
+    && !img.classList.contains('cms-body-photo-right')
+    && !img.classList.contains('cms-body-photo-block')) {
+    img.classList.add('cms-body-photo-left');
+  }
+  ensurePagePhotoResizeHandles();
+  preview.querySelectorAll('img.cms-body-photo.is-selected').forEach((node) => {
+    if (node !== img) node.classList.remove('is-selected');
+  });
+  img.classList.add('is-selected');
+  pagePhotoResize.img = img;
+  const applyWidth = () => {
+    if (pagePhotoResize.img !== img) return;
+    const measured = Math.round(img.getBoundingClientRect().width);
+    const existing = Number.parseFloat(img.style.width || img.getAttribute('data-photo-width') || '');
+    const width = Number.isFinite(existing) && existing > 0 ? existing : measured;
+    if (width > 0) {
+      img.style.width = `${width}px`;
+      img.style.height = 'auto';
+      img.setAttribute('data-photo-width', String(width));
+    }
+    positionPageBodyPhotoResizeHandles();
+  };
+  if (img.complete && img.naturalWidth) applyWidth();
+  else img.addEventListener('load', applyWidth, { once: true });
+  applyWidth();
+  requestAnimationFrame(() => positionPageBodyPhotoResizeHandles());
+}
+
+function bindPageBodyPhotoResize() {
+  if (document.documentElement.dataset.pageBodyPhotoResizeBound === '1') return;
+  document.documentElement.dataset.pageBodyPhotoResizeBound = '1';
+  const isPhotoTarget = (preview, node) => {
+    const img = node?.closest?.('img');
+    if (!img || img.tagName !== 'IMG' || !preview?.contains(img)) return null;
+    const field = img.closest('.cms-edit-rich');
+    if (!field || field.classList.contains('cms-edit-inline')) return null;
+    return img;
+  };
+  const onSelectPointer = (event) => {
+    if (!canInsertPageBodyPhotos()) return;
+    if (event.target.closest?.('#cms-photo-resize-handles, #admin-page-photo-toast, #rich-text-toolbar')) return;
+    const preview = document.querySelector('#page-preview');
+    if (!preview) return;
+    const target = isPhotoTarget(preview, event.target);
+    if (target) {
+      event.preventDefault();
+      const field = target.closest('.cms-edit-rich');
+      field?.classList.add('is-focused');
+      selectPageBodyPhoto(target);
+      savePageRichSelection(field);
+      setRichToolbarVisible(true);
+      return;
+    }
+    if (!event.target.closest?.('#cms-photo-resize-handles, #admin-page-photo-toast, #rich-text-toolbar')) {
+      clearPageBodyPhotoSelection();
+    }
+  };
+  document.addEventListener('pointerdown', onSelectPointer, true);
+  document.addEventListener('dragstart', (event) => {
+    if (event.target?.closest?.('img.cms-body-photo, #page-preview .cms-edit-rich img, .hero-card img')) {
+      event.preventDefault();
+    }
+  });
+}
+
+function ensurePagePhotoToast() {
+  let root = document.querySelector('#admin-page-photo-toast');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'admin-page-photo-toast';
+  root.className = 'admin-page-photo-toast';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-labelledby', 'admin-page-photo-toast-title');
+  root.hidden = true;
+  root.innerHTML = `
+    <button type="button" class="admin-page-photo-toast-backdrop" data-page-photo-dismiss aria-label="Close insert photo"></button>
+    <div class="admin-page-photo-toast-panel">
+      <div class="admin-page-photo-toast-card">
+        <h3 id="admin-page-photo-toast-title">Insert photo</h3>
+        <p class="admin-page-photo-toast-copy">Places the photo at your cursor so text can wrap around it. Large photos are compressed in your browser before upload. After insert, drag a corner to resize. Save the page to publish.</p>
+        <label>Alt text<input name="page_photo_alt" type="text" maxlength="160" placeholder="Describe the photo"></label>
+        <label class="admin-page-photo-file">Upload image
+          <input name="page_photo_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.svg">
+        </label>
+        <div class="admin-page-photo-toast-actions">
+          <button class="btn primary" type="button" data-page-photo-upload>Upload &amp; insert</button>
+          <button class="btn outline" type="button" data-page-photo-dismiss>Cancel</button>
+        </div>
+        <p class="admin-page-photo-toast-status" data-page-photo-status aria-live="polite"></p>
+        <div class="admin-page-photo-picker" data-page-photo-picker></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelectorAll('[data-page-photo-dismiss]').forEach((el) => {
+    el.addEventListener('click', () => hidePagePhotoToast());
+  });
+  root.querySelector('[data-page-photo-upload]')?.addEventListener('click', () => uploadAndInsertPagePhoto());
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hidePagePhotoToast();
+  });
+  return root;
+}
+
+async function loadPagePhotoPickerList() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  const picker = root?.querySelector('[data-page-photo-picker]');
+  if (!picker) return;
+  picker.innerHTML = '<p class="draft">Loading photos…</p>';
+  try {
+    const photos = await jsonFetch('/api/photos');
+    const ordered = [...photos].sort((a, b) => (
+      Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      || Number(b.id || 0) - Number(a.id || 0)
+    ));
+    if (!ordered.length) {
+      picker.innerHTML = '<p class="draft">No gallery photos yet. Upload one above.</p>';
+      return;
+    }
+    picker.innerHTML = `
+      <p class="admin-page-photo-picker-label">Or choose an existing photo</p>
+      <div class="admin-page-photo-grid">
+        ${ordered.map((photo) => `
+          <button type="button" class="admin-page-photo-thumb" data-page-photo-pick="${escapeAttr(photo.url)}" data-page-photo-alt="${escapeAttr(photo.alt_text || plainTextFromHtml(photo.caption) || 'Photo')}" title="${escapeAttr(plainTextFromHtml(photo.caption) || photo.original_name || 'Photo')}">
+            <img src="${escapeAttr(photo.url)}" alt="${escapeAttr(photo.alt_text || 'Photo')}">
+          </button>
+        `).join('')}
+      </div>`;
+    picker.querySelectorAll('[data-page-photo-pick]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const altInput = root.querySelector('[name="page_photo_alt"]');
+        const alt = String(altInput?.value || button.dataset.pagePhotoAlt || 'Photo').trim() || 'Photo';
+        if (insertPhotoIntoPageBody(button.dataset.pagePhotoPick, alt)) hidePagePhotoToast();
+      });
+    });
+  } catch (error) {
+    picker.innerHTML = `<p class="draft">Could not load photos: ${escapeHtml(error.message || 'error')}</p>`;
+  }
+}
+
+async function showPagePhotoToast() {
+  if (!canInsertPageBodyPhotos()) {
+    alert('You need permission to edit this page before inserting a photo.');
+    return;
+  }
+  const preferred = getActivePageRichField({ multilineOnly: true });
+  savePageRichSelection(preferred);
+  if (!pageRichSelection.field) {
+    alert('Click into the page body text, then choose Photo.');
+    return;
+  }
+  placePageRichCaretMark(pageRichSelection.field);
+  const root = ensurePagePhotoToast();
+  const status = root.querySelector('[data-page-photo-status]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  if (status) status.textContent = '';
+  if (altInput) altInput.value = '';
+  if (fileInput) fileInput.value = '';
+  window.clearTimeout(pagePhotoToastLeaveTimer);
+  root.hidden = false;
+  root.classList.remove('is-leaving');
+  root.classList.remove('is-visible');
+  void root.offsetWidth;
+  root.classList.add('is-visible');
+  await loadPagePhotoPickerList();
+  window.setTimeout(() => altInput?.focus(), 40);
+}
+
+function hidePagePhotoToast() {
+  const markedField = pageRichSelection.field;
+  if (markedField?.querySelector?.('[data-cms-caret-mark]')) {
+    restorePageRichSelection();
+  } else {
+    clearPageRichCaretMarks();
+  }
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root || root.hidden) return;
+  root.classList.add('is-leaving');
+  root.classList.remove('is-visible');
+  window.clearTimeout(pagePhotoToastLeaveTimer);
+  pagePhotoToastLeaveTimer = window.setTimeout(() => {
+    root.classList.remove('is-leaving');
+    root.hidden = true;
+  }, 380);
+}
+
+async function uploadAndInsertPagePhoto() {
+  const root = document.querySelector('#admin-page-photo-toast');
+  if (!root) return;
+  const status = root.querySelector('[data-page-photo-status]');
+  const fileInput = root.querySelector('[name="page_photo_file"]');
+  const altInput = root.querySelector('[name="page_photo_alt"]');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = 'Choose an image file to upload.';
+    return;
+  }
+  const alt = String(altInput?.value || '').trim() || file.name.replace(/\.[^.]+$/, '') || 'Photo';
+  if (status) {
+    status.textContent = Number(file.size || 0) > GALLERY_UPLOAD_MAX_BYTES
+      ? 'Compressing image…'
+      : 'Uploading…';
+  }
+  try {
+    const uploadFile = await prepareImageFileForUpload(file, 'page photo');
+    if (status && uploadFile !== file) {
+      status.textContent = `Uploading compressed image (${Math.max(1, Math.round(uploadFile.size / 1024))} KB)…`;
+    } else if (status) {
+      status.textContent = 'Uploading…';
+    }
+    const stored = await uploadPreparedGalleryPhoto({
+      file: uploadFile,
+      altText: alt,
+      caption: alt,
+      sortOrder: -600,
+    });
+    if (!insertPhotoIntoPageBody(stored.url, stored.alt_text || alt)) {
+      if (status) status.textContent = 'Uploaded, but could not insert into the body. Click the body and try again.';
+      return;
+    }
+    hidePagePhotoToast();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not upload photo.';
+  }
 }
 
 function applyRichStyle(styleMap = {}) {
@@ -1751,6 +2503,7 @@ function syncPreviewFromForm() {
     if (isHome && preview.querySelector('[data-cms-home-field]')) {
       state.homeBodyHtml = serializeHomePreviewHtml(preview);
     }
+    clearPageBodyPhotoSelection();
     preview.innerHTML = buildEditablePagePreview(payload);
     const chip = document.querySelector('[data-page-layout-chip]');
     if (chip) chip.textContent = layoutChipLabel(payload.layout);
@@ -1860,14 +2613,31 @@ function bindPageVisualEditor() {
 
   preview.addEventListener('focusin', event => {
     const field = event.target.closest?.('.cms-edit-rich');
+    if (field) {
+      preview.querySelectorAll('.cms-edit-rich.is-focused').forEach((node) => {
+        if (node !== field) node.classList.remove('is-focused');
+      });
+      field.classList.add('is-focused');
+      savePageRichSelection(field);
+    }
     setRichToolbarVisible(Boolean(field));
+  });
+  preview.addEventListener('mouseup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
+  });
+  preview.addEventListener('keyup', () => {
+    const field = getActivePageRichField();
+    if (field) savePageRichSelection(field);
   });
   preview.addEventListener('focusout', event => {
     const next = event.relatedTarget;
-    if (next?.closest?.('#rich-text-toolbar')) return;
+    if (next?.closest?.('#rich-text-toolbar') || next?.closest?.('#admin-page-photo-toast')) return;
     setTimeout(() => {
       const active = preview.querySelector('.cms-edit-rich.is-focused, .cms-edit-rich:focus');
-      setRichToolbarVisible(Boolean(active) || Boolean(document.activeElement?.closest?.('#rich-text-toolbar')));
+      const toolbarFocus = Boolean(document.activeElement?.closest?.('#rich-text-toolbar')
+        || document.activeElement?.closest?.('#admin-page-photo-toast'));
+      setRichToolbarVisible(Boolean(active) || toolbarFocus);
     }, 0);
   });
 
@@ -1878,9 +2648,14 @@ function bindPageVisualEditor() {
     if (field.classList.contains('cms-edit-rich')) {
       const html = event.clipboardData?.getData('text/html');
       const text = event.clipboardData?.getData('text/plain') || '';
-      const clean = field.classList.contains('cms-edit-inline')
-        ? (html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text))
-        : (html ? sanitizeRichHtml(html) : formatRichText(text));
+      let clean = '';
+      if (field.classList.contains('cms-edit-inline')) {
+        clean = html ? sanitizeInlineRichHtml(html) : formatInlineRichText(text);
+      } else if (field.matches?.('.hero-card')) {
+        clean = html ? sanitizeHomeHeroPasteHtml(html) : formatRichText(text);
+      } else {
+        clean = html ? sanitizeRichHtml(html) : formatRichText(text);
+      }
       document.execCommand('insertHTML', false, clean || escapeHtml(text));
       syncFieldFromPreview(field);
     } else {
@@ -1914,6 +2689,11 @@ function bindPageVisualEditor() {
     if (field) syncFieldFromPreview(field);
     event.target.value = '';
   });
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar?.querySelector('[data-rich-insert-photo]')?.addEventListener('click', () => {
+    showPagePhotoToast();
+  });
+  bindPageBodyPhotoResize();
 
   document.querySelector('#add-page-callout')?.addEventListener('click', () => {
     const title = form.elements.callout_title;
@@ -2083,11 +2863,44 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
   });
 }
 
-function activateTab(name) {
-    if (name === 'security-log' && !isSuperAdmin()) {
-    return Promise.resolve(false);
+function canOpenAdminTab(name) {
+  const tab = String(name || '').trim();
+  const scheduleOnly = isScheduleBoardOnlyUser();
+  if (tab === 'dashboard' || tab === 'mail') return !scheduleOnly;
+  if (tab === 'pages') {
+    return (state.pages || []).some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage()));
   }
-  if (name === 'caldev' && !canAccessScheduleBoard()) {
+  if (tab === 'sponsors') return canEditSponsors();
+  if (tab === 'ledger') return canAccessLedger();
+  if (tab === 'checkout') return canAccessCheckout();
+  if (tab === 'staff') return canEditStaff();
+  if (tab === 'ensembles') return canEditPage('ensembles');
+  if (tab === 'booster-members') return canEditBoosterMembers();
+  if (tab === 'minutes') return canViewMinutes() && !scheduleOnly;
+  if (tab === 'badge-creator') return canAccessBadgeCreator();
+  if (tab === 'contact') return canEditContact();
+  if (tab === 'site' || tab === 'social') return hasPermission('site');
+  if (tab === 'users') return hasPermission('users');
+  if (tab === 'security-log') return isSuperAdmin();
+  if (tab === 'forms') return canAccessForms();
+  if (tab === 'caldev') return canAccessScheduleBoard();
+  if (tab === 'photos') return hasPermission('photos');
+  if (tab === 'events') return false;
+  return false;
+}
+
+function hideCalendarFinishedControls() {
+  const allow = canNotifyCalendarSubscribers();
+  document.querySelectorAll('#caldev-finished-top, [data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
+    el.hidden = !allow;
+  });
+  const top = document.querySelector('#caldev-finished-top');
+  const actions = top?.closest('.panel-actions');
+  if (actions) actions.hidden = !allow;
+}
+
+function activateTab(name) {
+  if (!canOpenAdminTab(name)) {
     return Promise.resolve(false);
   }
   const pagesPanel = document.querySelector('#tab-pages');
@@ -2104,8 +2917,13 @@ function activateTab(name) {
     if (name === 'ledger') {
       loadLedger().catch(() => {});
     }
-    if (name === 'booster-members' || name === 'minutes') {
+    if (name === 'booster-members' || name === 'minutes' || name === 'badge-creator') {
       setBoostersMenuOpen(true);
+    }
+    if (name === 'badge-creator') {
+      if (typeof window.initBadgeCreatorPanel === 'function') {
+        window.initBadgeCreatorPanel().catch(() => {});
+      }
     }
     if (name === 'minutes') {
       loadMinutes().catch(() => {});
@@ -2118,6 +2936,10 @@ function activateTab(name) {
     if (name === 'mail') {
       loadMailRecipients().catch(() => {});
     }
+    if (name === 'forms') {
+      if (!canAccessForms()) return;
+      loadFormsPanel().catch(() => {});
+    }
     if (name === 'social') {
       loadSocialPanel().catch(() => {});
     }
@@ -2129,7 +2951,7 @@ function activateTab(name) {
       loadSecurityLog({ resetPage: true }).catch(() => {});
     }
     if (name === 'caldev') {
-      if (!isSuperAdmin()) return;
+      if (!canAccessScheduleBoard()) return;
       loadCaldevEvents().catch(() => {});
     }
     if (name === 'events') {
@@ -2172,8 +2994,14 @@ function pageShortcutLabel(page) {
   return title || pageLabel(page?.slug || '');
 }
 
-const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor']);
-const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'calendar']);
+const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
+const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
+
+function isFormMakerPage(page) {
+  if (!page) return false;
+  if (page.is_form || page.slug === 'letterman-jacket') return true;
+  return /data-cms-form=/.test(String(page.body_html || ''));
+}
 
 function canManageSitePages() {
   // Pages nav is for site admins (global `pages` permission / Super Admin).
@@ -2193,7 +3021,7 @@ function syncPageSettingsAccess() {
 function editablePages() {
   return (state.pages || [])
     .filter((page) => {
-      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug)) return false;
+      if (PAGE_SHORTCUT_EXCLUDES.has(page.slug) || isFormMakerPage(page)) return false;
       if (page.slug === 'boosters') return canEditBoostersPage();
       return canManageSitePages() && canEditPage(page);
     })
@@ -2211,7 +3039,7 @@ function canAccessSponsorsMenu() {
 }
 
 function canAccessBoostersMenu() {
-  return canEditBoosterMembers() || canViewMinutes();
+  return canEditBoosterMembers() || canViewMinutes() || canAccessBadgeCreator();
 }
 
 function setSponsorsMenuOpen(open) {
@@ -2280,9 +3108,10 @@ function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
   document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
 
+  const scheduleOnly = isScheduleBoardOnlyUser();
   const panels = {
-    dashboard: true,
-    mail: true,
+    dashboard: !scheduleOnly,
+    mail: !scheduleOnly,
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
@@ -2291,12 +3120,14 @@ function showAllowedPanels() {
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
-    minutes: canViewMinutes(),
+    minutes: canViewMinutes() && !scheduleOnly,
+    'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
     social: hasPermission('site'),
     users: hasPermission('users'),
     'security-log': isSuperAdmin(),
+    forms: canAccessForms(),
     caldev: canAccessScheduleBoard(),
     events: canViewEvents(),
     photos: hasPermission('photos'),
@@ -2307,12 +3138,13 @@ function showAllowedPanels() {
     // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
     if (button.dataset.tab === 'events') allowed = false;
     if (button.dataset.tab === 'caldev') allowed = canAccessScheduleBoard();
+    if (scheduleOnly && (button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail')) allowed = false;
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
   const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
+  const boostersAccess = !scheduleOnly && canAccessBoostersMenu();
   if (boostersMenu) {
     boostersMenu.hidden = !boostersAccess;
     if (boostersAccess) manageVisible = true;
@@ -2322,6 +3154,8 @@ function showAllowedPanels() {
     if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
     const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
     if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+    const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
+    if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
   }
   bindBoostersMenu();
   const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
@@ -2342,6 +3176,8 @@ function showAllowedPanels() {
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
+  const visualPilotLink = document.querySelector('[data-visual-pilot-link]');
+  if (visualPilotLink) visualPilotLink.hidden = !canEditPage('join');
   const newPageButton = document.querySelector('#new-page');
   if (newPageButton) newPageButton.hidden = !canManageSitePages();
   syncPageSettingsAccess();
@@ -2391,11 +3227,12 @@ function showAllowedPanels() {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  hideCalendarFinishedControls();
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
-  activateTab('dashboard');
+  activateTab(scheduleOnly ? 'caldev' : 'dashboard');
 }
 
 function bindAdminNavToggle() {
@@ -2874,7 +3711,7 @@ function renderDashboard() {
   const welcome = document.querySelector('#dashboard-welcome');
   if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
 
-  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260816`;
+  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260907`;
   const cards = [
     isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
     canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
@@ -2888,13 +3725,12 @@ function renderDashboard() {
     canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
     canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
     canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
+    canAccessBadgeCreator() && ['Badge Creator', 'Build, save, download, and print CR80 committee and officer badges.', 'badge-creator', 'Boosters', 'tab'],
     canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
+    canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canCreateEvents() && !isSuperAdmin()
-      ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
-      : !isSuperAdmin() && canViewEvents() && ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    canAccessScheduleBoard() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab', 'caldev'],
+    canAccessScheduleBoard() && ['Schedule Board', 'Add and edit events for the public Calendar.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -2940,7 +3776,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     const page = state.pages.find(item => item.slug === slug);
     if (!page) return;
     const isHomePage = Boolean(page.is_home) || page.slug === 'home';
-    state.homeBodyHtml = isHomePage ? String(page.body_html || '') : '';
+    state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
@@ -2962,6 +3798,21 @@ function editPage(slug, { skipGuard = false } = {}) {
       const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
       if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
     }
+    let visualHint = form.querySelector('[data-visual-pilot-hint]');
+    if (!visualHint) {
+      visualHint = document.createElement('p');
+      visualHint.className = 'notice';
+      visualHint.setAttribute('data-visual-pilot-hint', '');
+      form.insertBefore(visualHint, form.querySelector('.form-grid, .page-meta-grid'));
+    }
+    if (page.slug === 'join') {
+      visualHint.hidden = false;
+      visualHint.innerHTML = 'Join the Band is managed in the visual editor. The old Pages editor cannot save this page. <a href="/admin/visual/join">Open the Join visual editor</a>';
+    } else {
+      visualHint.hidden = true;
+      visualHint.textContent = '';
+    }
+    syncPagePhotoToolbar();
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
     form.elements.active.checked = Boolean(page.active);
     syncPageSettingsAccess();
@@ -2987,7 +3838,8 @@ function editPage(slug, { skipGuard = false } = {}) {
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
+  const pages = ((state.pageCatalog?.length ? state.pageCatalog : state.pages) || [])
+    .filter((page) => !isFormMakerPage(page) && page.slug !== 'in-kind');
   box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
 }
 
@@ -3944,7 +4796,7 @@ function renderSponsors() {
   const ordered = orderedSponsors();
   list.innerHTML = ordered.map((sponsor) => {
     const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
-    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : 'Bronze');
+    const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : tier === 'honorable' ? 'Honorable Mention' : 'Bronze');
     const benefits = [];
     if (sponsor.show_marquee !== false) benefits.push('Marquee');
     if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
@@ -3956,7 +4808,7 @@ function renderSponsors() {
       <div>
         <b>${escapeHtml(sponsor.name)}</b>
         <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
-        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${sponsor.active ? 'Active' : 'Hidden'} · ${escapeHtml(benefits.join(' · '))}</small>
+        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${Number(sponsor.active) !== 0 ? 'On Sponsors page' : 'Hidden from Sponsors page'} · ${escapeHtml(benefits.join(' · '))}</small>
       </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
@@ -3974,7 +4826,8 @@ function renderSponsors() {
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     const levelSelect = formControl(form, 'level');
     if (levelSelect) {
-      const level = String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor';
+      const isHonorable = (sponsor.tier || sponsorTierFromLevel(sponsor.level)) === 'honorable';
+      const level = isHonorable ? 'Honorable Mention' : (String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor');
       if (![...levelSelect.options].some((option) => option.value === level)) {
         const option = document.createElement('option');
         option.value = level;
@@ -4387,6 +5240,13 @@ async function loadUsers() {
       input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
     });
     form.elements.active.checked = Boolean(user.active);
+    const editingSelf = Number(user.id) === Number(state.me?.user?.id);
+    const lockOwnPrivileges = editingSelf && !isSuperAdmin();
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = lockOwnPrivileges;
+    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+      input.disabled = lockOwnPrivileges;
+    });
     const status = document.querySelector('#user-status');
     if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -4655,6 +5515,7 @@ async function mountCaldevCmsBoard() {
   if (!mountEl || !canAccessScheduleBoard()) return;
   if (window.CaldevCmsBoard?.mount) {
     await window.CaldevCmsBoard.mount(mountEl);
+    hideCalendarFinishedControls();
     return;
   }
   mountEl.innerHTML = '<p class="draft">Schedule Board editor failed to load. Refresh and try again.</p>';
@@ -4670,7 +5531,7 @@ function bindCaldevPanel() {
   window.__caldevPanelBound = true;
 
   async function notifyCalendarFinished() {
-    if (!canAccessScheduleBoard()) return;
+    if (!canNotifyCalendarSubscribers()) return;
     if (!confirm('Email calendar subscribers that the schedule board is finished/updated? Fundraising subscribers are not included.')) return;
     try {
       const result = await jsonFetch('/api/admin/caldev/notify-finished', {
@@ -5121,6 +5982,675 @@ function renderContactMessages() {
     </article>
   `).join('')
     : '<p class="draft">No contact messages yet.</p>';
+}
+
+function selectedFormsUserIds(name, rootSelector = '#forms-settings-form') {
+  const root = typeof rootSelector === 'string' ? document.querySelector(rootSelector) : rootSelector;
+  return [...(root || document).querySelectorAll(`input[name="${name}"]:checked`)]
+    .map((input) => Number(input.value))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function renderFormsUserBoxes(targetId, inputName, users, selectedIds, { emailOnly = false } = {}) {
+  const box = document.querySelector(targetId);
+  if (!box) return;
+  const selected = new Set((selectedIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  const options = (users || []).filter((user) => !emailOnly || user.can_email);
+  box.innerHTML = options.length
+    ? options.map((user) => `
+      <label class="checkline contact-recipient-option">
+        <input type="checkbox" name="${escapeAttr(inputName)}" value="${escapeAttr(user.id)}" ${selected.has(Number(user.id)) ? 'checked' : ''}>
+        <span><b>${escapeHtml(user.display_name || user.username)}</b><small>${escapeHtml(user.email || user.username)}</small></span>
+      </label>
+    `).join('')
+    : `<p class="draft">${emailOnly ? 'No CMS users with email logins are available yet.' : 'No CMS users are available yet.'}</p>`;
+}
+
+function renderFormsSubmissions(submissions = []) {
+  const list = document.querySelector('#forms-submissions-list');
+  if (!list) return;
+  list.innerHTML = submissions.length
+    ? submissions.map((item) => `
+    <article class="admin-row">
+      <div>
+        <b>${escapeHtml(item.title || item.business_name || (item.kind === 'letterman-jacket' ? 'Letterman jacket order' : item.kind === 'inkind' ? 'In-kind donation' : 'Form submission'))}</b>
+        <span>${escapeHtml(item.name || '')}${item.email ? ` &lt;${escapeHtml(item.email)}&gt;` : ''}</span>
+        <small>${escapeHtml(item.kind === 'letterman-jacket' ? 'Letterman jacket' : item.kind === 'inkind' ? 'In-kind' : item.kind || 'Form')} · ${escapeHtml(item.value || '')} · ${item.delivered ? 'Emailed' : `Not emailed${item.delivery_error ? `: ${escapeHtml(item.delivery_error)}` : ''}`} · ${escapeHtml(item.created_at || '')}</small>
+      </div>
+      <div class="row-actions"><a class="btn outline" href="/api/admin/forms/submissions/${encodeURIComponent(item.id)}.pdf">Download PDF</a></div>
+    </article>
+  `).join('')
+    : '<p class="draft">No form submissions yet.</p>';
+}
+
+const FORM_BUILDER_TYPES = [
+  { type: 'heading', label: 'Heading' },
+  { type: 'text', label: 'Short Text' },
+  { type: 'textarea', label: 'Long Text' },
+  { type: 'email', label: 'Email' },
+  { type: 'phone', label: 'Phone' },
+  { type: 'number', label: 'Number' },
+  { type: 'date', label: 'Date Picker' },
+  { type: 'dropdown', label: 'Dropdown' },
+  { type: 'choice', label: 'Single Choice' },
+  { type: 'checkbox', label: 'Multiple Choice' },
+  { type: 'note', label: 'Paragraph' },
+  { type: 'pricing', label: 'Price List' },
+];
+const FORM_BUILDER_INPUTS = new Set(['text', 'textarea', 'email', 'phone', 'number', 'date', 'dropdown', 'choice', 'checkbox']);
+const MAX_FORM_BUILDER_FIELDS = 40;
+
+const formBuilderState = {
+  record: null,
+  selectedId: '',
+  users: [],
+  dirty: false,
+};
+
+function newFormBuilderFieldId(type = 'field') {
+  return `${String(type || 'field').replace(/[^a-z0-9]+/gi, '_').slice(0, 24)}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function createBuilderField(type = 'text') {
+  const meta = FORM_BUILDER_TYPES.find((item) => item.type === type) || FORM_BUILDER_TYPES[1];
+  const isInput = FORM_BUILDER_INPUTS.has(meta.type);
+  return {
+    id: newFormBuilderFieldId(meta.type),
+    type: meta.type,
+    label: meta.type === 'heading' ? 'Heading' : meta.type === 'note' ? '' : meta.label,
+    required: isInput && meta.type !== 'checkbox',
+    full: meta.type === 'heading' || meta.type === 'note' || meta.type === 'pricing' || meta.type === 'textarea' || meta.type === 'choice' || meta.type === 'checkbox',
+    optional: false,
+    placeholder: '',
+    text: meta.type === 'note' ? 'Add your text.' : '',
+    options: meta.type === 'choice' || meta.type === 'dropdown' || meta.type === 'checkbox' ? ['Option 1', 'Option 2'] : [],
+    items: meta.type === 'pricing' ? [{ label: 'Item', price: '$0.00', sizes: '' }] : [],
+    price_from: false,
+    emphasize: false,
+    italic: false,
+  };
+}
+
+function formBuilderDefinition() {
+  const record = formBuilderState.record;
+  const definition = record?.definition && typeof record.definition === 'object' ? record.definition : {};
+  if (!Array.isArray(definition.fields)) definition.fields = [];
+  return definition;
+}
+
+function selectedBuilderField() {
+  const id = formBuilderState.selectedId;
+  return formBuilderDefinition().fields.find((field) => field.id === id) || null;
+}
+
+function slugPreviewFromTitle(title) {
+  const slug = String(title || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || 'form';
+}
+
+function markFormBuilderDirty() {
+  formBuilderState.dirty = true;
+}
+
+function showFormsListView() {
+  const list = document.querySelector('#forms-list-view');
+  const builder = document.querySelector('#forms-builder-view');
+  if (list) list.hidden = false;
+  if (builder) builder.hidden = true;
+  formBuilderState.record = null;
+  formBuilderState.selectedId = '';
+  formBuilderState.dirty = false;
+}
+
+function showFormsBuilderView() {
+  const list = document.querySelector('#forms-list-view');
+  const builder = document.querySelector('#forms-builder-view');
+  if (list) list.hidden = true;
+  if (builder) {
+    builder.hidden = false;
+    builder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function renderCmsFormsList(forms = []) {
+  const list = document.querySelector('#cms-forms-list');
+  if (!list) return;
+  list.innerHTML = forms.length
+    ? forms.map((item) => `
+      <article class="admin-row">
+        <div>
+          <b>${escapeHtml(item.title || 'Untitled Form')}</b>
+          <span><a href="${escapeAttr(item.path || `/${item.slug}.html`)}" target="_blank" rel="noreferrer">${escapeHtml(item.path || `/${item.slug}.html`)}</a></span>
+          <small>Updated ${escapeHtml(item.updated_at || '')}</small>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn outline" data-edit-form="${escapeAttr(item.id)}">Edit</button>
+          <button type="button" class="btn outline" data-delete-form="${escapeAttr(item.id)}" data-form-title="${escapeAttr(item.title || '')}" data-form-path="${escapeAttr(item.path || '')}">Delete</button>
+        </div>
+      </article>
+    `).join('')
+    : '<p class="draft">No forms yet. Create one above. The title becomes the public HTML page.</p>';
+}
+
+function renderFormBuilderPalette() {
+  const palette = document.querySelector('#form-builder-palette');
+  if (!palette) return;
+  const atMax = (formBuilderDefinition().fields || []).length >= MAX_FORM_BUILDER_FIELDS;
+  palette.innerHTML = FORM_BUILDER_TYPES.map((item) => (
+    `<button type="button" class="form-builder-palette-item" data-add-field="${escapeAttr(item.type)}"${atMax ? ' disabled' : ''}>
+      <span class="form-builder-palette-mark">${escapeHtml(item.label.slice(0, 1))}</span>
+      <span>${escapeHtml(item.label)}</span>
+    </button>`
+  )).join('');
+}
+
+function formBuilderFieldPreviewHtml(field) {
+  const type = field.type || 'text';
+  const label = field.label || (type === 'note' ? '' : 'Untitled');
+  if (type === 'heading') return `<h3 class="letterman-section">${escapeHtml(label)}</h3>`;
+  if (type === 'note') {
+    const body = field.emphasize ? `<b>${escapeHtml(field.text || '')}</b>` : field.italic ? `<em>${escapeHtml(field.text || '')}</em>` : escapeHtml(field.text || '');
+    return `<p class="letterman-note">${body}</p>`;
+  }
+  if (type === 'pricing') {
+    const items = (field.items || []).map((item) => `<div><span>${escapeHtml(item.label || '')}</span><b>${escapeHtml(item.price || '')}</b></div>`).join('');
+    return `<div class="letterman-pricing">${items}</div>`;
+  }
+  if (type === 'choice' || type === 'checkbox') {
+    const inputType = type === 'checkbox' ? 'checkbox' : 'radio';
+    const options = (field.options || []).map((option) => (
+      `<label class="letterman-choice"><input type="${inputType}" disabled> ${escapeHtml(option)}</label>`
+    )).join('');
+    return `<fieldset class="letterman-choices"><legend>${escapeHtml(label)}${field.required ? ' *' : ''}</legend><div class="letterman-choice-row">${options}</div></fieldset>`;
+  }
+  if (type === 'dropdown') {
+    const options = ['<option>Select</option>', ...(field.options || []).map((option) => `<option>${escapeHtml(option)}</option>`)].join('');
+    return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<select disabled>${options}</select></label>`;
+  }
+  if (type === 'textarea') {
+    return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<textarea rows="3" disabled placeholder="${escapeAttr(field.placeholder || '')}"></textarea></label>`;
+  }
+  const inputType = type === 'date' ? 'date' : type === 'email' ? 'email' : type === 'phone' ? 'tel' : type === 'number' ? 'number' : 'text';
+  return `<label>${escapeHtml(label)}${field.required ? ' *' : ''}<input type="${inputType}" disabled placeholder="${escapeAttr(field.placeholder || '')}"></label>`;
+}
+
+function renderFormBuilderCanvas() {
+  const canvas = document.querySelector('#form-builder-canvas');
+  const definition = formBuilderDefinition();
+  const title = document.querySelector('#form-builder-title')?.value || formBuilderState.record?.title || 'Untitled Form';
+  const lockedSlug = formBuilderState.record?.slug === 'letterman-jacket';
+  const path = lockedSlug ? '/letterman-jacket.html' : `/${slugPreviewFromTitle(title)}.html`;
+  const pathHint = document.querySelector('#form-builder-path');
+  if (pathHint) pathHint.textContent = `Public page: ${path}`;
+  const kicker = document.querySelector('#form-builder-kicker-preview');
+  if (kicker) kicker.textContent = definition.kicker || 'Band Boosters';
+  const heading = document.querySelector('#form-builder-heading-preview');
+  if (heading) heading.textContent = definition.heading || 'East Forsyth Band';
+  const submit = document.querySelector('#form-builder-submit-preview');
+  if (submit) submit.textContent = definition.submit_label || 'Submit';
+  if (!canvas) return;
+  const fields = definition.fields || [];
+  canvas.innerHTML = fields.length
+    ? fields.map((field) => `
+      <article class="form-builder-field${field.id === formBuilderState.selectedId ? ' is-selected' : ''}${field.full ? ' is-full' : ''}" data-field-id="${escapeAttr(field.id)}" draggable="false">
+        <button type="button" class="drag-handle" aria-label="Drag to reorder field" title="Drag to reorder">⋮⋮</button>
+        <div class="form-builder-field-preview">${formBuilderFieldPreviewHtml(field)}</div>
+      </article>
+    `).join('')
+    : '<p class="draft">Click a field type on the left to add it to the form.</p>';
+}
+
+function renderFormBuilderProps() {
+  const box = document.querySelector('#form-builder-props');
+  if (!box) return;
+  const definition = formBuilderDefinition();
+  const field = selectedBuilderField();
+  if (!field) {
+    box.innerHTML = `
+      <p class="muted">Select a field on the form to edit it, or set the page heading below.</p>
+      <label>Kicker<input data-form-kicker maxlength="80" value="${escapeHtml(definition.kicker || '')}"></label>
+      <label>Heading<input data-form-heading maxlength="120" value="${escapeHtml(definition.heading || '')}"></label>
+      <label>Submit button<input data-form-submit maxlength="80" value="${escapeHtml(definition.submit_label || 'Submit')}"></label>
+    `;
+    return;
+  }
+  const isInput = FORM_BUILDER_INPUTS.has(field.type);
+  const showOptions = field.type === 'choice' || field.type === 'dropdown' || field.type === 'checkbox';
+  box.innerHTML = `
+    <p class="form-builder-prop-type">${escapeHtml(FORM_BUILDER_TYPES.find((item) => item.type === field.type)?.label || field.type)}</p>
+    <label${field.type === 'note' || field.type === 'pricing' ? ' hidden' : ''}>Field title
+      <input data-prop-label maxlength="120" value="${escapeHtml(field.label || '')}">
+    </label>
+    <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-prop-required${field.required ? ' checked' : ''}> Required</label>
+    <label class="checkline"${isInput ? '' : ' hidden'}><input type="checkbox" data-prop-full${field.full ? ' checked' : ''}> Full width</label>
+    <label${isInput && field.type !== 'choice' && field.type !== 'checkbox' && field.type !== 'date' ? '' : ' hidden'}>Placeholder
+      <input data-prop-placeholder maxlength="120" value="${escapeHtml(field.placeholder || '')}">
+    </label>
+    <label${showOptions ? '' : ' hidden'}>Choices <small>one per line</small>
+      <textarea data-prop-options rows="5" maxlength="400">${escapeHtml((field.options || []).join('\n'))}</textarea>
+    </label>
+    <label${field.type === 'note' ? '' : ' hidden'}>Paragraph text
+      <textarea data-prop-text rows="4" maxlength="800">${escapeHtml(field.text || '')}</textarea>
+    </label>
+    <label class="checkline"${field.type === 'note' ? '' : ' hidden'}><input type="checkbox" data-prop-emphasize${field.emphasize ? ' checked' : ''}> Bold note</label>
+    <label class="checkline"${field.type === 'note' ? '' : ' hidden'}><input type="checkbox" data-prop-italic${field.italic ? ' checked' : ''}> Italic note</label>
+    <div class="letterman-price-list"${field.type === 'pricing' ? '' : ' hidden'}>
+      ${(field.items || [{ label: '', price: '', sizes: '' }]).map((item, index) => `
+        <div class="letterman-price-edit" data-price-index="${index}">
+          <input data-price-label maxlength="80" placeholder="Price title" value="${escapeHtml(item.label || '')}">
+          <input data-price-value maxlength="40" placeholder="$0.00" value="${escapeHtml(item.price || '')}">
+          <input data-price-sizes maxlength="80" placeholder="Sizes: S, M, L" value="${escapeHtml(item.sizes || '')}">
+          <button type="button" class="btn outline" data-remove-price>Remove</button>
+        </div>
+      `).join('')}
+      <button type="button" class="btn outline" data-add-price>Add price</button>
+    </div>
+    <div class="form-builder-prop-actions">
+      <button type="button" class="btn outline" data-duplicate-field>Duplicate</button>
+      <button type="button" class="btn outline" data-remove-field>Delete field</button>
+    </div>
+  `;
+}
+
+function syncFormBuilderChrome() {
+  const record = formBuilderState.record;
+  const titleInput = document.querySelector('#form-builder-title');
+  const intro = document.querySelector('#form-builder-intro');
+  const open = document.querySelector('#form-builder-open');
+  if (titleInput && document.activeElement !== titleInput) titleInput.value = record?.title || '';
+  if (intro && document.activeElement !== intro) intro.value = record?.definition?.intro || '';
+  if (open) {
+    open.href = record?.path || '/';
+    open.hidden = !record?.path;
+  }
+  renderFormBuilderPalette();
+  renderFormBuilderCanvas();
+  renderFormBuilderProps();
+  renderFormsUserBoxes('#form-builder-recipients', 'form_recipient_user_ids', formBuilderState.users, record?.recipient_user_ids || [], { emailOnly: true });
+}
+
+function openFormBuilder(record) {
+  formBuilderState.record = {
+    ...record,
+    definition: {
+      kicker: record?.definition?.kicker || 'Band Boosters',
+      heading: record?.definition?.heading || 'East Forsyth Band',
+      title: record?.definition?.title || record?.title || 'Untitled Form',
+      intro: record?.definition?.intro || '',
+      submit_label: record?.definition?.submit_label || 'Submit',
+      fields: Array.isArray(record?.definition?.fields) ? record.definition.fields.map((field) => ({ ...field })) : [],
+    },
+    recipient_user_ids: Array.isArray(record?.recipient_user_ids) ? record.recipient_user_ids.slice() : [],
+  };
+  formBuilderState.selectedId = formBuilderState.record.definition.fields[0]?.id || '';
+  formBuilderState.dirty = false;
+  showFormsBuilderView();
+  syncFormBuilderChrome();
+}
+
+function addFormBuilderField(type) {
+  const definition = formBuilderDefinition();
+  if (definition.fields.length >= MAX_FORM_BUILDER_FIELDS) return;
+  const field = createBuilderField(type);
+  const selectedIndex = definition.fields.findIndex((item) => item.id === formBuilderState.selectedId);
+  if (selectedIndex >= 0) definition.fields.splice(selectedIndex + 1, 0, field);
+  else definition.fields.push(field);
+  formBuilderState.selectedId = field.id;
+  markFormBuilderDirty();
+  syncFormBuilderChrome();
+  document.querySelector(`[data-field-id="${CSS.escape(field.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function applyFormBuilderProp(name, value) {
+  const definition = formBuilderDefinition();
+  if (name === 'kicker' || name === 'heading' || name === 'submit_label') {
+    definition[name] = value;
+    markFormBuilderDirty();
+    renderFormBuilderCanvas();
+    return;
+  }
+  const field = selectedBuilderField();
+  if (!field) return;
+  field[name] = value;
+  markFormBuilderDirty();
+  renderFormBuilderCanvas();
+}
+
+async function loadFormBuilder(id) {
+  const status = document.querySelector('#form-builder-status');
+  if (status) status.textContent = 'Loading form…';
+  const record = await jsonFetch(`/api/admin/forms/${encodeURIComponent(id)}`);
+  openFormBuilder(record);
+  if (status) status.textContent = '';
+}
+
+async function saveFormBuilder() {
+  const record = formBuilderState.record;
+  if (!record?.id) return;
+  const status = document.querySelector('#form-builder-status');
+  const title = String(document.querySelector('#form-builder-title')?.value || record.title || '').trim();
+  if (!title) {
+    if (status) status.textContent = 'Form title is required.';
+    return;
+  }
+  const definition = formBuilderDefinition();
+  definition.title = title;
+  definition.intro = document.querySelector('#form-builder-intro')?.value || '';
+  if (status) status.textContent = 'Saving…';
+  try {
+    const saved = await jsonFetch(`/api/admin/forms/${encodeURIComponent(record.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        title,
+        definition,
+        recipient_user_ids: selectedFormsUserIds('form_recipient_user_ids', '#form-builder-recipients'),
+      }),
+    });
+    formBuilderState.dirty = false;
+    openFormBuilder(saved);
+    if (status) status.textContent = `Saved. Public page: ${saved.path}`;
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save the form.';
+  }
+}
+
+async function createCmsForm(title) {
+  const record = await jsonFetch('/api/admin/forms', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+  openFormBuilder(record);
+  const status = document.querySelector('#form-builder-status');
+  if (status) status.textContent = `Created ${record.path}. Add fields, then save.`;
+}
+
+async function deleteCmsForm(id, title, path) {
+  const label = title || 'this form';
+  if (!window.confirm(`Delete "${label}" and its public page ${path || ''}? This cannot be undone.`)) return;
+  await jsonFetch(`/api/admin/forms/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (formBuilderState.record && Number(formBuilderState.record.id) === Number(id)) showFormsListView();
+  await loadFormsPanel();
+}
+
+async function loadFormsPanel() {
+  if (!canAccessForms()) return;
+  const data = await jsonFetch('/api/admin/forms');
+  const users = data.users || [];
+  formBuilderState.users = users;
+  renderFormsUserBoxes('#forms-access-boxes', 'access_user_ids', users, data.access_user_ids || []);
+  renderFormsUserBoxes('#forms-recipient-boxes', 'recipient_user_ids', users, data.recipient_user_ids || [], { emailOnly: true });
+  renderCmsFormsList(data.forms || []);
+  renderFormsSubmissions(data.submissions || []);
+  const accessFieldset = document.querySelector('[data-forms-access-fieldset]');
+  if (accessFieldset) accessFieldset.hidden = !data.can_edit_access;
+  const status = document.querySelector('#forms-settings-status');
+  if (status) status.textContent = '';
+  if (formBuilderState.record && !document.querySelector('#forms-builder-view')?.hidden) {
+    renderFormsUserBoxes('#form-builder-recipients', 'form_recipient_user_ids', users, formBuilderState.record.recipient_user_ids || [], { emailOnly: true });
+  }
+}
+
+function bindFormsSettingsForm() {
+  const form = document.querySelector('#forms-settings-form');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#forms-settings-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+      const payload = {
+        recipient_user_ids: selectedFormsUserIds('recipient_user_ids'),
+      };
+      if (isSuperAdmin()) {
+        payload.access_user_ids = selectedFormsUserIds('access_user_ids');
+      }
+      await jsonFetch('/api/admin/forms', { method: 'PUT', body: JSON.stringify(payload) });
+      await loadFormsPanel();
+      if (status) status.textContent = 'Access and in-kind delivery settings saved.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not save form settings.';
+    }
+  });
+}
+
+function bindFormBuilder() {
+  const create = document.querySelector('#forms-create-form');
+  if (create && create.dataset.bound !== '1') {
+    create.dataset.bound = '1';
+    create.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const status = document.querySelector('#forms-create-status');
+      const title = String(create.elements.title?.value || '').trim();
+      if (status) status.textContent = 'Creating…';
+      try {
+        await createCmsForm(title);
+        create.reset();
+        if (status) status.textContent = '';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not create the form.';
+      }
+    });
+  }
+
+  const list = document.querySelector('#cms-forms-list');
+  if (list && list.dataset.bound !== '1') {
+    list.dataset.bound = '1';
+    list.addEventListener('click', async (event) => {
+      const edit = event.target.closest('[data-edit-form]');
+      if (edit) {
+        try {
+          await loadFormBuilder(edit.dataset.editForm);
+        } catch (error) {
+          alert(error.message || 'Could not open the form.');
+        }
+        return;
+      }
+      const remove = event.target.closest('[data-delete-form]');
+      if (remove) {
+        try {
+          await deleteCmsForm(remove.dataset.deleteForm, remove.dataset.formTitle, remove.dataset.formPath);
+        } catch (error) {
+          alert(error.message || 'Could not delete the form.');
+        }
+      }
+    });
+  }
+
+  const back = document.querySelector('#form-builder-back');
+  if (back && back.dataset.bound !== '1') {
+    back.dataset.bound = '1';
+    back.addEventListener('click', () => {
+      if (formBuilderState.dirty && !window.confirm('Leave without saving this form?')) return;
+      showFormsListView();
+      loadFormsPanel().catch(() => {});
+    });
+  }
+
+  const save = document.querySelector('#form-builder-save');
+  if (save && save.dataset.bound !== '1') {
+    save.dataset.bound = '1';
+    save.addEventListener('click', () => { saveFormBuilder().catch(() => {}); });
+  }
+
+  const title = document.querySelector('#form-builder-title');
+  if (title && title.dataset.bound !== '1') {
+    title.dataset.bound = '1';
+    title.addEventListener('input', () => {
+      if (!formBuilderState.record) return;
+      formBuilderState.record.title = title.value;
+      markFormBuilderDirty();
+      renderFormBuilderCanvas();
+    });
+  }
+
+  const intro = document.querySelector('#form-builder-intro');
+  if (intro && intro.dataset.bound !== '1') {
+    intro.dataset.bound = '1';
+    intro.addEventListener('input', () => {
+      if (!formBuilderState.record) return;
+      formBuilderDefinition().intro = intro.value;
+      markFormBuilderDirty();
+    });
+  }
+
+  const palette = document.querySelector('#form-builder-palette');
+  if (palette && palette.dataset.bound !== '1') {
+    palette.dataset.bound = '1';
+    palette.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-add-field]');
+      if (!button || button.disabled) return;
+      addFormBuilderField(button.dataset.addField);
+    });
+  }
+
+  const canvas = document.querySelector('#form-builder-canvas');
+  if (canvas && canvas.dataset.bound !== '1') {
+    canvas.dataset.bound = '1';
+    canvas.addEventListener('click', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      formBuilderState.selectedId = row.dataset.fieldId || '';
+      renderFormBuilderCanvas();
+      renderFormBuilderProps();
+    });
+    let dragId = null;
+    let allowRowDrag = false;
+    canvas.addEventListener('mousedown', (event) => {
+      allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+      const row = event.target.closest('.form-builder-field');
+      if (row && allowRowDrag) row.draggable = true;
+    });
+    canvas.addEventListener('touchstart', (event) => {
+      allowRowDrag = Boolean(event.target.closest('.drag-handle'));
+    }, { passive: true });
+    canvas.addEventListener('dragstart', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row || !allowRowDrag) {
+        event.preventDefault();
+        return;
+      }
+      dragId = row.dataset.fieldId;
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', dragId);
+    });
+    canvas.addEventListener('dragend', () => {
+      allowRowDrag = false;
+      dragId = null;
+      canvas.querySelectorAll('.form-builder-field').forEach((item) => {
+        item.draggable = false;
+        item.classList.remove('is-dragging', 'is-drop-target');
+      });
+    });
+    canvas.addEventListener('dragover', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (row.dataset.fieldId !== dragId) row.classList.add('is-drop-target');
+    });
+    canvas.addEventListener('dragleave', (event) => {
+      event.target.closest('.form-builder-field')?.classList.remove('is-drop-target');
+    });
+    canvas.addEventListener('drop', (event) => {
+      const row = event.target.closest('.form-builder-field');
+      if (!row) return;
+      event.preventDefault();
+      const fromId = event.dataTransfer.getData('text/plain') || dragId;
+      const toId = row.dataset.fieldId;
+      const fields = formBuilderDefinition().fields;
+      const fromIndex = fields.findIndex((item) => item.id === fromId);
+      const toIndex = fields.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+      const [moved] = fields.splice(fromIndex, 1);
+      fields.splice(toIndex, 0, moved);
+      markFormBuilderDirty();
+      renderFormBuilderCanvas();
+    });
+  }
+
+  const props = document.querySelector('#form-builder-props');
+  if (props && props.dataset.bound !== '1') {
+    props.dataset.bound = '1';
+    props.addEventListener('input', (event) => {
+      const target = event.target;
+      if (target.matches('[data-form-kicker]')) applyFormBuilderProp('kicker', target.value);
+      else if (target.matches('[data-form-heading]')) applyFormBuilderProp('heading', target.value);
+      else if (target.matches('[data-form-submit]')) applyFormBuilderProp('submit_label', target.value);
+      else if (target.matches('[data-prop-label]')) applyFormBuilderProp('label', target.value);
+      else if (target.matches('[data-prop-placeholder]')) applyFormBuilderProp('placeholder', target.value);
+      else if (target.matches('[data-prop-text]')) applyFormBuilderProp('text', target.value);
+      else if (target.matches('[data-prop-options]')) {
+        applyFormBuilderProp('options', String(target.value || '').split(/\n+/).map((item) => item.trim()).filter(Boolean));
+      } else if (target.matches('[data-price-label], [data-price-value], [data-price-sizes]')) {
+        const field = selectedBuilderField();
+        if (!field || field.type !== 'pricing') return;
+        field.items = [...props.querySelectorAll('.letterman-price-edit')].map((row) => ({
+          label: row.querySelector('[data-price-label]')?.value || '',
+          price: row.querySelector('[data-price-value]')?.value || '',
+          sizes: row.querySelector('[data-price-sizes]')?.value || '',
+        }));
+        markFormBuilderDirty();
+        renderFormBuilderCanvas();
+      }
+    });
+    props.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target.matches('[data-prop-required]')) applyFormBuilderProp('required', target.checked);
+      else if (target.matches('[data-prop-full]')) applyFormBuilderProp('full', target.checked);
+      else if (target.matches('[data-prop-emphasize]')) applyFormBuilderProp('emphasize', target.checked);
+      else if (target.matches('[data-prop-italic]')) applyFormBuilderProp('italic', target.checked);
+    });
+    props.addEventListener('click', (event) => {
+      if (event.target.closest('[data-add-price]')) {
+        const field = selectedBuilderField();
+        if (!field || field.type !== 'pricing') return;
+        field.items = [...(field.items || []), { label: '', price: '', sizes: '' }];
+        markFormBuilderDirty();
+        renderFormBuilderProps();
+        renderFormBuilderCanvas();
+        return;
+      }
+      if (event.target.closest('[data-remove-price]')) {
+        const field = selectedBuilderField();
+        const row = event.target.closest('.letterman-price-edit');
+        if (!field || !row) return;
+        const index = Number(row.dataset.priceIndex);
+        field.items = (field.items || []).filter((_, itemIndex) => itemIndex !== index);
+        markFormBuilderDirty();
+        renderFormBuilderProps();
+        renderFormBuilderCanvas();
+        return;
+      }
+      if (event.target.closest('[data-duplicate-field]')) {
+        const field = selectedBuilderField();
+        if (!field) return;
+        const copy = { ...field, id: newFormBuilderFieldId(field.type), options: [...(field.options || [])], items: (field.items || []).map((item) => ({ ...item })) };
+        const fields = formBuilderDefinition().fields;
+        const index = fields.findIndex((item) => item.id === field.id);
+        fields.splice(index + 1, 0, copy);
+        formBuilderState.selectedId = copy.id;
+        markFormBuilderDirty();
+        syncFormBuilderChrome();
+        return;
+      }
+      if (event.target.closest('[data-remove-field]')) {
+        const field = selectedBuilderField();
+        if (!field) return;
+        const fields = formBuilderDefinition();
+        fields.fields = fields.fields.filter((item) => item.id !== field.id);
+        formBuilderState.selectedId = fields.fields[0]?.id || '';
+        markFormBuilderDirty();
+        syncFormBuilderChrome();
+      }
+    });
+  }
 }
 
 async function loadContactDeliveryStatus() {
@@ -5994,6 +7524,8 @@ function bindPasswordControls() {
 
 function bindForms() {
   bindPasswordControls();
+  bindFormsSettingsForm();
+  bindFormBuilder();
 
   document.querySelector('#site-form')?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -6576,6 +8108,11 @@ function bindForms() {
       return;
     }
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
+    const editingSelf = Number(id) === Number(state.me?.user?.id);
+    if (editingSelf && !isSuperAdmin()) {
+      payload.role = state.me.user.role;
+      payload.permissions = Array.isArray(state.me.user.permissions) ? [...state.me.user.permissions] : [];
+    }
     delete payload.id;
     if (!payload.password) delete payload.password;
     status.textContent = 'Saving…';
@@ -6602,7 +8139,12 @@ function bindForms() {
     const form = document.querySelector('#user-form');
     form.reset();
     form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    form.querySelectorAll('input[name="permissions"]').forEach(input => {
+      input.checked = false;
+      input.disabled = false;
+    });
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = false;
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
@@ -6926,6 +8468,11 @@ function bindForms() {
     }
   });
 }
+
+window.jsonFetch = jsonFetch;
+window.prepareImageFileForUpload = prepareImageFileForUpload;
+window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
+window.canAccessBadgeCreator = canAccessBadgeCreator;
 
 bindFormRichEditors();
 bindPageVisualEditor();

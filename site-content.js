@@ -135,6 +135,20 @@ function paragraphsFromText(value) {
     .join('') || (String(value || '').trim() ? `<p>${escapeHtml(decodeBasicHtmlEntities(String(value).trim()))}</p>` : '');
 }
 
+function formatHeaderBrandTitle(value) {
+  const plain = String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = plain.match(/^(East Forsyth)\s+(.+)$/i);
+  if (!match) return formatInlineRichText(value);
+  return `<small>${escapeHtml(match[1])}</small><span class="brand-title-rest">${escapeHtml(match[2])}</span>`;
+}
+
 function formatInlineRichText(value, fallback = '') {
   const raw = String(value ?? '');
   const source = raw.trim() ? raw : String(fallback || '');
@@ -154,6 +168,65 @@ function formatRichText(value, fallback = '') {
 function isHomePage() {
   const path = (location.pathname || '/').replace(/\/+$/, '') || '/';
   return path === '/' || path.endsWith('/index.html') || /(^|\/)index\.html$/i.test(path);
+}
+
+const SPONSOR_MARQUEE_FILES = new Set([
+  'calendar.html',
+  'fundraising.html',
+  'sponsors.html',
+  'coming-soon.html',
+  'join.html',
+  'volunteer.html',
+]);
+
+function publicPathShowsSponsorMarquee(pathname = '') {
+  const path = String(pathname || '/').replace(/\/+$/, '') || '/';
+  if (path === '/' || /(?:^|\/)index\.html$/i.test(path)) return true;
+  const file = path.split('/').pop() || '';
+  return SPONSOR_MARQUEE_FILES.has(file);
+}
+
+function sponsorMarqueeEnabled() {
+  if (document.body?.classList.contains('admin-body')) return false;
+  if (document.body?.classList.contains('maintenance-body')) return false;
+  if (document.querySelector('.cms-shell')) return false;
+  const flag = document.body?.dataset?.sponsorMarquee;
+  if (flag === 'off') return false;
+  if (flag === 'on') return true;
+  return publicPathShowsSponsorMarquee(location.pathname || '/');
+}
+
+const MARQUEE_SLOT_SELECTOR = 'section.sponsor-marquee-section[data-sponsor-marquee], [data-sponsor-marquee]:not(html):not(body)';
+
+function isPageRootNode(node) {
+  return Boolean(node) && (node === document.body || node === document.documentElement);
+}
+
+function querySponsorMarqueeSlots(root = document) {
+  const nodes = [];
+  if (!root) return nodes;
+  if (typeof root.querySelectorAll !== 'function') return nodes;
+  root.querySelectorAll(MARQUEE_SLOT_SELECTOR).forEach((node) => {
+    if (!node || isPageRootNode(node)) return;
+    if (typeof node.contains === 'function' && node.contains(document.body)) return;
+    nodes.push(node);
+  });
+  return nodes;
+}
+
+function querySponsorMarqueeSlot(root = document) {
+  return querySponsorMarqueeSlots(root)[0] || null;
+}
+
+function removeSponsorMarquee() {
+  querySponsorMarqueeSlots().forEach((node) => node.remove());
+}
+
+function canPlaceInSiteChrome(parent, child) {
+  if (!parent || !child || parent === child) return false;
+  if (isPageRootNode(child) || isPageRootNode(parent)) return false;
+  if (typeof child.contains === 'function' && child.contains(parent)) return false;
+  return child.parentElement !== parent;
 }
 
 function pickRandomSponsor(sponsors) {
@@ -181,6 +254,7 @@ function resolveSponsorTierKey(sponsor = {}) {
   if (/\bgold\b/.test(raw)) return 'gold';
   if (/\bsilver\b/.test(raw)) return 'silver';
   if (/\bbronze\b/.test(raw)) return 'bronze';
+  if (/\bhonorable(?:[\s_-]+mention)?\b/.test(raw)) return 'honorable';
   return '';
 }
 
@@ -233,20 +307,18 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
 }
 
 function sponsorShowsFlyin(sponsor = {}) {
-  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_flyin === true || sponsor.show_flyin === 1) return true;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
   return /\b(silver|gold)\b/.test(tier) || Number(sponsor.homepage_ad) === 1;
 }
 
 function sponsorShowsMarquee(sponsor = {}) {
-  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_marquee === false || sponsor.show_marquee === 0) return false;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
-  return /\b(bronze|silver|gold)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
+  return /\b(bronze|silver|gold|honorable)\b/.test(tier) || sponsor.show_marquee === true || sponsor.show_marquee === 1;
 }
 
-const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v2';
+const MARQUEE_CACHE_KEY = 'efhs-sponsor-marquee-v4';
 
 function readMarqueeCache() {
   try {
@@ -266,8 +338,19 @@ function writeMarqueeCache(sponsors = []) {
   }
 }
 
+function paidSponsorsFirst(sponsors = []) {
+  const list = Array.isArray(sponsors) ? sponsors : [];
+  const paid = [];
+  const mention = [];
+  for (const sponsor of list) {
+    if (resolveSponsorTierKey(sponsor) === 'honorable') mention.push(sponsor);
+    else paid.push(sponsor);
+  }
+  return [...paid, ...mention];
+}
+
 function buildSponsorMarqueeMarkup(sponsors = []) {
-  const items = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee);
+  const items = paidSponsorsFirst((Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsMarquee));
   if (!items.length) return '';
   const logos = items.map((sponsor) => {
     const tier = resolveSponsorTierKey(sponsor);
@@ -287,12 +370,143 @@ function buildSponsorMarqueeMarkup(sponsors = []) {
   `;
 }
 
+function readPublicBootstrap() {
+  if (Object.prototype.hasOwnProperty.call(readPublicBootstrap, 'value')) return readPublicBootstrap.value;
+  const node = document.getElementById('efhs-public-read');
+  if (!node) {
+    readPublicBootstrap.value = null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(node.textContent || 'null');
+    readPublicBootstrap.value = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    readPublicBootstrap.value = null;
+  }
+  return readPublicBootstrap.value;
+}
+
+const SQUARE_SDK_TIMEOUT_MS = 15000;
+
+function squareSdkSrc(environment = 'production') {
+  return environment === 'sandbox'
+    ? 'https://sandbox.web.squarecdn.com/v1/square.js'
+    : 'https://web.squarecdn.com/v1/square.js';
+}
+
+function readSquarePublishableConfig() {
+  const square = readPublicBootstrap()?.square;
+  if (!square || typeof square !== 'object') return null;
+  const application_id = String(square.application_id || '').trim();
+  const location_id = String(square.location_id || '').trim();
+  if (!application_id && !location_id) return null;
+  return {
+    application_id,
+    location_id,
+    environment: square.environment === 'sandbox' ? 'sandbox' : 'production',
+    web_payments: Boolean(square.web_payments || (application_id && location_id)),
+  };
+}
+
+async function fetchSquarePublishableConfig() {
+  const boot = readSquarePublishableConfig();
+  if (boot?.application_id && boot?.location_id) {
+    return { ...boot, web_payments: true };
+  }
+  const config = await fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+  if (!config || typeof config !== 'object') return boot;
+  const application_id = String(config.application_id || boot?.application_id || '').trim();
+  const location_id = String(config.location_id || boot?.location_id || '').trim();
+  return {
+    application_id,
+    location_id,
+    environment: config.environment === 'sandbox' || boot?.environment === 'sandbox' ? 'sandbox' : 'production',
+    web_payments: Boolean(config.web_payments || (application_id && location_id)),
+    mock_enabled: Boolean(config.mock_enabled),
+    detail: config.detail || '',
+  };
+}
+
+function loadSquareWebSdk(environment = 'production') {
+  if (typeof window !== 'undefined' && window.Square) return Promise.resolve(window.Square);
+  const existing = typeof document !== 'undefined'
+    ? document.querySelector('script[data-square-web-sdk]')
+    : null;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, sdk) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(sdk);
+    };
+    const waitForSquare = (script) => {
+      if (window.Square) {
+        finish(null, window.Square);
+        return;
+      }
+      const started = Date.now();
+      const timer = window.setInterval(() => {
+        if (window.Square) {
+          window.clearInterval(timer);
+          finish(null, window.Square);
+        } else if (Date.now() - started > SQUARE_SDK_TIMEOUT_MS) {
+          window.clearInterval(timer);
+          finish(new Error('Square.js failed to load'));
+        }
+      }, 50);
+      script?.addEventListener('error', () => {
+        window.clearInterval(timer);
+        finish(new Error('Could not load Square payment form'));
+      });
+    };
+    if (existing) {
+      waitForSquare(existing);
+      return;
+    }
+    if (typeof document === 'undefined' || !document.head) {
+      finish(new Error('Could not load Square payment form'));
+      return;
+    }
+    const script = document.createElement('script');
+    script.dataset.squareWebSdk = '1';
+    script.src = squareSdkSrc(environment);
+    script.onload = () => waitForSquare(script);
+    script.onerror = () => finish(new Error('Could not load Square payment form'));
+    document.head.appendChild(script);
+  });
+}
+
+function prefetchSquareWebSdk(environment = 'production') {
+  loadSquareWebSdk(environment).catch(() => {});
+}
+
+async function attachSquareCard(config, hostSelector) {
+  const applicationId = String(config?.application_id || '').trim();
+  const locationId = String(config?.location_id || '').trim();
+  if (!applicationId || !locationId) {
+    throw new Error('Square card form is not configured.');
+  }
+  const Square = await loadSquareWebSdk(config.environment || 'production');
+  const payments = Square.payments(applicationId, locationId);
+  const card = await payments.card();
+  await card.attach(hostSelector);
+  return card;
+}
+
 async function maybeShowHomepageSponsorAd() {
   if (!isHomePage()) return;
   try {
+    const bootstrap = readPublicBootstrap();
     const [sponsors, site] = await Promise.all([
-      fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
-      fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
+      Array.isArray(bootstrap?.sponsors)
+        ? bootstrap.sponsors
+        : fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : [])),
+      bootstrap?.site
+        ? bootstrap.site
+        : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
     ]);
     const eligible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsFlyin);
     if (!eligible.length) return;
@@ -316,27 +530,43 @@ function ensurePublicBrandMark() {
   });
 }
 
-function ensureSiteChrome(header, mount) {
-  if (!header) return null;
+function ensureSiteChrome(header, marquee, deadlineMount) {
+  if (!header || isPageRootNode(header)) return null;
   let chrome = document.querySelector('[data-site-chrome]');
+  if (chrome && (isPageRootNode(chrome) || chrome === header || chrome.contains(document.body))) {
+    chrome = null;
+  }
   if (!chrome) {
     chrome = document.createElement('div');
     chrome.className = 'site-chrome';
     chrome.setAttribute('data-site-chrome', '');
     header.parentNode?.insertBefore(chrome, header);
   }
-  if (header.parentElement !== chrome) chrome.appendChild(header);
-  if (mount && mount.parentElement !== chrome) chrome.appendChild(mount);
-  // Keep header above the marquee inside the sticky chrome.
-  if (mount && mount.previousElementSibling !== header) chrome.appendChild(mount);
+  if (canPlaceInSiteChrome(chrome, header)) chrome.appendChild(header);
+  if (canPlaceInSiteChrome(chrome, marquee)) chrome.appendChild(marquee);
+  if (canPlaceInSiteChrome(chrome, deadlineMount)) chrome.appendChild(deadlineMount);
+  if (marquee && !isPageRootNode(marquee) && marquee.previousElementSibling !== header) {
+    header.after(marquee);
+  }
+  if (deadlineMount && !isPageRootNode(deadlineMount) && marquee && !isPageRootNode(marquee)
+    && deadlineMount.previousElementSibling !== marquee) {
+    marquee.after(deadlineMount);
+  } else if (deadlineMount && !isPageRootNode(deadlineMount) && (!marquee || isPageRootNode(marquee))
+    && deadlineMount.previousElementSibling !== header) {
+    header.after(deadlineMount);
+  }
   return chrome;
 }
 
 function ensureSponsorMarqueeMount() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return null;
+  }
   const header = document.querySelector('header.site-header');
-  if (!header) return document.querySelector('[data-sponsor-marquee]') || null;
+  if (!header) return querySponsorMarqueeSlot();
 
-  let mount = document.querySelector('[data-sponsor-marquee]');
+  let mount = querySponsorMarqueeSlot();
   if (!mount) {
     mount = document.createElement('section');
     mount.className = 'sponsor-marquee-section';
@@ -344,14 +574,18 @@ function ensureSponsorMarqueeMount() {
     mount.setAttribute('aria-label', 'Sponsor marquee');
     mount.hidden = true;
   }
-  ensureSiteChrome(header, mount);
-  document.querySelectorAll('[data-sponsor-marquee]').forEach((node) => {
+  ensureSiteChrome(header, mount, document.querySelector('[data-site-deadline-banners]'));
+  querySponsorMarqueeSlots().forEach((node) => {
     if (node !== mount) node.remove();
   });
   return mount;
 }
 
 function renderSponsorMarquee(sponsors = []) {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   const mount = ensureSponsorMarqueeMount();
   if (!mount) return;
   const markup = buildSponsorMarqueeMarkup(sponsors);
@@ -375,6 +609,10 @@ function renderSponsorMarquee(sponsors = []) {
 }
 
 function hydrateMarqueeFromCache() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   const mount = ensureSponsorMarqueeMount();
   if (mount && !mount.hidden && mount.querySelector('.sponsor-marquee-track')) {
     mount.dataset.marqueeReady = '1';
@@ -385,13 +623,91 @@ function hydrateMarqueeFromCache() {
 }
 
 async function loadSponsorMarquee() {
+  if (!sponsorMarqueeEnabled()) {
+    removeSponsorMarquee();
+    return;
+  }
   try {
-    const sponsors = await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
+    const bootstrap = readPublicBootstrap();
+    const sponsors = Array.isArray(bootstrap?.sponsors)
+      ? bootstrap.sponsors
+      : await fetch('/api/sponsors', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : []));
     const list = Array.isArray(sponsors) ? sponsors : [];
     writeMarqueeCache(list);
     renderSponsorMarquee(list);
   } catch {
     // Keep any already-visible SSR/cache marquee in place.
+  }
+}
+
+function isPublicSiteDeadlineContext() {
+  if (document.body?.classList.contains('admin-body')) return false;
+  if (document.querySelector('.cms-shell')) return false;
+  return !isCmsAdminPreviewContext();
+}
+
+function safeDeadlineBannerHref(value) {
+  const href = String(value || '').trim();
+  if (!href || /^(javascript:|data:|vbscript:)/i.test(href)) return '/calendar.html';
+  if (/^https?:\/\//i.test(href) || href.startsWith('/') || /^mailto:/i.test(href)) return href;
+  return '/calendar.html';
+}
+
+function ensureSiteDeadlineBannersMount() {
+  if (!isPublicSiteDeadlineContext()) return document.querySelector('[data-site-deadline-banners]') || null;
+  const header = document.querySelector('header.site-header');
+  const marquee = sponsorMarqueeEnabled()
+    ? (querySponsorMarqueeSlot() || ensureSponsorMarqueeMount())
+    : null;
+  if (!sponsorMarqueeEnabled()) removeSponsorMarquee();
+  let mount = document.querySelector('[data-site-deadline-banners]');
+  if (!mount) {
+    mount = document.createElement('div');
+    mount.className = 'site-deadline-banners';
+    mount.setAttribute('data-site-deadline-banners', '');
+    mount.hidden = true;
+  }
+  if (header) ensureSiteChrome(header, marquee, mount);
+  else if (marquee && mount.previousElementSibling !== marquee) marquee.after(mount);
+  document.querySelectorAll('[data-site-deadline-banners]').forEach((node) => {
+    if (node !== mount) node.remove();
+  });
+  return mount;
+}
+
+function renderSiteDeadlineBanners(items = []) {
+  const mount = ensureSiteDeadlineBannersMount();
+  if (!mount) return;
+  const banners = (Array.isArray(items) ? items : []).map((item) => {
+    const text = String(item?.text || '').trim();
+    if (!text) return '';
+    const href = safeDeadlineBannerHref(item.href);
+    const cta = String(item?.cta || 'View details').trim() || 'View details';
+    return `<div class="caldev-deadline-banner" role="status">${escapeHtml(text)} <a href="${escapeHtml(href)}">${escapeHtml(cta)}</a></div>`;
+  }).filter(Boolean);
+  if (!banners.length) {
+    mount.hidden = true;
+    mount.innerHTML = '';
+    return;
+  }
+  mount.hidden = false;
+  mount.innerHTML = banners.join('');
+}
+
+async function loadSiteDeadlineBanners() {
+  if (!isPublicSiteDeadlineContext()) return;
+  ensureSiteDeadlineBannersMount();
+  const bootstrap = readPublicBootstrap();
+  if (Array.isArray(bootstrap?.deadlineBanners)) {
+    renderSiteDeadlineBanners(bootstrap.deadlineBanners);
+    return;
+  }
+  try {
+    const items = await fetch('/api/caldev/deadline-banners', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : []));
+    renderSiteDeadlineBanners(Array.isArray(items) ? items : []);
+  } catch {
+    // Keep any server-rendered banners in place.
   }
 }
 
@@ -744,16 +1060,67 @@ function initMonthCalendars(allEvents) {
   });
 }
 
+function highlightEventFromCaldev(event) {
+  if (!event || typeof event !== 'object') {
+    return { date_label: '', date_detail: '', title: '', description: '' };
+  }
+  if (event.date_label && event.date_detail) return event;
+  const iso = String(event.start_date || '').trim();
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return {
+      ...event,
+      date_label: String(event.date_label || ''),
+      date_detail: String(event.date_detail || ''),
+    };
+  }
+  const monthIndex = Number(match[2]) - 1;
+  return {
+    ...event,
+    date_label: MONTH_CALENDAR_LABELS[monthIndex] || '',
+    date_detail: match[3],
+    event_year: Number(match[1]),
+  };
+}
+
 async function loadPublicContent() {
   // Start marquee immediately so it does not wait on site/events/photos.
-  const marqueePromise = loadSponsorMarquee();
+  const marqueePromise = sponsorMarqueeEnabled() ? loadSponsorMarquee() : Promise.resolve(removeSponsorMarquee());
+  const deadlinePromise = loadSiteDeadlineBanners();
+  ensureBoosterMeetingsContainers();
+  const highlightNodes = [...document.querySelectorAll('[data-events]')];
+  const needsHighlights = highlightNodes.length > 0;
+  const needsBoosterMeetings = Boolean(document.querySelector('[data-booster-meetings]'));
   const needsMonthCalendar = Boolean(document.querySelector('[data-month-calendar]'));
-  const [site, events, photos, calendarEvents] = await Promise.all([
-    fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
-    fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
-    fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+  const needsLegacyEvents = needsBoosterMeetings || needsMonthCalendar;
+  const highlightLimit = highlightNodes.reduce((max, node) => {
+    const raw = node.dataset.limit;
+    if (raw === undefined || raw === '') return Math.max(max, 3);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.max(max, n) : max;
+  }, 0) || 3;
+  const bootstrap = readPublicBootstrap();
+  const [site, events, photos, calendarEvents, highlightEvents] = await Promise.all([
+    bootstrap?.site
+      ? bootstrap.site
+      : fetch('/api/site', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+    needsLegacyEvents
+      ? fetch('/api/events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
+    Array.isArray(bootstrap?.photos)
+      ? bootstrap.photos
+      : (
+        document.querySelector('[data-photo-gallery], .photo-gallery, [data-home-gallery]')
+          ? fetch('/api/photos', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+          : []
+      ),
     needsMonthCalendar
       ? fetch('/api/calendar-events', { cache: 'no-store' }).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
+    needsHighlights
+      ? fetch(`/api/caldev/events?upcoming=1&limit=${Math.min(highlightLimit, 12)}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .catch(() => [])
       : Promise.resolve([]),
   ]);
 
@@ -762,8 +1129,14 @@ async function loadPublicContent() {
       const key = element.dataset.siteField;
       const value = site[key];
       if (!value) return;
+      if (key === 'title' && element.closest('a.brand')) {
+        element.innerHTML = formatHeaderBrandTitle(value);
+        return;
+      }
       if (key === 'hero_title' || key === 'title') {
-        element.innerHTML = formatInlineRichText(value);
+        element.innerHTML = key === 'hero_title' && element.closest('.home-redesign')
+          ? formatHomeHeroTitle(value)
+          : formatInlineRichText(value);
         return;
       }
       if (key === 'hero_subtitle' || key === 'footer_note') {
@@ -795,10 +1168,11 @@ async function loadPublicContent() {
 
   document.querySelectorAll('[data-events]').forEach(container => {
     const rawLimit = container.dataset.limit;
+    const source = Array.isArray(highlightEvents) ? highlightEvents : [];
     const limit = rawLimit === undefined || rawLimit === ''
-      ? events.length
+      ? source.length
       : Math.max(0, Number(rawLimit) || 0);
-    const visibleEvents = events.slice(0, limit || events.length);
+    const visibleEvents = source.slice(0, limit || source.length).map(highlightEventFromCaldev);
     if (!visibleEvents.length) {
       container.innerHTML = '<p class="draft">No upcoming events have been published yet.</p>';
       return;
@@ -813,7 +1187,6 @@ async function loadPublicContent() {
 
   if (needsMonthCalendar) initMonthCalendars(calendarEvents);
 
-  ensureBoosterMeetingsContainers();
   const boosterMeetings = (Array.isArray(events) ? events : []).filter((event) => (
     Number(event.show_on_boosters) === 1
     && Number(event.repeat_enabled) !== 1
@@ -836,13 +1209,18 @@ async function loadPublicContent() {
     renderPhotoGallery(container, photos);
   });
   bindPhotoGalleries();
+  applyPublicThemePhotos(photos);
 
   bindSponsorMapCards();
   bindSponsorTierSignup();
   bindDonateButtons();
   bindDuesButtons();
+  bindSponsorChoiceButtons();
+  bindInKindForm();
+  bindLettermanForm();
+  bindCmsForms();
   maybeAutoOpenDonate();
-  await Promise.all([marqueePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
+  await Promise.all([marqueePromise, deadlinePromise, maybeShowHomepageSponsorAd(), loadContactForms()]);
 }
 
 function shouldAutoOpenDonate() {
@@ -900,6 +1278,42 @@ function isBrandGalleryPlaceholder(src = '') {
   return /efhs-photo-[12]\.png|efhs-logo\.png|efhs-blue-regiment-mark\.png|efhs-admin-mark\.png/.test(value);
 }
 
+function safePublicThemePhotoUrl(url = '') {
+  const value = String(url || '').trim();
+  if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
+  if (/["');\s<>\\]/.test(value)) return '';
+  return value;
+}
+
+function applyPublicThemePhotos(photos = []) {
+  if (!document.body?.classList.contains('efhs-theme')) return;
+  // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
+  const homeHero = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
+  const root = document.documentElement;
+  root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
+  const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
+  if (currentPage && currentPage !== 'none') return;
+  const list = Array.isArray(photos) ? photos : [];
+  const urls = list.map((photo) => safePublicThemePhotoUrl(photo?.url)).filter(Boolean);
+  if (!urls.length) return;
+  const at = (index) => urls[index % urls.length];
+  root.style.setProperty('--efhs-page-photo', `url("${at(0)}")`);
+  root.style.setProperty('--efhs-card-photo-1', `url("${at(0)}")`);
+  root.style.setProperty('--efhs-card-photo-2', `url("${at(1)}")`);
+  root.style.setProperty('--efhs-card-photo-3', `url("${at(2)}")`);
+}
+
+function formatHomeHeroTitle(value) {
+  const html = formatInlineRichText(value);
+  if (/<span\b/i.test(html)) return html;
+  const plain = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const parts = plain.split(/\.\s+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return html;
+  const last = parts.pop().replace(/\.$/, '');
+  const lead = `${parts.join('. ')}.`;
+  return `<span>${lead}</span> ${last}.`;
+}
+
 function renderPhotoGallery(container, photos = []) {
   if (!container) return;
   // Drop brand/logo placeholders immediately so they never flash on Gallery.
@@ -917,6 +1331,7 @@ function renderPhotoGallery(container, photos = []) {
     list = list.slice(0, limit);
   }
   if (!list.length) {
+    if (container.dataset.keepFallback === '1' && container.querySelector('img')) return;
     container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }
@@ -991,9 +1406,22 @@ function bindPhotoGalleries(root = document) {
       }
     });
     document.addEventListener('contextmenu', (event) => {
-      if (event.target?.closest?.('.gallery-item, .photo-lightbox')) {
+      if (event.target?.closest?.('.gallery-item, .photo-lightbox, [data-photo-open]')) {
         event.preventDefault();
       }
+    });
+    document.addEventListener('click', (event) => {
+      const trigger = event.target.closest?.('[data-photo-open]');
+      if (!trigger || trigger.closest('[data-photo-gallery]')) return;
+      const img = trigger.matches('img') ? trigger : trigger.querySelector('img');
+      const src = trigger.getAttribute('data-photo-src') || img?.currentSrc || img?.src;
+      if (!src) return;
+      event.preventDefault();
+      openPhotoLightbox({
+        src,
+        alt: img?.alt || trigger.getAttribute('aria-label') || '',
+        caption: trigger.getAttribute('data-photo-caption') || trigger.getAttribute('aria-label') || img?.alt || '',
+      });
     });
   }
   root.querySelectorAll('[data-photo-gallery]').forEach((container) => {
@@ -1017,9 +1445,17 @@ function bindPhotoGalleries(root = document) {
   protectPhotoMedia(root);
 }
 
+function isDefaultContactTopicLabel(label) {
+  return /^general\s+questions?$/i.test(String(label || '').trim());
+}
+
 function buildContactFormHtml(topics = []) {
+  const selectedId = (Array.isArray(topics) ? topics : []).find((topic) => isDefaultContactTopicLabel(topic?.label))?.id;
   const options = topics.length
-    ? topics.map((topic) => `<option value="${escapeHtml(topic.id)}">${escapeHtml(topic.label)}</option>`).join('')
+    ? topics.map((topic) => {
+      const selected = selectedId != null && Number(topic.id) === Number(selectedId) ? ' selected' : '';
+      return `<option value="${escapeHtml(topic.id)}"${selected}>${escapeHtml(topic.label)}</option>`;
+    }).join('')
     : '<option value="" disabled selected>Contact topics coming soon</option>';
   const disabled = topics.length ? '' : ' disabled';
   return `
@@ -1114,10 +1550,12 @@ function readTierPackageFromCard(card) {
   const title = (card.querySelector('[data-cms-field$="_title"], h3')?.textContent || `${tier} Sponsor`)
     .replace(/\s+/g, ' ')
     .trim();
-  const amountText = (card.querySelector('[data-cms-field$="_amount"], .sponsor-tier-amount')?.textContent || '')
+  const amountAttr = Number(card.dataset?.amountCents || card.getAttribute?.('data-amount-cents') || 0);
+  const amountNode = card.querySelector('[data-cms-field$="_amount"], .sponsor-tier-amount, [data-amount]');
+  const amountText = (amountNode?.textContent || String(card.textContent || '').match(/\$\s*[\d,]+(?:\.\d{2})?/)?.[0] || '')
     .replace(/\s+/g, ' ')
     .trim();
-  const amountCents = parseSponsorAmountCents(amountText);
+  const amountCents = amountAttr > 0 ? Math.round(amountAttr) : parseSponsorAmountCents(amountText);
   if (!amountCents) return null;
   return {
     tier,
@@ -1176,6 +1614,7 @@ function openSponsorSignupModal(pkg) {
   closeDuesModal({ immediate: true });
   closeSponsorSignupModal({ immediate: true });
   sponsorSignupState = { ...pkg, draft: null, application: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal';
@@ -1424,21 +1863,6 @@ function openSponsorSignupModal(pkg) {
     loadSponsorMarquee();
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(application, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -1465,10 +1889,14 @@ function openSponsorSignupModal(pkg) {
       payContinue.disabled = true;
       payContinue.textContent = `Pay ${pkg.amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#sponsor-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#sponsor-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -1664,21 +2092,25 @@ function openSponsorSignupModal(pkg) {
     try {
       const [result, config] = await Promise.all([
         ensureApplication(),
-        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
-          .then((response) => (response.ok ? response.json() : null))
-          .catch(() => null),
+        fetchSquarePublishableConfig(),
       ]);
       if (config?.web_payments) {
         await embedCardCheckout(result, config);
         return;
       }
-      if (statusEl) {
+      const live = modal.querySelector('[data-pay-status]');
+      if (live) {
+        live.textContent = result.detail
+          || 'Application saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      } else if (statusEl) {
         statusEl.textContent = result.detail
           || 'Application saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
       }
       if (payButton) payButton.disabled = false;
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
+      const live = modal.querySelector('[data-pay-status]');
+      if (live) live.textContent = error.message || 'Could not continue to payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
       if (payButton) payButton.disabled = false;
     }
   }
@@ -1691,25 +2123,39 @@ function openSponsorSignupModal(pkg) {
   form?.querySelector('input[name="business_name"]')?.focus();
 }
 
+let sponsorTierSignupDelegated = false;
+
+function sponsorTierCardFromEvent(event) {
+  const target = event?.target;
+  if (!target?.closest) return null;
+  const card = target.closest('.sponsor-tier[data-tier], .sponsor-tiers [data-tier].sponsor-tier');
+  if (!card) return null;
+  if (card.closest('#page-preview, .cms-shell, .admin-body')) return null;
+  return card;
+}
+
 function bindSponsorTierSignup(root = document) {
   if (isCmsAdminPreviewContext(root)) return;
   root.querySelectorAll('.sponsor-tiers [data-tier].sponsor-tier, .sponsor-tier[data-tier]').forEach((card) => {
-    if (card.dataset.signupBound === '1') return;
     if (card.closest('#page-preview, .cms-shell, .admin-body')) return;
-    card.dataset.signupBound = '1';
     card.classList.add('sponsor-tier-clickable');
     if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '0');
     if (!card.getAttribute('role')) card.setAttribute('role', 'button');
-    const open = (event) => {
-      event.preventDefault();
-      const pkg = readTierPackageFromCard(card);
-      if (!pkg) return;
-      openSponsorSignupModal(pkg);
-    };
-    card.addEventListener('click', open);
-    card.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') open(event);
-    });
+  });
+  if (sponsorTierSignupDelegated) return;
+  sponsorTierSignupDelegated = true;
+  const openFromEvent = (event) => {
+    const card = sponsorTierCardFromEvent(event);
+    if (!card) return;
+    const pkg = readTierPackageFromCard(card);
+    if (!pkg) return;
+    event.preventDefault();
+    openSponsorSignupModal(pkg);
+  };
+  document.addEventListener('click', openFromEvent);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    openFromEvent(event);
   });
 }
 
@@ -1777,6 +2223,7 @@ function openDonateModal() {
   closeDonateModal({ immediate: true });
   closeDuesModal({ immediate: true });
   donateModalState = { draft: null, donation: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal donate-modal';
@@ -1860,21 +2307,6 @@ function openDonateModal() {
     }, 4200);
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(donation, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -1900,10 +2332,14 @@ function openDonateModal() {
       payContinue.disabled = true;
       payContinue.textContent = `Donate ${amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#donate-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#donate-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -2056,9 +2492,7 @@ function openDonateModal() {
     try {
       const [result, config] = await Promise.all([
         ensureDonation(),
-        fetch('/api/sponsor-checkout/config', { cache: 'no-store' })
-          .then((response) => (response.ok ? response.json() : null))
-          .catch(() => null),
+        fetchSquarePublishableConfig(),
       ]);
       if (config?.web_payments) {
         await embedCardCheckout(result, config);
@@ -2074,13 +2508,19 @@ function openDonateModal() {
         finishDonateSuccess(paid.detail);
         return;
       }
-      if (statusEl) {
+      const live = modal.querySelector('[data-donate-pay-status]');
+      if (live) {
+        live.textContent = result.detail
+          || 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
+      } else if (statusEl) {
         statusEl.textContent = result.detail
           || 'Donation saved. Add SQUARE_APPLICATION_ID to enable in-popup card checkout.';
       }
       if (payButton) payButton.disabled = false;
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
+      const live = modal.querySelector('[data-donate-pay-status]');
+      if (live) live.textContent = error.message || 'Could not continue to payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not continue to payment.';
       if (payButton) payButton.disabled = false;
     }
   }
@@ -2091,6 +2531,198 @@ function openDonateModal() {
   });
 
   form?.querySelector('input[name="donor_name"]')?.focus();
+}
+
+function closeSponsorChoiceModal({ immediate = false } = {}) {
+  const modal = document.querySelector('.sponsor-choice-modal');
+  const clearBody = () => {
+    if (!document.querySelector('.sponsor-signup-modal, .donate-modal, .dues-modal')) {
+      document.body.classList.remove('sponsor-signup-open');
+    }
+  };
+  if (!modal) {
+    clearBody();
+    return;
+  }
+  if (immediate) {
+    modal.remove();
+    clearBody();
+    return;
+  }
+  modal.classList.add('is-leaving');
+  modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    if (document.body.contains(modal)) modal.remove();
+    clearBody();
+  }, 280);
+}
+
+function openSponsorChoiceModal() {
+  closeSponsorChoiceModal({ immediate: true });
+  const modal = document.createElement('aside');
+  modal.className = 'sponsor-signup-modal sponsor-choice-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Choose sponsorship or in-kind');
+  modal.innerHTML = `
+    <button type="button" class="sponsor-signup-backdrop" data-choice-close aria-label="Close"></button>
+    <div class="sponsor-signup-panel">
+      <div class="sponsor-signup-head">
+        <span class="sponsor-signup-kicker">Support the band</span>
+        <h3>How would you like to help?</h3>
+        <p>Choose Sponsorship Tiers or an In-Kind donation.</p>
+      </div>
+      <div class="sponsor-choice-actions">
+        <a class="btn primary" href="/become-a-sponsor.html">Sponsorship Tiers</a>
+        <a class="btn outline" href="/in-kind.html">In-Kind</a>
+      </div>
+      <button type="button" class="btn outline" data-choice-close>Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add('sponsor-signup-open');
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+  modal.querySelectorAll('[data-choice-close]').forEach((button) => {
+    button.addEventListener('click', () => closeSponsorChoiceModal());
+  });
+}
+
+function bindSponsorChoiceButtons(root = document) {
+  if (isCmsAdminPreviewContext(root)) return;
+  root.querySelectorAll('[data-sponsor-choice-open]').forEach((control) => {
+    if (control.dataset.sponsorChoiceBound === '1') return;
+    if (control.closest('#page-preview, .cms-shell, .admin-body')) return;
+    if (control.hasAttribute('disabled')) return;
+    control.dataset.sponsorChoiceBound = '1';
+    control.addEventListener('click', (event) => {
+      event.preventDefault();
+      openSponsorChoiceModal();
+    });
+  });
+}
+
+function bindInKindForm(root = document) {
+  const form = root.querySelector('[data-inkind-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  const hear = form.querySelector('[data-inkind-hear]');
+  const other = form.querySelector('[data-inkind-other]');
+  const syncOther = () => {
+    if (!other) return;
+    const show = String(hear?.value || '') === 'Other';
+    other.hidden = !show;
+    const input = other.querySelector('input');
+    if (input) input.required = show;
+  };
+  hear?.addEventListener('change', syncOther);
+  syncOther();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-inkind-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/inkind', {
+        method: 'POST',
+        body: new FormData(form),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      syncOther();
+      if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
+function cmsFormPayload(form) {
+  const data = {};
+  for (const [key, value] of new FormData(form).entries()) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      data[key] = Array.isArray(data[key]) ? [...data[key], value] : [data[key], value];
+    } else {
+      data[key] = value;
+    }
+  }
+  return data;
+}
+
+function bindLettermanAmountAutofill(form) {
+  const amount = form.querySelector('[data-letterman-amount]');
+  const priceForSize = (size) => {
+    const key = String(size || '').trim().toUpperCase();
+    if (!key) return '';
+    const wrap = form.closest('[data-letterman-copy]') || form;
+    for (const item of wrap.querySelectorAll('[data-letterman-price]')) {
+      const sizes = String(item.dataset.priceSizes || '').split(/[\s,]+/).map((part) => part.trim().toUpperCase()).filter(Boolean);
+      if (sizes.includes(key)) return item.querySelector('b')?.textContent?.trim() || '';
+    }
+    return '';
+  };
+  form.querySelectorAll('input[type="radio"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!amount) return;
+      const next = priceForSize(input.value);
+      if (next) amount.value = next;
+    });
+  });
+}
+
+function bindLettermanForm(root = document) {
+  const form = root.querySelector('[data-letterman-form]');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  bindLettermanAmountAutofill(form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = form.querySelector('[data-letterman-status]');
+    if (status) status.textContent = 'Sending…';
+    try {
+      const response = await fetch('/api/letterman-jacket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cmsFormPayload(form)),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+      form.reset();
+      if (status) status.textContent = result.detail || 'Thank you. Your order was sent.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not submit the form.';
+    }
+  });
+}
+
+function bindCmsForms(root = document) {
+  root.querySelectorAll('[data-cms-form]').forEach((form) => {
+    if (form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+    bindLettermanAmountAutofill(form);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const slug = String(form.getAttribute('data-cms-form') || '').trim();
+      const status = form.querySelector('[data-cms-form-status], [data-letterman-status]');
+      if (!slug) {
+        if (status) status.textContent = 'This form is missing its page name.';
+        return;
+      }
+      if (status) status.textContent = 'Sending…';
+      try {
+        const response = await fetch(`/api/forms/${encodeURIComponent(slug)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cmsFormPayload(form)),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Could not submit the form');
+        form.reset();
+        if (status) status.textContent = result.detail || 'Thank you. Your form was sent.';
+      } catch (error) {
+        if (status) status.textContent = error.message || 'Could not submit the form.';
+      }
+    });
+  });
 }
 
 function bindDonateButtons(root = document) {
@@ -2157,6 +2789,7 @@ function openDuesModal() {
   closeDonateModal({ immediate: true });
   closeDuesModal({ immediate: true });
   duesModalState = { draft: null, dues: null };
+  prefetchSquareWebSdk(readSquarePublishableConfig()?.environment || 'production');
 
   const modal = document.createElement('aside');
   modal.className = 'sponsor-signup-modal dues-modal';
@@ -2241,21 +2874,6 @@ function openDuesModal() {
     }, failed ? 5600 : 4200);
   }
 
-  function loadSquareWebSdk(environment = 'production') {
-    const existing = document.querySelector('script[data-square-web-sdk]');
-    if (existing && window.Square) return Promise.resolve(window.Square);
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.dataset.squareWebSdk = '1';
-      script.src = environment === 'sandbox'
-        ? 'https://sandbox.web.squarecdn.com/v1/square.js'
-        : 'https://web.squarecdn.com/v1/square.js';
-      script.onload = () => (window.Square ? resolve(window.Square) : reject(new Error('Square.js failed to load')));
-      script.onerror = () => reject(new Error('Could not load Square payment form'));
-      document.head.appendChild(script);
-    });
-  }
-
   async function embedCardCheckout(dues, config) {
     if (!payBody) return;
     modal.classList.add('is-checkout');
@@ -2282,10 +2900,14 @@ function openDuesModal() {
       payContinue.disabled = true;
       payContinue.textContent = `Pay ${amountDisplay}`;
     }
-    const Square = await loadSquareWebSdk(config.environment || 'production');
-    const payments = Square.payments(config.application_id, config.location_id);
-    const card = await payments.card();
-    await card.attach('#dues-square-card');
+    let card;
+    try {
+      card = await attachSquareCard(config, '#dues-square-card');
+    } catch (error) {
+      if (liveStatus) liveStatus.textContent = error.message || 'Could not load the secure card form.';
+      if (payContinue) payContinue.disabled = false;
+      throw error;
+    }
     if (liveStatus) {
       liveStatus.innerHTML = `
         <span class="sponsor-signup-square-status">
@@ -2460,14 +3082,15 @@ function openDuesModal() {
     if (payButton) payButton.disabled = true;
     try {
       const dues = await ensureDuesPayment();
-      const configResponse = await fetch('/api/sponsor-checkout/config', { cache: 'no-store' });
-      const config = await configResponse.json().catch(() => ({}));
-      if (!configResponse.ok || !config.web_payments) {
-        throw new Error(config.detail || 'Square card payments are not ready yet.');
+      const config = await fetchSquarePublishableConfig();
+      if (!config?.web_payments) {
+        throw new Error(config?.detail || 'Square card payments are not ready yet.');
       }
       await embedCardCheckout(dues, config);
     } catch (error) {
-      if (statusEl) statusEl.textContent = error.message || 'Could not start payment.';
+      const live = modal.querySelector('[data-dues-pay-status]');
+      if (live) live.textContent = error.message || 'Could not start payment.';
+      else if (statusEl) statusEl.textContent = error.message || 'Could not start payment.';
       if (payButton) {
         payButton.disabled = false;
         payButton.textContent = 'Pay with Square';
@@ -2497,11 +3120,51 @@ function bindDuesButtons(root = document) {
   });
 }
 
-ensurePublicBrandMark();
-hydrateMarqueeFromCache();
-loadPublicContent();
+function bootPublicSiteContent() {
+  ensurePublicBrandMark();
+  try {
+    hydrateMarqueeFromCache();
+  } catch (error) {
+    // Marquee chrome must never wipe the page or block donate/toast/Square bindings.
+    console.error(error);
+    try { removeSponsorMarquee(); } catch { /* keep going */ }
+  }
+  bindSponsorChoiceButtons();
+  bindSponsorTierSignup();
+  bindDonateButtons();
+  bindDuesButtons();
+  bindInKindForm();
+  bindLettermanForm();
+  bindCmsForms();
+  loadPublicContent();
+}
+
+if (!globalThis.__EFHS_SKIP_SITE_CONTENT_BOOT) {
+  bootPublicSiteContent();
+} else {
+  globalThis.__efhsSiteContent = {
+    sponsorMarqueeEnabled,
+    removeSponsorMarquee,
+    querySponsorMarqueeSlot,
+    querySponsorMarqueeSlots,
+    ensureSiteChrome,
+    ensureSponsorMarqueeMount,
+    hydrateMarqueeFromCache,
+    readTierPackageFromCard,
+    bindSponsorTierSignup,
+    readSquarePublishableConfig,
+    fetchSquarePublishableConfig,
+    loadSquareWebSdk,
+    attachSquareCard,
+  };
+}
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  const choice = document.querySelector('.sponsor-choice-modal');
+  if (choice) {
+    closeSponsorChoiceModal();
+    return;
+  }
   const dues = document.querySelector('.dues-modal');
   if (dues) {
     const confirm = dues.querySelector('[data-dues-confirm]');

@@ -4,7 +4,7 @@ export const CALDEV_TRACKS = [
   { id: 'game', label: 'Games', color: '#E71321' },
   { id: 'rehearsal', label: 'Rehearsals', color: '#014990' },
   { id: 'meeting', label: 'Meetings', color: '#002142' },
-  { id: 'deadline', label: 'Deadlines', color: '#FDD703' },
+  { id: 'deadline', label: 'IMPORTANT', color: '#FDD703' },
   { id: 'trip', label: 'Trips', color: '#7c3aed' },
   { id: 'other', label: 'Other', color: '#5b6472' },
 ];
@@ -77,9 +77,100 @@ export function stripSimpleHtml(value = '') {
     .trim();
 }
 
+function decodeBasicHtmlEntities(value = '') {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+}
+
+function escapeHtmlAttr(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function normalizeCaldevLinkUrl(raw = '') {
+  const url = decodeBasicHtmlEntities(String(raw || '')).trim();
+  if (!url || /[\s<>]/.test(url)) return '';
+  if (/^(javascript:|data:|vbscript:)/i.test(url)) return '';
+  if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//')) return url;
+  if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(url)) return `https://${url}`;
+  return '';
+}
+
+function extractHtmlAttr(attrs, name) {
+  const match = String(attrs || '').match(new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+  return decodeBasicHtmlEntities(match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+function sanitizeCaldevStyleAttribute(attrs = '') {
+  const style = extractHtmlAttr(attrs, 'style');
+  if (!style || /expression|url\s*\(|javascript/i.test(style)) return '';
+  const parts = [];
+  const color = style.match(/color\s*:\s*([^;]+)/i);
+  const size = style.match(/font-size\s*:\s*([^;]+)/i);
+  if (color && /^(#(?:[0-9a-f]{3}|[0-9a-f]{6})|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|[a-z]+)$/i.test(color[1].trim())) {
+    parts.push(`color: ${color[1].trim()}`);
+  }
+  if (size && /^\d+(\.\d+)?(px|pt|em|rem)$/i.test(size[1].trim())) {
+    parts.push(`font-size: ${size[1].trim()}`);
+  }
+  return parts.join('; ');
+}
+
+/** Keep safe description markup (links + basic formatting). Strip everything else. */
+export function sanitizeCaldevDescriptionHtml(value = '') {
+  let html = String(value || '');
+  if (!html.trim()) return '';
+  html = html
+    .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/<(p|div)(\s[^>]*)?>/gi, '')
+    .replace(/<\/(p|div)>/gi, '<br>');
+  const allowed = new Set(['a', 'b', 'i', 'u', 'strong', 'em', 'span', 'br']);
+  html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
+    const tag = rawTag.toLowerCase();
+    if (!allowed.has(tag)) return '';
+    if (tag === 'br') return '<br>';
+    if (match.startsWith('</')) return `</${tag}>`;
+    if (tag === 'a') {
+      const href = normalizeCaldevLinkUrl(extractHtmlAttr(attrs, 'href'));
+      if (!href) return '';
+      return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">`;
+    }
+    if (tag === 'span') {
+      const style = sanitizeCaldevStyleAttribute(attrs);
+      return style ? `<span style="${style}">` : '<span>';
+    }
+    return `<${tag}>`;
+  });
+  return html
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/(?:<br>\s*)+$/gi, '')
+    .trim()
+    .slice(0, 4000);
+}
+
 export function normalizeCaldevPayload(payload = {}, existing = null) {
   const title = stripSimpleHtml(payload.title ?? existing?.title ?? '').slice(0, 200);
-  const description = stripSimpleHtml(payload.description ?? existing?.description ?? '').slice(0, 4000);
+  const description = sanitizeCaldevDescriptionHtml(payload.description ?? existing?.description ?? '');
   const location = stripSimpleHtml(payload.location ?? existing?.location ?? '').slice(0, 200);
   const who = stripSimpleHtml(payload.who ?? existing?.who ?? '').slice(0, 200);
   let start_date = String(payload.start_date ?? existing?.start_date ?? '').trim();
@@ -167,8 +258,170 @@ export function compareCaldevEvents(a, b) {
   return String(a?.title || '').localeCompare(String(b?.title || ''));
 }
 
+/** Banner shows from 7 days before the due date through the due date (Eastern). */
+export const DEADLINE_BANNER_LEAD_DAYS = 7;
+const DEADLINE_BANNER_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** Homepage highlights and Schedule Board rundown use America/New_York calendar days. */
+export function easternTodayIso(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const read = (type) => parts.find((part) => part.type === type)?.value;
+  return `${read('year')}-${read('month')}-${read('day')}`;
+}
+
+export const CALDEV_UPCOMING_LIMIT_DEFAULT = 3;
+export const CALDEV_UPCOMING_LIMIT_MAX = 12;
+
+export function parseCaldevUpcomingLimit(value, fallback = CALDEV_UPCOMING_LIMIT_DEFAULT) {
+  if (value == null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(Math.floor(n), CALDEV_UPCOMING_LIMIT_MAX);
+}
+
+/** Map a Schedule Board row onto the homepage timeline datebox fields. */
+export function caldevEventToHighlight(event) {
+  const hydrated = event?.id != null && event?.start_date != null ? event : hydrateCaldevRow(event);
+  const parts = isoToProductionDateParts(hydrated?.start_date);
+  return {
+    id: Number(hydrated?.id) || 0,
+    title: String(hydrated?.title || ''),
+    description: String(hydrated?.description || ''),
+    location: String(hydrated?.location || ''),
+    who: String(hydrated?.who || ''),
+    start_date: String(hydrated?.start_date || ''),
+    end_date: String(hydrated?.end_date || ''),
+    start_time: String(hydrated?.start_time || ''),
+    end_time: String(hydrated?.end_time || ''),
+    track: normalizeCaldevTrack(hydrated?.track),
+    all_day: Number(hydrated?.all_day) ? 1 : 0,
+    date_label: parts?.date_label || '',
+    date_detail: parts?.date_detail || '',
+    event_year: parts?.event_year ?? null,
+  };
+}
+
+export function shiftIsoDate(iso, days = 0) {
+  if (!isIsoDate(iso)) return '';
+  const [year, month, day] = String(iso).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+/** Last calendar day the deadline is still due — start_date, or end_date when later. */
+export function deadlineDueIso(event) {
+  const start = String(event?.start_date || '').trim();
+  if (!isIsoDate(start)) return '';
+  const end = String(event?.end_date || '').trim();
+  if (isIsoDate(end) && end >= start) return end;
+  return start;
+}
+
+export function isDeadlineBannerActive(event, todayIso = '') {
+  if (normalizeCaldevTrack(event?.track) !== 'deadline') return false;
+  const due = deadlineDueIso(event);
+  if (!due || !isIsoDate(todayIso)) return false;
+  const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
+  return todayIso >= windowStart && todayIso <= due;
+}
+
+/**
+ * Upcoming deadline banners from already-loaded Schedule Board rows.
+ * Read-only: no extra D1 table, column, write, or cron. D1 has no cheap
+ * scheduled cleanup, and public GET handlers stay read-only.
+ */
+export function activeDeadlineBannerEvents(events = [], todayIso = '') {
+  return (Array.isArray(events) ? events : [])
+    .filter((event) => isDeadlineBannerActive(event, todayIso))
+    .sort((a, b) => {
+      const dueCmp = deadlineDueIso(a).localeCompare(deadlineDueIso(b));
+      if (dueCmp) return dueCmp;
+      return compareCaldevEvents(a, b);
+    });
+}
+
+export function formatDeadlineBannerDate(iso) {
+  if (!isIsoDate(iso)) return '';
+  const [year, month, day] = String(iso).split('-').map(Number);
+  const monthName = DEADLINE_BANNER_MONTHS[month - 1];
+  if (!monthName || day < 1 || day > 31) return '';
+  const suffix = (day % 100 >= 11 && day % 100 <= 13)
+    ? 'th'
+    : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
+  return `${monthName} ${day}${suffix}, ${year}`;
+}
+
+export function firstCaldevDescriptionLink(html = '') {
+  const match = String(html || '').match(/<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/i);
+  if (!match) return '';
+  return normalizeCaldevLinkUrl(match[1] || match[2] || match[3] || '');
+}
+
+export function deadlineBannerCopy(event) {
+  const due = deadlineDueIso(event);
+  const title = stripSimpleHtml(event?.title || '').slice(0, 200) || 'IMPORTANT';
+  const dateLabel = formatDeadlineBannerDate(due);
+  return {
+    title,
+    due,
+    dateLabel,
+    text: dateLabel ? `IMPORTANT: ${title} ${dateLabel}!` : `IMPORTANT: ${title}!`,
+    href: firstCaldevDescriptionLink(event?.description || ''),
+  };
+}
+
+export function buildDeadlineBannerItems(events = [], todayIso = '') {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  return activeDeadlineBannerEvents(events, today).map((event) => {
+    const copy = deadlineBannerCopy(event);
+    const href = copy.href || '/calendar.html';
+    return {
+      text: copy.text,
+      href,
+      cta: copy.href ? 'Click Here' : 'View details',
+    };
+  });
+}
+
+export function renderSiteDeadlineBannersHtml(items = []) {
+  const banners = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const text = String(item?.text || '').trim();
+      if (!text) return '';
+      const href = normalizeCaldevLinkUrl(item.href) || '/calendar.html';
+      const cta = String(item?.cta || 'View details').trim() || 'View details';
+      return `<div class="caldev-deadline-banner" role="status">${escapeHtml(text)} <a href="${escapeHtmlAttr(href)}">${escapeHtml(cta)}</a></div>`;
+    })
+    .filter(Boolean)
+    .join('');
+  if (!banners) {
+    return '<div class="site-deadline-banners" data-site-deadline-banners hidden></div>';
+  }
+  return `<div class="site-deadline-banners" data-site-deadline-banners>${banners}</div>`;
+}
+
+let caldevSchemaReady = false;
+let caldevSchemaPromise = null;
+
+/** Test helper — clears the in-isolate caldev schema memo. */
+export function resetCaldevSchemaCache() {
+  caldevSchemaReady = false;
+  caldevSchemaPromise = null;
+}
+
 export async function ensureCaldevSchema(env) {
-  await env.DB.prepare(`
+  if (caldevSchemaReady) return;
+  if (!caldevSchemaPromise) {
+    caldevSchemaPromise = (async () => {
+      await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS caldev_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -187,17 +440,29 @@ export async function ensureCaldevSchema(env) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
-  for (const sql of [
-    "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
-    'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
-    'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
-  ]) {
-    try {
-      await env.DB.prepare(sql).run();
-    } catch {
-      // Column already exists.
-    }
+      for (const sql of [
+        "ALTER TABLE caldev_events ADD COLUMN who TEXT NOT NULL DEFAULT ''",
+        'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
+        'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
+        'CREATE INDEX IF NOT EXISTS idx_caldev_events_start_date ON caldev_events (start_date, start_time, id)',
+      ]) {
+        try {
+          await env.DB.prepare(sql).run();
+        } catch {
+          // Column already exists.
+        }
+      }
+      caldevSchemaReady = true;
+    })()
+      .catch((error) => {
+        caldevSchemaReady = false;
+        throw error;
+      })
+      .finally(() => {
+        caldevSchemaPromise = null;
+      });
   }
+  await caldevSchemaPromise;
 }
 
 const CALDEV_SELECT = `
@@ -327,6 +592,69 @@ export async function listCaldevEvents(env) {
     ORDER BY CASE WHEN start_date = '' THEN 1 ELSE 0 END, start_date ASC, start_time ASC, id ASC
   `).all();
   return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+/**
+ * Deadline rows for public banners. track is stored lowercase, and empty
+ * dates cannot become banners, so the filter matches idx_caldev_events_track_start.
+ * Never seeds or migrates.
+ */
+export function deadlineCaldevStatement(env) {
+  return env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE track = 'deadline' AND start_date != ''
+    ORDER BY start_date ASC, start_time ASC, id ASC
+  `);
+}
+
+export function mapCaldevRows(result) {
+  return (result?.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+export async function listDeadlineCaldevEvents(env) {
+  return mapCaldevRows(await deadlineCaldevStatement(env).all());
+}
+
+/**
+ * Upcoming Schedule Board rows for homepage highlights.
+ * Time-bounded (start_date >= Eastern today) and LIMITed so homepage
+ * render never loads the full caldev_events corpus into the Worker.
+ */
+export async function listUpcomingCaldevEvents(env, {
+  todayIso = '',
+  limit = CALDEV_UPCOMING_LIMIT_DEFAULT,
+} = {}) {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  const rowLimit = parseCaldevUpcomingLimit(limit, CALDEV_UPCOMING_LIMIT_DEFAULT);
+  if (rowLimit <= 0) return [];
+  const rows = await env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE start_date != ''
+      AND start_date >= ?
+    ORDER BY start_date ASC, start_time ASC, id ASC
+    LIMIT ?
+  `).bind(today, rowLimit).all();
+  return (rows.results || []).map(hydrateCaldevRow).filter(Boolean);
+}
+
+export function caldevEventsFromDateStatement(env, { todayIso = '', limit = 80 } = {}) {
+  const today = isIsoDate(todayIso) ? todayIso : easternTodayIso();
+  const rowLimit = Math.min(Math.max(Number(limit) || 80, 1), 120);
+  return env.DB.prepare(`
+    SELECT ${CALDEV_SELECT}
+    FROM caldev_events
+    WHERE start_date != ''
+      AND start_date >= ?
+    ORDER BY start_date ASC, start_time ASC, id ASC
+    LIMIT ?
+  `).bind(today, rowLimit);
+}
+
+/** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
+export async function listCaldevEventsFromDate(env, { todayIso = '', limit = 80 } = {}) {
+  return mapCaldevRows(await caldevEventsFromDateStatement(env, { todayIso, limit }).all());
 }
 
 export async function getCaldevEventById(env, id) {

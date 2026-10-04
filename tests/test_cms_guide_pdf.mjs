@@ -31,7 +31,7 @@ test('CMS Website Guide ships as a real PDF download', () => {
   const admin = readFileSync(join(ROOT, 'admin.js'), 'utf8');
   assert.match(admin, /\/api\/admin\/website-guide\.pdf/);
   assert.match(admin, /isSuperAdmin\(\) && \['Website Guide'/);
-  assert.match(admin, /website-guide-api-20260816/);
+  assert.match(admin, /website-guide-api-20260907/);
 
   const worker = readFileSync(join(ROOT, 'worker/src/worker.mjs'), 'utf8');
   assert.match(worker, /canAccessWebsiteGuide/);
@@ -41,21 +41,39 @@ test('CMS Website Guide ships as a real PDF download', () => {
   assert.match(worker, /CMS_WEBSITE_GUIDE_PDF_PATH/);
 });
 
-test('Website Guide HTML covers Super Admin topics', () => {
+test('Website Guide HTML covers the content-admin guide topics', () => {
   const html = readFileSync(join(ROOT, 'assets/downloads/EFHS-Band-Website-CMS-Guide-Super-Admin.html'), 'utf8');
-  assert.match(html, /Super Admins only/i);
-  assert.match(html, /Security Audit Log/i);
-  assert.match(html, /append-only/i);
-  assert.match(html, /AES-256-GCM/);
-  assert.match(html, /page:ensembles/);
-  assert.match(html, /events:manage/);
-  assert.match(html, /Never grantable/i);
-  assert.match(html, /Browse by month/);
-  assert.match(html, /Meeting Minutes/);
-  assert.match(html, /Last login/);
-  assert.match(html, /maintenance mode/i);
-  assert.match(html, /Notify Me/);
+  assert.match(html, /Website &amp; CMS Guide/);
+  assert.match(html, /October 2026/);
+  assert.match(html, /Super Admin/);
+  assert.match(html, /Dashboard → Website Guide/);
   assert.match(html, /\/api\/admin\/website-guide\.pdf/);
+  assert.match(html, /Coming Soon/);
+  assert.match(html, /Ensembles/);
+  assert.match(html, /Join page visual editor/);
+  assert.match(html, /last 20 saves/);
+  assert.match(html, /Schedule Board/);
+  assert.match(html, /IMPORTANT/);
+  assert.match(html, /Fundraising/);
+  assert.match(html, /Sponsors/);
+  assert.match(html, /Form Builder/);
+  assert.match(html, /Notify Me/);
+  assert.match(html, /maintenance mode/i);
+  assert.match(html, /Meeting Minutes/);
+  assert.match(html, /Ledger/);
+  assert.match(html, /Instagram/);
+  assert.match(html, /Pay dues/);
+  assert.match(html, /gallery.html/);
+  assert.match(html, /in-kind.html/);
+  assert.match(html, /letterman-jacket.html/);
+  assert.match(html, /efhsband-live/);
+  assert.match(html, /efhsband-dev/);
+  assert.match(html, /npm run deploy:worker/);
+  assert.match(html, /Workers Free/);
+  assert.match(html, /Time Travel/);
+  assert.doesNotMatch(html, /Not live on production yet/);
+  assert.doesNotMatch(html, /Cloudflare Pages with a Worker/);
+  assert.doesNotMatch(html, /SQUARE_[A-Z_]+|RESEND_[A-Z_]+|ZERNIO_[A-Z_]+|API_KEY|ACCESS_TOKEN/);
 });
 
 test('Website Guide access helpers are Super Admin only', () => {
