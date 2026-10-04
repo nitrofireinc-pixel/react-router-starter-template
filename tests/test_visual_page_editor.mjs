@@ -162,6 +162,7 @@ test('worker wires Join visual editor behind page-edit permission', () => {
   assert.match(workerSrc, /renderVisualEditorHtml/);
   assert.doesNotMatch(workerSrc, /visual-pages\/home/);
   assert.match(adminJs, /\/admin\/visual\/join/);
+  assert.match(editorJs, /versionedAsset\('\/styles\.css'\)/);
   assert.match(editorJs, /grapesjs\.init/);
   assert.match(editorJs, /panels:\s*\{\s*defaults:\s*\[\]/);
   assert.match(editorJs, /setDevice/);

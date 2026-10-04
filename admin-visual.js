@@ -10,6 +10,18 @@
   const linkModal = document.querySelector('[data-visual-link-modal]');
   const linkForm = document.querySelector('[data-visual-link-form]');
   const deviceSelect = document.querySelector('[data-visual-device-select]');
+  const ASSET_VERSION = (() => {
+    try {
+      const script = document.currentScript || document.querySelector('script[src*="admin-visual.js"]');
+      return new URL(script?.src || '', window.location.origin).searchParams.get('v') || '';
+    } catch {
+      return '';
+    }
+  })();
+  function versionedAsset(path) {
+    if (!ASSET_VERSION || /[?&]v=/.test(path)) return path;
+    return `${path}${path.includes('?') ? '&' : '?'}v=${encodeURIComponent(ASSET_VERSION)}`;
+  }
 
   const SITE_PHOTOS = [
     { url: '/assets/efhs-logo.png', alt_text: 'EFHS logo' },
@@ -199,10 +211,10 @@
     canvas: {
       styles: [
         'https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;700;800&display=swap',
-        '/styles.css',
-        '/public-theme.css',
-        '/home-redesign.css',
-        '/admin-visual.css',
+        versionedAsset('/styles.css'),
+        versionedAsset('/public-theme.css'),
+        versionedAsset('/home-redesign.css'),
+        versionedAsset('/admin-visual.css'),
       ],
     },
     richTextEditor: {

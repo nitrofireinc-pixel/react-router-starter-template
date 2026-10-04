@@ -134,6 +134,8 @@ test('run_worker_first lists only Worker routes in both wrangler files', () => {
   const headers = readFileSync(join(root, '_headers'), 'utf8');
   assert.match(headers, /X-Content-Type-Options: nosniff/);
   assert.match(headers, /Cache-Control: public, max-age=31536000, immutable/);
+  assert.match(headers, /Cache-Control: public, max-age=86400/);
+  assert.match(headers, /! Cache-Control/);
   assert.match(headers, /Service-Worker-Allowed: \//);
 });
 

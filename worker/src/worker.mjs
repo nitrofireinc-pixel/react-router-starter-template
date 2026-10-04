@@ -110,6 +110,7 @@ import {
   applyIncrementalSchema,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
+import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
   VISUAL_EDITOR_PATH,
   canEditVisualPilot,
@@ -132,6 +133,8 @@ export {
   isSafeHref,
   isSafeSrc,
 } from './html-sanitizer.mjs';
+
+export { applyWorkerSecurityHeaders, WORKER_SECURITY_HEADERS } from './worker-security-headers.mjs';
 
 export { isVisualPilotSlug };
 
@@ -344,7 +347,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-const ASSET_VERSION = 'cms-rc-20261004a';
+export const ASSET_VERSION = 'cms-rc-20261004b';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -12333,15 +12336,15 @@ export default {
     try {
       const url = new URL(request.url);
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
-        return serveBundledStaticAsset(request, env, url);
+        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url));
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
         const cached = await matchUploadCache(url);
-        if (cached) return cached;
+        if (cached) return applyWorkerSecurityHeaders(cached);
       }
       const opened = openD1Session(request, env);
       const response = await dispatchWorker(request, opened.env, ctx);
-      return attachD1Bookmark(response, opened.session);
+      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
     } catch (error) {
       console.error('worker_exception', String(error?.stack || error?.message || error));
       throw error;
