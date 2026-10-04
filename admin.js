@@ -1168,9 +1168,19 @@ function markHomeHtmlEditable(html = '') {
   const template = document.createElement('template');
   template.innerHTML = String(html || '').trim();
   const root = template.content;
-  root.querySelectorAll('[data-events]').forEach((node) => {
+  root.querySelectorAll('[data-events], [data-home-dynamic]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
-    node.setAttribute('data-cms-dynamic-label', 'Managed in Schedule Board');
+    if (!node.getAttribute('data-cms-dynamic-label')) {
+      const slot = node.getAttribute('data-home-slot') || '';
+      const label = slot === 'sponsor-tiers'
+        ? 'Managed on Become a Sponsor'
+        : slot === 'sponsor-thanks'
+          ? 'Managed in Sponsors'
+          : slot === 'officers'
+            ? 'Managed in Booster Members'
+            : 'Managed in Schedule Board';
+      node.setAttribute('data-cms-dynamic-label', label);
+    }
   });
   root.querySelectorAll('[data-photo-gallery]').forEach((node) => {
     node.classList.add('cms-home-dynamic');
@@ -1182,7 +1192,7 @@ function markHomeHtmlEditable(html = '') {
   });
 
   root.querySelectorAll('.hero-card').forEach((card) => {
-    if (card.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
+    if (card.closest('[data-events], [data-photo-gallery], [data-home-dynamic], .cms-home-preview-note, .gallery-more')) return;
     card.classList.add('cms-edit-field', 'cms-edit-rich', 'cms-home-hero-card');
     card.setAttribute('contenteditable', 'true');
     card.setAttribute('role', 'textbox');
@@ -1197,6 +1207,7 @@ function markHomeHtmlEditable(html = '') {
   let index = 0;
   targets.forEach((el) => {
     if (el.closest('[data-events], [data-photo-gallery], .cms-home-preview-note, .gallery-more')) return;
+    if (el.closest('[data-home-dynamic]') && !el.matches('[data-home-deal]')) return;
     if (el.closest('.hero-card, .cms-edit-field')) return;
     index += 1;
     const label = homeFieldLabel(el);
