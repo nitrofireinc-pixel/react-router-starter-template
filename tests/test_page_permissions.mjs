@@ -14,6 +14,7 @@ import {
   normalizePageGrants,
   pageSettingsChanged,
   visualStructureSignature,
+  visualStyleSignature,
 } from '../worker/src/page-permissions.mjs';
 import worker, {
   applyEnsemblesBodyHtml,
@@ -25,14 +26,17 @@ import worker, {
   canEditPageLayout,
   canManageMeetingMinutes,
   canManagePageSettings,
+  canPreviewUnpublishedCmsPage,
   canViewMeetingMinutes,
   DB_SCHEMA_VERSION,
+  isDeliberateComingSoonPage,
   makeSession,
   MINUTES_EDIT_WINDOW_HOURS,
   minutesEditableUntil,
   minutesWithinEditWindow,
   resetDbInitCache,
   sanitizeAssignablePermissions,
+  shouldServePublicCmsPage,
   userPageCapabilities,
 } from '../worker/src/worker.mjs';
 import {
@@ -48,6 +52,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
 const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
 const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
+const visualCss = readFileSync(join(root, 'admin-visual.css'), 'utf8');
 const styles = readFileSync(join(root, 'styles.css'), 'utf8');
 const migration = readFileSync(join(root, 'migrations/2026-10-04.3.sql'), 'utf8');
 
@@ -200,6 +205,42 @@ test('visualStructureSignature ignores text, links, images, list items, and card
   assert.equal(visualStructureSignature(BASE_HTML), visualStructureSignature(edited));
   const added = `${BASE_HTML}<section class="content" data-visual-block="extra"><p>New</p></section>`;
   assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(added));
+});
+
+test('content-only visual save 403s style-block CSS changes as layout', async () => {
+  resetVisualPagesSchemaCache();
+  const styled = `${BASE_HTML}<style data-visual-css>#hero{display:block}</style>`;
+  const { env, count } = createVisualEnv(styled);
+  const copy = styled.replace('Intro', 'Welcome sponsors');
+  const saved = await saveVisualPage(env, {
+    slug: 'sponsors',
+    html: copy,
+    action: 'draft',
+    user: { id: 8, display_name: 'Jamie' },
+    allowStructure: false,
+  });
+  assert.match(saved.draft_html, /Welcome sponsors/);
+  const afterCopy = count();
+
+  const hidden = styled.replace('#hero{display:block}', '#hero{display:none}');
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: hidden,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => {
+      assert.equal(error.status, 403);
+      assert.equal(error.code, 'layout_required');
+      assert.match(error.message, /layout:sponsors/);
+      return true;
+    },
+  );
+  assert.ok(count() - afterCopy <= 3, `style reject used ${count() - afterCopy} queries`);
+  assert.equal(visualStyleSignature(styled), visualStyleSignature(copy));
+  assert.notEqual(visualStyleSignature(styled), visualStyleSignature(hidden));
 });
 
 test('content-only visual save accepts copy edits and 403s a structural save', async () => {
@@ -367,6 +408,14 @@ test('Users form and visual editor hide layout for content-only users', () => {
   assert.match(visualJs, /draggable: canLayout/);
   assert.match(visualJs, /copyable: canLayout/);
   assert.match(visualJs, /removable: canLayout/);
+  assert.match(visualJs, /if \(canLayout\) \{\s*toolbar\.push\(tool\('tlb-move'/);
+  assert.match(visualJs, /if \(canLayout\) \{\s*toolbar\.push\(tool\('tlb-delete'/);
+  assert.match(visualJs, /then edit the text/);
+  assert.match(visualJs, /styleManager: canLayout \? \{ appendTo: '#visual-gjs-sink' \}/);
+  assert.doesNotMatch(editor, /data-visual-style-editor/);
+  assert.match(renderVisualEditorHtml('test', { slug: 'sponsors', canLayout: true }), /data-visual-style-editor/);
+  assert.match(visualCss, /\.visual-content-only #visual-gjs-sink/);
+  assert.match(adminJs, /#new-user[\s\S]*syncPageGrantCovered/);
 });
 
 test('Worker APIs return layout_required and minutes audit actions without double-logging', () => {
@@ -377,6 +426,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.match(workerSrc, /SELECT slug FROM cms_pages/);
   assert.match(workerSrc, /capabilities: userPageCapabilities/);
   assert.match(workerSrc, /minutes\.edit\.admin_after_window/);
+  assert.match(workerSrc, /if \(!canManageMeetingMinutes\(auth\.user\)\) \{[\s\S]*Permission required: minutes:edit[\s\S]*if \(!canEditMeetingMinutes/);
   assert.match(workerSrc, /within 48 hours of creation/);
   assert.match(workerSrc, /mayEditBoosters = existing\.slug === 'boosters' && hasPermission\(auth\.user, 'boosters'\)/);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes', 'POST'), false);
@@ -385,7 +435,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.edit.admin_after_window'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('minutes.delete'));
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004v'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004w'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
@@ -447,6 +497,89 @@ function badgeAuthEnv(user) {
     ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
   };
 }
+
+test('inactive CMS pages 404 unless Coming Soon or an editor previews', () => {
+  const ensembles = { slug: 'ensembles', title: 'Ensembles', active: 0 };
+  const resources = { slug: 'resources', title: 'Student Resources', active: 0 };
+  const comingSoon = { slug: 'coming-soon', title: 'Coming Soon', active: 1 };
+  const comingSoonOff = { slug: 'coming-soon', title: 'Coming Soon', active: 0 };
+  const join = { slug: 'join', title: 'Join the Band', active: 1 };
+  const volunteer = { slug: 'volunteer', title: 'Volunteer', active: 0 };
+  const editor = { role: 'editor', permissions: ['page:ensembles'] };
+  const stranger = { role: 'editor', permissions: ['page:sponsors'] };
+
+  assert.equal(isDeliberateComingSoonPage(comingSoon), true);
+  assert.equal(isDeliberateComingSoonPage(join), true);
+  assert.equal(isDeliberateComingSoonPage(volunteer), true);
+  assert.equal(isDeliberateComingSoonPage(ensembles), false);
+
+  assert.equal(shouldServePublicCmsPage(ensembles, null), false);
+  assert.equal(shouldServePublicCmsPage(resources, null), false);
+  assert.equal(shouldServePublicCmsPage(comingSoon, null), true);
+  assert.equal(shouldServePublicCmsPage(comingSoonOff, null), true);
+  assert.equal(shouldServePublicCmsPage(volunteer, null), true);
+  assert.equal(shouldServePublicCmsPage(ensembles, editor), true);
+  assert.equal(shouldServePublicCmsPage(ensembles, stranger), false);
+  assert.equal(canPreviewUnpublishedCmsPage(editor, ensembles), true);
+  assert.equal(canPreviewUnpublishedCmsPage(stranger, ensembles), false);
+  assert.match(workerSrc, /if \(!shouldServePublicCmsPage\(page, user\)\)/);
+  assert.match(workerSrc, /renderPublicNotFound/);
+});
+
+test('minutes PUT without minutes:edit returns Permission required, not the 48h window', async () => {
+  resetDbInitCache();
+  const viewer = {
+    id: 9,
+    username: 'viewer@efhsband.org',
+    display_name: 'Viewer',
+    password_hash: 'x',
+    role: 'editor',
+    permissions: JSON.stringify(['page:sponsors']),
+    active: 1,
+  };
+  const minutes = {
+    id: 3,
+    meeting_date: '2026-10-01',
+    body_html: '<p>Notes</p>',
+    created_by: 1,
+    created_at: '2026-10-04 21:00:00',
+    updated_at: '2026-10-04 21:00:00',
+    created_by_name: 'Admin',
+  };
+  const env = {
+    EFBAND_SECRET: 'test-session-secret',
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (q.includes('FROM site_content WHERE key')) return { value: DB_SCHEMA_VERSION };
+            if (q.includes('FROM users WHERE id')) return viewer;
+            if (q.includes('FROM booster_meeting_minutes')) return minutes;
+            if (q.includes('FROM admin_audit_log')) return null;
+            return null;
+          },
+          async all() { return { results: [] }; },
+          async run() { return { success: true }; },
+        };
+      },
+      async batch() { return []; },
+    },
+    ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
+  };
+  const cookie = `efband_session=${await makeSession({ id: viewer.id, username: viewer.username }, env)}`;
+  const response = await worker.fetch(new Request('https://efhsband.org/api/admin/minutes/3', {
+    method: 'PUT',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ meeting_date: '2026-10-01', body_html: '<p>Hack</p>' }),
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 403);
+  const payload = await response.json();
+  assert.equal(payload.detail, 'Permission required: minutes:edit');
+  assert.doesNotMatch(payload.detail, /48 hours/);
+});
 
 test('Badge Creator APIs and HTML tab 403 without badges', async () => {
   resetDbInitCache();

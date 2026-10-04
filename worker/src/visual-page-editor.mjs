@@ -9,9 +9,9 @@ import {
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
 } from './admin-chrome.mjs';
-import { visualStructureSignature } from './page-permissions.mjs';
+import { visualStructureSignature, visualStyleSignature } from './page-permissions.mjs';
 
-export { visualStructureSignature };
+export { visualStructureSignature, visualStyleSignature };
 
 export const VISUAL_PILOT_SLUG = 'join';
 export const VISUAL_PILOT_PATH = '/join.html';
@@ -793,7 +793,10 @@ export async function saveVisualPage(env, {
     const baseline = sanitizeVisualPageHtml(
       stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
     );
-    if (visualStructureSignature(clean) !== visualStructureSignature(baseline)) {
+    if (
+      visualStructureSignature(clean) !== visualStructureSignature(baseline)
+      || visualStyleSignature(clean) !== visualStyleSignature(baseline)
+    ) {
       throw layoutRequiredError(key);
     }
   }
@@ -902,6 +905,9 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   </aside>
   <aside class="visual-history-drawer" data-visual-versions hidden></aside>`
     : '';
+  const styleSink = canLayout
+    ? '<div id="visual-gjs-sink" data-visual-style-editor hidden></div>'
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -991,6 +997,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
       </div>
     </div>
   </div>
+  ${styleSink}
   <script src="/admin-nav.js?v=${v}"></script>
   <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>

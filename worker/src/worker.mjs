@@ -134,6 +134,7 @@ import {
   pageSettingsChanged,
   parsePermissionList,
   visualStructureSignature,
+  visualStyleSignature,
 } from './page-permissions.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
@@ -406,7 +407,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004v';
+export const ASSET_VERSION = 'cms-p1-20261004w';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -573,7 +574,7 @@ export function normalizePageSlug(value) {
   return slug || 'page';
 }
 
-export { normalizePageGrants, pageSettingsChanged, visualStructureSignature };
+export { normalizePageGrants, pageSettingsChanged, visualStructureSignature, visualStyleSignature };
 
 export function parsePermissions(value) {
   return parsePermissionList(value);
@@ -7221,6 +7222,24 @@ export function isPublicCmsPageActive(page) {
   return Boolean(page) && Number(page.active) === 1;
 }
 
+/** Dedicated Coming Soon placeholders Trevor keeps on the public site. */
+export function isDeliberateComingSoonPage(page = {}) {
+  const slug = String(page?.slug || '').trim().toLowerCase();
+  return COMING_SOON_PAGES.some((item) => item.slug === slug);
+}
+
+export function canPreviewUnpublishedCmsPage(user, page = {}) {
+  return Boolean(user) && canEditPageContent(user, page?.slug);
+}
+
+/** Inactive pages 404 unless they are Coming Soon or the visitor can edit them. */
+export function shouldServePublicCmsPage(page, user = null) {
+  if (!page) return false;
+  if (isPublicCmsPageActive(page)) return true;
+  if (isDeliberateComingSoonPage(page)) return true;
+  return canPreviewUnpublishedCmsPage(user, page);
+}
+
 /** Public form POST must follow Coming Soon when the CMS page is inactive. */
 export function publicFormSubmitGate(page) {
   if (page && isPublicCmsPageActive(page)) return { ok: true };
@@ -10903,7 +10922,10 @@ async function routeApi(request, env, url, ctx = null) {
     if (
       !isVisualEditorSlug(existing.slug)
       && !canEditPageLayout(auth.user, existing.slug)
-      && visualStructureSignature(page.body_html) !== visualStructureSignature(existing.body_html)
+      && (
+        visualStructureSignature(page.body_html) !== visualStructureSignature(existing.body_html)
+        || visualStyleSignature(page.body_html) !== visualStyleSignature(existing.body_html)
+      )
     ) {
       return jsonResponse({
         detail: `Permission required: layout:${existing.slug}`,
@@ -11831,6 +11853,17 @@ async function routeApi(request, env, url, ctx = null) {
         detail: `${existing.meeting_date} deleted`,
       });
       return jsonResponse({ ok: true });
+    }
+    if (!canManageMeetingMinutes(auth.user)) {
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.edit',
+        status: 403,
+        minutes: existing,
+        before: await sha256Hex(existing.body_html || ''),
+        beforeHtml: existing.body_html || '',
+        detail: 'Permission required: minutes:edit',
+      });
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     if (!canEditMeetingMinutes(auth.user, existing)) {
       await writeMinutesAudit(env, request, auth.user, {
@@ -12946,7 +12979,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
-  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
+  const isComingSoonPage = isDeliberateComingSoonPage(page)
     || !isPublicCmsPageActive(page);
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
     calendarHighlights,
@@ -13304,7 +13337,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
   }
   const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
-    // Include inactive rows so unpublished CMS pages (ensembles) still use renderCmsPage
+    // Include inactive rows so unpublished CMS pages can 404 (or preview) here
     // instead of falling through to the unthemed static HTML draft.
     const today = easternTodayIso();
     const page = await cachedPublicRead(`page-path:${path}`, async () => {
@@ -13312,8 +13345,14 @@ async function serveStaticOrCms(request, env, url, ctx) {
       return mapCmsPage((result.results || [])[0] || null);
     }, { ctx });
     if (page) {
-      const livePage = publicCmsPageForRender(page);
-      const pageIsLive = isPublicCmsPageActive(page);
+      if (!shouldServePublicCmsPage(page, user)) {
+        return withHint(await renderPublicNotFound(env, url, { loggedIn, ctx }));
+      }
+      const previewUnpublished = !isPublicCmsPageActive(page)
+        && !isDeliberateComingSoonPage(page)
+        && canPreviewUnpublishedCmsPage(user, page);
+      const livePage = previewUnpublished ? { ...page, active: 1 } : publicCmsPageForRender(page);
+      const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
       const isFundraising = pageIsLive && page.slug === 'fundraising';
       const reads = await loadPublicCmsReads(env, {

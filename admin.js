@@ -3918,37 +3918,43 @@ function renderPagePermissionBoxes() {
   bindPageGrantTable(box, pagesGrant);
 }
 
+function syncPageGrantRow(root, layoutBox, pagesGrant) {
+  const slug = layoutBox.dataset.layoutSlug;
+  const content = root.querySelector(`[data-content-slug="${CSS.escape(slug)}"]`);
+  if (!content) return;
+  if (layoutBox.checked) {
+    content.checked = true;
+    content.disabled = true;
+  } else {
+    content.disabled = Boolean(pagesGrant?.checked);
+  }
+}
+
+function syncPageGrantCovered(root = document.querySelector('#page-permission-boxes'), pagesGrant = document.querySelector('[data-pages-grant]')) {
+  if (!root) return;
+  const table = root.querySelector('#page-grant-table');
+  const covered = Boolean(pagesGrant?.checked);
+  if (table) table.classList.toggle('is-covered', covered);
+  root.querySelectorAll('input[name="permissions"]').forEach((input) => {
+    if (covered) {
+      input.disabled = true;
+    } else if (input.dataset.layoutSlug) {
+      input.disabled = false;
+      syncPageGrantRow(root, input, pagesGrant);
+    } else if (input.dataset.contentSlug) {
+      const layout = root.querySelector(`[data-layout-slug="${CSS.escape(input.dataset.contentSlug)}"]`);
+      input.disabled = Boolean(layout?.checked);
+    }
+  });
+}
+
 function bindPageGrantTable(root, pagesGrant) {
   if (!root) return;
-  const syncRow = (layoutBox) => {
-    const slug = layoutBox.dataset.layoutSlug;
-    const content = root.querySelector(`[data-content-slug="${CSS.escape(slug)}"]`);
-    if (!content) return;
-    if (layoutBox.checked) {
-      content.checked = true;
-      content.disabled = true;
-    } else {
-      content.disabled = Boolean(pagesGrant?.checked);
-    }
-  };
-  const syncCovered = () => {
-    const table = root.querySelector('#page-grant-table');
-    const covered = Boolean(pagesGrant?.checked);
-    if (table) table.classList.toggle('is-covered', covered);
-    root.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      if (covered) {
-        input.disabled = true;
-      } else if (input.dataset.layoutSlug) {
-        input.disabled = false;
-        syncRow(input);
-      }
-    });
-  };
   root.querySelectorAll('[data-layout-slug]').forEach((layoutBox) => {
-    layoutBox.addEventListener('change', () => syncRow(layoutBox));
+    layoutBox.addEventListener('change', () => syncPageGrantRow(root, layoutBox, pagesGrant));
   });
-  pagesGrant?.addEventListener('change', syncCovered);
-  syncCovered();
+  pagesGrant?.addEventListener('change', () => syncPageGrantCovered(root, pagesGrant));
+  syncPageGrantCovered(root, pagesGrant);
 }
 
 async function loadSponsorAdSettings() {
@@ -8367,6 +8373,7 @@ function bindForms() {
     });
     const roleSelect = form.querySelector('[name="role"]');
     if (roleSelect) roleSelect.disabled = false;
+    syncPageGrantCovered(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {

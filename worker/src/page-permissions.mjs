@@ -114,6 +114,23 @@ function isRepeatableContent(tag, classes) {
  * Ordered structural fingerprint. Text, href, img src/alt, list items, and
  * cards are content. Sections / visual blocks / locked blocks are layout.
  */
+export function extractVisualCss(html = '') {
+  const styles = [];
+  String(html || '').replace(
+    /<style\b[^>]*\bdata-visual-css\b[^>]*>([\s\S]*?)<\/style>/gi,
+    (_, css) => {
+      styles.push(String(css || ''));
+      return '';
+    },
+  );
+  return styles.join('\n');
+}
+
+/** Normalized CSS fingerprint. Style-block edits are layout, not content. */
+export function visualStyleSignature(html = '') {
+  return extractVisualCss(html).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 export function visualStructureSignature(html = '') {
   const source = String(html || '').replace(/<style[\s\S]*?<\/style>/gi, ' ');
   const nodes = [];

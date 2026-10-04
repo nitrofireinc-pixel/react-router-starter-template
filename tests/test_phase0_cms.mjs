@@ -132,7 +132,7 @@ test('Phase 0.4 inactive CMS pages render Coming Soon instead of their body', ()
   assert.match(publicPage.body_html, /Student Resources/);
   assert.doesNotMatch(publicPage.body_html, /Secret handbook text/);
   assert.equal(publicCmsPageForRender({ ...inactive, active: 1 }).body_html, inactive.body_html);
-  assert.match(workerSrc, /const livePage = publicCmsPageForRender\(page\)/);
+  assert.match(workerSrc, /previewUnpublished \? \{ \.\.\.page, active: 1 \} : publicCmsPageForRender\(page\)/);
 });
 
 test('Phase 0.5 migrateAndSeedDb never overwrites an existing cms_pages body', () => {
