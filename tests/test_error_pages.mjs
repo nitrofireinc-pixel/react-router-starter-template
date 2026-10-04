@@ -198,6 +198,7 @@ test('lite 500, 503, and 429 never touch D1 and send Retry-After', async () => {
   assert.match(maintHtml, /error-503 lite/);
   assert.match(maintHtml, /tuning up the site/);
   assert.match(maintHtml, /instagram\.com/);
+  assert.match(maintHtml, /location\.reload/);
   assert.ok(boxed.queryCounter.n > before);
 
   const limited = await renderErrorPage(429, { url: new URL('https://efhsband.org/calendar.html'), shell: 'lite' });
@@ -304,7 +305,9 @@ test('DEV error hook is disabled without DEV_ERROR_HOOK and renders branded page
   const page503 = await worker.fetch(new Request('https://efhsband.org/__dev/error/503'), on.env, ctx);
   assert.equal(page503.status, 503);
   assert.equal(page503.headers.get('retry-after'), '600');
-  assert.match(await page503.text(), /error-page error-503 lite/);
+  const hook503 = await page503.text();
+  assert.match(hook503, /error-page error-503 lite/);
+  assert.doesNotMatch(hook503, /location\.reload/);
 
   const page403 = await worker.fetch(new Request('https://efhsband.org/__dev/error/403'), on.env, ctx);
   assert.equal(page403.status, 403);

@@ -12330,6 +12330,7 @@ export function liteErrorResponse(status, {
   path = '/',
   detail = '',
   retryAfter,
+  pollMaintenance,
 } = {}) {
   const code = Number(status) || 500;
   const copy = mergeErrorCopy(code, site, {
@@ -12344,7 +12345,7 @@ export function liteErrorResponse(status, {
     markSrc: PUBLIC_BRAND_MARK,
     logoSrc: site?.logo_url || '/assets/efhs-logo.png',
     instagramHref: instagramHrefFromSite(site),
-    pollMaintenance: code === 503,
+    pollMaintenance: pollMaintenance ?? (code === 503),
   }), code, headers);
 }
 
@@ -12362,6 +12363,7 @@ export async function renderErrorPage(status, opts = {}) {
       path,
       detail: opts.detail,
       retryAfter: opts.retryAfter,
+      pollMaintenance: opts.pollMaintenance,
     });
   }
 
@@ -12407,6 +12409,7 @@ export async function renderErrorPage(status, opts = {}) {
       path,
       detail: opts.detail,
       retryAfter: opts.retryAfter,
+      pollMaintenance: opts.pollMaintenance,
     });
   }
 }
@@ -12663,6 +12666,7 @@ async function handleDevErrorHook(request, env, url, ctx) {
     ctx,
     shell: defaults.shell,
     retryAfter: defaults.retryAfter,
+    pollMaintenance: false,
   });
 }
 

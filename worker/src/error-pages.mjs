@@ -307,7 +307,7 @@ ${ERROR_PAGE_INLINE_CSS}
 <header class="lite-bar"><a href="/"><img src="${escapeAttr(logoSrc)}" alt="East Forsyth Eagles logo"><span><small>East Forsyth</small>Blue Regiment Band</span></a></header>
 <main id="main">${errorHeroHtml(code, copy, { markSrc })}</main>
 <footer class="lite-foot"><div><span><b>East Forsyth Blue Regiment Band</b></span><span>Band office: (336) 703-6735 &middot; <a href="${escapeAttr(ig)}">Instagram</a></span></div></footer>
-${pollMaintenance || code === 503 ? maintenancePollScript() : ''}
+${pollMaintenance ? maintenancePollScript() : ''}
 </body></html>`;
 }
 
