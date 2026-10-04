@@ -200,11 +200,17 @@ test('public GET routes stay at or under 10 D1 queries; no request exceeds 40', 
 });
 
 test('go-live SQL matches the incremental statements and stays under 40 queries with 20 concurrent first requests', async () => {
-  const sqlFile = readFileSync(join(root, 'migrations/2026-10-04.1.sql'), 'utf8');
+  const sqlFile = [
+    readFileSync(join(root, 'migrations/2026-10-04.1.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.2.sql'), 'utf8'),
+  ].join('\n');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
   assert.equal(normalize(sqlFile).includes('CREATE TABLE IF NOT EXISTS visual_pages'), true);
   assert.equal(normalize(sqlFile).includes('CREATE TABLE IF NOT EXISTS visual_page_versions'), true);
+  assert.equal(normalize(sqlFile).includes('CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update'), true);
+  assert.equal(normalize(sqlFile).includes('idx_audit_created'), true);
+  assert.equal(normalize(sqlFile).includes('prev_sha256'), true);
   assert.equal(normalize(sqlFile).includes("schema_version"), true);
   for (const statement of incrementalSchemaStatements()) {
     assert.equal(normalize(sqlFile).includes(normalize(statement)), true, statement.slice(0, 60));

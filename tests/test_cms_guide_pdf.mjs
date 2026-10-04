@@ -71,6 +71,11 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /npm run deploy:worker/);
   assert.match(html, /Workers Free/);
   assert.match(html, /Time Travel/);
+  assert.match(html, /6\.15 Security log/);
+  assert.match(html, /change\.pages/);
+  assert.match(html, /page\.edit\.open/);
+  assert.match(html, /25 entries per page/);
+  assert.match(html, /Chain intact/);
   assert.doesNotMatch(html, /Not live on production yet/);
   assert.doesNotMatch(html, /Cloudflare Pages with a Worker/);
   assert.doesNotMatch(html, /SQUARE_[A-Z_]+|RESEND_[A-Z_]+|ZERNIO_[A-Z_]+|API_KEY|ACCESS_TOKEN/);

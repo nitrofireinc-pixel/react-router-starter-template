@@ -3,6 +3,41 @@ import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
 export const PREVIOUS_DB_SCHEMA_VERSION = '2026-10-03.1';
 export const MAX_D1_QUERIES_PER_INVOCATION = 40;
 
+export const AUDIT_LOG_PREV_SHA_COLUMN_SQL =
+  "ALTER TABLE admin_audit_log ADD COLUMN prev_sha256 TEXT NOT NULL DEFAULT ''";
+
+export const AUDIT_LOG_CREATED_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log (created_at, id)';
+
+export const AUDIT_LOG_ACTION_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_audit_action_created ON admin_audit_log (action, created_at)';
+
+export const AUDIT_LOG_NO_UPDATE_TRIGGER_SQL = `
+CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update
+BEFORE UPDATE ON admin_audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'append-only');
+END
+`.trim();
+
+export const AUDIT_LOG_NO_DELETE_TRIGGER_SQL = `
+CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_delete
+BEFORE DELETE ON admin_audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'append-only');
+END
+`.trim();
+
+export function auditLogSchemaStatements() {
+  return [
+    AUDIT_LOG_PREV_SHA_COLUMN_SQL,
+    AUDIT_LOG_CREATED_INDEX_SQL,
+    AUDIT_LOG_ACTION_INDEX_SQL,
+    AUDIT_LOG_NO_UPDATE_TRIGGER_SQL,
+    AUDIT_LOG_NO_DELETE_TRIGGER_SQL,
+  ];
+}
+
 export const VISUAL_PAGES_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS visual_pages (
   slug TEXT PRIMARY KEY,
@@ -29,13 +64,14 @@ CREATE TABLE IF NOT EXISTS visual_page_versions (
 export const VISUAL_PAGE_VERSIONS_INDEX_SQL =
   'CREATE INDEX IF NOT EXISTS idx_visual_page_versions_slug ON visual_page_versions (slug, id)';
 
-/** Idempotent 2026-10-03.1 → 2026-10-04.1 statements. No seed rewrites. Join visual rows stay. */
+/** Idempotent 2026-10-03.1 → current statements. No seed rewrites. Join visual rows stay. */
 export function incrementalSchemaStatements() {
   return [
     VISUAL_PAGES_TABLE_SQL,
     VISUAL_PAGE_VERSIONS_TABLE_SQL,
     VISUAL_PAGE_VERSIONS_INDEX_SQL,
     ...PUBLIC_READ_INDEX_SQL,
+    ...auditLogSchemaStatements(),
   ];
 }
 
@@ -43,9 +79,9 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.1',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.2',
     '-- Run at deploy time (owner sign-off only):',
-    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.1.sql',
+    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.2.sql',
     '-- Do NOT run this against production from a laptop or Cloud Agent.',
     '-- Safe to re-run. Worker initDb applies the same statements when it sees an older schema.',
     '',
@@ -57,16 +93,30 @@ export function renderIncrementalSchemaSql(targetVersion) {
   ].join('\n');
 }
 
+function isIdempotentSchemaError(error) {
+  return /duplicate column|already exists|duplicate object name/i.test(String(error?.message || error || ''));
+}
+
 export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   const statements = incrementalSchemaStatements();
   if (statements.length + 1 > MAX_D1_QUERIES_PER_INVOCATION) {
     throw new Error(`incremental schema has ${statements.length + 1} statements; Free plan cap is ${MAX_D1_QUERIES_PER_INVOCATION}`);
   }
-  if (typeof env?.DB?.batch === 'function') {
-    await env.DB.batch(statements.map((sql) => env.DB.prepare(sql)));
+  const alters = statements.filter((sql) => /^\s*ALTER TABLE/i.test(sql));
+  const rest = statements.filter((sql) => !/^\s*ALTER TABLE/i.test(sql));
+  if (typeof env?.DB?.batch === 'function' && rest.length) {
+    await env.DB.batch(rest.map((sql) => env.DB.prepare(sql)));
   } else {
-    for (const sql of statements) {
+    for (const sql of rest) {
       await env.DB.prepare(sql).run();
+    }
+  }
+  for (const sql of alters) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch (error) {
+      if (isIdempotentSchemaError(error)) continue;
+      throw error;
     }
   }
   if (typeof writeVersion === 'function') await writeVersion(env);

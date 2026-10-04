@@ -308,8 +308,19 @@ table.t td:first-child { color: #0f1f36; }
 <tr><td><b>Badge Creator</b></td><td>Super Admin, President, VP</td><td>Printable name badges for officers and committee members.</td></tr>
 <tr><td><b>Ledger</b></td><td>Treasurer, President</td><td>Income, expense and in-kind records, with <b>Download Excel</b>.</td></tr>
 <tr><td><b>Checkout</b></td><td>Treasurer, President, VP</td><td>Charge a card through Square ($1.00 minimum). Card details stay with Square.</td></tr>
-<tr><td><b>Security Log</b></td><td>Super Admin only</td><td>Read-only record of logins and CMS changes. It cannot be edited or deleted.</td></tr>
+<tr><td><b>Security Log</b></td><td>Super Admin only</td><td>Read-only record of logins and CMS changes. Month/year (Eastern Time), 25 entries per page, search, and a PDF of the selected month. It cannot be edited or deleted.</td></tr>
 </tbody></table>
+<h2 id="editing-15">6.15 Security log (Super Admin)</h2>
+<p>Menu → <b>Security Log</b>. Only Super Admins can open it. The log is append-only: no one can edit or delete a row, including Super Admins. D1 triggers abort any UPDATE or DELETE.</p>
+<ul>
+<li>The screen opens on the <b>current month in Eastern Time</b>, with a month and year selector. Change those to look at an earlier month.</li>
+<li>It shows <b>25 entries per page</b>, newest first. Use « ‹ Page › » to move through the month.</li>
+<li>Search by <b>user</b>, <b>action</b> (dropdown of known actions such as login, change.pages, mail.send), an optional <b>date range</b>, and free text. Free-text search looks at the decrypted summary, path, and details of the rows already loaded on that page. It does not search encrypted ciphertext in the database.</li>
+<li><b>Download month PDF</b> exports the selected month (and any user/action/date filters). Keep that PDF with your records.</li>
+<li>Visual editor <b>Save draft</b>, <b>Publish</b>, and <b>Restore</b> appear as <b>change.pages</b>, with the page name and kind (draft, publish, or restore) in the summary. Opening a visual editor page adds <b>page.edit.open</b>.</li>
+<li>Each sealed row still shows its own integrity flag. The screen also reports <b>Chain intact</b> or <b>Break at entry #id</b> for the hash chain on new rows.</li>
+<li>If an audit write fails, the Worker logs it and the Security Log shows a warning such as <b>N audit writes failed since &lt;time&gt;</b>.</li>
+</ul>
 </section>
 <section class="sec" id="dos"><h1 class="sec-h"><span class="num">7</span><span>Do&#x27;s and don&#x27;ts</span></h1><div class="sec-rule"></div>
 <table class="t"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><thead><tr><th>Do</th><th>Don't</th></tr></thead><tbody>

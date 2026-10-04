@@ -4834,6 +4834,10 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   .maintenance-preview-banner{font-size:.82rem;padding:10px 12px}
 }
 .security-log-panel .security-log-filters{margin-bottom:16px}
+.security-log-filter-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.security-log-filter-grid .full{grid-column:1/-1}
+.security-log-chain-ok{color:var(--navy);font-weight:800}
+#security-log-write-warning:not([hidden]){margin:8px 0 0}
 .security-log-panel,
 .security-log-panel .admin-card,
 .security-log-list,

@@ -43,6 +43,8 @@ import {
   slugFromFormTitle,
 } from './form-builder.mjs';
 import {
+  ADMIN_AUDIT_KNOWN_ACTIONS,
+  ADMIN_AUDIT_PAGE_SIZE,
   buildAdminAuditExportPdfBase64,
   buildAuditSummary,
   enrichMailAuditMeta,
@@ -108,6 +110,7 @@ import {
 } from './d1-read-policy.mjs';
 import {
   applyIncrementalSchema,
+  auditLogSchemaStatements,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
@@ -351,7 +354,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004d';
+export const ASSET_VERSION = 'cms-p1-20261004e';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1886,7 +1889,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.1';
+export const DB_SCHEMA_VERSION = '2026-10-04.2';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -2025,6 +2028,13 @@ async function migrateAndSeedDb(env) {
     await env.DB.prepare('ALTER TABLE admin_audit_log ADD COLUMN enc_version INTEGER NOT NULL DEFAULT 1').run();
   } catch {
     // Column already exists.
+  }
+  for (const sql of auditLogSchemaStatements()) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch {
+      // Column, index, or trigger already exists.
+    }
   }
   try {
     await env.DB.prepare('ALTER TABLE events ADD COLUMN event_year INTEGER NOT NULL DEFAULT 2026').run();
@@ -9708,16 +9718,25 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/security-log' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
-    const pageSize = Math.min(Math.max(Number(url.searchParams.get('limit') || 5), 1), 5);
+    const pageSize = Math.min(Math.max(Number(url.searchParams.get('limit') || ADMIN_AUDIT_PAGE_SIZE), 1), ADMIN_AUDIT_PAGE_SIZE);
     const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0);
     const actionFilter = String(url.searchParams.get('action') || '').trim();
     const actorFilter = String(url.searchParams.get('actor') || '').trim();
+    const year = url.searchParams.get('year');
+    const month = url.searchParams.get('month');
+    const from = String(url.searchParams.get('from') || '').trim();
+    const to = String(url.searchParams.get('to') || '').trim();
+    const q = String(url.searchParams.get('q') || '').trim();
     const payload = await listAdminAuditLogs(env, {
-      // CMS preview shows 5 entries per page; full history is in the PDF download.
       limit: pageSize,
       offset,
       action: actionFilter,
       actor: actorFilter,
+      year,
+      month,
+      from,
+      to,
+      q,
     });
     const totalPages = Math.max(1, Math.ceil((Number(payload.total) || 0) / pageSize) || 1);
     const page = Math.floor(offset / pageSize) + 1;
@@ -9747,6 +9766,11 @@ async function routeApi(request, env, url, ctx = null) {
           filters: {
             action: actionFilter,
             actor: actorFilter,
+            year: payload.year,
+            month: payload.month,
+            from,
+            to,
+            q,
           },
         },
       });
@@ -9781,10 +9805,15 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
     const payload = await listAdminAuditLogs(env, {
-      limit: Math.min(Number(url.searchParams.get('limit') || 1000), 2000),
+      limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
       offset: 0,
       action: String(url.searchParams.get('action') || '').trim(),
       actor: String(url.searchParams.get('actor') || '').trim(),
+      year: url.searchParams.get('year'),
+      month: url.searchParams.get('month'),
+      from: String(url.searchParams.get('from') || '').trim(),
+      to: String(url.searchParams.get('to') || '').trim(),
+      q: String(url.searchParams.get('q') || '').trim(),
     });
     await writeAdminAuditLog(env, {
       action: 'security.log.export',
@@ -11858,6 +11887,26 @@ async function handleVisualEditorPage(request, env, slug) {
   }
   const cms = await getPageBySlug(env, key, true);
   if (!cms) return htmlResponse('<!doctype html><title>Not found</title><p>Page not found</p>', 404);
+  await writeAdminAuditLog(env, {
+    action: 'page.edit.open',
+    category: 'pages',
+    method: 'GET',
+    path: `/admin/visual/${key}`,
+    status: 200,
+    actor_user_id: user.id,
+    actor_username: user.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action: 'page.edit.open',
+      method: 'GET',
+      path: `/admin/visual/${key}`,
+      status: 200,
+      actorUsername: user.username,
+      detail: `${key} opened`,
+    }),
+    meta: { slug: key, kind: 'open' },
+  });
   return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION, {
     title: cms.title,
     slug: key,
@@ -12974,13 +13023,24 @@ const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Five entries per page with « ‹ Page › » navigation. Download PDF for the full encrypted log. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download / Print PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div class="admin-card security-log-filters">
-  <div class="form-grid">
-    <label>Filter by user<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
-    <label>Filter by action<input id="security-log-action" type="search" placeholder="login, mail.send, change.pages…" autocomplete="off"></label>
+  <div class="form-grid security-log-filter-grid">
+    <label>Month<select id="security-log-month">
+      <option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option>
+      <option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option>
+      <option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option>
+    </select></label>
+    <label>Year<select id="security-log-year"></select></label>
+    <label>User<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
+    <label>Action<select id="security-log-action"><option value="">All actions</option>${ADMIN_AUDIT_KNOWN_ACTIONS.map((action) => `<option value="${action}">${action}</option>`).join('')}</select></label>
+    <label>From date<input id="security-log-from" type="date"></label>
+    <label>To date<input id="security-log-to" type="date"></label>
+    <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity. Isolated from website pages and logos.</p>
+  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. Free-text search runs on the decrypted rows on this page only.</p>
+  <p class="status" id="security-log-chain" aria-live="polite"></p>
+  <p class="error" id="security-log-write-warning" hidden></p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
 </div>
 <div class="admin-card">

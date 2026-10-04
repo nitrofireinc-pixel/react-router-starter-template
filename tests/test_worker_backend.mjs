@@ -2329,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004d'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004e'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2914,6 +2914,9 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(workerSrc, /security\.log\.view/);
   assert.match(workerSrc, /security-log-pager/);
   assert.match(workerSrc, /total_pages/);
+  assert.match(workerSrc, /25 entries per page/);
+  assert.match(workerSrc, /security-log-month/);
+  assert.match(workerSrc, /page\.edit\.open/);
   assert.match(workerSrc, /view and print only/i);
   assert.doesNotMatch(workerSrc, /minutes-view-modal/);
   // Security log must never appear as a grantable GLOBAL_PERMISSIONS scope.
@@ -2934,6 +2937,8 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(adminJs, /loadSecurityLog/);
   assert.match(adminJs, /renderSecurityLogPager/);
   assert.match(adminJs, /securityLogPage/);
+  assert.match(adminJs, /securityLogPageSize: 25/);
+  assert.match(adminJs, /security-log-month/);
   assert.match(adminJs, /security-log/);
   assert.match(adminJs, /tab', 'security'/);
   assert.match(adminJs, /Always pin Security Log/);
