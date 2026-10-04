@@ -2329,7 +2329,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004f'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004g'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2485,6 +2485,8 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(headerHtml, /class="brand-mark"/);
   assert.match(headerHtml, /class="btn gold header-donate"/);
   assert.match(headerHtml, /data-donate-open/);
+  assert.match(styles, /header\.site-header > \.header-donate\{display:none!important\}/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header > \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /border-top:1px solid #fff/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?display:flex/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header\{[\s\S]*?min-height:84px/);
@@ -2542,7 +2544,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(homeCss, /body\.home-page,[\s\S]*?overflow-x:clip/);
   assert.match(homeCss, /@media \(max-width:1100px\)\{[\s\S]*?quick-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(homeCss, /\.home-redesign \.impact ul\{[\s\S]*?flex-wrap:wrap/);
-  assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:inline-flex/);
+  assert.match(themeCss, /@media \(min-width:1200px\) and \(max-width:1339px\)\{[\s\S]*?\.header-donate\{[\s\S]*?display:none/);
   assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme \.header-donate\{display:none!important\}/);
   assert.match(themeCss, /@media \(max-width:767px\)\{[\s\S]*?nav \.header-donate,[\s\S]*?display:inline-flex!important/);
   assert.match(themeCss, /html\.nav-use-hamburger body\.efhs-theme header\.site-header nav a,[\s\S]*?text-shadow:none/);
@@ -2553,8 +2555,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   const midWidth = midStart >= 0 && midEnd > midStart ? themeCss.slice(midStart, midEnd) : '';
   assert.ok(midWidth, '768-1199 header breakpoint missing');
   assert.match(midWidth, /font-size:12px/);
-  assert.match(midWidth, /body\.efhs-theme \.header-donate\{[\s\S]*?display:inline-flex/);
-  assert.doesNotMatch(midWidth, /header-donate\{display:none/);
+  assert.match(midWidth, /body\.efhs-theme \.header-donate\{[\s\S]*?display:none/);
   assert.match(themeCss, /nav \.header-donate,[\s\S]*?order:-1/);
   assert.match(themeCss, /max-height:calc\(100dvh - 52px - 6\.75rem\)/);
   assert.match(styles, /html\.nav-use-hamburger/);

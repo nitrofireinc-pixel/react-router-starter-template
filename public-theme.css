@@ -184,7 +184,7 @@ body.efhs-theme header.site-header nav{
   flex-wrap:nowrap;
 }
 body.efhs-theme .header-donate{
-  display:inline-flex;
+  display:none;
   flex:0 0 auto;
   align-items:center;
   gap:8px;
@@ -196,6 +196,7 @@ body.efhs-theme .header-donate{
   text-transform:uppercase;
   box-shadow:0 10px 26px rgba(253,215,3,.28);
 }
+body.efhs-theme header.site-header > .header-donate{display:none!important}
 body.efhs-theme .header-donate .ic{
   width:1.05em;
   height:1.05em;
@@ -895,60 +896,20 @@ body.efhs-theme .footer h3{
     padding:6px 5px;
   }
   body.efhs-theme .header-donate{
-    display:inline-flex;
-    margin:0 0 4px;
-    padding:8px 12px;
-    font-size:12px;
-    min-height:36px;
+    display:none;
   }
 }
 
-/* Extra nav items (dev has 9 vs live 7) clip Donate on the single-row header
-   between 1200 and 1339. Drop to brand-over-nav and keep Donate on the nav row. */
+/* Desktop header no longer reserves a Donate slot. Keep a single-row nav
+   between 1200 and 1339 so Notify Me stays right-aligned with no empty gap. */
 @media (min-width:1200px) and (max-width:1339px){
-  body.efhs-theme header.site-header{
-    flex-wrap:wrap;
-    align-items:center;
-    justify-content:center;
-    min-height:0;
-    height:auto;
-    max-height:none;
-    padding:8px 16px 6px;
-    column-gap:8px;
-    row-gap:2px;
-  }
-  body.efhs-theme .header-inner{
-    flex:1 1 100%;
-    width:100%;
-    justify-content:center;
-    min-height:64px;
-  }
-  body.efhs-theme .brand{justify-content:center}
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
-    flex:1 1 auto;
-    width:auto;
-    max-width:calc(100% - 8.5rem);
-    justify-content:center;
-    flex-wrap:nowrap;
-    padding:0 0 4px;
-    gap:0;
-    min-width:0;
-  }
-  body.efhs-theme header.site-header nav a,
-  body.efhs-theme header.site-header nav .nav-notify-me,
-  body.efhs-theme header.site-header nav .nav-support-toggle{
-    font-size:12px;
-    letter-spacing:.04em;
-    padding:6px 5px;
+    max-width:none;
+    justify-content:flex-end;
   }
   body.efhs-theme .header-donate{
-    display:inline-flex;
-    flex:0 0 auto;
-    margin:0 0 4px;
-    padding:8px 12px;
-    font-size:12px;
-    min-height:36px;
+    display:none;
   }
 }
 

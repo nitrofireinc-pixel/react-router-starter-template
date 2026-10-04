@@ -362,6 +362,8 @@ html.nav-use-hamburger .header-quick-actions .nav-notify-bell{
     display:block;
   }
 }
+/* Desktop header: hide the gold Donate control. Mobile/hamburger keep nav .header-donate. */
+header.site-header > .header-donate{display:none!important}
 /* Desktop nav bar: full-bleed utility navy, gold links centered */
 @media(min-width:768px){
   header.site-header nav{

@@ -49,12 +49,14 @@ function measureInlineNavFits() {
   if (header.scrollWidth > header.clientWidth + 2) return false;
   if (donate) {
     const style = window.getComputedStyle(donate);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-    const donateBox = donate.getBoundingClientRect();
-    const headerBox = header.getBoundingClientRect();
-    if (donateBox.width < 4 || donateBox.height < 4) return false;
-    if (donateBox.right > headerBox.right + 4 || donateBox.left < headerBox.left - 4) return false;
-    if (donateBox.bottom > headerBox.bottom + 14 || donateBox.top < headerBox.top - 8) return false;
+    // Desktop hides the header Donate control; do not force the hamburger for that.
+    if (style.display !== 'none' && style.visibility !== 'hidden') {
+      const donateBox = donate.getBoundingClientRect();
+      const headerBox = header.getBoundingClientRect();
+      if (donateBox.width < 4 || donateBox.height < 4) return false;
+      if (donateBox.right > headerBox.right + 4 || donateBox.left < headerBox.left - 4) return false;
+      if (donateBox.bottom > headerBox.bottom + 14 || donateBox.top < headerBox.top - 8) return false;
+    }
   }
   return true;
 }

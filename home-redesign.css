@@ -853,7 +853,7 @@ body.efhs-theme .home-redesign .mosaic figcaption{position:absolute;left:0;right
 body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(1){grid-column:span 2;grid-row:span 2}
 body.efhs-theme .home-redesign .mosaic .gallery-item:nth-child(7){grid-column:span 2}
 body.home-page .footer{padding-bottom:120px}
-body.home-page .header-donate{display:inline-flex}
+body.home-page .header-donate{display:none}
 @media (max-width:767px){
   body.home-page .header-donate{display:none}
   body.home-page header.site-header nav .header-donate{display:inline-flex!important}
