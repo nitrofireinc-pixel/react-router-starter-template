@@ -383,7 +383,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004r';
+export const ASSET_VERSION = 'cms-p1-20261004s';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7404,9 +7404,9 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
   return jobs;
 }
 
-async function loadPublicCmsReads(env, options) {
+async function loadPublicCmsReads(env, options = {}) {
   const jobs = publicReadJobs(env, options);
-  const values = await readCachedQueryBatch(env, jobs);
+  const values = await readCachedQueryBatch(env, jobs, { ctx: options.ctx });
   const read = (key, fallback = null) => (values.has(key) ? values.get(key) : fallback);
   return {
     site: read('site', siteFromContentRows([])),
@@ -7422,7 +7422,7 @@ async function loadPublicCmsReads(env, options) {
   };
 }
 
-async function loadPublicChromeReads(env, today) {
+async function loadPublicChromeReads(env, today, ctx) {
   // Reuse the public page cache keys. The marquee is the sponsors list from this batch.
   const jobs = publicReadJobs(env, { path: '/', today, isHome: false }).filter((job) => (
     job.key === 'site'
@@ -7430,7 +7430,7 @@ async function loadPublicChromeReads(env, today) {
     || job.key === 'sponsors'
     || job.key === `deadline-events:${today}`
   ));
-  const values = await readCachedQueryBatch(env, jobs);
+  const values = await readCachedQueryBatch(env, jobs, { ctx });
   return {
     site: values.get('site') || siteFromContentRows([]),
     pages: values.get('pages-nav') || [],
@@ -8640,7 +8640,7 @@ async function routeApi(request, env, url, ctx = null) {
     }, 405);
   }
   if (url.pathname === '/api/site' && request.method === 'GET') {
-    return jsonResponse(await cachedPublicRead('site', () => getSite(env)));
+    return jsonResponse(await cachedPublicRead('site', () => getSite(env), { ctx }));
   }
 
   if (url.pathname === '/api/calendar-push-state' && request.method === 'GET') {
@@ -8774,16 +8774,16 @@ async function routeApi(request, env, url, ctx = null) {
   }
   if (url.pathname === '/api/events' && request.method === 'GET') {
     const today = easternTodayIso();
-    return jsonResponse(await cachedPublicRead(`events-upcoming:${today}`, () => getEvents(env, { upcomingOnly: true, expandRepeats: true })));
+    return jsonResponse(await cachedPublicRead(`events-upcoming:${today}`, () => getEvents(env, { upcomingOnly: true, expandRepeats: true }), { ctx }));
   }
   if (url.pathname === '/api/calendar-events' && request.method === 'GET') {
     // Full month view needs past and future months, not only upcoming rows.
-    return jsonResponse(await cachedPublicRead('events-all', () => getEvents(env, { upcomingOnly: false, expandRepeats: true })));
+    return jsonResponse(await cachedPublicRead('events-all', () => getEvents(env, { upcomingOnly: false, expandRepeats: true }), { ctx }));
   }
   if (url.pathname === '/api/caldev/deadline-banners' && request.method === 'GET') {
     try {
       const today = easternTodayIso();
-      const events = await cachedPublicRead(`deadline-events:${today}`, () => listDeadlineCaldevEvents(env));
+      const events = await cachedPublicRead(`deadline-events:${today}`, () => listDeadlineCaldevEvents(env), { ctx });
       return jsonResponse(buildDeadlineBannerItems(events, today));
     } catch {
       return jsonResponse([]);
@@ -8798,17 +8798,17 @@ async function routeApi(request, env, url, ctx = null) {
       const events = await cachedPublicRead(`caldev-upcoming:${today}:${limit}`, () => listUpcomingCaldevEvents(env, {
         todayIso: today,
         limit,
-      }));
+      }), { ctx });
       return jsonResponse(events.map(caldevEventToHighlight));
     }
-    const events = await cachedPublicRead('caldev-events', () => listCaldevEvents(env));
+    const events = await cachedPublicRead('caldev-events', () => listCaldevEvents(env), { ctx });
     return jsonResponse(events);
   }
   if (url.pathname === '/api/caldev/tracks' && request.method === 'GET') {
     return jsonResponse(CALDEV_TRACKS);
   }
   if (url.pathname === '/api/sponsors' && request.method === 'GET') {
-    return jsonResponse(await cachedPublicRead('sponsors', () => getSponsors(env, true)));
+    return jsonResponse(await cachedPublicRead('sponsors', () => getSponsors(env, true), { ctx }));
   }
   if (url.pathname === '/api/address-suggest' && request.method === 'GET') {
     const query = String(url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
@@ -9573,13 +9573,13 @@ async function routeApi(request, env, url, ctx = null) {
     return handleBuiltFormSubmit(request, env, 'letterman-jacket');
   }
   if (url.pathname === '/api/photos' && request.method === 'GET') {
-    return jsonResponse(await cachedPublicRead('photos', () => getPhotos(env)));
+    return jsonResponse(await cachedPublicRead('photos', () => getPhotos(env), { ctx }));
   }
   if (url.pathname === '/api/pages' && request.method === 'GET') {
     return jsonResponse(await cachedPublicRead('pages-nav', async () => {
       const rows = await navPagesStatement(env).all();
       return (rows.results || []).map((page) => mapCmsPage(page));
-    }));
+    }, { ctx }));
   }
   const publicPageMatch = url.pathname.match(/^\/api\/pages\/([a-z0-9-]+)$/);
   if (publicPageMatch && request.method === 'GET') {
@@ -12367,7 +12367,7 @@ export async function renderErrorPage(status, opts = {}) {
 
   try {
     const today = easternTodayIso();
-    const chrome = opts.chrome || await loadPublicChromeReads(opts.env, today);
+    const chrome = opts.chrome || await loadPublicChromeReads(opts.env, today, opts.ctx);
     const site = chrome.site || siteHint;
     const copy = mergeErrorCopy(code, site, {
       path,
@@ -12411,8 +12411,8 @@ export async function renderErrorPage(status, opts = {}) {
   }
 }
 
-async function renderPublicNotFound(env, url, { loggedIn = false } = {}) {
-  return renderErrorPage(404, { env, url, loggedIn });
+async function renderPublicNotFound(env, url, { loggedIn = false, ctx } = {}) {
+  return renderErrorPage(404, { env, url, loggedIn, ctx });
 }
 
 async function serveBundledStaticAsset(request, env, url) {
@@ -12454,12 +12454,12 @@ async function serveBundledStaticAsset(request, env, url) {
   return assetResponse;
 }
 
-async function serveStaticOrCms(request, env, url) {
+async function serveStaticOrCms(request, env, url, ctx) {
   if (isWorkerStaticAssetPath(url.pathname)) {
     return serveBundledStaticAsset(request, env, url);
   }
   await initDb(env);
-  const site = await cachedPublicRead('site', () => getSite(env));
+  const site = await cachedPublicRead('site', () => getSite(env), { ctx });
   const maintenanceOn = isMaintenanceMode(site);
   const user = await currentUser(request, env);
   const loggedIn = Boolean(user);
@@ -12493,6 +12493,7 @@ async function serveStaticOrCms(request, env, url) {
       env,
       url,
       site,
+      ctx,
       shell: 'lite',
       retryAfter: 600,
     }));
@@ -12505,6 +12506,7 @@ async function serveStaticOrCms(request, env, url) {
       env,
       url,
       site,
+      ctx,
       shell: 'lite',
       retryAfter: 600,
     });
@@ -12524,7 +12526,7 @@ async function serveStaticOrCms(request, env, url) {
     const page = await cachedPublicRead(`page-path:${path}`, async () => {
       const result = await pageByPathStatement(env, path).all();
       return mapCmsPage((result.results || [])[0] || null);
-    });
+    }, { ctx });
     if (page) {
       const livePage = publicCmsPageForRender(page);
       const pageIsLive = isPublicCmsPageActive(page);
@@ -12538,6 +12540,7 @@ async function serveStaticOrCms(request, env, url) {
         needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
         needsStaff: pageIsLive && page.slug === 'directors',
         needsPhotos: pageIsLive && (isHome || page.slug === 'gallery'),
+        ctx,
       });
       const pages = reads.pages;
       const allSponsors = reads.sponsors;
@@ -12594,6 +12597,7 @@ async function serveStaticOrCms(request, env, url) {
         request,
         env,
         url,
+        ctx,
         loggedIn: Boolean(guideAuth.user),
         detail: 'The Website Guide is available to Super Admins only.',
       });
@@ -12615,7 +12619,7 @@ async function serveStaticOrCms(request, env, url) {
   }
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
   if (assetResponse.status === 404 && isPublicDocumentRequest(url.pathname)) {
-    return renderPublicNotFound(env, url, { loggedIn });
+    return renderPublicNotFound(env, url, { loggedIn, ctx });
   }
   // Keep CMS scripts/styles fresh so deploy fixes are not masked by long CDN/browser caches.
   const assetName = assetUrl.pathname.split('/').pop() || '';
@@ -12639,8 +12643,36 @@ export function renderPushServiceWorker() {
   return '';
 }
 
+const DEV_ERROR_HOOK_RE = /^\/__dev\/error\/(401|403|404|429|500|503)\/?$/;
+
+function isDevErrorHookEnabled(env) {
+  return String(env?.DEV_ERROR_HOOK || '') === '1';
+}
+
+async function handleDevErrorHook(request, env, url, ctx) {
+  if (!isDevErrorHookEnabled(env)) return null;
+  const match = String(url.pathname || '').match(DEV_ERROR_HOOK_RE);
+  if (!match) return null;
+  const code = Number(match[1]);
+  const defaults = ERROR_DEFAULTS[code] || ERROR_DEFAULTS[404];
+  if (defaults.shell !== 'lite') await initDb(env);
+  return renderErrorPage(code, {
+    request,
+    env,
+    url,
+    ctx,
+    shell: defaults.shell,
+    retryAfter: defaults.retryAfter,
+  });
+}
+
 async function dispatchWorker(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/__dev' || url.pathname.startsWith('/__dev/')) {
+      const hooked = await handleDevErrorHook(request, env, url, ctx);
+      if (hooked) return hooked;
+      return renderErrorPage(404, { request, env, url, ctx });
+    }
     if (url.pathname === '/push-sw.js') {
       const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
       if (asset.ok) {
@@ -12701,7 +12733,7 @@ async function dispatchWorker(request, env, ctx) {
     }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
-    return serveStaticOrCms(request, env, url);
+    return serveStaticOrCms(request, env, url, ctx);
 }
 
 export default {

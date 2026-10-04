@@ -26,6 +26,7 @@ function createErrorEnv({
   queryCounter = { n: 0 },
   errorPages = null,
   instagram = DEFAULT_INSTAGRAM_HREF,
+  extraEnv = {},
 } = {}) {
   const home = {
     id: 1,
@@ -103,6 +104,7 @@ function createErrorEnv({
           return new Response('missing', { status: 404 });
         },
       },
+      ...extraEnv,
     },
   };
 }
@@ -260,7 +262,7 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
-  assert.equal(ASSET_VERSION, 'cms-p1-20261004r');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261004s');
   assert.match(workerSrc, /export async function renderErrorPage/);
   assert.match(workerSrc, /liteErrorResponse\(500/);
   assert.match(workerSrc, /Error pages/);
@@ -274,4 +276,44 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   assert.match(readFileSync(join(root, 'error-page.css'), 'utf8'), /instrument-hero/);
   assert.match(workerSrc, /shell: 'lite'/);
   assert.doesNotMatch(workerSrc, /WWW-Authenticate|www-authenticate/);
+  assert.match(workerSrc, /DEV_ERROR_HOOK/);
+  assert.match(workerSrc, /DEV_ERROR_HOOK_RE/);
+  assert.match(workerSrc, /__dev\\\/error\\\/\(401\|403\|404\|429\|500\|503\)/);
+  const liveToml = readFileSync(join(root, 'wrangler.toml'), 'utf8');
+  const devToml = readFileSync(join(root, 'wrangler.dev.toml'), 'utf8');
+  assert.doesNotMatch(liveToml, /DEV_ERROR_HOOK/);
+  assert.doesNotMatch(liveToml, /\/__dev\//);
+  assert.match(devToml, /DEV_ERROR_HOOK\s*=\s*"1"/);
+  assert.match(devToml, /"\/__dev\/\*"/);
+});
+
+test('DEV error hook is disabled without DEV_ERROR_HOOK and renders branded pages when enabled', async () => {
+  resetCaches();
+  const off = createErrorEnv();
+  const hidden = await worker.fetch(new Request('https://efhsband.org/__dev/error/500'), off.env, { waitUntil() {} });
+  assert.equal(hidden.status, 404);
+  assert.match(await hidden.text(), /error-page error-404/);
+
+  resetCaches();
+  const on = createErrorEnv({ extraEnv: { DEV_ERROR_HOOK: '1' } });
+  const ctx = { waitUntil() {} };
+  const page500 = await worker.fetch(new Request('https://efhsband.org/__dev/error/500'), on.env, ctx);
+  assert.equal(page500.status, 500);
+  assert.match(await page500.text(), /error-page error-500 lite/);
+
+  const page503 = await worker.fetch(new Request('https://efhsband.org/__dev/error/503'), on.env, ctx);
+  assert.equal(page503.status, 503);
+  assert.equal(page503.headers.get('retry-after'), '600');
+  assert.match(await page503.text(), /error-page error-503 lite/);
+
+  const page403 = await worker.fetch(new Request('https://efhsband.org/__dev/error/403'), on.env, ctx);
+  assert.equal(page403.status, 403);
+  assert.match(await page403.text(), /error-page error-403/);
+
+  const page404 = await worker.fetch(new Request('https://efhsband.org/__dev/error/404'), on.env, ctx);
+  assert.equal(page404.status, 404);
+  assert.match(await page404.text(), /error-page error-404/);
+
+  const unknown = await worker.fetch(new Request('https://efhsband.org/__dev/error/418'), on.env, ctx);
+  assert.equal(unknown.status, 404);
 });

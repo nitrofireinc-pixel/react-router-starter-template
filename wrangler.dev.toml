@@ -32,6 +32,7 @@ run_worker_first = [
   "/donate",
   "/donate/",
   "/assets/downloads/*",
+  "/__dev/*",
 ]
 html_handling = "none"
 
@@ -42,6 +43,7 @@ CONTACT_FROM_NAME = "East Forsyth Band Boosters"
 CONTACT_DEFAULT_EMAIL = ""
 CONTACT_EMAIL_PROVIDER = "none"
 DEV_UPLOAD_ORIGIN = "https://efhsband.org"
+DEV_ERROR_HOOK = "1"
 
 [[d1_databases]]
 binding = "DB"
