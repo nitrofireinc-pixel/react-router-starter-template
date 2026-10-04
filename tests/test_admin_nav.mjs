@@ -97,7 +97,7 @@ test('mobile admin menu copies collapsed children and labels Sponsors page layou
   assert.doesNotMatch(renderFn, /closest\(\s*['"]\[hidden\]['"]\s*\)/);
   assert.match(renderFn, /node\.hidden && !isCollapsedMenuSub\(node\)/);
   assert.match(adminJs, /page layout/i);
-  assert.match(adminJs, /slug \|\| ''\)\)\.trim\(\)\.toLowerCase\(\) === 'sponsors'/);
+  assert.match(adminJs, /page\?\.slug \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'sponsors'/);
   assert.match(adminJs, /revealOverlaySubmenus\?\.\(\)/);
 
   const chrome = renderAdminSidebarHtml('test');
