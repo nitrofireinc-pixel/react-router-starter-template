@@ -31,6 +31,10 @@ import {
   inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
+  createAuditExportSession,
+  readAuditExportSession,
+  formatAuditGenerationReport,
+  buildAuditGenerationCatalog,
   verifyAdminAuditBatch,
   verifyAdminAuditRange,
   ACCESS_DENIED_THROTTLE_MS,
@@ -64,8 +68,12 @@ import {
   writeAdminAuditLog,
 } from '../worker/src/admin-audit-log.mjs';
 import {
+  AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
   AUDIT_LOG_NO_DELETE_TRIGGER_SQL,
   AUDIT_LOG_NO_UPDATE_TRIGGER_SQL,
+  AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL,
+  AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL,
+  AUDIT_LOG_PENDING_TABLE_SQL,
 } from '../worker/src/schema-upgrade.mjs';
 import {
   buildAuditDeviceMeta,
@@ -348,8 +356,10 @@ function applyListFilters(rows, sql, binds) {
   return { result, nextBind: index };
 }
 
-function createAuditDb(seedRows = [], { users = [] } = {}) {
+function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
   const rows = seedRows.slice();
+  const pending = [];
+  const names = actorNames.slice();
   const site = new Map();
   const sqlLog = [];
   const env = {
@@ -370,6 +380,10 @@ function createAuditDb(seedRows = [], { users = [] } = {}) {
             if (q.includes('COUNT(*)')) {
               return { total: applyListFilters(rows, q, this.binds).result.length };
             }
+            if (q.includes('MAX(id)')) {
+              const max = rows.reduce((maxId, item) => Math.max(maxId, Number(item.id) || 0), 0);
+              return { max_id: max };
+            }
             if (q.includes('WHERE id = ?') && q.includes('payload_sha256')) {
               return rows.find((row) => Number(row.id) === Number(this.binds[0])) || null;
             }
@@ -385,6 +399,30 @@ function createAuditDb(seedRows = [], { users = [] } = {}) {
             return null;
           },
           async all() {
+            if (q.includes('FROM admin_audit_pending')) {
+              const drained = new Set(rows.map((row) => Number(row.source_pending_id)).filter(Boolean));
+              const open = pending.filter((row) => !drained.has(Number(row.id)));
+              const limit = Number(this.binds[0]) || open.length;
+              return { results: open.slice(0, limit) };
+            }
+            if (q.includes('FROM admin_audit_actor_names')) {
+              const like = String(this.binds[0] || '').replace(/%/g, '').toLowerCase();
+              return {
+                results: names
+                  .filter((user) => (
+                    String(user.username || '').toLowerCase().includes(like)
+                    || String(user.display_name || '').toLowerCase().includes(like)
+                  ))
+                  .map((user) => ({ id: user.user_id })),
+              };
+            }
+            if (q.includes("action = 'log.genesis'")) {
+              return {
+                results: rows
+                  .filter((row) => row.action === 'log.genesis')
+                  .sort((a, b) => Number(a.id) - Number(b.id)),
+              };
+            }
             if (q.includes('FROM users')) {
               const like = String(this.binds[0] || '').replace(/%/g, '').toLowerCase();
               return {
@@ -435,6 +473,30 @@ function createAuditDb(seedRows = [], { users = [] } = {}) {
               site.set(this.binds[0], this.binds[1]);
               return { success: true };
             }
+            if (q.includes('INSERT INTO admin_audit_pending')) {
+              const row = {
+                id: pending.length + 1,
+                created_at: this.binds[0],
+                action: this.binds[1],
+                category: this.binds[2],
+                actor_user_id: this.binds[3],
+                actor_username: this.binds[4],
+                payload_sha256: this.binds[5],
+                ciphertext: this.binds[6],
+                enc_version: this.binds[7],
+                key_id: this.binds[8],
+              };
+              pending.push(row);
+              return { success: true, meta: { last_row_id: row.id } };
+            }
+            if (q.includes('INSERT INTO admin_audit_actor_names')) {
+              names.push({
+                user_id: this.binds[0],
+                username: this.binds[1],
+                display_name: this.binds[2],
+              });
+              return { success: true };
+            }
             if (q.includes('INSERT INTO admin_audit_log')) {
               const cols = (q.match(/INSERT INTO admin_audit_log\s*\(([^)]+)\)/i)?.[1] || '')
                 .split(',')
@@ -443,8 +505,18 @@ function createAuditDb(seedRows = [], { users = [] } = {}) {
               cols.forEach((col, index) => {
                 row[col] = this.binds[index];
               });
-              if (row.prev_id != null && row.prev_id !== '' && rows.some((item) => Number(item.prev_id) === Number(row.prev_id))) {
+              if (row.prev_id == null || row.prev_id === '') {
+                throw new Error('audit-chain-fork');
+              }
+              const maxId = rows.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+              if (maxId && Number(row.prev_id) !== maxId) {
+                throw new Error('audit-chain-fork');
+              }
+              if (rows.some((item) => Number(item.prev_id) === Number(row.prev_id))) {
                 throw new Error('UNIQUE constraint failed: admin_audit_log.prev_id');
+              }
+              if (row.source_pending_id != null && rows.some((item) => Number(item.source_pending_id) === Number(row.source_pending_id))) {
+                throw new Error('UNIQUE constraint failed: admin_audit_log.source_pending_id');
               }
               rows.push(row);
               return { success: true, meta: { last_row_id: row.id } };
@@ -455,7 +527,7 @@ function createAuditDb(seedRows = [], { users = [] } = {}) {
       },
     },
   };
-  return { env, rows, site, sqlLog };
+  return { env, rows, pending, names, site, sqlLog };
 }
 
 test('visual editor mutations log as change.pages with slug and kind', async () => {
@@ -547,10 +619,14 @@ test('hash chain uses the contiguous id range for filtered or scattered rows', a
   const brokenList = await listAdminAuditLogs(env, { year: 2026, month: 10, action: 'login', limit: 25 });
   assert.deepEqual(brokenList.entries.map((entry) => entry.id), [5, 3, 1]);
   assert.match(brokenList.chain_status, /this page/i);
+  rows[4].prev_sha256 = 'also-bad';
   const broken = await verifyAdminAuditBatch(env, { after_id: 0, limit: 100 });
   assert.equal(broken.chain_ok, false);
-  assert.equal(broken.chain_status, 'Break at entry #4');
-  assert.equal(broken.chain_break_id, 4);
+  assert.match(broken.chain_status, /#4/);
+  assert.match(broken.chain_status, /#5/);
+  assert.deepEqual(broken.chain_break_ids, [4, 5]);
+  assert.equal(broken.done, true);
+  assert.equal(broken.chain_head_id, 5);
 });
 
 test('free-text search ignores security.log.view so a missing term matches nothing', async () => {
@@ -792,6 +868,8 @@ test('new-row encrypt plus chain hash stays well under the Workers 10ms budget i
 test('access-denied helpers classify protected 401/403 and skip public 404s', () => {
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('security.log.export.start'));
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('security.log.export.complete'));
   assert.equal(sanitizeAuditPath('/api/admin/users?token=secret#frag'), '/api/admin/users');
   assert.equal(sanitizeAuditPath('https://efhsband.org/admin/visual/home?next=/admin'), '/admin/visual/home');
   assert.equal(isProtectedAuditPath('/admin'), true);
@@ -1353,11 +1431,21 @@ test('parallel audit writes form a single linear prev_id chain', async () => {
       payload_sha256 TEXT NOT NULL DEFAULT '',
       ciphertext TEXT NOT NULL DEFAULT '',
       enc_version INTEGER NOT NULL DEFAULT 1,
+      key_id TEXT NOT NULL DEFAULT '',
       prev_sha256 TEXT NOT NULL DEFAULT '',
-      prev_id INTEGER
+      prev_id INTEGER,
+      source_pending_id INTEGER
     );
     CREATE UNIQUE INDEX idx_audit_prev_id ON admin_audit_log(prev_id) WHERE prev_id IS NOT NULL;
+    CREATE UNIQUE INDEX idx_audit_source_pending ON admin_audit_log(source_pending_id) WHERE source_pending_id IS NOT NULL;
     CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO site_content (key, value) VALUES ('audit_chain_cutover_id', '0');
+    ${AUDIT_LOG_PENDING_TABLE_SQL};
+    ${AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL};
+    ${AUDIT_LOG_NO_UPDATE_TRIGGER_SQL};
+    ${AUDIT_LOG_NO_DELETE_TRIGGER_SQL};
+    ${AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL};
+    ${AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL};
   `);
   const env = {
     EFBAND_SECRET: 'unit-test-secret',
@@ -1395,21 +1483,29 @@ test('parallel audit writes form a single linear prev_id chain', async () => {
   })));
   assert.equal(results.every(Boolean), true);
   const rows = db.prepare('SELECT id, payload_sha256, prev_sha256, prev_id FROM admin_audit_log ORDER BY id').all();
-  assert.equal(rows.length, 12);
+  const pendingCount = Number(db.prepare('SELECT COUNT(*) AS total FROM admin_audit_pending').get().total) || 0;
+  assert.equal(rows.length + pendingCount, 12);
+  if (pendingCount) {
+    const later = await writeAdminAuditLog(env, { action: 'login', actor_username: 'drainer@efhsband.org' });
+    assert.equal(Boolean(later?.id), true);
+  }
+  const linear = db.prepare('SELECT id, payload_sha256, prev_sha256, prev_id FROM admin_audit_log ORDER BY id').all();
+  assert.ok(linear.length >= 12);
+  assert.equal(linear.every((row) => row.prev_id != null), true);
   const prevIds = new Set();
-  for (let i = 0; i < rows.length; i += 1) {
+  for (let i = 0; i < linear.length; i += 1) {
     if (i === 0) {
-      assert.equal(rows[i].prev_sha256, '');
+      assert.equal(Number(linear[i].prev_id), 0);
       continue;
     }
-    assert.equal(rows[i].prev_sha256, rows[i - 1].payload_sha256, `row ${rows[i].id} fork`);
-    assert.equal(Number(rows[i].prev_id), Number(rows[i - 1].id));
-    assert.equal(prevIds.has(Number(rows[i].prev_id)), false);
-    prevIds.add(Number(rows[i].prev_id));
+    assert.equal(linear[i].prev_sha256, linear[i - 1].payload_sha256, `row ${linear[i].id} fork`);
+    assert.equal(Number(linear[i].prev_id), Number(linear[i - 1].id));
+    assert.equal(prevIds.has(Number(linear[i].prev_id)), false);
+    prevIds.add(Number(linear[i].prev_id));
   }
   const verified = await verifyAdminAuditRange(env, {});
   assert.equal(verified.chain_ok, true);
-  assert.equal(verified.checked, 12);
+  assert.equal(verified.checked, linear.length);
   db.close();
 });
 
@@ -1478,9 +1574,218 @@ test('admin.js verify walks batches and does not double-bind select filters', ()
   assert.match(adminJs, /Verifying whole hash chain/);
   assert.match(adminJs, /This page — not a full-chain verify/);
   assert.match(adminJs, /downloadSecurityLogExport/);
+  assert.match(adminJs, /security-log\/export\/start/);
+  assert.match(adminJs, /session_id/);
+  assert.match(adminJs, /True chain head/);
   const selectBlock = adminJs.slice(
     adminJs.indexOf('const securityLogSelectFilters'),
     adminJs.indexOf('securityLogTextFilters.forEach'),
   );
   assert.doesNotMatch(selectBlock, /addEventListener\('input'/);
+});
+
+test('2026-10-04.4.sql adds prev_id then the unique index and linear trigger', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      action TEXT NOT NULL,
+      actor_user_id INTEGER,
+      actor_username TEXT NOT NULL DEFAULT '',
+      payload_sha256 TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `);
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'));
+  const cols = db.prepare('PRAGMA table_info(admin_audit_log)').all().map((col) => col.name);
+  assert.equal(cols.includes('prev_id'), true);
+  assert.equal(cols.includes('prev_sha256'), true);
+  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'aaa', 0, '')").run();
+  assert.throws(
+    () => db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('x', 'bbb', NULL, 'aaa')").run(),
+    /audit-chain-fork/,
+  );
+  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'bbb', 1, 'aaa')").run();
+  const count = db.prepare('SELECT COUNT(*) AS total FROM admin_audit_log').get();
+  assert.equal(count.total, 2);
+  db.close();
+});
+
+test('deleted-user display-name search uses the actor name map', async () => {
+  resetAuditWriteFailureState();
+  const seed = [{
+    id: 1,
+    action: 'login',
+    actor_user_id: 44,
+    actor_username: 'old-login@efhsband.org',
+    created_at: '2026-10-04 16:00:00',
+    payload_sha256: 'h1',
+    prev_sha256: '',
+  }];
+  const { env } = createAuditDb(seed, {
+    users: [],
+    actorNames: [{ user_id: 44, username: 'old-login@efhsband.org', display_name: 'Pat Deleted' }],
+  });
+  const listed = await listAdminAuditLogs(env, {
+    year: 2026,
+    month: 10,
+    actor: 'Pat Deleted',
+    limit: 25,
+  });
+  assert.equal(listed.total, 1);
+  assert.equal(listed.entries[0].actor_user_id, 44);
+});
+
+test('export session is signed and required', async () => {
+  const { env } = createAuditDb();
+  const started = await createAuditExportSession(env, {
+    actorId: 1,
+    format: 'csv',
+    filters: { month: 10, year: 2026 },
+  });
+  assert.match(started.session_id, /\./);
+  const ok = await readAuditExportSession(env, started.session_id);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.session.format, 'csv');
+  const missing = await readAuditExportSession(env, '');
+  assert.equal(missing.ok, false);
+  const bad = await readAuditExportSession(env, `${started.session_id}x`);
+  assert.equal(bad.ok, false);
+});
+
+test('generation report is court-readable and lists every break', () => {
+  const catalog = buildAuditGenerationCatalog({
+    genesisRows: [{
+      id: 953,
+      generation: 2,
+      new_key_id: 'k2',
+      created_at: '2026-10-05T00:45:00.000Z',
+      authorized_by: 'Trevor',
+      reason: 'rotate',
+    }],
+    minId: 1,
+    maxId: 960,
+  });
+  const report = formatAuditGenerationReport(catalog, [
+    { id: 790 },
+    { id: 865 },
+  ]);
+  assert.match(report[0], /Generation 1 \(historical, closed by genesis #953\)/);
+  assert.match(report[0], /#790/);
+  assert.match(report[0], /#865/);
+  assert.match(report[1], /Generation 2 \(k2\)/);
+  assert.match(report[1], /Trevor/);
+  assert.match(report[1], /INTACT/);
+});
+
+test('50 parallel SQLite writes stay a single linear chain with zero NULL prev_id', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      action TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'admin',
+      method TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL DEFAULT '',
+      status INTEGER,
+      actor_user_id INTEGER,
+      actor_username TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      meta_json TEXT NOT NULL DEFAULT '{}',
+      payload_sha256 TEXT NOT NULL DEFAULT '',
+      ciphertext TEXT NOT NULL DEFAULT '',
+      enc_version INTEGER NOT NULL DEFAULT 1,
+      key_id TEXT NOT NULL DEFAULT '',
+      prev_sha256 TEXT NOT NULL DEFAULT '',
+      prev_id INTEGER,
+      source_pending_id INTEGER
+    );
+    CREATE UNIQUE INDEX idx_audit_prev_id ON admin_audit_log(prev_id) WHERE prev_id IS NOT NULL;
+    CREATE UNIQUE INDEX idx_audit_source_pending ON admin_audit_log(source_pending_id) WHERE source_pending_id IS NOT NULL;
+    CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO site_content (key, value) VALUES ('audit_chain_cutover_id', '0');
+    ${AUDIT_LOG_PENDING_TABLE_SQL};
+    ${AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL};
+    ${AUDIT_LOG_NO_UPDATE_TRIGGER_SQL};
+    ${AUDIT_LOG_NO_DELETE_TRIGGER_SQL};
+    ${AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL};
+    ${AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL};
+  `);
+  const env = {
+    EFBAND_SECRET: 'unit-test-secret',
+    AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere',
+    DB: {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (String(sql).includes('ORDER BY id DESC LIMIT 1')) {
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+            return stmt.get(...this.binds) || null;
+          },
+          async all() {
+            return { results: stmt.all(...this.binds) };
+          },
+          async run() {
+            try {
+              const info = stmt.run(...this.binds);
+              return { success: true, meta: { last_row_id: Number(info.lastInsertRowid) } };
+            } catch (error) {
+              throw new Error(error?.message || String(error));
+            }
+          },
+        };
+      },
+    },
+  };
+  const requested = 56;
+  const writeStarted = performance.now();
+  const results = await Promise.all(Array.from({ length: requested }, (_, index) => writeAdminAuditLog(env, {
+    action: 'login',
+    actor_username: `writer${index}@efhsband.org`,
+  })));
+  const writeMs = performance.now() - writeStarted;
+  assert.equal(results.every(Boolean), true);
+  let pending = Number(db.prepare('SELECT COUNT(*) AS total FROM admin_audit_pending').get().total) || 0;
+  if (pending) {
+    await writeAdminAuditLog(env, { action: 'login', actor_username: 'drain@efhsband.org' });
+  }
+  const linear = db.prepare('SELECT id, payload_sha256, prev_sha256, prev_id, source_pending_id FROM admin_audit_log ORDER BY id').all();
+  const consumed = new Set(linear.map((row) => Number(row.source_pending_id)).filter(Boolean));
+  const openPending = db.prepare('SELECT id FROM admin_audit_pending').all()
+    .filter((row) => !consumed.has(Number(row.id)));
+  assert.equal(openPending.length, 0);
+  const drainExtra = linear.some((row) => row.source_pending_id) || results.some((row) => row?.queued)
+    ? Number(db.prepare("SELECT COUNT(*) AS total FROM admin_audit_log WHERE actor_username = 'drain@efhsband.org'").get().total) || 0
+    : 0;
+  assert.equal(linear.length, requested + drainExtra);
+  assert.equal(linear.every((row) => row.prev_id != null), true);
+  for (let i = 1; i < linear.length; i += 1) {
+    assert.equal(Number(linear[i].prev_id), Number(linear[i - 1].id));
+    assert.equal(linear[i].prev_sha256, linear[i - 1].payload_sha256);
+  }
+  const verified = await verifyAdminAuditRange(env, {});
+  assert.equal(verified.chain_ok, true);
+  assert.equal(verified.checked, linear.length);
+  const perWrite = writeMs / requested;
+  console.log(JSON.stringify({
+    parallel_write_test: {
+      requested,
+      chained: linear.length,
+      open_pending: openPending.length,
+      null_prev_id: linear.filter((row) => row.prev_id == null).length,
+      cpu_ms_per_write_wall: Number(perWrite.toFixed(3)),
+      chain_ok: verified.chain_ok,
+    },
+  }));
+  db.close();
 });

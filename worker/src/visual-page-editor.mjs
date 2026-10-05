@@ -9,7 +9,7 @@ import {
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
 } from './admin-chrome.mjs';
-import { visualStructureSignature, visualStyleSignature } from './page-permissions.mjs';
+import { contentOnlyHtmlViolation, visualStructureSignature, visualStyleSignature } from './page-permissions.mjs';
 
 export { visualStructureSignature, visualStyleSignature };
 
@@ -799,6 +799,7 @@ export async function saveVisualPage(env, {
     if (
       visualStructureSignature(clean) !== visualStructureSignature(baseline)
       || visualStyleSignature(clean) !== visualStyleSignature(baseline)
+      || contentOnlyHtmlViolation(baseline, clean)
     ) {
       throw layoutRequiredError(key);
     }

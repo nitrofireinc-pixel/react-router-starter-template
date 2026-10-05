@@ -19,9 +19,13 @@ export const ADMIN_AUDIT_ENC_VERSION = 1;
 export const ADMIN_AUDIT_ENC_VERSION_V2 = 2;
 export const ADMIN_AUDIT_ENC_VERSION_UNSIGNED = 0;
 export const ADMIN_AUDIT_PAGE_SIZE = 25;
-export const ADMIN_AUDIT_VERIFY_BATCH = 100;
+export const ADMIN_AUDIT_VERIFY_BATCH = 40;
 export const ADMIN_AUDIT_EXPORT_BATCH = 50;
-export const ADMIN_AUDIT_CHAIN_RETRIES = 8;
+export const ADMIN_AUDIT_CHAIN_RETRIES = 25;
+export const ADMIN_AUDIT_PENDING_DRAIN = 8;
+export const ADMIN_AUDIT_PENDING_TABLE = 'admin_audit_pending';
+export const AUDIT_CHAIN_BREAK_EXPLAIN =
+  'A break means this row’s previous-id or previous-hash does not match the sealed row immediately before it, or its stored SHA-256 does not match a fresh digest of that row. Rows cannot be edited or deleted: BEFORE UPDATE/DELETE triggers abort those statements.';
 export const AUDIT_LOG_TIMEZONE = 'America/New_York';
 export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
 export const AUDIT_LOG_KEY_ENV = 'AUDIT_LOG_KEY';
@@ -67,6 +71,8 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'mail.test',
   'security.log.view',
   'security.log.export',
+  'security.log.export.start',
+  'security.log.export.complete',
   'security.log.verify',
   'log.genesis',
   'access.denied',
@@ -354,6 +360,7 @@ export function clearLoginFailures(username = '', ip = '') {
 }
 
 const TEXT = new TextEncoder();
+const TEXT_DEC = new TextDecoder();
 const READ_TEXT = new TextDecoder();
 
 const SENSITIVE_KEYS = new Set([
@@ -1213,12 +1220,23 @@ export async function writeAdminAuditLog(env, entry = {}) {
   });
 }
 
-function isAuditPrevIdConflict(error) {
+function isAuditChainConflict(error) {
   const msg = String(error?.message || error || '');
-  return /unique/i.test(msg) && /prev_id/i.test(msg);
+  return ((/unique/i.test(msg) && /prev_id/i.test(msg))
+    || /audit-chain-fork/i.test(msg));
 }
 
-async function readAuditChainHead(env) {
+function isSourcePendingConflict(error) {
+  const msg = String(error?.message || error || '');
+  return /unique/i.test(msg) && /source_pending/i.test(msg);
+}
+
+async function auditChainRetryWait(attempt = 1) {
+  const ms = 1 + Math.floor(Math.random() * Math.min(4, Math.max(1, attempt)));
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function readAuditChainHead(env) {
   const prevSql = `SELECT id, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
   assertAuditSqlIsAppendOnly(prevSql);
   const previous = await env.DB.prepare(prevSql).first();
@@ -1239,12 +1257,17 @@ async function insertAuditRowOnce(env, {
   encVersion,
   prevSha256,
   prevId,
+  sourcePendingId = null,
 }) {
-  const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
+  const withPending = `INSERT INTO ${ADMIN_AUDIT_TABLE}
+      (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256, prev_id, source_pending_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const withoutPending = `INSERT INTO ${ADMIN_AUDIT_TABLE}
       (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256, prev_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  assertAuditSqlIsAppendOnly(insertSql);
-  return env.DB.prepare(insertSql).bind(
+  assertAuditSqlIsAppendOnly(withPending);
+  assertAuditSqlIsAppendOnly(withoutPending);
+  const binds = [
     createdAt,
     action,
     category,
@@ -1262,7 +1285,90 @@ async function insertAuditRowOnce(env, {
     encVersion,
     prevSha256,
     prevId,
+  ];
+  try {
+    return await env.DB.prepare(withPending).bind(...binds, sourcePendingId).run();
+  } catch (error) {
+    if (!/no such column:\s*source_pending_id/i.test(String(error?.message || error || ''))) {
+      throw error;
+    }
+    return env.DB.prepare(withoutPending).bind(...binds).run();
+  }
+}
+
+async function listUndrainedPending(env, limit = ADMIN_AUDIT_PENDING_DRAIN) {
+  const sql = `SELECT p.id, p.created_at, p.action, p.category, p.actor_user_id, p.actor_username,
+      p.payload_sha256, p.ciphertext, p.enc_version, p.key_id
+     FROM ${ADMIN_AUDIT_PENDING_TABLE} p
+     WHERE NOT EXISTS (
+       SELECT 1 FROM ${ADMIN_AUDIT_TABLE} a WHERE a.source_pending_id = p.id
+     )
+     ORDER BY p.id ASC
+     LIMIT ?`;
+  try {
+    const fetched = await env.DB.prepare(sql).bind(Math.max(1, Number(limit) || ADMIN_AUDIT_PENDING_DRAIN)).all();
+    return fetched?.results || [];
+  } catch {
+    return [];
+  }
+}
+
+async function insertPendingAuditRow(env, row = {}) {
+  const sql = `INSERT INTO ${ADMIN_AUDIT_PENDING_TABLE}
+    (created_at, action, category, actor_user_id, actor_username, payload_sha256, ciphertext, enc_version, key_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  return env.DB.prepare(sql).bind(
+    row.createdAt,
+    row.action,
+    row.category,
+    row.actorUserId,
+    row.actorUsername,
+    row.payloadSha256,
+    row.ciphertext,
+    row.encVersion,
+    row.usedKeyId || '',
   ).run();
+}
+
+async function drainPendingAuditRows(env) {
+  const pending = await listUndrainedPending(env);
+  let drained = 0;
+  for (const row of pending) {
+    let placed = false;
+    for (let attempt = 1; attempt <= ADMIN_AUDIT_CHAIN_RETRIES; attempt += 1) {
+      try {
+        const head = await readAuditChainHead(env);
+        await insertAuditRowOnce(env, {
+          createdAt: row.created_at,
+          action: row.action,
+          category: row.category,
+          actorUserId: row.actor_user_id,
+          actorUsername: row.actor_username,
+          payloadSha256: row.payload_sha256,
+          ciphertext: row.ciphertext,
+          encVersion: row.enc_version,
+          prevSha256: head.payload_sha256,
+          prevId: head.id > 0 ? head.id : 0,
+          sourcePendingId: Number(row.id) || null,
+        });
+        placed = true;
+        drained += 1;
+        break;
+      } catch (error) {
+        if (isSourcePendingConflict(error)) {
+          placed = true;
+          break;
+        }
+        if (isAuditChainConflict(error) && attempt < ADMIN_AUDIT_CHAIN_RETRIES) {
+          await auditChainRetryWait(attempt);
+          continue;
+        }
+        return { drained, complete: false };
+      }
+    }
+    if (!placed) return { drained, complete: false };
+  }
+  return { drained, complete: true };
 }
 
 async function insertAuditChainRow(env, {
@@ -1278,13 +1384,13 @@ async function insertAuditChainRow(env, {
   keyed,
 }) {
   let lastError = null;
-  let prevSha256 = '';
-  let prevId = 0;
+  await drainPendingAuditRows(env);
   for (let attempt = 1; attempt <= ADMIN_AUDIT_CHAIN_RETRIES; attempt += 1) {
     try {
+      if (attempt > 1) await drainPendingAuditRows(env);
       const head = await readAuditChainHead(env);
-      prevSha256 = head.payload_sha256;
-      prevId = head.id > 0 ? head.id : 0;
+      const prevSha256 = head.payload_sha256;
+      const prevId = head.id > 0 ? head.id : 0;
       const result = await insertAuditRowOnce(env, {
         createdAt,
         action,
@@ -1309,14 +1415,15 @@ async function insertAuditChainRow(env, {
       };
     } catch (error) {
       lastError = error;
-      if (isAuditPrevIdConflict(error) && attempt < ADMIN_AUDIT_CHAIN_RETRIES) continue;
+      if (isAuditChainConflict(error) && attempt < ADMIN_AUDIT_CHAIN_RETRIES) {
+        await auditChainRetryWait(attempt);
+        continue;
+      }
       break;
     }
   }
   try {
-    const head = await readAuditChainHead(env);
-    prevSha256 = head.payload_sha256;
-    const result = await insertAuditRowOnce(env, {
+    const queued = await insertPendingAuditRow(env, {
       createdAt,
       action,
       category,
@@ -1325,18 +1432,18 @@ async function insertAuditChainRow(env, {
       payloadSha256,
       ciphertext,
       encVersion,
-      prevSha256,
-      prevId: null,
+      usedKeyId,
     });
     return {
-      id: result?.meta?.last_row_id || null,
+      id: null,
+      pending_id: queued?.meta?.last_row_id || null,
       payload_sha256: payloadSha256,
-      prev_sha256: prevSha256,
+      prev_sha256: '',
       prev_id: null,
       enc_version: encVersion,
       key_id: usedKeyId,
       key_missing: !keyed,
-      chain_fallback: true,
+      queued: true,
     };
   } catch (error) {
     console.error('admin audit log write failed', error?.message || lastError?.message || error);
@@ -1818,6 +1925,23 @@ export function resolveAuditLogTimeRange({
   };
 }
 
+export async function recordAuditActorName(env, user = {}) {
+  const userId = Number(user?.id);
+  if (!env?.DB?.prepare || !Number.isInteger(userId) || userId <= 0) return null;
+  try {
+    await env.DB.prepare(
+      'INSERT INTO admin_audit_actor_names (user_id, username, display_name) VALUES (?, ?, ?)',
+    ).bind(
+      userId,
+      String(user.username || '').trim().slice(0, 190),
+      String(user.display_name || '').trim().slice(0, 190),
+    ).run();
+  } catch {
+    return null;
+  }
+  return userId;
+}
+
 export async function resolveAuditActorSqlFilter(env, actor = '') {
   const actorFilter = String(actor || '').trim();
   if (!actorFilter) return { clauses: [], binds: [] };
@@ -1826,16 +1950,24 @@ export async function resolveAuditActorSqlFilter(env, actor = '') {
   }
   const like = `%${actorFilter.toLowerCase()}%`;
   const ids = [];
+  const addId = (value) => {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0 && !ids.includes(id)) ids.push(id);
+  };
   try {
     const usersSql = 'SELECT id FROM users WHERE LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? LIMIT 50';
     assertAuditSqlIsAppendOnly(usersSql);
     const found = await env.DB.prepare(usersSql).bind(like, like).all();
-    for (const row of found?.results || []) {
-      const id = Number(row.id);
-      if (Number.isInteger(id) && id > 0) ids.push(id);
-    }
+    for (const row of found?.results || []) addId(row.id);
   } catch {
     // users table is optional in unit mocks
+  }
+  try {
+    const namesSql = 'SELECT DISTINCT user_id AS id FROM admin_audit_actor_names WHERE LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? LIMIT 50';
+    const found = await env.DB.prepare(namesSql).bind(like, like).all();
+    for (const row of found?.results || []) addId(row.id);
+  } catch {
+    // name map is optional until schema 2026-10-04.5
   }
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(', ');
@@ -1957,6 +2089,198 @@ export async function listAdminAuditLogs(env, {
   };
 }
 
+export async function readAuditChainCutover(env) {
+  try {
+    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+      .bind('audit_chain_cutover_id')
+      .first();
+    if (row?.value == null || String(row.value).trim() === '') return 0;
+    return Number(row.value) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function loadAuditGenerations(env) {
+  const sql = `SELECT id, created_at, action, category, actor_user_id, actor_username, key_id,
+      ciphertext, enc_version, payload_sha256
+     FROM ${ADMIN_AUDIT_TABLE}
+     WHERE action = 'log.genesis'
+     ORDER BY id ASC`;
+  assertAuditSqlIsAppendOnly(sql);
+  let rows = [];
+  try {
+    const fetched = await env.DB.prepare(sql).all();
+    rows = fetched?.results || [];
+  } catch {
+    rows = [];
+  }
+  const gens = [];
+  for (const row of rows) {
+    const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
+    const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
+    gens.push({
+      id: Number(row.id) || 0,
+      created_at: String(row.created_at || decoded?.created_at || ''),
+      actor_username: String(decoded?.actor_username || row.actor_username || ''),
+      generation: Number(meta.generation) || gens.length + 2,
+      new_key_id: String(meta.new_key_id || row.key_id || ''),
+      authorized_by: String(meta.authorized_by || decoded?.actor_username || row.actor_username || ''),
+      reason: String(meta.reason || ''),
+    });
+  }
+  return gens;
+}
+
+export function buildAuditGenerationCatalog({ genesisRows = [], minId = 1, maxId = 0 } = {}) {
+  const startMin = Number(minId) || 1;
+  const endMax = Number(maxId) || startMin;
+  const rows = Array.isArray(genesisRows) ? genesisRows : [];
+  if (!rows.length) {
+    return [{
+      generation: 1,
+      key_id: 'historical',
+      start_id: startMin,
+      end_id: endMax,
+      historical: false,
+      current: true,
+    }];
+  }
+  const catalog = [];
+  const first = rows[0];
+  const firstId = Number(first.id) || startMin;
+  if (firstId > startMin) {
+    catalog.push({
+      generation: 1,
+      key_id: 'historical',
+      start_id: startMin,
+      end_id: firstId - 1,
+      historical: true,
+      closed_by: firstId,
+      close_reason: first.reason || '',
+    });
+  }
+  rows.forEach((row, index) => {
+    const next = rows[index + 1];
+    catalog.push({
+      generation: Number(row.generation) || (index + 2),
+      key_id: row.new_key_id || row.key_id || '',
+      start_id: Number(row.id) || startMin,
+      end_id: next ? Number(next.id) - 1 : endMax,
+      started_at: row.created_at,
+      started_at_et: formatAuditTimestampEt(row.created_at),
+      started_by: row.authorized_by || row.actor_username || '',
+      reason: row.reason || '',
+    });
+  });
+  return catalog;
+}
+
+export function formatAuditGenerationReport(catalog = [], breaks = []) {
+  return (Array.isArray(catalog) ? catalog : []).map((gen) => {
+    const genBreaks = (Array.isArray(breaks) ? breaks : []).filter((item) => {
+      const id = Number(item.id);
+      return id >= Number(gen.start_id) && id <= Number(gen.end_id);
+    });
+    const ids = genBreaks.map((item) => `#${item.id}`).join(', ');
+    if (gen.historical) {
+      return `Generation 1 (historical, closed by genesis #${gen.closed_by}): ${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'}${ids ? ` at ${ids}` : ''}, reason recorded in genesis row`;
+    }
+    const status = genBreaks.length
+      ? `${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'} at ${ids}`
+      : 'INTACT';
+    return `Generation ${gen.generation} (${gen.key_id || 'k1'}), started ${gen.started_at_et || 'at original build'} by ${gen.started_by || 'unknown'}, rows #${gen.start_id}-#${gen.end_id}: ${status}`;
+  });
+}
+
+export async function createAuditExportSession(env, {
+  actorId = 0,
+  format = 'csv',
+  filters = {},
+} = {}) {
+  const session = {
+    v: 1,
+    sid: crypto.randomUUID(),
+    actor_id: Number(actorId) || 0,
+    format: String(format || 'csv'),
+    filters: filters && typeof filters === 'object' ? filters : {},
+    iat: Date.now(),
+    exp: Date.now() + (45 * 60 * 1000),
+  };
+  const payload = JSON.stringify(session);
+  const sig = await signAuditChainHead(env, payload);
+  return {
+    session_id: `${bytesToBase64(TEXT.encode(payload))}.${sig}`,
+    session,
+  };
+}
+
+export async function readAuditExportSession(env, sessionId = '') {
+  const raw = String(sessionId || '').trim();
+  const dot = raw.lastIndexOf('.');
+  if (dot < 1) return { ok: false, status: 400, detail: 'Export session required' };
+  let payload = '';
+  try {
+    payload = TEXT_DEC.decode(base64ToBytes(raw.slice(0, dot)));
+  } catch {
+    return { ok: false, status: 400, detail: 'Export session is invalid' };
+  }
+  const sig = raw.slice(dot + 1);
+  const expected = await signAuditChainHead(env, payload);
+  if (sig !== expected) return { ok: false, status: 403, detail: 'Export session is invalid' };
+  let session = null;
+  try {
+    session = JSON.parse(payload);
+  } catch {
+    return { ok: false, status: 400, detail: 'Export session is invalid' };
+  }
+  if (Date.now() > Number(session?.exp || 0)) {
+    return { ok: false, status: 403, detail: 'Export session expired' };
+  }
+  return { ok: true, session };
+}
+
+export async function nextAuditExportRunningHash(prev = '', entries = []) {
+  let acc = String(prev || '');
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    acc = await sha256Hex(`${acc}|${entry.id}|${entry.payload_sha256 || ''}`);
+  }
+  return acc;
+}
+
+export async function buildAuditExportManifest(env, extra = {}) {
+  const head = await readAuditChainHead(env);
+  const genesis = await loadAuditGenerations(env);
+  const minId = extra.min_id != null ? Number(extra.min_id) : 1;
+  const maxId = extra.max_id != null ? Number(extra.max_id) : head.id;
+  const catalog = buildAuditGenerationCatalog({
+    genesisRows: genesis,
+    minId,
+    maxId: maxId || head.id,
+  });
+  const material = [
+    String(head.id || 0),
+    String(head.payload_sha256 || ''),
+    String(extra.count || 0),
+    String(extra.running_hash || ''),
+    String(minId || 0),
+    String(maxId || 0),
+  ].join('|');
+  const signed = await signAuditChainHead(env, material);
+  return {
+    chain_head_id: head.id,
+    chain_head: head.payload_sha256,
+    generations: catalog,
+    generation_report: formatAuditGenerationReport(catalog, extra.breaks || []),
+    signed_manifest: signed,
+    signed_chain: signed,
+    count: extra.count || 0,
+    running_hash: extra.running_hash || '',
+    min_id: minId,
+    max_id: maxId,
+  };
+}
+
 export async function verifyAdminAuditBatch(env, {
   after_id = 0,
   expected_prev = '',
@@ -1965,37 +2289,81 @@ export async function verifyAdminAuditBatch(env, {
   const started = Date.now();
   const safeLimit = Math.min(Math.max(Number(limit) || ADMIN_AUDIT_VERIFY_BATCH, 1), 200);
   const afterId = Math.max(Number(after_id) || 0, 0);
-  const batchSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id > ? ORDER BY id ASC LIMIT ?`;
+  const batchSql = `SELECT id, created_at, action, category, actor_user_id, key_id, ciphertext, enc_version,
+      payload_sha256, prev_sha256, prev_id
+     FROM ${ADMIN_AUDIT_TABLE} WHERE id > ? ORDER BY id ASC LIMIT ?`;
   assertAuditSqlIsAppendOnly(batchSql);
   const fetched = await env.DB.prepare(batchSql).bind(afterId, safeLimit).all();
   const rows = fetched?.results || [];
   let prevHash = String(expected_prev || '');
-  if (!prevHash && afterId > 0) {
-    const neighborSql = `SELECT payload_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id = ?`;
+  let prevId = afterId;
+  if (afterId > 0 && (!prevHash || !prevId)) {
+    const neighborSql = `SELECT id, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id = ?`;
     assertAuditSqlIsAppendOnly(neighborSql);
     const neighbor = await env.DB.prepare(neighborSql).bind(afterId).first();
-    prevHash = String(neighbor?.payload_sha256 || '');
+    if (!prevHash) prevHash = String(neighbor?.payload_sha256 || '');
+    if (neighbor?.id) prevId = Number(neighbor.id) || afterId;
   }
-  let chainOk = true;
-  let breakId = null;
+  const cutover = await readAuditChainCutover(env);
+  const breaks = [];
+  const digestFailures = [];
+  const legacy = [];
   for (const row of rows) {
+    const id = Number(row.id) || 0;
     const prev = String(row.prev_sha256 || '');
+    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
+    const afterCutover = cutover > 0 && id > cutover;
+    const blankLink = !prev && (linkedId == null || linkedId === 0);
+    if (!afterCutover && (blankLink || linkedId == null) && (!prev || prev === prevHash)) {
+      if (blankLink || linkedId == null) {
+        legacy.push({ id, kind: 'legacy', reason: 'legacy, pre-chain' });
+      }
+    }
     if (prev && prev !== prevHash) {
-      chainOk = false;
-      breakId = Number(row.id) || 0;
-      break;
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: `previous hash does not match row #${prevId || afterId}`,
+      });
+    } else if (afterCutover && (linkedId == null || (prevId && linkedId !== prevId) || (!prev && prevHash))) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: linkedId == null
+          ? 'prev_id is NULL after cutover'
+          : `prev_id ${linkedId} does not follow #${prevId}`,
+      });
+    }
+    const digest = await verifyAuditRowDigest(row);
+    if (digest.recomputed && !digest.ok) {
+      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
+      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
     }
     prevHash = String(row.payload_sha256 || '');
+    prevId = id;
   }
   const last = rows.length ? rows[rows.length - 1] : null;
   const first = rows.length ? rows[0] : null;
   const done = rows.length < safeLimit;
+  const trueHead = await readAuditChainHead(env);
+  const genesis = await loadAuditGenerations(env);
+  const catalog = buildAuditGenerationCatalog({
+    genesisRows: genesis,
+    minId: first ? Number(first.id) : afterId || 1,
+    maxId: trueHead.id || (last ? Number(last.id) : afterId),
+  });
+  const chainOk = breaks.length === 0;
+  const breakIds = breaks.map((item) => item.id);
   return {
     chain_ok: chainOk,
     chain_status: chainOk
       ? (done ? 'Whole chain intact' : 'Batch intact')
-      : `Break at entry #${breakId}`,
-    chain_break_id: breakId,
+      : `Breaks at ${breakIds.map((id) => `#${id}`).join(', ')}`,
+    chain_break_id: breakIds[0] || null,
+    chain_break_ids: breakIds,
+    breaks,
+    digest_failures: digestFailures,
+    legacy,
     checked: rows.length,
     after_id: afterId,
     next_after_id: last ? Number(last.id) : afterId,
@@ -2003,7 +2371,11 @@ export async function verifyAdminAuditBatch(env, {
     done,
     min_id: first ? Number(first.id) : null,
     max_id: last ? Number(last.id) : null,
-    chain_head: last ? String(last.payload_sha256 || '') : '',
+    chain_head: trueHead.payload_sha256,
+    chain_head_id: trueHead.id,
+    generations: catalog,
+    generation_report: formatAuditGenerationReport(catalog, breaks),
+    explanation: AUDIT_CHAIN_BREAK_EXPLAIN,
     scope: 'whole_chain',
     elapsed_ms: Date.now() - started,
     key_configured: hasAuditLogKey(env),
@@ -2020,10 +2392,16 @@ export async function verifyAdminAuditRange(env, options = {}) {
   let chainOk = true;
   let status = 'Whole chain intact';
   let breakId = null;
+  const breaks = [];
+  const digestFailures = [];
   let minId = null;
   let maxId = null;
   let head = '';
+  let headId = null;
   let tail = '';
+  let generations = [];
+  let generationReport = [];
+  let explanation = AUDIT_CHAIN_BREAK_EXPLAIN;
   while (true) {
     const batch = await verifyAdminAuditBatch(env, {
       after_id: afterId,
@@ -2032,17 +2410,23 @@ export async function verifyAdminAuditRange(env, options = {}) {
     });
     if (minId == null) minId = batch.min_id;
     if (batch.max_id) maxId = batch.max_id;
-    if (!tail && batch.chain_head && batch.min_id) tail = batch.chain_head;
+    if (!tail && batch.min_id) tail = String(batch.next_expected_prev || '');
     checked += Number(batch.checked) || 0;
     if (batch.chain_head) head = batch.chain_head;
+    if (batch.chain_head_id) headId = batch.chain_head_id;
+    if (Array.isArray(batch.breaks)) breaks.push(...batch.breaks);
+    if (Array.isArray(batch.digest_failures)) digestFailures.push(...batch.digest_failures);
+    if (Array.isArray(batch.generations)) generations = batch.generations;
+    if (batch.explanation) explanation = batch.explanation;
     if (batch.chain_ok === false) {
       chainOk = false;
-      status = batch.chain_status;
-      breakId = batch.chain_break_id;
-      break;
+      breakId = breakId || batch.chain_break_id;
     }
     if (batch.done) {
-      status = batch.chain_status || 'Whole chain intact';
+      generationReport = formatAuditGenerationReport(generations, breaks);
+      status = chainOk
+        ? (generationReport[generationReport.length - 1] || 'Whole chain intact')
+        : `Breaks at ${breaks.map((item) => `#${item.id}`).join(', ')}`;
       break;
     }
     afterId = batch.next_after_id;
@@ -2060,13 +2444,19 @@ export async function verifyAdminAuditRange(env, options = {}) {
     chain_ok: chainOk,
     chain_status: status,
     chain_break_id: breakId,
+    chain_break_ids: breaks.map((item) => item.id),
+    breaks,
     checked,
-    digest_failures: 0,
+    digest_failures: digestFailures,
     min_id: minId,
     max_id: maxId,
     chain_head: head,
+    chain_head_id: headId,
     chain_tail: tail,
     signed_chain: signature,
+    generations,
+    generation_report: generationReport,
+    explanation,
     key_configured: hasAuditLogKey(env),
     scope: 'whole_chain',
   };
@@ -2152,7 +2542,14 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
     lines.push('');
     lines.push(`chain_ok,${csvEscape(verify.chain_ok)}`);
     lines.push(`chain_head,${csvEscape(verify.chain_head)}`);
-    lines.push(`signed_chain,${csvEscape(verify.signed_chain)}`);
+    lines.push(`chain_head_id,${csvEscape(verify.chain_head_id)}`);
+    lines.push(`signed_chain,${csvEscape(verify.signed_chain || verify.signed_manifest)}`);
+    lines.push(`signed_manifest,${csvEscape(verify.signed_manifest || verify.signed_chain)}`);
+    if (Array.isArray(verify.generation_report)) {
+      for (const line of verify.generation_report) {
+        lines.push(`generation,${csvEscape(line)}`);
+      }
+    }
   }
   return `${lines.join('\n')}\n`;
 }

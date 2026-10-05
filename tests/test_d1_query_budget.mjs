@@ -205,6 +205,7 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
     readFileSync(join(root, 'migrations/2026-10-04.2.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.3.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.5.sql'), 'utf8'),
   ].join('\n');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
@@ -213,8 +214,9 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
   assert.equal(normalize(sqlFile).includes('CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update'), true);
   assert.equal(normalize(sqlFile).includes('idx_audit_created'), true);
   assert.equal(sqlFile.includes('prev_sha256'), true);
+  assert.equal(normalize(sqlFile).includes('ALTER TABLE admin_audit_log ADD COLUMN prev_id'), true);
+  assert.equal(normalize(sqlFile).includes('admin_audit_log_linear_insert'), true);
   assert.equal(normalize(sqlFile).includes("schema_version"), true);
-  assert.equal(normalize(sqlFile).includes('ALTER TABLE'), false);
   for (const statement of incrementalSchemaStatements()) {
     if (/^\s*ALTER TABLE/i.test(statement)) continue;
     assert.equal(normalize(sqlFile).includes(normalize(statement)), true, statement.slice(0, 60));
@@ -229,6 +231,10 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
         prepare(sql) {
           return {
             bind() { return this; },
+            async first() {
+              queries += 1;
+              return null;
+            },
             async all() {
               queries += 1;
               return { results: [] };

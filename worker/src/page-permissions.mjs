@@ -153,6 +153,96 @@ export function visualStyleSignature(html = '') {
   return extractVisualCss(html).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+export const CONTENT_ONLY_TEXT_TAGS = new Set([
+  'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'a', 'ul', 'ol', 'li',
+]);
+export const CONTENT_ONLY_HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+function parseHtmlAttrMap(attrs = '') {
+  const raw = String(attrs || '');
+  const map = {};
+  if (hasHiddenAttribute(raw)) map.hidden = '';
+  const re = /([a-zA-Z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+  let match;
+  while ((match = re.exec(raw))) {
+    map[String(match[1] || '').toLowerCase()] = String(match[2] ?? match[3] ?? match[4] ?? '');
+  }
+  return map;
+}
+
+export function scanHtmlElements(html = '') {
+  const source = String(html || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ');
+  const els = [];
+  const re = /<([a-zA-Z][a-zA-Z0-9:-]*)\b([^>]*?)(\/?)>/g;
+  let match;
+  while ((match = re.exec(source))) {
+    const tag = String(match[1] || '').toLowerCase();
+    if (tag === 'script' || tag === 'style') continue;
+    els.push({ tag, attrs: match[2] || '', attrMap: parseHtmlAttrMap(match[2] || '') });
+  }
+  return els;
+}
+
+function isSafeContentHref(value = '') {
+  const href = String(value || '').trim();
+  if (!href) return true;
+  if (href.startsWith('#') || href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) {
+    return true;
+  }
+  if (/^(mailto|tel):/i.test(href)) return true;
+  if (/^https?:\/\//i.test(href)) return true;
+  return false;
+}
+
+function isContentOnlyContentAttr(tag, name, value) {
+  if (tag === 'a' && name === 'href') return isSafeContentHref(value);
+  if (tag === 'img' && (name === 'src' || name === 'alt')) return true;
+  return false;
+}
+
+function contentOnlyLayoutFingerprint(el) {
+  const layout = {};
+  for (const [name, value] of Object.entries(el.attrMap || {})) {
+    if (isContentOnlyContentAttr(el.tag, name, value)) continue;
+    layout[name] = name === 'style' ? normalizeInlineStyle(value) : String(value);
+  }
+  const keys = Object.keys(layout).sort();
+  return `${el.tag}|${keys.map((key) => `${key}=${layout[key]}`).join(';')}`;
+}
+
+function hasContentOnlyLayoutAttrs(el) {
+  return Object.entries(el.attrMap || {}).some(([name, value]) => (
+    !isContentOnlyContentAttr(el.tag, name, value)
+  ));
+}
+
+/** Returns a reason string when content-only HTML changes layout, else null. */
+export function contentOnlyHtmlViolation(baseline = '', next = '') {
+  const before = scanHtmlElements(baseline);
+  const after = scanHtmlElements(next);
+  const baselineHeadings = new Set(
+    before.filter((el) => CONTENT_ONLY_HEADING_TAGS.has(el.tag)).map((el) => el.tag),
+  );
+  const freelyAddable = (tag) => CONTENT_ONLY_TEXT_TAGS.has(tag) || baselineHeadings.has(tag);
+  const beforeCounts = new Map();
+  for (const el of before) beforeCounts.set(el.tag, (beforeCounts.get(el.tag) || 0) + 1);
+  const afterCounts = new Map();
+  for (const el of after) afterCounts.set(el.tag, (afterCounts.get(el.tag) || 0) + 1);
+  for (const [tag, count] of afterCounts) {
+    if (count > (beforeCounts.get(tag) || 0) && !freelyAddable(tag)) {
+      return `new <${tag}> is not allowed for content-only editors`;
+    }
+  }
+  const sensitive = (els) => els
+    .filter((el) => !freelyAddable(el.tag) || hasContentOnlyLayoutAttrs(el))
+    .map(contentOnlyLayoutFingerprint)
+    .sort();
+  if (sensitive(before).join('\n') !== sensitive(after).join('\n')) {
+    return 'style, class, hidden, or other non-whitelisted attributes changed';
+  }
+  return null;
+}
+
 export function visualStructureSignature(html = '') {
   const source = String(html || '').replace(/<style[\s\S]*?<\/style>/gi, ' ');
   const nodes = [];

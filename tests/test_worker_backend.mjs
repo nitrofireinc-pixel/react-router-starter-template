@@ -504,6 +504,36 @@ test('event helpers decode contenteditable entities instead of showing &amp; / &
   assert.doesNotMatch(indexHtml, /<p data-site-field="footer_note">/);
 });
 
+test('serializePagePayload keeps existing slug and active when those fields are omitted', () => {
+  const existing = {
+    slug: 'inactive-resources',
+    path: '/inactive-resources.html',
+    title: 'Inactive Resources',
+    body_html: '<section><p>Keep</p></section>',
+    nav_order: 8,
+    is_home: 0,
+    active: 0,
+  };
+  const omitted = serializePagePayload({
+    title: 'Renamed In The Editor',
+    body_html: '<section><p>Edited</p></section>',
+  }, existing);
+  assert.equal(omitted.slug, 'inactive-resources');
+  assert.equal(omitted.path, '/inactive-resources.html');
+  assert.equal(omitted.active, 0);
+  assert.equal(omitted.title, 'Renamed In The Editor');
+  assert.match(omitted.body_html, /Edited/);
+
+  const explicit = serializePagePayload({
+    title: 'Renamed In The Editor',
+    slug: 'renamed-resources',
+    active: 1,
+    body_html: '<section><p>Edited</p></section>',
+  }, existing);
+  assert.equal(explicit.slug, 'renamed-resources');
+  assert.equal(explicit.active, 1);
+});
+
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {
   const page = serializePagePayload({
     title: 'Calendar',
@@ -2333,7 +2363,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005a'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005b'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3482,7 +3512,7 @@ test('initDb applies the incremental upgrade on 2026-10-02.1 without the full se
   const batches = calls.filter((call) => call.type === 'batch');
   assert.equal(batches.length, 1);
   assert.ok(batches[0].count <= 40);
-  assert.ok(batches[0].count < 20, 'incremental upgrade must not recreate every table');
+  assert.ok(batches[0].count < 30, 'incremental upgrade must not recreate every table');
   assert.equal(calls.some((call) => call.type === 'run' && /schema_version|site_content/.test(call.sql)), true);
   await initDb(env);
   assert.equal(calls.filter((call) => call.type === 'batch').length, 1);

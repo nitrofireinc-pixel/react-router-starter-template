@@ -50,9 +50,11 @@ import {
   buildAdminAuditExportCsv,
   buildAdminAuditExportJson,
   buildAdminAuditExportPdfBase64,
+  buildAuditExportManifest,
   buildAuditSummary,
   clearLoginFailures,
   contentEvidenceHashed,
+  createAuditExportSession,
   enqueueAdminAudit,
   enrichMailAuditMeta,
   inspectLoginLock,
@@ -61,9 +63,12 @@ import {
   markRequestAuditWritten,
   maybeAuditAdminApiResponse,
   maybeLogAccessDenial,
+  nextAuditExportRunningHash,
   verifyAdminAuditBatch,
   parseAuditUtcDate,
   permissionListFromValue,
+  readAuditExportSession,
+  recordAuditActorName,
   registerLoginFailure,
   requestClientIp,
   requestCountry,
@@ -415,7 +420,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005a';
+export const ASSET_VERSION = 'cms-p1-20261005b';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2102,7 +2107,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.4';
+export const DB_SCHEMA_VERSION = '2026-10-04.5';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -8924,38 +8929,58 @@ export function sanitizeHomeBodyHtml(html = '') {
   return sanitizeHomeAllowlistHtml(source);
 }
 
+function payloadHasOwn(payload, key) {
+  return Boolean(payload) && Object.prototype.hasOwnProperty.call(payload, key);
+}
+
 export function serializePagePayload(payload, existing = null) {
-  const slug = normalizePageSlug(payload.slug || payload.title || existing?.slug);
-  const path = payload.path ? normalizeStaticPath(payload.path) : pagePathFromSlug(slug);
+  const raw = payload && typeof payload === 'object' ? payload : {};
+  const slug = existing && !payloadHasOwn(raw, 'slug')
+    ? normalizePageSlug(existing.slug)
+    : normalizePageSlug(raw.slug || raw.title || existing?.slug);
+  const path = payloadHasOwn(raw, 'path')
+    ? (raw.path ? normalizeStaticPath(raw.path) : pagePathFromSlug(slug))
+    : (existing
+      ? (Number(existing.is_home) ? '/' : (existing.path || pagePathFromSlug(existing.slug || slug)))
+      : pagePathFromSlug(slug));
   const defaultHtml = '<section><div class="wrap"><h1>New Page</h1><p>Edit this page in the CMS.</p></div></section>';
   let body_html;
   if (slug === 'home') {
-    if (payload.body_html != null && String(payload.body_html).trim()) {
-      body_html = sanitizeHomeBodyHtml(payload.body_html);
+    if (raw.body_html != null && String(raw.body_html).trim()) {
+      body_html = sanitizeHomeBodyHtml(raw.body_html);
     } else {
       const baseHtml = String(existing?.body_html ?? defaultHtml);
       const cards = normalizeHomeFeatureCards({
         ...extractHomeFeatureCards(baseHtml),
-        ...payload,
+        ...raw,
       });
       body_html = applyHomeFeatureCards(baseHtml, cards);
     }
-  } else if (hasStructuredPageFields(payload)) {
-    body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
+  } else if (hasStructuredPageFields(raw)) {
+    body_html = generateStructuredPageHtml({ title: raw.title || existing?.title, ...raw });
   } else {
-    body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+    body_html = String(raw.body_html ?? existing?.body_html ?? defaultHtml);
   }
   if (slug !== 'home') {
     body_html = sanitizeCmsPageHtml(body_html);
   }
+  const title = existing && !payloadHasOwn(raw, 'title')
+    ? String(existing.title || 'Untitled Page').trim()
+    : String(raw.title || existing?.title || 'Untitled Page').trim();
+  const active = existing && !payloadHasOwn(raw, 'active')
+    ? (Number(existing.active) ? 1 : 0)
+    : (raw.active === false || raw.active === 0 ? 0 : 1);
+  const isHome = existing && !payloadHasOwn(raw, 'is_home') && !payloadHasOwn(raw, 'slug')
+    ? (Number(existing.is_home) ? 1 : 0)
+    : (slug === 'home' || raw.is_home ? 1 : 0);
   return {
     slug,
-    path: slug === 'home' ? '/' : path,
-    title: String(payload.title || existing?.title || 'Untitled Page').trim(),
+    path: slug === 'home' || isHome ? '/' : path,
+    title,
     body_html,
-    nav_order: Number(payload.nav_order ?? existing?.nav_order ?? 99),
-    is_home: slug === 'home' || payload.is_home ? 1 : 0,
-    active: payload.active === false || payload.active === 0 ? 0 : 1,
+    nav_order: Number(raw.nav_order ?? existing?.nav_order ?? 99),
+    is_home: isHome,
+    active,
   };
 }
 
@@ -10312,7 +10337,10 @@ async function routeApi(request, env, url, ctx = null) {
       q: String(url.searchParams.get('q') || '').trim(),
     };
     const batched = url.searchParams.get('batch') === '1';
+    const format = url.pathname.endsWith('.csv') ? 'csv' : 'json';
     if (batched) {
+      const sessionRead = await readAuditExportSession(env, url.searchParams.get('session_id') || '');
+      if (!sessionRead.ok) return jsonResponse({ detail: sessionRead.detail }, sessionRead.status || 400);
       const started = Date.now();
       const afterId = Math.max(Number(url.searchParams.get('after_id') || 0), 0);
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 100);
@@ -10327,40 +10355,30 @@ async function routeApi(request, env, url, ctx = null) {
         ? Number(payload.entries[payload.entries.length - 1].id)
         : afterId;
       const done = payload.entries.length < limit;
-      if (afterId === 0) {
-        await enqueueAdminAudit(env, ctx, {
-          action: 'security.log.export',
-          category: 'security',
-          method: 'GET',
-          path: url.pathname,
-          status: 200,
-          ...auditRequestForensics(request, auth.user),
-          summary: buildAuditSummary({
-            action: 'security.log.export',
-            method: 'GET',
-            path: url.pathname,
-            status: 200,
-            actorUsername: auth.user.username,
-            detail: `exported batch of ${payload.entries.length} entries`,
-          }),
-          meta: {
-            entry_count: payload.entries.length,
-            total: payload.total,
-            format: url.pathname.endsWith('.csv') ? 'csv' : 'json',
-            batch: true,
-          },
+      const prevHash = String(url.searchParams.get('running_hash') || '');
+      const runningHash = await nextAuditExportRunningHash(prevHash, payload.entries);
+      let manifest = null;
+      if (done) {
+        manifest = await buildAuditExportManifest(env, {
+          count: payload.total,
+          running_hash: runningHash,
+          min_id: payload.entries[0]?.id || afterId,
+          max_id: nextAfter,
         });
       }
       const elapsed_ms = Date.now() - started;
-      if (url.pathname.endsWith('.csv')) {
-        const csvBody = buildAdminAuditExportCsv(payload.entries, null);
+      if (format === 'csv') {
+        const csvBody = buildAdminAuditExportCsv(payload.entries, done ? manifest : null);
         const [header, ...lines] = csvBody.trimEnd().split('\n');
         return jsonResponse({
           header,
-          chunk: lines.filter((line) => line.length).join('\n'),
+          chunk: lines.filter((line) => line.length && !/^(chain_|signed_|generation,)/.test(line)).join('\n'),
           count: payload.entries.length,
           total: payload.total,
           next_after_id: nextAfter,
+          running_hash: runningHash,
+          session_id: sessionRead.session.sid,
+          manifest,
           done,
           elapsed_ms,
         });
@@ -10370,13 +10388,45 @@ async function routeApi(request, env, url, ctx = null) {
         count: payload.entries.length,
         total: payload.total,
         next_after_id: nextAfter,
+        running_hash: runningHash,
+        session_id: sessionRead.session.sid,
+        manifest,
         done,
         elapsed_ms,
       });
     }
     const payload = await listAdminAuditLogs(env, range);
-    if (url.pathname.endsWith('.csv')) {
-      return new Response(buildAdminAuditExportCsv(payload.entries, null), {
+    const manifest = await buildAuditExportManifest(env, {
+      count: payload.entries.length,
+      min_id: payload.entries[0]?.id || 0,
+      max_id: payload.entries.at(-1)?.id || 0,
+    });
+    await writeAdminAuditLog(env, {
+      action: 'security.log.export',
+      category: 'security',
+      method: 'GET',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export',
+        method: 'GET',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `exported ${payload.entries.length} ${format} entries`,
+      }),
+      meta: {
+        entry_count: payload.entries.length,
+        total: payload.total,
+        format,
+        batch: false,
+        chain_head: manifest.chain_head,
+        signed_manifest: manifest.signed_manifest,
+      },
+    });
+    if (format === 'csv') {
+      return new Response(buildAdminAuditExportCsv(payload.entries, manifest), {
         status: 200,
         headers: {
           'content-type': 'text/csv; charset=utf-8',
@@ -10385,7 +10435,7 @@ async function routeApi(request, env, url, ctx = null) {
         },
       });
     }
-    return new Response(buildAdminAuditExportJson(payload.entries, null), {
+    return new Response(buildAdminAuditExportJson(payload.entries, manifest), {
       status: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -10394,13 +10444,96 @@ async function routeApi(request, env, url, ctx = null) {
       },
     });
   }
+  if (url.pathname === '/api/admin/security-log/export/start' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const body = await request.json().catch(() => ({}));
+    const format = String(body.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
+    const filters = {
+      action: String(body.action || '').trim(),
+      actor: String(body.actor || '').trim(),
+      year: body.year ?? null,
+      month: body.month ?? null,
+      from: String(body.from || '').trim(),
+      to: String(body.to || '').trim(),
+      q: String(body.q || '').trim(),
+    };
+    const started = await createAuditExportSession(env, {
+      actorId: auth.user.id,
+      format,
+      filters,
+    });
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export.start',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export.start',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `${format} ${filters.from || ''} ${filters.to || ''}`.trim(),
+      }),
+      meta: {
+        session_id: started.session.sid,
+        format,
+        filters,
+      },
+    });
+    return jsonResponse({
+      session_id: started.session_id,
+      sid: started.session.sid,
+      format,
+      filters,
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/export/complete' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const body = await request.json().catch(() => ({}));
+    const sessionRead = await readAuditExportSession(env, body.session_id || '');
+    if (!sessionRead.ok) return jsonResponse({ detail: sessionRead.detail }, sessionRead.status || 400);
+    const clientSha = String(body.client_sha256 || '').trim().toLowerCase();
+    const serverHash = String(body.server_running_hash || body.running_hash || '').trim().toLowerCase();
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export.complete',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export.complete',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `${body.count || 0} rows`,
+      }),
+      meta: {
+        session_id: sessionRead.session.sid,
+        format: sessionRead.session.format,
+        min_id: Number(body.min_id) || null,
+        max_id: Number(body.max_id) || null,
+        row_count: Number(body.count) || 0,
+        client_sha256: clientSha,
+        server_running_hash: serverHash,
+        filters: sessionRead.session.filters || {},
+      },
+    });
+    return jsonResponse({ ok: true, session_id: sessionRead.session.sid });
+  }
   if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
     const verify = await verifyAdminAuditBatch(env, {
       after_id: Number(url.searchParams.get('after_id') || 0),
       expected_prev: String(url.searchParams.get('expected_prev') || ''),
-      limit: Number(url.searchParams.get('limit') || 100),
+      limit: Number(url.searchParams.get('limit') || 40),
     });
     if (Number(url.searchParams.get('after_id') || 0) === 0) {
       await enqueueAdminAudit(env, ctx, {
@@ -10419,9 +10552,40 @@ async function routeApi(request, env, url, ctx = null) {
           detail: verify.chain_status,
         }),
         meta: {
+          phase: 'start',
           checked: verify.checked,
           chain_ok: verify.chain_ok,
           chain_head: verify.chain_head,
+          chain_head_id: verify.chain_head_id,
+          min_id: verify.min_id,
+          max_id: verify.max_id,
+          batch: true,
+        },
+      });
+    }
+    if (verify.done) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'security.log.verify',
+        category: 'security',
+        method: 'GET',
+        path: '/api/admin/security-log/verify',
+        status: 200,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'security.log.verify',
+          method: 'GET',
+          path: '/api/admin/security-log/verify',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: verify.chain_status,
+        }),
+        meta: {
+          phase: 'complete',
+          checked: verify.checked,
+          chain_ok: verify.chain_ok,
+          chain_head: verify.chain_head,
+          chain_head_id: verify.chain_head_id,
+          breaks: verify.chain_break_ids,
           min_id: verify.min_id,
           max_id: verify.max_id,
           batch: true,
@@ -10823,6 +10987,7 @@ async function routeApi(request, env, url, ctx = null) {
       const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       const afterGrants = permissionListFromValue(created?.permissions);
+      await recordAuditActorName(env, created);
       await enqueueAdminAudit(env, ctx, {
         action: 'user.create',
         category: 'users',
@@ -10888,6 +11053,7 @@ async function routeApi(request, env, url, ctx = null) {
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
     if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
     const updated = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first();
+    await recordAuditActorName(env, updated || { id, username: existing.username, display_name: displayName });
     await enqueueAdminAudit(env, ctx, {
       action: 'user.edit',
       category: 'users',
@@ -10920,11 +11086,12 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     if (Number(userMatch[1]) === auth.user.id) return jsonResponse({ detail: 'You cannot delete your own account' }, 400);
-    const existing = await env.DB.prepare('SELECT id, username, role, permissions FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
+    const existing = await env.DB.prepare('SELECT id, username, display_name, role, permissions FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
     if (!existing) return jsonResponse({ detail: 'User not found' }, 404);
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can delete Super Admin accounts' }, 403);
     }
+    await recordAuditActorName(env, existing);
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
     await enqueueAdminAudit(env, ctx, {
       action: 'user.delete',
@@ -14250,7 +14417,7 @@ __ADMIN_SIDEBAR__
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. The list header reports this page only. Verify integrity walks the whole chain in batches. User search runs in SQL before pagination. Free-text search runs on the decrypted rows on this page only.</p>
+  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. The list header reports this page only. Verify integrity walks every row to the true last entry, recomputes each digest, and lists every break by id, grouped by generation. A break means a row’s previous-id or previous-hash does not match the sealed row before it, or its stored SHA-256 does not match a fresh digest. Rows cannot be edited or deleted: database triggers abort UPDATE and DELETE. User search matches usernames still in Users plus the plaintext actor name on each row and a deleted-user name map. Free-text search runs on the decrypted rows on this page only.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
   <p class="status" id="security-log-verify" aria-live="polite"></p>
   <p class="error" id="security-log-write-warning" hidden></p>

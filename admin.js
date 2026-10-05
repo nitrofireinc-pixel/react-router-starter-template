@@ -8452,34 +8452,46 @@ function bindForms() {
       let afterId = 0;
       let expectedPrev = '';
       let checked = 0;
-      let status = 'Whole chain intact';
-      let ok = true;
+      const breaks = [];
+      let catalog = [];
+      let explanation = '';
       let head = '';
+      let headId = null;
       while (true) {
         const params = new URLSearchParams({
           after_id: String(afterId),
           expected_prev: expectedPrev,
-          limit: '100',
+          limit: '40',
         });
         const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
         checked += Number(data.checked) || 0;
         if (data.chain_head) head = data.chain_head;
+        if (data.chain_head_id) headId = data.chain_head_id;
+        if (Array.isArray(data.breaks)) breaks.push(...data.breaks);
+        if (Array.isArray(data.generations) && data.generations.length) catalog = data.generations;
+        if (data.explanation) explanation = data.explanation;
         if (out) out.textContent = `Verifying… ${checked} rows`;
-        if (data.chain_ok === false) {
-          ok = false;
-          status = data.chain_status || `Break at entry #${data.chain_break_id}`;
-          break;
-        }
-        if (data.done) {
-          status = data.chain_status || 'Whole chain intact';
-          break;
-        }
+        if (data.done) break;
         afterId = Number(data.next_after_id) || afterId;
         expectedPrev = String(data.next_expected_prev || '');
       }
+      const report = (catalog || []).map((gen) => {
+        const genBreaks = breaks.filter((item) => Number(item.id) >= Number(gen.start_id) && Number(item.id) <= Number(gen.end_id));
+        const ids = genBreaks.map((item) => `#${item.id}`).join(', ');
+        if (gen.historical) {
+          return `Generation 1 (historical, closed by genesis #${gen.closed_by}): ${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'}${ids ? ` at ${ids}` : ''}, reason recorded in genesis row`;
+        }
+        const status = genBreaks.length
+          ? `${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'} at ${ids}`
+          : 'INTACT';
+        return `Generation ${gen.generation} (${gen.key_id || 'k1'}), started ${gen.started_at_et || 'at original build'} by ${gen.started_by || 'unknown'}, rows #${gen.start_id}-#${gen.end_id}: ${status}`;
+      });
+      const lines = report.length ? report : [breaks.length ? `Breaks at ${breaks.map((item) => `#${item.id}`).join(', ')}` : 'Whole chain intact'];
+      if (headId) lines.push(`True chain head: #${headId} ${String(head || '').slice(0, 16)}${head ? '…' : ''}`);
+      if (explanation) lines.push(explanation);
       if (out) {
-        out.textContent = `${status} · ${checked} rows · head ${String(head || '').slice(0, 16)}${head ? '…' : ''}`;
-        out.className = ok ? 'status' : 'error';
+        out.textContent = `${lines.join(' · ')} · ${checked} rows`;
+        out.className = breaks.length ? 'error' : 'status';
       }
     } catch (error) {
       if (out) {
@@ -8488,16 +8500,34 @@ function bindForms() {
       }
     }
   });
+  async function sha256HexClient(value) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value || '')));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
   async function downloadSecurityLogExport(format) {
     const filters = securityLogFilterValues();
+    const started = await jsonFetch('/api/admin/security-log/export/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ format, ...filters }),
+    });
+    const sessionId = started.session_id;
+    if (!sessionId) throw new Error('Export session was not created');
     const chunks = [];
     let header = '';
     let afterId = 0;
     let done = false;
+    let runningHash = '';
+    let manifest = null;
+    let minId = null;
+    let maxId = null;
+    let count = 0;
     while (!done) {
       const params = new URLSearchParams({
         batch: '1',
+        session_id: sessionId,
         after_id: String(afterId),
+        running_hash: runningHash,
         limit: '50',
         year: filters.year,
         month: filters.month,
@@ -8513,15 +8543,51 @@ function bindForms() {
       } else if (Array.isArray(data.entries)) {
         chunks.push(...data.entries);
       }
+      count += Number(data.count) || 0;
+      if (minId == null && (data.entries?.[0]?.id || afterId)) minId = Number(data.entries?.[0]?.id || afterId);
+      if (data.next_after_id) maxId = Number(data.next_after_id);
+      runningHash = String(data.running_hash || runningHash);
+      if (data.manifest) manifest = data.manifest;
       done = Boolean(data.done) || !data.next_after_id || data.count === 0;
       afterId = Number(data.next_after_id) || afterId;
     }
     const filename = format === 'csv'
       ? 'efhsband-security-audit-log.csv'
       : 'efhsband-security-audit-log.json';
-    const body = format === 'csv'
-      ? `${header}\n${chunks.filter(Boolean).join('\n')}\n`
-      : JSON.stringify({ generated_at: new Date().toISOString(), entries: chunks }, null, 2);
+    let body;
+    if (format === 'csv') {
+      const extras = [];
+      if (manifest) {
+        extras.push(`chain_ok,${manifest.chain_ok ?? ''}`);
+        extras.push(`chain_head,${manifest.chain_head || ''}`);
+        extras.push(`signed_manifest,${manifest.signed_manifest || manifest.signed_chain || ''}`);
+        for (const line of manifest.generation_report || []) extras.push(`generation,${line}`);
+      }
+      body = `${header}\n${chunks.filter(Boolean).join('\n')}\n${extras.join('\n')}\n`;
+    } else {
+      body = JSON.stringify({
+        generated_at: new Date().toISOString(),
+        access: 'super_admin_only',
+        editable: false,
+        encryption: 'aes-256-gcm',
+        integrity: 'sha-256-hash-chain',
+        verify: manifest,
+        entries: chunks,
+      }, null, 2);
+    }
+    const clientSha = await sha256HexClient(body);
+    await jsonFetch('/api/admin/security-log/export/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        client_sha256: clientSha,
+        server_running_hash: runningHash,
+        min_id: minId,
+        max_id: maxId,
+        count,
+      }),
+    });
     const blob = new Blob([body], {
       type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8',
     });

@@ -10,6 +10,7 @@ import {
 } from '../worker/src/admin-audit-log.mjs';
 import { renderAdminSidebarHtml } from '../worker/src/admin-chrome.mjs';
 import {
+  contentOnlyHtmlViolation,
   migrateStoredUserPermissionGrants,
   normalizePageGrants,
   pageSettingsChanged,
@@ -294,6 +295,36 @@ test('content-only visual save 403s inline style, class, and hidden on a block',
   assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(hiddenAttr));
 });
 
+test('content-only visual save 403s hidden style on an inner paragraph or span', async () => {
+  resetVisualPagesSchemaCache();
+  const { env } = createVisualEnv();
+  const hiddenP = BASE_HTML.replace('<p>Intro</p>', '<p style="display:none">Intro</p>');
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: hiddenP,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => error.status === 403 && error.code === 'layout_required',
+  );
+  const hiddenSpan = BASE_HTML.replace('<p>Intro</p>', '<p><span style="display:none">Intro</span></p>');
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: hiddenSpan,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => error.status === 403 && error.code === 'layout_required',
+  );
+  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenP), /style|hidden|attribute/i);
+  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenSpan), /span|style|attribute/i);
+  assert.equal(contentOnlyHtmlViolation(BASE_HTML, BASE_HTML.replace('Intro', 'Welcome')), null);
+});
+
 test('content-only visual save accepts copy edits and 403s a structural save', async () => {
   resetVisualPagesSchemaCache();
   const { env, count } = createVisualEnv();
@@ -492,8 +523,8 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005a'/);
-  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.4'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005b'/);
+  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.5'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
 
