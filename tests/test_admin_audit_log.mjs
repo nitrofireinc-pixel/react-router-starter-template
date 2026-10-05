@@ -2248,6 +2248,29 @@ test('verify complete uses a constant number of D1 queries regardless of row cou
   assert.ok(queriesA <= 8, `verify complete used ${queriesA} queries`);
 });
 
+test('D1 query counter preserves bind() return values for first/all/run', async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind(...args) {
+            return {
+              async first() { return { n: args[0] }; },
+              async all() { return { results: [{ n: args[0] }] }; },
+              async run() { return { success: true, n: args[0] }; },
+            };
+          },
+          async first() { throw new Error('unbound first'); },
+        };
+      },
+    },
+  };
+  attachD1QueryCounter(env, createD1QueryBudget());
+  const row = await env.DB.prepare('SELECT ?').bind(7).first();
+  assert.equal(row.n, 7);
+  assert.equal(d1QueryCount(env), 1);
+});
+
 test('D1 query counter is per-request and does not freeze on env', async () => {
   const hits = { n: 0 };
   const db = {

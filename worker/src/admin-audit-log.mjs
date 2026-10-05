@@ -685,7 +685,8 @@ export function attachD1QueryCounter(env, budget = null) {
     const origRun = typeof stmt.run === 'function' ? stmt.run.bind(stmt) : null;
     if (origBind) {
       stmt.bind = (...args) => {
-        origBind(...args);
+        const bound = origBind(...args);
+        if (bound && bound !== stmt) return wrapStatement(bound);
         return stmt;
       };
     }
