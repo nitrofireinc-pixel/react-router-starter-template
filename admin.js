@@ -8507,8 +8507,9 @@ function bindForms() {
     const parts = [];
     if (current) {
       const title = current.title || (current.intact ? 'INTACT' : 'Link breaks');
-      const start = current.started_label || current.original_label
-        || [current.started_at_et ? `Started ${current.started_at_et}` : '', current.started_by ? `by ${current.started_by}` : '']
+      const start = current.original_build
+        ? (current.started_label || current.original_label)
+        : [current.started_at_et ? `Started ${current.started_at_et}` : '', current.started_by ? `by ${current.started_by}` : '']
           .filter(Boolean).join(' ');
       parts.push(`<section class="security-log-court-current${current.intact ? '' : ' is-broken'}">
         <h2>${escapeHtml(title)}</h2>

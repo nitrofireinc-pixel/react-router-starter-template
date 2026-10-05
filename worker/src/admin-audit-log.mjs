@@ -2520,7 +2520,7 @@ export function buildCourtVerifyReport({
   const legacyStart = legacyIds.length ? Math.min(...legacyIds) : null;
   const legacyEnd = legacyIds.length ? Math.max(...legacyIds) : null;
   const startedDate = formatAuditPlainDate(firstEntryAt);
-  const startedLabel = startedDate
+  const firstSetupLabel = startedDate
     ? `Started ${startedDate}, when the Security log was first set up`
     : '';
   const updateDate = formatAuditPlainDate(cutoverAt);
@@ -2535,9 +2535,9 @@ export function buildCourtVerifyReport({
       end_id: current.end_id || maxId,
       started_at_et: current.started_at_et || '',
       started_by: current.started_by || '',
-      started_label: startedLabel,
+      started_label: current.original_build ? firstSetupLabel : '',
       original_build: Boolean(current.original_build),
-      original_label: startedLabel,
+      original_label: firstSetupLabel,
     } : null,
     previous: previous.map((gen) => {
       const genBreaks = inRange(breaks, gen.start_id, gen.end_id);
