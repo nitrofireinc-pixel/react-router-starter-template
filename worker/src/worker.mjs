@@ -9036,9 +9036,15 @@ async function handleApi(request, env, url, ctx = null) {
 
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
-  // Security log is immutable except the Super-Admin new-log genesis action.
+  // Security log rows are immutable. POST is allowed only for genesis and
+  // export session start/complete (those write additional sealed rows).
   if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
-    if (!(url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST')) {
+    const allowedWrite = request.method === 'POST' && (
+      url.pathname === '/api/admin/security-log/genesis'
+      || url.pathname === '/api/admin/security-log/export/start'
+      || url.pathname === '/api/admin/security-log/export/complete'
+    );
+    if (!allowedWrite) {
       return jsonResponse({
         detail: 'Security log is view and print only. Editing is not allowed.',
         access: 'super_admin_only',

@@ -380,6 +380,13 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
             if (q.includes('COUNT(*)')) {
               return { total: applyListFilters(rows, q, this.binds).result.length };
             }
+            if (q.includes('MIN(id)') && q.includes('MAX(id)')) {
+              const ids = rows.map((row) => Number(row.id) || 0);
+              return {
+                min_id: ids.length ? Math.min(...ids) : 0,
+                max_id: ids.length ? Math.max(...ids) : 0,
+              };
+            }
             if (q.includes('MAX(id)')) {
               const max = rows.reduce((maxId, item) => Math.max(maxId, Number(item.id) || 0), 0);
               return { max_id: max };

@@ -2347,10 +2347,18 @@ export async function verifyAdminAuditBatch(env, {
   const done = rows.length < safeLimit;
   const trueHead = await readAuditChainHead(env);
   const genesis = await loadAuditGenerations(env);
+  let extrema = { min_id: first ? Number(first.id) : afterId || 1, max_id: trueHead.id };
+  try {
+    const extremaSql = `SELECT MIN(id) AS min_id, MAX(id) AS max_id FROM ${ADMIN_AUDIT_TABLE}`;
+    assertAuditSqlIsAppendOnly(extremaSql);
+    extrema = await env.DB.prepare(extremaSql).first() || extrema;
+  } catch {
+    // keep batch bounds
+  }
   const catalog = buildAuditGenerationCatalog({
     genesisRows: genesis,
-    minId: first ? Number(first.id) : afterId || 1,
-    maxId: trueHead.id || (last ? Number(last.id) : afterId),
+    minId: Number(extrema?.min_id) || 1,
+    maxId: Number(extrema?.max_id) || trueHead.id || (last ? Number(last.id) : afterId),
   });
   const chainOk = breaks.length === 0;
   const breakIds = breaks.map((item) => item.id);
