@@ -189,6 +189,7 @@ import {
   canEditVisualPage,
   isVisualEditorSlug,
   isVisualPilotSlug,
+  extractEditableJoinHtml,
   loadVisualPageState,
   normalizeVisualSavePayload,
   pageHasVisualPublish,
@@ -430,7 +431,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005e';
+export const ASSET_VERSION = 'cms-p1-20261005f';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -11270,15 +11271,19 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${slug}` }, 403);
     }
     const raw = await request.json().catch(() => ({}));
-    const parsed = normalizeVisualSavePayload(raw);
-    if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
+    const rawHtml = extractEditableJoinHtml(raw.html ?? raw.body_html ?? '');
+    const parsed = normalizeVisualSavePayload({ ...raw, html: rawHtml });
+    const allowStructure = canEditPageLayout(auth.user, slug);
+    if (!parsed.ok && allowStructure) {
+      return jsonResponse({ detail: parsed.detail }, parsed.status);
+    }
     try {
       const state = await saveVisualPage(env, {
         slug,
-        html: parsed.html,
-        action: parsed.action,
+        html: rawHtml,
+        action: parsed.action || 'draft',
         user: auth.user,
-        allowStructure: canEditPageLayout(auth.user, slug),
+        allowStructure,
       });
       return jsonResponse({
         ...state,

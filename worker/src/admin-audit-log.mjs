@@ -783,8 +783,24 @@ export function canonicalChainMaterial(row = {}, version = null) {
   });
 }
 
-export async function verifyAuditRowDigest(row = {}, env = null) {
+export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
   const encVersion = Number(row.enc_version);
+  const id = Number(row.id) || 0;
+  const hmacSinceId = Number(options.hmacSinceId) || 0;
+  const cutoverId = Number(options.cutoverId) || 0;
+  const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
+  const postCutoverLinked = cutoverId > 0 && id > cutoverId && linkedId != null;
+  const atOrAfterHmac = hmacSinceId > 0 && id >= hmacSinceId;
+
+  if (postCutoverLinked && encVersion !== ADMIN_AUDIT_ENC_VERSION_V3) {
+    return {
+      recomputed: true,
+      ok: false,
+      legacy: false,
+      reason: 'post_cutover_linked_must_be_v3',
+    };
+  }
+
   if (encVersion === ADMIN_AUDIT_ENC_VERSION) {
     return { recomputed: false, ok: true, legacy: true };
   }
@@ -808,11 +824,19 @@ export async function verifyAuditRowDigest(row = {}, env = null) {
         return { recomputed: true, ok: true, legacy: false, actual: keyed, keyed: true, key_id: keyId };
       }
     }
+    const rejectPlain = postCutoverLinked || atOrAfterHmac;
     const plain = await sha256Hex(material);
-    if (expected && expected === plain) {
+    if (!rejectPlain && expected && expected === plain) {
       return { recomputed: true, ok: true, legacy: false, actual: plain, keyed: false, pre_hmac: true };
     }
-    return { recomputed: true, ok: false, legacy: false, actual: env ? '' : plain, keyed: Boolean(env) };
+    return {
+      recomputed: true,
+      ok: false,
+      legacy: false,
+      actual: env ? '' : plain,
+      keyed: Boolean(env && hasAuditLogKey(env, keyId)),
+      reason: rejectPlain ? 'hmac_required' : 'digest_mismatch',
+    };
   }
   const actual = await sha256Hex(material);
   return {
@@ -2512,6 +2536,12 @@ export function classifyAuditLinkRows(rows = [], {
         kind: 'link',
         reason: `prev_id ${linkedId} does not follow #${lastId}`,
       });
+    } else if (cutoff > 0 && Number(row.enc_version) !== ADMIN_AUDIT_ENC_VERSION_V3) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: 'post-cutover linked row must be enc_version 3',
+      });
     }
 
     hash = String(row.payload_sha256 || '');
@@ -2529,14 +2559,15 @@ export function classifyAuditLinkRows(rows = [], {
 }
 
 export async function readAuditChainCutoverMeta(env) {
-  const meta = { id: 0, at: '' };
+  const meta = { id: 0, at: '', hmacSinceId: 0 };
   try {
     const fetched = await env.DB.prepare(
-      "SELECT key, value FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at')",
+      "SELECT key, value FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at', 'audit_hmac_since_id')",
     ).all();
     for (const row of fetched?.results || []) {
       if (row?.key === 'audit_chain_cutover_id') meta.id = Number(row.value) || 0;
       if (row?.key === 'audit_chain_cutover_at') meta.at = String(row.value || '');
+      if (row?.key === 'audit_hmac_since_id') meta.hmacSinceId = Number(row.value) || 0;
     }
   } catch {
     try {
@@ -2944,7 +2975,7 @@ export function auditLinkBreaksFromRows(rows = [], cutover = 0, cutoverAt = '') 
 }
 
 export async function collectAuditLinkState(env) {
-  const sql = `SELECT id, created_at, prev_id, prev_sha256, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
+  const sql = `SELECT id, created_at, prev_id, prev_sha256, payload_sha256, enc_version FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
   assertAuditSqlIsAppendOnly(sql);
   let rows = [];
   try {
@@ -3071,7 +3102,10 @@ export async function verifyAdminAuditBatch(env, {
   const compatibility = classified.compatibility;
   for (const row of rows) {
     const id = Number(row.id) || 0;
-    const digest = await verifyAuditRowDigest(row, env);
+    const digest = await verifyAuditRowDigest(row, env, {
+      hmacSinceId: cutover.hmacSinceId,
+      cutoverId: cutover.id,
+    });
     if (digest.recomputed && !digest.ok) {
       digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
       breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
@@ -3162,7 +3196,10 @@ export async function verifyAdminAuditComplete(env) {
   const breaks = [...classified.breaks];
   const digestFailures = [];
   for (const row of rows) {
-    const digest = await verifyAuditRowDigest(row, env);
+    const digest = await verifyAuditRowDigest(row, env, {
+      hmacSinceId: cutover.hmacSinceId,
+      cutoverId: cutover.id,
+    });
     if (digest.recomputed && !digest.ok) {
       const id = Number(row.id) || 0;
       digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });

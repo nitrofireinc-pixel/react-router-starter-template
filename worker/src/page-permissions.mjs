@@ -187,9 +187,20 @@ export function scanHtmlElements(html = '') {
   return els;
 }
 
+function normalizeDecodedText(value = '') {
+  let decoded = String(value || '');
+  for (let i = 0; i < 3; i += 1) {
+    const next = decodeHtmlEntities(decoded);
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded.replace(/[\s\u0000-\u001f]+/g, '');
+}
+
 function isSafeContentHref(value = '') {
-  const href = String(value || '').trim();
+  const href = normalizeDecodedText(value);
   if (!href) return true;
+  if (/^javascript:/i.test(href)) return false;
   if (href.startsWith('#') || href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) {
     return true;
   }
@@ -198,8 +209,19 @@ function isSafeContentHref(value = '') {
   return false;
 }
 
+function isSafeBlankTarget(value = '') {
+  return String(value || '').trim().toLowerCase() === '_blank';
+}
+
+function isSafeLinkRel(value = '') {
+  const tokens = String(value || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => token === 'noopener' || token === 'noreferrer');
+}
+
 function isContentOnlyContentAttr(tag, name, value) {
   if (tag === 'a' && name === 'href') return isSafeContentHref(value);
+  if (tag === 'a' && name === 'target') return isSafeBlankTarget(value);
+  if (tag === 'a' && name === 'rel') return isSafeLinkRel(value);
   if (tag === 'img' && (name === 'src' || name === 'alt')) return true;
   return false;
 }
@@ -232,8 +254,7 @@ function decodeHtmlEntities(value = '') {
 }
 
 function javascriptSchemeCount(html = '') {
-  const decoded = decodeHtmlEntities(String(html || '')).replace(/[\s\u0000-\u001f]+/g, '');
-  return (decoded.match(/javascript:/gi) || []).length;
+  return (normalizeDecodedText(html).match(/javascript:/gi) || []).length;
 }
 
 function forbiddenMarkupCounts(html = '') {
@@ -243,8 +264,13 @@ function forbiddenMarkupCounts(html = '') {
   for (const _ of raw.matchAll(/<script[\s>/]/gi)) add('script');
   for (const _ of raw.matchAll(/<style[\s>/]/gi)) add('style');
   for (const _ of raw.matchAll(/<iframe[\s>/]/gi)) add('iframe');
-  for (const match of raw.matchAll(/\s(on[a-z]+)\s*=/gi)) add(String(match[1] || '').toLowerCase());
-  for (const match of raw.matchAll(/\s(data-[a-z0-9_-]*)\s*=/gi)) add(String(match[1] || '').toLowerCase());
+  for (const _ of raw.matchAll(/<svg[\s>/]/gi)) add('svg');
+  for (const match of raw.matchAll(/(?:^|[\s/<"'`])(on[a-z]+)\s*=/gi)) {
+    add(String(match[1] || '').toLowerCase());
+  }
+  for (const match of raw.matchAll(/(?:^|[\s/<"'`])(data-[a-z0-9_-]*)\s*=/gi)) {
+    add(String(match[1] || '').toLowerCase());
+  }
   const jsCount = javascriptSchemeCount(raw);
   for (let i = 0; i < jsCount; i += 1) add('javascript:');
   return counts;
@@ -258,6 +284,7 @@ export function contentOnlyForbiddenHtmlViolation(baseline = '', next = '') {
     if (key === 'script') return 'script tags are not allowed';
     if (key === 'style') return '<style> tags are not allowed';
     if (key === 'iframe') return 'iframe tags are not allowed';
+    if (key === 'svg') return 'svg tags are not allowed';
     if (key === 'javascript:') return 'javascript: links are not allowed';
     if (key.startsWith('on')) return `${key} event attributes are not allowed`;
     if (key.startsWith('data-')) return `${key} attributes are not allowed`;

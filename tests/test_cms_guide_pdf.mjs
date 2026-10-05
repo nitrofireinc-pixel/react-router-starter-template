@@ -59,6 +59,7 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /Form Builder/);
   assert.match(html, /Notify Me/);
   assert.match(html, /maintenance mode/i);
+  assert.match(html, /old Worker isolate that writes a Security log row after the first new linked row will abort/i);
   assert.match(html, /Meeting Minutes/);
   assert.match(html, /Ledger/);
   assert.match(html, /Instagram/);

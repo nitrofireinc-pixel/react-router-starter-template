@@ -656,11 +656,12 @@ export function isNearEmptyVisualHtml(html = '') {
 
 export function normalizeVisualSavePayload(raw = {}, existingHtml = '') {
   const action = String(raw.action || raw.kind || 'draft').toLowerCase() === 'publish' ? 'publish' : 'draft';
-  const html = sanitizeVisualPageHtml(extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml));
+  const rawHtml = extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml);
+  const html = sanitizeVisualPageHtml(rawHtml);
   if (!html || isNearEmptyVisualHtml(html)) {
-    return { ok: false, status: 422, detail: 'Add some page content before saving.' };
+    return { ok: false, status: 422, detail: 'Add some page content before saving.', action, rawHtml };
   }
-  return { ok: true, action, html };
+  return { ok: true, action, html, rawHtml };
 }
 
 export function trimVisualVersions(rows = [], limit = VISUAL_VERSION_LIMIT) {
@@ -788,23 +789,27 @@ export async function saveVisualPage(env, {
     error.status = 404;
     throw error;
   }
-  const clean = sanitizeVisualPageHtml(html);
+  const stored = await env.DB.prepare(
+    'SELECT slug, draft_html, published_html FROM visual_pages WHERE slug = ?',
+  ).bind(key).first();
+  const incoming = String(html || '');
+  let baseline = '';
+  if (allowStructure === false) {
+    baseline = sanitizeVisualPageHtml(
+      stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
+    );
+    const forbidden = contentOnlyForbiddenHtmlViolation(baseline, incoming);
+    if (forbidden) throw layoutRequiredError(key, forbidden);
+    const incomingViolation = contentOnlyHtmlViolation(baseline, incoming);
+    if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
+  }
+  const clean = sanitizeVisualPageHtml(incoming);
   if (!clean || isNearEmptyVisualHtml(clean)) {
     const error = new Error('Add some page content before saving.');
     error.status = 422;
     throw error;
   }
-  const stored = await env.DB.prepare(
-    'SELECT slug, draft_html, published_html FROM visual_pages WHERE slug = ?',
-  ).bind(key).first();
   if (allowStructure === false) {
-    const baseline = sanitizeVisualPageHtml(
-      stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
-    );
-    const forbidden = contentOnlyForbiddenHtmlViolation(baseline, String(html || ''));
-    if (forbidden) throw layoutRequiredError(key, forbidden);
-    const incomingViolation = contentOnlyHtmlViolation(baseline, String(html || ''));
-    if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
     const cleanViolation = contentOnlyHtmlViolation(baseline, clean);
     if (
       visualStructureSignature(clean) !== visualStructureSignature(baseline)

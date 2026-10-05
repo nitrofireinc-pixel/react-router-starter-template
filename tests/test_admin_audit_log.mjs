@@ -48,6 +48,7 @@ import {
   buildAuditGenerationCatalog,
   buildAuditExportManifest,
   verifyAdminAuditBatch,
+  verifyAdminAuditComplete,
   verifyAdminAuditRange,
   ACCESS_DENIED_THROTTLE_MS,
   ADMIN_AUDIT_KNOWN_ACTIONS,
@@ -88,6 +89,7 @@ import {
   AUDIT_LOG_PENDING_TABLE_SQL,
   applyIncrementalSchema,
   ensureAuditChainCutover,
+  ensureAuditHmacSince,
   ensureAuditLogColumns,
   listTableColumnNames,
   readAuditLinearTriggerSql,
@@ -2095,7 +2097,8 @@ test('verify labels in-window hash-correct NULL prev_id as previous site version
   assert.equal(batch.compatibility.some((item) => item.id === 10), true);
   assert.match(batch.compatibility[0].reason, /previous site version/);
   assert.match(batch.court_report.compatibility_heading, /update on Oct 4, 2026/);
-  assert.equal(batch.breaks.some((item) => item.id === 11), false);
+  assert.equal(batch.breaks.some((item) => item.id === 11), true);
+  assert.match(batch.breaks.find((item) => item.id === 11).reason, /enc_version 3|must be enc_version 3/i);
 });
 
 test('audited write under forced conflicts stays at or under 45 queries and queues pending', async () => {
@@ -2487,26 +2490,32 @@ test('NULL-prev after the first new-format linked row is a break even inside the
   assert.match(classified.breaks.find((item) => item.id === 391).reason, /after the first linked row/i);
 });
 
-test('repair does not re-stamp cutover_at or cutover_id when they already exist', async () => {
+test('repair does not re-stamp cutover_at, cutover_id, or hmac_since_id when they already exist', async () => {
   const db = createProdAtDot2();
   const env = sqliteEnv(db);
   await applyIncrementalSchema(env);
   const firstId = db.prepare("SELECT value FROM site_content WHERE key = 'audit_chain_cutover_id'").get().value;
   const firstAt = db.prepare("SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at'").get().value;
+  const firstHmac = db.prepare("SELECT value FROM site_content WHERE key = 'audit_hmac_since_id'").get().value;
   assert.ok(firstAt);
+  assert.equal(Number(firstHmac), Number(firstId) + 1);
   await new Promise((resolve) => setTimeout(resolve, 20));
   const again = await ensureAuditChainCutover(env);
+  const againHmac = await ensureAuditHmacSince(env);
   const secondId = db.prepare("SELECT value FROM site_content WHERE key = 'audit_chain_cutover_id'").get().value;
   const secondAt = db.prepare("SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at'").get().value;
+  const secondHmac = db.prepare("SELECT value FROM site_content WHERE key = 'audit_hmac_since_id'").get().value;
   assert.equal(secondId, firstId);
   assert.equal(secondAt, firstAt);
+  assert.equal(secondHmac, firstHmac);
   assert.equal(String(again.at), firstAt);
-  const count = db.prepare("SELECT COUNT(*) AS n FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at')").get().n;
-  assert.equal(count, 2);
+  assert.equal(againHmac.id, Number(firstHmac));
+  const count = db.prepare("SELECT COUNT(*) AS n FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at', 'audit_hmac_since_id')").get().n;
+  assert.equal(count, 3);
   db.close();
 });
 
-test('v3 keyed HMAC verifies and older SHA-256 v3 rows still pass', async () => {
+test('v3 keyed HMAC verifies; plain SHA-256 v3 only passes before hmac_since_id', async () => {
   const env = { AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere' };
   const row = {
     enc_version: 3,
@@ -2517,17 +2526,23 @@ test('v3 keyed HMAC verifies and older SHA-256 v3 rows still pass', async () => 
     actor_username: 'a@efhsband.org',
     key_id: 'k1',
     ciphertext: 'k1.iv.data',
-    prev_id: 9,
+    prev_id: null,
     prev_sha256: 'prev',
   };
   const material = canonicalChainMaterial(row, 3);
   const keyed = await hmacSha256Hex(env, material, 'k1');
   const plain = await sha256Hex(material);
   assert.notEqual(keyed, plain);
-  assert.equal((await verifyAuditRowDigest({ ...row, payload_sha256: keyed }, env)).ok, true);
-  assert.equal((await verifyAuditRowDigest({ ...row, payload_sha256: keyed }, env)).keyed, true);
-  assert.equal((await verifyAuditRowDigest({ ...row, payload_sha256: plain }, env)).ok, true);
-  assert.equal((await verifyAuditRowDigest({ ...row, payload_sha256: plain }, env)).pre_hmac, true);
+  const opts = { hmacSinceId: 10, cutoverId: 9 };
+  assert.equal((await verifyAuditRowDigest({ ...row, id: 12, payload_sha256: keyed }, env, opts)).ok, true);
+  assert.equal((await verifyAuditRowDigest({ ...row, id: 12, payload_sha256: keyed }, env, opts)).keyed, true);
+  const older = await verifyAuditRowDigest({ ...row, id: 8, payload_sha256: plain }, env, opts);
+  assert.equal(older.ok, true);
+  assert.equal(older.pre_hmac, true);
+  const atSince = await verifyAuditRowDigest({ ...row, id: 10, payload_sha256: plain }, env, opts);
+  assert.equal(atSince.ok, false);
+  const afterSince = await verifyAuditRowDigest({ ...row, id: 11, payload_sha256: plain }, env, opts);
+  assert.equal(afterSince.ok, false);
   const v2 = await verifyAuditRowDigest({
     enc_version: 2,
     created_at: 't',
@@ -2547,4 +2562,143 @@ test('v3 keyed HMAC verifies and older SHA-256 v3 rows still pass', async () => 
     }, 2)),
   }, env);
   assert.equal(v2.ok, true);
+});
+
+test('T11 forged v3 with plain SHA-256 after hmac_since is a digest break', async () => {
+  const envKey = { AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere' };
+  const base = {
+    created_at: '2026-10-05 03:01:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    key_id: 'k1',
+    ciphertext: 'k1.iv.real',
+    enc_version: 3,
+  };
+  const linked = {
+    ...base,
+    id: 10,
+    prev_id: 9,
+    prev_sha256: 'h9',
+  };
+  const keyed = await hmacSha256Hex(envKey, canonicalChainMaterial(linked, 3), 'k1');
+  const forged = {
+    ...base,
+    id: 11,
+    created_at: '2026-10-05 03:02:00',
+    ciphertext: 'k1.iv.forged',
+    prev_id: 10,
+    prev_sha256: keyed,
+  };
+  const plain = await sha256Hex(canonicalChainMaterial(forged, 3));
+  const { env, site } = createAuditDb([
+    { id: 9, action: 'login', payload_sha256: 'h9', prev_sha256: '', prev_id: null, created_at: '2026-10-04 15:50:00', enc_version: 1 },
+    { ...linked, payload_sha256: keyed },
+    { ...forged, payload_sha256: plain },
+  ]);
+  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
+  site.set('audit_hmac_since_id', '10');
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => item.id === 11 && item.kind === 'digest'), true);
+});
+
+test('T12 rewritten v3 suffix with plain SHA-256 digests is a digest break', async () => {
+  const envKey = { AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere' };
+  const row10 = {
+    id: 10,
+    created_at: '2026-10-05 03:01:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    key_id: 'k1',
+    ciphertext: 'k1.iv.real',
+    enc_version: 3,
+    prev_id: 9,
+    prev_sha256: 'h9',
+  };
+  const keyed10 = await hmacSha256Hex(envKey, canonicalChainMaterial(row10, 3), 'k1');
+  const edited = {
+    ...row10,
+    id: 10,
+    ciphertext: 'k1.iv.edited',
+  };
+  const plain10 = await sha256Hex(canonicalChainMaterial(edited, 3));
+  const suffix = {
+    ...row10,
+    id: 11,
+    created_at: '2026-10-05 03:02:00',
+    ciphertext: 'k1.iv.suffix',
+    prev_id: 10,
+    prev_sha256: plain10,
+  };
+  const plain11 = await sha256Hex(canonicalChainMaterial(suffix, 3));
+  const { env, site } = createAuditDb([
+    { id: 9, action: 'login', payload_sha256: 'h9', prev_sha256: '', prev_id: null, created_at: '2026-10-04 15:50:00', enc_version: 1 },
+    { ...edited, payload_sha256: plain10 },
+    { ...suffix, payload_sha256: plain11 },
+  ]);
+  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
+  site.set('audit_hmac_since_id', '10');
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.filter((item) => item.kind === 'digest').length >= 1, true);
+  assert.equal(walked.breaks.some((item) => item.id === 10 || item.id === 11), true);
+});
+
+test('T13 deleted row relabeled as enc_version 1 with matching prev hash is a break', async () => {
+  const envKey = { AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere' };
+  const row10 = {
+    id: 10,
+    created_at: '2026-10-05 03:01:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    key_id: 'k1',
+    ciphertext: 'k1.iv.real',
+    enc_version: 3,
+    prev_id: 9,
+    prev_sha256: 'h9',
+  };
+  const keyed10 = await hmacSha256Hex(envKey, canonicalChainMaterial(row10, 3), 'k1');
+  const relabeled = {
+    id: 11,
+    created_at: '2026-10-05 03:02:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    payload_sha256: 'h11',
+    prev_sha256: keyed10,
+    prev_id: 10,
+    enc_version: 1,
+  };
+  const classified = classifyAuditLinkRows([
+    { id: 9, action: 'login', payload_sha256: 'h9', prev_sha256: '', prev_id: null, created_at: '2026-10-04 15:50:00', enc_version: 1 },
+    { ...row10, payload_sha256: keyed10 },
+    relabeled,
+  ], {
+    cutoverAt: '2026-10-05 03:00:00',
+    cutoverId: 9,
+  });
+  assert.equal(classified.breaks.some((item) => item.id === 11), true);
+  assert.match(classified.breaks.find((item) => item.id === 11).reason, /enc_version 3/i);
+  const digest = await verifyAuditRowDigest(relabeled, envKey, { hmacSinceId: 10, cutoverId: 9 });
+  assert.equal(digest.ok, false);
+  const { env, site } = createAuditDb([
+    { id: 9, action: 'login', payload_sha256: 'h9', prev_sha256: '', prev_id: null, created_at: '2026-10-04 15:50:00', enc_version: 1 },
+    { ...row10, payload_sha256: keyed10 },
+    relabeled,
+  ]);
+  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
+  site.set('audit_hmac_since_id', '10');
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => item.id === 11), true);
 });

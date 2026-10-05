@@ -1,3 +1,9 @@
+import {
+  ADMIN_AUDIT_ENC_VERSION_V3,
+  canonicalChainMaterial,
+  hasAuditLogKey,
+  hmacSha256Hex,
+} from './admin-audit-log.mjs';
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
 import { migrateStoredUserPermissionGrants } from './page-permissions.mjs';
 
@@ -46,6 +52,7 @@ export const AUDIT_LOG_ACTOR_NAMES_INDEX_SQL =
 
 export const AUDIT_CHAIN_CUTOVER_KEY = 'audit_chain_cutover_id';
 export const AUDIT_CHAIN_CUTOVER_AT_KEY = 'audit_chain_cutover_at';
+export const AUDIT_HMAC_SINCE_KEY = 'audit_hmac_since_id';
 export const AUDIT_CUTOVER_NULL_PREV_WINDOW_MINUTES = 15;
 
 export const AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL =
@@ -346,6 +353,7 @@ export async function auditSchemaNeedsRepair(env) {
 export async function repairAuditSchema(env) {
   await ensureAuditLogColumns(env);
   await ensureAuditChainCutover(env);
+  await ensureAuditHmacSince(env);
   await runSchemaStatements(env, [
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL,
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
@@ -365,6 +373,7 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
     // users.permissions may be missing on partial fixtures
   }
   await ensureAuditChainCutover(env);
+  await ensureAuditHmacSince(env);
   await backfillAuditActorNames(env);
   if (typeof writeVersion === 'function') await writeVersion(env);
 }
@@ -424,6 +433,46 @@ export async function ensureAuditChainCutover(env) {
     await writeSiteContentIfAbsent(env, AUDIT_CHAIN_CUTOVER_AT_KEY, cutoverAt);
   }
   return { id: cutoverId, at: cutoverAt };
+}
+
+/**
+ * Stamp audit_hmac_since_id once. Prod has no v3 rows so this is cutover_id+1.
+ * DEV uses the first HMAC-matching v3 row when one exists. Never re-stamped.
+ */
+export async function ensureAuditHmacSince(env) {
+  if (!env?.DB?.prepare) return { id: 0 };
+  const existingRow = await readSiteContentRow(env, AUDIT_HMAC_SINCE_KEY);
+  if (existingRow && String(existingRow.value || '').trim() !== '') {
+    return { id: Number(existingRow.value) || 0 };
+  }
+  const existingCutover = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_KEY);
+  const fallback = (Number(existingCutover?.value) || 0) + 1;
+  let since = fallback;
+  if (hasAuditLogKey(env)) {
+    try {
+      const fetched = await env.DB.prepare(`
+        SELECT id, created_at, action, category, actor_user_id, actor_username,
+               ciphertext, enc_version, key_id, payload_sha256, prev_sha256, prev_id
+          FROM admin_audit_log
+         WHERE enc_version = ${ADMIN_AUDIT_ENC_VERSION_V3}
+         ORDER BY id ASC
+      `).all();
+      for (const row of fetched?.results || []) {
+        const keyId = String(row.key_id || '');
+        if (!hasAuditLogKey(env, keyId)) continue;
+        const material = canonicalChainMaterial(row, ADMIN_AUDIT_ENC_VERSION_V3);
+        const keyed = await hmacSha256Hex(env, material, keyId);
+        if (keyed && keyed === String(row.payload_sha256 || '')) {
+          since = Number(row.id) || fallback;
+          break;
+        }
+      }
+    } catch {
+      since = fallback;
+    }
+  }
+  await writeSiteContentIfAbsent(env, AUDIT_HMAC_SINCE_KEY, String(since));
+  return { id: since };
 }
 
 export async function backfillAuditActorNames(env) {

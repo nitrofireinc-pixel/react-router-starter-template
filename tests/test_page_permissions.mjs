@@ -329,19 +329,28 @@ test('content-only visual save 403s hidden style on an inner paragraph or span',
 
 test('content-only visual save 403s onclick, data-*, iframe, script, style, and javascript: links', async () => {
   resetVisualPagesSchemaCache();
-  const { env } = createVisualEnv();
+  const { env, versions } = createVisualEnv();
   const cases = [
     [BASE_HTML.replace('<p>Intro</p>', '<p onclick="alert(1)">Intro</p>'), /onclick/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b onclick="alert(1)">x</b></p>'), /onclick/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p onmouseover="alert(1)">Intro</p>'), /onmouseover/i],
     [BASE_HTML.replace('<p>Intro</p>', '<p data-x="1">Intro</p>'), /data-x/i],
     [`${BASE_HTML}<iframe src="/x"></iframe>`, /iframe/i],
     [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
     [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
     [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
     [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript&colon;alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;avascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#x6a;avascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;&#9;avascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b style="color:red">x</b></p>'), /style/i],
+    [`${BASE_HTML}<svg onload="alert(1)"></svg>`, /svg|onload/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><img src="/uploads/a.jpg" alt="x" onerror="alert(1)"></p>'), /onerror/i],
   ];
   for (const [html, detail] of cases) {
-    assert.match(contentOnlyForbiddenHtmlViolation(BASE_HTML, html), detail);
+    assert.match(
+      contentOnlyForbiddenHtmlViolation(BASE_HTML, html) || contentOnlyHtmlViolation(BASE_HTML, html) || '',
+      detail,
+    );
     await assert.rejects(
       () => saveVisualPage(env, {
         slug: 'sponsors',
@@ -357,6 +366,142 @@ test('content-only visual save 403s onclick, data-*, iframe, script, style, and 
       },
     );
   }
+  assert.equal(versions.length, 0);
+});
+
+function createJoinDraftPutEnv(html = BASE_HTML) {
+  const editor = {
+    id: 8,
+    username: 'jamie@efhsband.org',
+    display_name: 'Jamie',
+    password_hash: 'x',
+    role: 'editor',
+    permissions: JSON.stringify(['page:join']),
+    active: 1,
+  };
+  let visual = {
+    slug: 'join',
+    draft_html: html,
+    published_html: html,
+    published_at: '2026-10-04T00:00:00.000Z',
+    updated_at: '2026-10-04T00:00:00.000Z',
+  };
+  const cms = {
+    slug: 'join',
+    title: 'Join the Band',
+    path: '/join.html',
+    body_html: html,
+    active: 1,
+  };
+  const versions = [];
+  const env = {
+    EFBAND_SECRET: 'test-session-secret',
+    DB: {
+      prepare(sql) {
+        const q = String(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            if (q.includes('FROM site_content WHERE key')) return { value: DB_SCHEMA_VERSION };
+            if (q.includes('FROM users WHERE id')) return editor;
+            if (q.includes('FROM cms_pages')) return cms;
+            if (q.includes('FROM visual_pages')) return visual;
+            if (q.includes('FROM visual_page_versions')) return null;
+            if (q.includes('FROM admin_audit_log')) return null;
+            return null;
+          },
+          async all() { return { results: versions.slice().reverse() }; },
+          async run() {
+            if (q.includes('UPDATE visual_pages')) {
+              visual = { ...visual, draft_html: this.binds[0] };
+            }
+            if (q.includes('INSERT INTO visual_page_versions')) {
+              versions.push({
+                id: versions.length + 1,
+                slug: this.binds[0],
+                kind: this.binds[1],
+                html: this.binds[2],
+              });
+            }
+            return { success: true };
+          },
+        };
+      },
+      async batch() { return []; },
+    },
+    ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
+  };
+  return { env, editor, visual: () => visual, versions };
+}
+
+test('content-only join draft PUT 403s raw XSS constructs and stores none of them', async () => {
+  resetDbInitCache();
+  resetVisualPagesSchemaCache();
+  const { env, editor, visual, versions } = createJoinDraftPutEnv();
+  const cookie = `efband_session=${await makeSession({ id: editor.id, username: editor.username }, env)}`;
+  const cases = [
+    [BASE_HTML.replace('<p>Intro</p>', '<p onclick="alert(1)">Intro</p>'), /onclick/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b onclick="alert(1)">x</b></p>'), /onclick/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p onmouseover="alert(1)">Intro</p>'), /onmouseover/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p data-x="1">Intro</p>'), /data-x/i],
+    [`${BASE_HTML}<iframe src="/x"></iframe>`, /iframe/i],
+    [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
+    [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript&colon;alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#x6a;avascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;&#9;avascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b style="color:red">x</b></p>'), /style/i],
+    [`${BASE_HTML}<svg onload="alert(1)"></svg>`, /svg|onload/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><img src="/uploads/a.jpg" alt="x" onerror="alert(1)"></p>'), /onerror/i],
+  ];
+  assert.match(workerSrc, /html: rawHtml/);
+  assert.match(workerSrc, /extractEditableJoinHtml\(raw\.html/);
+  for (const [html, detail] of cases) {
+    const response = await worker.fetch(new Request('https://efhsband.org/api/admin/visual-pages/join', {
+      method: 'PUT',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'draft', html }),
+    }), env, { waitUntil() {} });
+    assert.equal(response.status, 403, html);
+    const payload = await response.json();
+    assert.match(payload.detail, detail);
+    assert.doesNotMatch(visual().draft_html, /onclick|onmouseover|onerror|onload|javascript:|iframe|data-x/i);
+  }
+  const allowed = await worker.fetch(new Request('https://efhsband.org/api/admin/visual-pages/join', {
+    method: 'PUT',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      action: 'draft',
+      html: BASE_HTML.replace('<p>Intro</p>', '<p>Intro <a href="https://example.com/join" target="_blank">Join</a></p>'),
+    }),
+  }), env, { waitUntil() {} });
+  assert.equal(allowed.status, 200);
+  const saved = await allowed.json();
+  assert.match(saved.draft_html, /target="_blank"/);
+  assert.match(saved.draft_html, /rel="noopener noreferrer"/);
+  assert.equal(versions.length, 1);
+});
+
+test('content-only save allows target=_blank when the server adds rel=noopener noreferrer', async () => {
+  resetVisualPagesSchemaCache();
+  const { env } = createVisualEnv();
+  const withBlank = BASE_HTML.replace(
+    '<p>Intro</p>',
+    '<p>Intro <a href="https://example.com/join" target="_blank">Join</a></p>',
+  );
+  assert.equal(contentOnlyHtmlViolation(BASE_HTML, withBlank), null);
+  const saved = await saveVisualPage(env, {
+    slug: 'sponsors',
+    html: withBlank,
+    action: 'draft',
+    user: { id: 8, display_name: 'Jamie' },
+    allowStructure: false,
+  });
+  assert.match(saved.draft_html, /target="_blank"/);
+  assert.match(saved.draft_html, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(saved.draft_html, /onclick|javascript:|onerror|onload/i);
 });
 
 test('content-only save accepts a plain https link next to an existing classed link', async () => {
@@ -576,7 +721,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005e'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005f'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.6'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
