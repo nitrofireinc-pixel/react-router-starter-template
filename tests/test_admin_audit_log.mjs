@@ -35,6 +35,7 @@ import {
   readAuditExportSession,
   formatAuditGenerationReport,
   buildAuditGenerationCatalog,
+  buildAuditExportManifest,
   verifyAdminAuditBatch,
   verifyAdminAuditRange,
   ACCESS_DENIED_THROTTLE_MS,
@@ -1659,6 +1660,49 @@ test('export session is signed and required', async () => {
   assert.equal(missing.ok, false);
   const bad = await readAuditExportSession(env, `${started.session_id}x`);
   assert.equal(bad.ok, false);
+});
+
+test('export manifest keeps every generation even when the last batch starts mid-chain', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const seed = [
+    { id: 1, action: 'login', payload_sha256: 'h1', prev_sha256: '', prev_id: null, created_at: '2026-10-04 16:00:00' },
+    { id: 790, action: 'login', payload_sha256: 'h790', prev_sha256: 'wrong', prev_id: 789, created_at: '2026-10-04 16:00:00' },
+    {
+      id: 953,
+      action: 'log.genesis',
+      actor_username: 'Trevor',
+      payload_sha256: 'h953',
+      prev_sha256: 'h952',
+      prev_id: 952,
+      created_at: '2026-10-05T00:42:51.143Z',
+      key_id: 'k2',
+      meta_json: JSON.stringify({
+        generation: 2,
+        new_key_id: 'k2',
+        authorized_by: 'Trevor',
+        reason: 'DEV test',
+      }),
+    },
+    { id: 1011, action: 'login', payload_sha256: 'h1011', prev_sha256: 'h1010', prev_id: 1010, created_at: '2026-10-05 01:00:00' },
+  ];
+  const { env, site } = createAuditDb(seed);
+  site.set('audit_chain_cutover_id', '996');
+  const manifest = await buildAuditExportManifest(env, {
+    min_id: 971,
+    max_id: 1011,
+    count: 41,
+    running_hash: 'abc',
+    breaks: [{ id: 790 }],
+  });
+  assert.equal(manifest.chain_head_id, 1011);
+  assert.match(manifest.signed_manifest || '', /./);
+  assert.equal(manifest.generation_report.length, 2);
+  assert.match(manifest.generation_report[0], /Generation 1 \(historical, closed by genesis #953\)/);
+  assert.match(manifest.generation_report[0], /#790/);
+  assert.match(manifest.generation_report[1], /Generation 2 \(k2\)/);
+  assert.match(manifest.generation_report[1], /Trevor/);
+  assert.match(manifest.generation_report[1], /INTACT/);
 });
 
 test('generation report is court-readable and lists every break', () => {

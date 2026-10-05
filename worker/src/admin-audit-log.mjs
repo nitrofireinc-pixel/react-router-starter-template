@@ -2248,36 +2248,98 @@ export async function nextAuditExportRunningHash(prev = '', entries = []) {
   return acc;
 }
 
+export async function readAuditIdExtrema(env) {
+  const sql = `SELECT MIN(id) AS min_id, MAX(id) AS max_id FROM ${ADMIN_AUDIT_TABLE}`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).first();
+    return {
+      min_id: Number(row?.min_id) || 1,
+      max_id: Number(row?.max_id) || 0,
+    };
+  } catch {
+    return { min_id: 1, max_id: 0 };
+  }
+}
+
+export function auditLinkBreaksFromRows(rows = [], cutover = 0) {
+  const breaks = [];
+  let prevHash = '';
+  let prevId = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = Number(row.id) || 0;
+    const prev = String(row.prev_sha256 || '');
+    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
+    const afterCutover = cutover > 0 && id > cutover;
+    if (prev && prev !== prevHash) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: `previous hash does not match row #${prevId}`,
+      });
+    } else if (afterCutover && (linkedId == null || (prevId && linkedId !== prevId) || (!prev && prevHash))) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: linkedId == null
+          ? 'prev_id is NULL after cutover'
+          : `prev_id ${linkedId} does not follow #${prevId}`,
+      });
+    }
+    prevHash = String(row.payload_sha256 || '');
+    prevId = id;
+  }
+  return breaks;
+}
+
+export async function collectAuditLinkBreaks(env) {
+  const sql = `SELECT id, prev_id, prev_sha256, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
+  assertAuditSqlIsAppendOnly(sql);
+  let rows = [];
+  try {
+    const fetched = await env.DB.prepare(sql).all();
+    rows = fetched?.results || [];
+  } catch {
+    rows = [];
+  }
+  return auditLinkBreaksFromRows(rows, await readAuditChainCutover(env));
+}
+
 export async function buildAuditExportManifest(env, extra = {}) {
   const head = await readAuditChainHead(env);
   const genesis = await loadAuditGenerations(env);
-  const minId = extra.min_id != null ? Number(extra.min_id) : 1;
-  const maxId = extra.max_id != null ? Number(extra.max_id) : head.id;
+  const extrema = await readAuditIdExtrema(env);
+  const exportMin = extra.min_id != null ? Number(extra.min_id) : extrema.min_id;
+  const exportMax = extra.max_id != null ? Number(extra.max_id) : (extrema.max_id || head.id);
   const catalog = buildAuditGenerationCatalog({
     genesisRows: genesis,
-    minId,
-    maxId: maxId || head.id,
+    minId: extrema.min_id || 1,
+    maxId: extrema.max_id || head.id,
   });
+  const breaks = Array.isArray(extra.breaks)
+    ? extra.breaks
+    : await collectAuditLinkBreaks(env);
   const material = [
     String(head.id || 0),
     String(head.payload_sha256 || ''),
     String(extra.count || 0),
     String(extra.running_hash || ''),
-    String(minId || 0),
-    String(maxId || 0),
+    String(exportMin || 0),
+    String(exportMax || 0),
   ].join('|');
   const signed = await signAuditChainHead(env, material);
   return {
     chain_head_id: head.id,
     chain_head: head.payload_sha256,
     generations: catalog,
-    generation_report: formatAuditGenerationReport(catalog, extra.breaks || []),
+    generation_report: formatAuditGenerationReport(catalog, breaks),
     signed_manifest: signed,
     signed_chain: signed,
     count: extra.count || 0,
     running_hash: extra.running_hash || '',
-    min_id: minId,
-    max_id: maxId,
+    min_id: exportMin,
+    max_id: exportMax,
+    breaks,
   };
 }
 
