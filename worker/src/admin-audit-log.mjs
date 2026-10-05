@@ -2102,7 +2102,7 @@ export async function readAuditChainCutover(env) {
 }
 
 export async function loadAuditGenerations(env) {
-  const sql = `SELECT id, created_at, action, category, actor_user_id, actor_username, key_id,
+  const sql = `SELECT id, created_at, action, category, actor_user_id, actor_username,
       ciphertext, enc_version, payload_sha256
      FROM ${ADMIN_AUDIT_TABLE}
      WHERE action = 'log.genesis'
@@ -2289,7 +2289,7 @@ export async function verifyAdminAuditBatch(env, {
   const started = Date.now();
   const safeLimit = Math.min(Math.max(Number(limit) || ADMIN_AUDIT_VERIFY_BATCH, 1), 200);
   const afterId = Math.max(Number(after_id) || 0, 0);
-  const batchSql = `SELECT id, created_at, action, category, actor_user_id, key_id, ciphertext, enc_version,
+  const batchSql = `SELECT id, created_at, action, category, actor_user_id, ciphertext, enc_version,
       payload_sha256, prev_sha256, prev_id
      FROM ${ADMIN_AUDIT_TABLE} WHERE id > ? ORDER BY id ASC LIMIT ?`;
   assertAuditSqlIsAppendOnly(batchSql);
