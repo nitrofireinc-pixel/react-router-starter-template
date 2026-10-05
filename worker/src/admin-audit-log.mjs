@@ -33,7 +33,10 @@ export const AUDIT_CHAIN_BREAK_EXPLAIN =
 export const AUDIT_CHAIN_BREAK_GUIDANCE =
   'Contact the site maintainer; export the log before making any changes';
 export const AUDIT_LOG_TIMEZONE = 'America/New_York';
-export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
+export const AUDIT_WRITE_FAILURES_KEY = 'security_log_write_failures';
+export const AUDIT_WRITE_FAILURES_LEGACY_KEY = 'audit_write_failures';
+export const AUDIT_CUTOVER_ACTION = 'log.cutover';
+export const AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV = 'AUDIT_ALLOW_LEGACY_V3_UNTIL_ID';
 export const AUDIT_LOG_KEY_ENV = 'AUDIT_LOG_KEY';
 export const DEFAULT_AUDIT_KEY_ID = 'k1';
 export const LOGIN_LOCK_MAX_FAILURES = 5;
@@ -81,6 +84,7 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'security.log.export.complete',
   'security.log.verify',
   'log.genesis',
+  'log.cutover',
   'access.denied',
   'access.unauthenticated',
 ]);
@@ -163,12 +167,13 @@ export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
   'admin-audit',
 ]);
 
-const isolateWriteFailures = { count: 0, since: '' };
+const isolateWriteFailures = { count: 0, since: '', events: new Set() };
 const loginAttempts = new Map();
 
 export function resetAuditWriteFailureState() {
   isolateWriteFailures.count = 0;
   isolateWriteFailures.since = '';
+  isolateWriteFailures.events = new Set();
 }
 
 export function resetLoginLockState() {
@@ -220,8 +225,25 @@ export function isPublicHttpPath(path = '') {
   return true;
 }
 
+export function markupRejectionConstruct(detail = '') {
+  const text = String(detail || '').trim();
+  const onEvent = text.match(/\b(on[a-z]+)\s+event attributes/i);
+  if (onEvent) return onEvent[1].toLowerCase();
+  if (/javascript:/i.test(text)) return 'javascript:';
+  if (/script tags/i.test(text)) return 'script';
+  if (/<style>|style tags are not allowed/i.test(text)) return 'style';
+  if (/style is not allowed/i.test(text)) return 'style';
+  if (/iframe/i.test(text)) return 'iframe';
+  if (/svg/i.test(text)) return 'svg';
+  const data = text.match(/\b(data-[a-z0-9_-]*)\b/i);
+  if (data && /not allowed/i.test(text)) return data[1].toLowerCase();
+  return '';
+}
+
 export function requiredPermissionFromDetail(detail = '') {
   const text = String(detail || '').trim();
+  const construct = markupRejectionConstruct(text);
+  if (construct) return `rejected markup: ${construct}`;
   const required = text.match(/Permission required:\s*([a-z0-9:_-]+)/i);
   if (required) return required[1].toLowerCase();
   if (/maintenance mode/i.test(text)) return 'maintenance';
@@ -783,21 +805,46 @@ export function canonicalChainMaterial(row = {}, version = null) {
   });
 }
 
+export function auditLegacyV3UntilId(env = null) {
+  const raw = env?.[AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV];
+  if (raw == null || String(raw).trim() === '') return 0;
+  return Math.max(0, Number(raw) || 0);
+}
+
+export function allowPlainShaV3Row(id = 0, hmacSinceId = 0, env = null) {
+  const rowId = Number(id) || 0;
+  const since = Number(hmacSinceId) || 0;
+  if (since > 0 && rowId >= since) return false;
+  const until = auditLegacyV3UntilId(env);
+  if (until <= 0) return false;
+  return rowId > 0 && rowId <= until;
+}
+
 export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
   const encVersion = Number(row.enc_version);
   const id = Number(row.id) || 0;
   const hmacSinceId = Number(options.hmacSinceId) || 0;
   const cutoverId = Number(options.cutoverId) || 0;
   const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
-  const postCutoverLinked = cutoverId > 0 && id > cutoverId && linkedId != null;
   const atOrAfterHmac = hmacSinceId > 0 && id >= hmacSinceId;
+  const signedBoundaryCheck = Boolean(options.signedBoundaryCheck);
 
-  if (postCutoverLinked && encVersion !== ADMIN_AUDIT_ENC_VERSION_V3) {
+  if (!signedBoundaryCheck && cutoverId > 0 && id > 0 && id <= cutoverId && linkedId != null
+    && encVersion === ADMIN_AUDIT_ENC_VERSION_V3) {
     return {
       recomputed: true,
       ok: false,
       legacy: false,
-      reason: 'post_cutover_linked_must_be_v3',
+      reason: 'linked_v3_at_or_before_cutover',
+    };
+  }
+
+  if (!signedBoundaryCheck && atOrAfterHmac && linkedId != null && encVersion !== ADMIN_AUDIT_ENC_VERSION_V3) {
+    return {
+      recomputed: true,
+      ok: false,
+      legacy: false,
+      reason: 'hmac_boundary_linked_must_be_v3',
     };
   }
 
@@ -824,9 +871,11 @@ export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
         return { recomputed: true, ok: true, legacy: false, actual: keyed, keyed: true, key_id: keyId };
       }
     }
-    const rejectPlain = postCutoverLinked || atOrAfterHmac;
+    if (signedBoundaryCheck) {
+      return { recomputed: true, ok: false, legacy: false, keyed: false, reason: 'hmac_required' };
+    }
     const plain = await sha256Hex(material);
-    if (!rejectPlain && expected && expected === plain) {
+    if (allowPlainShaV3Row(id, hmacSinceId, env) && expected && expected === plain) {
       return { recomputed: true, ok: true, legacy: false, actual: plain, keyed: false, pre_hmac: true };
     }
     return {
@@ -835,7 +884,7 @@ export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
       legacy: false,
       actual: env ? '' : plain,
       keyed: Boolean(env && hasAuditLogKey(env, keyId)),
-      reason: rejectPlain ? 'hmac_required' : 'digest_mismatch',
+      reason: atOrAfterHmac || !allowPlainShaV3Row(id, hmacSinceId, env) ? 'hmac_required' : 'digest_mismatch',
     };
   }
   const actual = await sha256Hex(material);
@@ -856,9 +905,10 @@ const AUDIT_WRITE_RETRY_DELAYS_MS = [80, 200, 450];
 
 async function writeAdminAuditLogWithBackoff(env, entry = {}) {
   let lastError = null;
+  const eventKey = `${String(entry?.action || '')}|${String(entry?.path || '')}|${String(entry?.actor_username || '')}|${String(entry?.created_at || '')}`;
   for (let attempt = 0; attempt <= AUDIT_WRITE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      const result = await writeAdminAuditLog(env, entry);
+      const result = await writeAdminAuditLog(env, entry, { recordFailure: false });
       if (result) return result;
       lastError = new Error('audit write returned empty');
     } catch (error) {
@@ -875,7 +925,7 @@ async function writeAdminAuditLogWithBackoff(env, entry = {}) {
     path: String(entry?.path || ''),
     status: Number(entry?.status) || 0,
   });
-  await recordAuditWriteFailure(env, lastError);
+  await recordAuditWriteFailure(env, lastError, { eventKey: eventKey || 'audit-write' });
   return null;
 }
 
@@ -1360,7 +1410,7 @@ export async function signAuditChainHead(env, material = '') {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function writeAdminAuditLog(env, entry = {}) {
+export async function writeAdminAuditLog(env, entry = {}, { recordFailure = true } = {}) {
   if (!env?.DB) return null;
   const action = String(entry.action || 'change').trim().slice(0, 80) || 'change';
   const category = String(entry.category || auditCategoryFromPath(entry.path || '')).trim().slice(0, 40) || 'admin';
@@ -1454,6 +1504,7 @@ export async function writeAdminAuditLog(env, entry = {}) {
     encVersion: ADMIN_AUDIT_ENC_VERSION_V3,
     usedKeyId,
     keyed,
+    recordFailure,
   });
 }
 
@@ -1672,6 +1723,7 @@ async function insertAuditChainRow(env, {
   encVersion,
   usedKeyId,
   keyed,
+  recordFailure = true,
 }) {
   let lastError = null;
   if (auditWriteCanAfford(env, 6)) {
@@ -1764,7 +1816,11 @@ async function insertAuditChainRow(env, {
     };
   } catch (error) {
     console.error('admin audit log write failed', error?.message || lastError?.message || error);
-    await recordAuditWriteFailure(env, error || lastError);
+    if (recordFailure) {
+      await recordAuditWriteFailure(env, error || lastError, {
+        eventKey: `${createdAt}|${action}|${actorUsername}`,
+      });
+    }
     return null;
   }
 }
@@ -1817,6 +1873,9 @@ export async function startNewAuditLogGeneration(env, {
     started_at_utc: startedAt,
     site_logged_since_original_build: true,
     note: AUDIT_LOG_SINCE_NOTE,
+    cutover_id: Number(previous?.id) || 0,
+    cutover_at: sqliteUtcStamp(startedAt),
+    hmac_since_id: (Number(previous?.id) || 0) + 1,
   };
   const written = await writeAdminAuditLog(env, {
     action: 'log.genesis',
@@ -1844,7 +1903,7 @@ export async function startNewAuditLogGeneration(env, {
   generationCache.key_id = nextId;
   generationCache.loaded = true;
   await env.DB.prepare(
-    'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
   ).bind(AUDIT_LOG_GENERATION_KEY, JSON.stringify({
     key_id: nextId,
     generation,
@@ -1864,55 +1923,76 @@ export async function startNewAuditLogGeneration(env, {
   };
 }
 
-export async function recordAuditWriteFailure(env, error) {
+function mergeWriteFailureEvents(stored = {}, extra = []) {
+  const events = new Set();
+  for (const item of Array.isArray(stored.events) ? stored.events : []) {
+    if (item) events.add(String(item));
+  }
+  for (const item of extra) {
+    if (item) events.add(String(item));
+  }
+  return events;
+}
+
+export async function recordAuditWriteFailure(env, error, { eventKey = '' } = {}) {
   const now = new Date().toISOString();
-  isolateWriteFailures.count += 1;
+  const fingerprint = String(eventKey || '').trim() || `call:${isolateWriteFailures.events.size + 1}`;
+  isolateWriteFailures.events.add(fingerprint);
+  isolateWriteFailures.count = isolateWriteFailures.events.size;
   isolateWriteFailures.since = isolateWriteFailures.since || now;
   console.error('admin_audit_write_failed', {
     count: isolateWriteFailures.count,
     since: isolateWriteFailures.since,
     error: String(error?.message || error || 'write failed'),
   });
-  if (!env?.DB) return { ...isolateWriteFailures };
+  if (!env?.DB) {
+    return { count: isolateWriteFailures.count, since: isolateWriteFailures.since };
+  }
   try {
     const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
       .bind(AUDIT_WRITE_FAILURES_KEY)
       .first();
-    let stored = { count: 0, since: isolateWriteFailures.since };
+    let stored = { count: 0, since: isolateWriteFailures.since, events: [] };
     try {
       stored = JSON.parse(String(row?.value || '{}')) || stored;
     } catch {
-      stored = { count: 0, since: isolateWriteFailures.since };
+      stored = { count: 0, since: isolateWriteFailures.since, events: [] };
     }
+    const events = mergeWriteFailureEvents(stored, isolateWriteFailures.events);
     const next = {
-      count: Number(stored.count || 0) + 1,
+      count: events.size,
       since: String(stored.since || isolateWriteFailures.since || now),
       updated_at: now,
+      events: [...events],
     };
     await env.DB.prepare(
       'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     ).bind(AUDIT_WRITE_FAILURES_KEY, JSON.stringify(next)).run();
-    return next;
+    return { count: next.count, since: next.since };
   } catch (persistError) {
     console.error('admin_audit_write_failed_persist', persistError?.message || persistError);
-    return { ...isolateWriteFailures };
+    return { count: isolateWriteFailures.count, since: isolateWriteFailures.since };
   }
 }
 
 export async function readAuditWriteFailures(env) {
-  let stored = { count: 0, since: '' };
+  let stored = { count: 0, since: '', events: [] };
   if (env?.DB) {
     try {
-      const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-        .bind(AUDIT_WRITE_FAILURES_KEY)
-        .first();
-      stored = JSON.parse(String(row?.value || '{}')) || stored;
+      const fetched = await env.DB.prepare('SELECT key, value FROM site_content WHERE key IN (?, ?)')
+        .bind(AUDIT_WRITE_FAILURES_KEY, AUDIT_WRITE_FAILURES_LEGACY_KEY)
+        .all();
+      const rows = fetched?.results || [];
+      const newest = rows.find((row) => row.key === AUDIT_WRITE_FAILURES_KEY)
+        || rows.find((row) => row.key === AUDIT_WRITE_FAILURES_LEGACY_KEY);
+      stored = JSON.parse(String(newest?.value || '{}')) || stored;
     } catch {
-      stored = { count: 0, since: '' };
+      stored = { count: 0, since: '', events: [] };
     }
   }
+  const events = mergeWriteFailureEvents(stored, isolateWriteFailures.events);
   return {
-    count: Math.max(Number(stored.count || 0), isolateWriteFailures.count),
+    count: Math.max(events.size, Number(stored.count || 0), isolateWriteFailures.count),
     since: String(stored.since || isolateWriteFailures.since || ''),
   };
 }
@@ -2082,7 +2162,9 @@ export async function maybeLogAccessDenial(env, {
       actorUsername: actor?.username || session?.username || '',
       detail: collapsed
         ? `${decision.count} ${action} from same IP+path in 10 minutes`
-        : (required ? `required ${required}` : (detail || action)),
+        : (String(required || '').startsWith('rejected markup:')
+          ? required
+          : (required ? `required ${required}` : (detail || action))),
     }),
     include_device_client: action.startsWith('login.'),
     device_client: deviceClient || session?.device_client || null,
@@ -2453,6 +2535,7 @@ export function firstNewFormatLinkedId(rows = [], cutoverId = 0) {
 export function classifyAuditLinkRows(rows = [], {
   cutoverAt = '',
   cutoverId = 0,
+  hmacSinceId = 0,
   firstLinkedId = null,
   prevHash = '',
   prevId = 0,
@@ -2496,6 +2579,12 @@ export function classifyAuditLinkRows(rows = [], {
           kind: 'link',
           reason: `previous hash does not match row #${lastId}`,
         });
+      } else if (linkedId != null && Number(row.enc_version) === ADMIN_AUDIT_ENC_VERSION_V3) {
+        breaks.push({
+          id,
+          kind: 'link',
+          reason: 'linked enc_version 3 row at or before cutover_id',
+        });
       }
       hash = String(row.payload_sha256 || '');
       lastId = id;
@@ -2536,11 +2625,12 @@ export function classifyAuditLinkRows(rows = [], {
         kind: 'link',
         reason: `prev_id ${linkedId} does not follow #${lastId}`,
       });
-    } else if (cutoff > 0 && Number(row.enc_version) !== ADMIN_AUDIT_ENC_VERSION_V3) {
+    } else if (Number(hmacSinceId) > 0 && id >= Number(hmacSinceId)
+      && Number(row.enc_version) !== ADMIN_AUDIT_ENC_VERSION_V3) {
       breaks.push({
         id,
         kind: 'link',
-        reason: 'post-cutover linked row must be enc_version 3',
+        reason: 'linked row at or after hmac_since_id must be enc_version 3',
       });
     }
 
@@ -2558,30 +2648,118 @@ export function classifyAuditLinkRows(rows = [], {
   };
 }
 
-export async function readAuditChainCutoverMeta(env) {
-  const meta = { id: 0, at: '', hmacSinceId: 0 };
+export async function readSignedAuditBoundaries(env) {
+  const empty = {
+    id: 0, at: '', hmacSinceId: 0, source: '', rowId: 0, valid: false,
+  };
+  if (!env?.DB?.prepare) return empty;
+  const sql = `SELECT id, created_at, action, category, actor_user_id, actor_username,
+      ciphertext, enc_version, key_id, payload_sha256, prev_sha256, prev_id
+     FROM ${ADMIN_AUDIT_TABLE}
+     WHERE action IN ('log.cutover', 'log.genesis')
+     ORDER BY id ASC`;
+  assertAuditSqlIsAppendOnly(sql);
+  let rows = [];
   try {
-    const fetched = await env.DB.prepare(
-      "SELECT key, value FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at', 'audit_hmac_since_id')",
-    ).all();
-    for (const row of fetched?.results || []) {
-      if (row?.key === 'audit_chain_cutover_id') meta.id = Number(row.value) || 0;
-      if (row?.key === 'audit_chain_cutover_at') meta.at = String(row.value || '');
-      if (row?.key === 'audit_hmac_since_id') meta.hmacSinceId = Number(row.value) || 0;
-    }
+    const fetched = await env.DB.prepare(sql).all();
+    rows = fetched?.results || [];
   } catch {
-    try {
-      const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-        .bind('audit_chain_cutover_id')
-        .first();
-      if (row?.value != null && String(row.value).trim() !== '') {
-        meta.id = Number(row.value) || 0;
-      }
-    } catch {
-      // ignore
+    return empty;
+  }
+  for (const row of rows) {
+    const digest = await verifyAuditRowDigest(row, env, { signedBoundaryCheck: true });
+    if (!digest.ok || !digest.keyed) continue;
+    const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
+    const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
+    const cutoverId = Number(meta.cutover_id) || 0;
+    const hmacSinceId = Number(meta.hmac_since_id) || 0;
+    if (String(row.action) === AUDIT_CUTOVER_ACTION || (cutoverId && hmacSinceId)) {
+      return {
+        id: cutoverId,
+        at: String(meta.cutover_at || ''),
+        hmacSinceId,
+        source: String(row.action || ''),
+        rowId: Number(row.id) || 0,
+        valid: true,
+      };
     }
   }
-  return meta;
+  return empty;
+}
+
+export async function readAuditChainCutoverMeta(env) {
+  return readSignedAuditBoundaries(env);
+}
+
+export async function linkedAuditRowsExist(env) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE prev_id IS NOT NULL LIMIT 1`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).first();
+    return Boolean(row?.id);
+  } catch {
+    return false;
+  }
+}
+
+export async function signedAuditCutoverExists(env) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE action = 'log.cutover' ORDER BY id ASC LIMIT 1`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).first();
+    return Boolean(row?.id);
+  } catch {
+    return false;
+  }
+}
+
+export async function writeAuditCutoverRow(env, {
+  cutoverId = 0,
+  cutoverAt = '',
+  hmacSinceId = 0,
+} = {}) {
+  if (!env?.DB?.prepare || !hasAuditLogKey(env)) return { id: 0, skipped: true };
+  if (await signedAuditCutoverExists(env)) {
+    return { id: 0, already: true };
+  }
+  const written = await writeAdminAuditLog(env, {
+    action: AUDIT_CUTOVER_ACTION,
+    category: 'security',
+    actor_username: 'system',
+    summary: `Security log cutover ${Number(cutoverId) || 0} hmac_since ${Number(hmacSinceId) || 0}`,
+    meta: {
+      cutover_id: Number(cutoverId) || 0,
+      cutover_at: String(cutoverAt || ''),
+      hmac_since_id: Number(hmacSinceId) || 0,
+    },
+  });
+  return written || { id: 0 };
+}
+
+export function uniqueAuditBreakIds(items = []) {
+  const seen = new Set();
+  const ids = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const id = Number(item?.id ?? item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function missingCutoverBreak(rows = []) {
+  const firstLinked = (Array.isArray(rows) ? rows : []).find((row) => (
+    row.prev_id != null && row.prev_id !== ''
+  ));
+  if (!firstLinked) return null;
+  return {
+    id: Number(firstLinked.id) || 0,
+    kind: 'cutover',
+    reason: 'missing or invalid log.cutover boundary',
+  };
 }
 
 export async function readAuditChainCutover(env) {
@@ -2685,7 +2863,8 @@ export function buildCourtVerifyReport({
     .filter((item) => Number(item.id) >= Number(start) && Number(item.id) <= Number(end));
   const currentBreaks = current ? inRange(breaks, current.start_id, current.end_id) : [];
   const currentAltered = current ? inRange(digestFailures, current.start_id, current.end_id) : [];
-  const currentIntact = currentBreaks.length === 0 && currentAltered.length === 0;
+  const currentBreakIds = uniqueAuditBreakIds(currentBreaks);
+  const currentIntact = currentBreakIds.length === 0 && currentAltered.length === 0;
   const legacyIds = (Array.isArray(legacy) ? legacy : []).map((item) => Number(item.id)).filter(Boolean);
   const legacyStart = legacyIds.length ? Math.min(...legacyIds) : null;
   const legacyEnd = legacyIds.length ? Math.max(...legacyIds) : null;
@@ -2699,7 +2878,7 @@ export function buildCourtVerifyReport({
     : 'Written by the previous site version during the update';
   return {
     current: current ? {
-      title: currentIntact ? 'INTACT' : `${currentBreaks.length} link breaks`,
+      title: currentIntact ? 'INTACT' : `${currentBreakIds.length} link breaks`,
       intact: currentIntact,
       start_id: current.start_id,
       end_id: current.end_id || maxId,
@@ -2708,7 +2887,7 @@ export function buildCourtVerifyReport({
       started_label: current.original_build ? firstSetupLabel : '',
       original_build: Boolean(current.original_build),
       original_label: firstSetupLabel,
-      break_ids: currentBreaks.map((item) => item.id),
+      break_ids: currentBreakIds,
       guidance: currentIntact ? '' : AUDIT_CHAIN_BREAK_GUIDANCE,
     } : null,
     previous: previous.map((gen) => {
@@ -2722,7 +2901,7 @@ export function buildCourtVerifyReport({
         end_id: gen.end_id,
         link_breaks: genBreaks.length,
         altered_rows: altered.length,
-        break_ids: genBreaks.map((item) => item.id),
+        break_ids: uniqueAuditBreakIds(genBreaks),
       };
     }),
     legacy: legacyStart != null ? {
@@ -2753,7 +2932,7 @@ export function formatCourtVerifySummary(report = {}) {
   if (current.intact) {
     return started ? `${started} ${range}: INTACT` : `INTACT ${range}`;
   }
-  const ids = (current.break_ids || []).map((id) => `#${id}`).join(', ');
+  const ids = uniqueAuditBreakIds(current.break_ids || []).map((id) => `#${id}`).join(', ');
   return ids ? `${current.title} ${range} at ${ids}` : `${current.title} ${range}`;
 }
 
@@ -2763,12 +2942,13 @@ export function formatAuditGenerationReport(catalog = [], breaks = []) {
       const id = Number(item.id);
       return id >= Number(gen.start_id) && id <= Number(gen.end_id);
     });
-    const ids = genBreaks.map((item) => `#${item.id}`).join(', ');
+    const uniqueIds = uniqueAuditBreakIds(genBreaks);
+    const ids = uniqueIds.map((id) => `#${id}`).join(', ');
     if (gen.historical) {
-      return `Generation 1 (historical, closed by genesis #${gen.closed_by}): ${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'}${ids ? ` at ${ids}` : ''}, reason recorded in genesis row`;
+      return `Generation 1 (historical, closed by genesis #${gen.closed_by}): ${uniqueIds.length} break${uniqueIds.length === 1 ? '' : 's'}${ids ? ` at ${ids}` : ''}, reason recorded in genesis row`;
     }
-    const status = genBreaks.length
-      ? `${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'} at ${ids}`
+    const status = uniqueIds.length
+      ? `${uniqueIds.length} break${uniqueIds.length === 1 ? '' : 's'} at ${ids}`
       : 'INTACT';
     return `Generation ${gen.generation} (${gen.key_id || 'k1'}), started ${gen.started_at_et || 'at original build'} by ${gen.started_by || 'unknown'}, rows #${gen.start_id}-#${gen.end_id}: ${status}`;
   });
@@ -2966,10 +3146,11 @@ export async function readAuditIdExtrema(env) {
   }
 }
 
-export function auditLinkBreaksFromRows(rows = [], cutover = 0, cutoverAt = '') {
+export function auditLinkBreaksFromRows(rows = [], cutover = 0, cutoverAt = '', hmacSinceId = 0) {
   return classifyAuditLinkRows(rows, {
     cutoverAt,
     cutoverId: cutover,
+    hmacSinceId,
     inLegacyPrefix: true,
   }).breaks;
 }
@@ -2984,10 +3165,11 @@ export async function collectAuditLinkState(env) {
   } catch {
     rows = [];
   }
-  const cutover = await readAuditChainCutoverMeta(env);
+  const cutover = await readSignedAuditBoundaries(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
     cutoverId: cutover.id,
+    hmacSinceId: cutover.hmacSinceId,
     inLegacyPrefix: true,
   });
   return {
@@ -3088,10 +3270,11 @@ export async function verifyAdminAuditBatch(env, {
     if (!prevHash) prevHash = String(neighbor?.payload_sha256 || '');
     if (neighbor?.id) prevId = Number(neighbor.id) || afterId;
   }
-  const cutover = await readAuditChainCutoverMeta(env);
+  const cutover = await readSignedAuditBoundaries(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
     cutoverId: cutover.id,
+    hmacSinceId: cutover.hmacSinceId,
     prevHash,
     prevId,
     inLegacyPrefix: afterId === 0,
@@ -3100,6 +3283,10 @@ export async function verifyAdminAuditBatch(env, {
   const digestFailures = [];
   const legacy = classified.legacy;
   const compatibility = classified.compatibility;
+  if (!cutover.valid && rows.some((row) => row.prev_id != null && row.prev_id !== '')) {
+    const missing = missingCutoverBreak(rows);
+    if (missing) breaks.push(missing);
+  }
   for (const row of rows) {
     const id = Number(row.id) || 0;
     const digest = await verifyAuditRowDigest(row, env, {
@@ -3108,7 +3295,9 @@ export async function verifyAdminAuditBatch(env, {
     });
     if (digest.recomputed && !digest.ok) {
       digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
-      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      if (!breaks.some((item) => Number(item.id) === id)) {
+        breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      }
     }
     prevHash = String(row.payload_sha256 || '');
     prevId = id;
@@ -3132,7 +3321,7 @@ export async function verifyAdminAuditBatch(env, {
     maxId: Number(extrema?.max_id) || trueHead.id || (last ? Number(last.id) : afterId),
   });
   const chainOk = breaks.length === 0;
-  const breakIds = breaks.map((item) => item.id);
+  const breakIds = uniqueAuditBreakIds(breaks);
   return {
     chain_ok: chainOk,
     chain_status: chainOk
@@ -3186,15 +3375,20 @@ export async function verifyAdminAuditComplete(env) {
   } catch {
     rows = [];
   }
-  const cutover = await readAuditChainCutoverMeta(env);
+  const cutover = await readSignedAuditBoundaries(env);
   const genesis = await loadAuditGenerations(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
     cutoverId: cutover.id,
+    hmacSinceId: cutover.hmacSinceId,
     inLegacyPrefix: true,
   });
   const breaks = [...classified.breaks];
   const digestFailures = [];
+  if (!cutover.valid && rows.some((row) => row.prev_id != null && row.prev_id !== '')) {
+    const missing = missingCutoverBreak(rows);
+    if (missing) breaks.push(missing);
+  }
   for (const row of rows) {
     const digest = await verifyAuditRowDigest(row, env, {
       hmacSinceId: cutover.hmacSinceId,
@@ -3203,7 +3397,9 @@ export async function verifyAdminAuditComplete(env) {
     if (digest.recomputed && !digest.ok) {
       const id = Number(row.id) || 0;
       digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
-      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      if (!breaks.some((item) => Number(item.id) === id)) {
+        breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      }
     }
   }
   const first = rows[0] || null;
@@ -3240,8 +3436,8 @@ export async function verifyAdminAuditComplete(env) {
   return {
     chain_ok: breaks.length === 0,
     chain_status: status,
-    chain_break_id: breaks[0]?.id || null,
-    chain_break_ids: breaks.map((item) => item.id),
+    chain_break_id: uniqueAuditBreakIds(breaks)[0] || null,
+    chain_break_ids: uniqueAuditBreakIds(breaks),
     breaks,
     checked: rows.length,
     digest_failures: digestFailures,

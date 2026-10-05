@@ -37,4 +37,18 @@ BEGIN
   SELECT RAISE(ABORT, 'append-only');
 END;
 
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_update
+BEFORE UPDATE ON site_content
+WHEN OLD.key LIKE 'audit_%'
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END;
+
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_delete
+BEFORE DELETE ON site_content
+WHEN OLD.key LIKE 'audit_%'
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END;
+
 INSERT INTO site_content (key, value) VALUES ('schema_version', '2026-10-04.6') ON CONFLICT(key) DO UPDATE SET value = excluded.value;

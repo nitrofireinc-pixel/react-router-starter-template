@@ -79,6 +79,11 @@ import {
   visualPageAuditFromRequest,
   wrapPdfLine,
   writeAdminAuditLog,
+  writeAuditCutoverRow,
+  uniqueAuditBreakIds,
+  markupRejectionConstruct,
+  signedAuditCutoverExists,
+  AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV,
 } from '../worker/src/admin-audit-log.mjs';
 import {
   AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
@@ -87,7 +92,10 @@ import {
   AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL,
   AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL,
   AUDIT_LOG_PENDING_TABLE_SQL,
+  SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
+  SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
   applyIncrementalSchema,
+  auditSchemaNeedsRepair,
   ensureAuditChainCutover,
   ensureAuditHmacSince,
   ensureAuditLogColumns,
@@ -95,6 +103,7 @@ import {
   readAuditLinearTriggerSql,
   linearTriggerAllowsLegacyNull,
   linearTriggerEnforcesCutoverWindow,
+  repairAuditSchema,
 } from '../worker/src/schema-upgrade.mjs';
 import {
   buildAuditDeviceMeta,
@@ -413,6 +422,12 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
             if (q.includes("name = 'admin_audit_log_linear_insert'")) {
               return { sql: 'WHEN ( NEW.prev_id IS NOT NULL' };
             }
+            if (q.includes("action = 'log.cutover'")) {
+              return rows.find((row) => row.action === 'log.cutover') || null;
+            }
+            if (q.includes('prev_id IS NOT NULL')) {
+              return rows.find((row) => row.prev_id != null && row.prev_id !== '') || null;
+            }
             if (q.includes('FROM admin_audit_export_sessions')) {
               const sid = String(this.binds[0] || '');
               const found = sessions.find((row) => row.sid === sid && row.kind === 'complete');
@@ -473,6 +488,13 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
                     || String(user.display_name || '').toLowerCase().includes(like)
                   ))
                   .map((user) => ({ id: user.user_id })),
+              };
+            }
+            if (q.includes("action IN ('log.cutover', 'log.genesis')") || q.includes('action IN ("log.cutover"')) {
+              return {
+                results: rows
+                  .filter((row) => row.action === 'log.cutover' || row.action === 'log.genesis')
+                  .sort((a, b) => Number(a.id) - Number(b.id)),
               };
             }
             if (q.includes("action = 'log.genesis'")) {
@@ -605,6 +627,14 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
   return { env, rows, pending, names, sessions, site, sqlLog };
 }
 
+async function attachSignedCutover(env, {
+  cutoverId = 0,
+  cutoverAt = '2026-10-05 03:00:00',
+  hmacSinceId = 0,
+} = {}) {
+  return writeAuditCutoverRow(env, { cutoverId, cutoverAt, hmacSinceId });
+}
+
 test('visual editor mutations log as change.pages with slug and kind', async () => {
   const { env, rows } = createAuditDb();
   await maybeAuditAdminApiResponse(env, {
@@ -665,13 +695,23 @@ test('security log list is indexed, paginated, and decrypts only the current pag
 test('failed audit writes increment a counter instead of disappearing', async () => {
   resetAuditWriteFailureState();
   const { env } = createAuditDb();
-  const first = await recordAuditWriteFailure(env, new Error('quota'));
-  const second = await recordAuditWriteFailure(env, new Error('quota'));
+  const first = await recordAuditWriteFailure(env, new Error('quota'), { eventKey: 'lost-a' });
+  const second = await recordAuditWriteFailure(env, new Error('quota'), { eventKey: 'lost-b' });
   assert.equal(first.count, 1);
   assert.equal(second.count, 2);
   assert.match(String(second.since), /T/);
   const listed = await listAdminAuditLogs(env, { year: 2026, month: 10 });
   assert.equal(listed.write_failures.count, 2);
+});
+
+test('failed audit writes count distinct events, not retry attempts', async () => {
+  resetAuditWriteFailureState();
+  const { env } = createAuditDb();
+  await recordAuditWriteFailure(env, new Error('quota'), { eventKey: 'same-lost-event' });
+  await recordAuditWriteFailure(env, new Error('quota'), { eventKey: 'same-lost-event' });
+  await recordAuditWriteFailure(env, new Error('quota'), { eventKey: 'same-lost-event' });
+  const listed = await listAdminAuditLogs(env, { year: 2026, month: 10 });
+  assert.equal(listed.write_failures.count, 1);
 });
 
 test('hash chain uses the contiguous id range for filtered or scattered rows', async () => {
@@ -684,6 +724,7 @@ test('hash chain uses the contiguous id range for filtered or scattered rows', a
     { id: 5, action: 'login', payload_sha256: 'h5', prev_sha256: 'h4', prev_id: 4, created_at: '2026-10-04 16:04:00', actor_username: 'agent@efhsband.org' },
   ];
   const { env, rows } = createAuditDb(seed);
+  await attachSignedCutover(env, { cutoverId: 0, cutoverAt: '2026-10-04 16:00:00', hmacSinceId: 6 });
   const filtered = await listAdminAuditLogs(env, { year: 2026, month: 10, action: 'login', limit: 25 });
   assert.deepEqual(filtered.entries.map((entry) => entry.id), [5, 3, 1]);
   assert.match(filtered.chain_status, /this page/i);
@@ -701,7 +742,7 @@ test('hash chain uses the contiguous id range for filtered or scattered rows', a
   assert.match(broken.chain_status, /#5/);
   assert.deepEqual(broken.chain_break_ids, [4, 5]);
   assert.equal(broken.done, true);
-  assert.equal(broken.chain_head_id, 5);
+  assert.equal(broken.chain_head_id, 6);
 });
 
 test('free-text search ignores security.log.view so a missing term matches nothing', async () => {
@@ -951,7 +992,11 @@ test('new-row encrypt plus chain hash stays well under the Workers 10ms budget i
 
 test('access-denied helpers classify protected 401/403 and skip public 404s', () => {
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
+  assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('log.cutover'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
+  assert.equal(markupRejectionConstruct('onclick event attributes are not allowed'), 'onclick');
+  assert.equal(requiredPermissionFromDetail('onclick event attributes are not allowed'), 'rejected markup: onclick');
+  assert.equal(requiredPermissionFromDetail('script tags are not allowed'), 'rejected markup: script');
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('security.log.export.start'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('security.log.export.complete'));
   assert.equal(sanitizeAuditPath('/api/admin/users?token=secret#frag'), '/api/admin/users');
@@ -1587,9 +1632,14 @@ test('parallel audit writes form a single linear prev_id chain', async () => {
     assert.equal(prevIds.has(Number(linear[i].prev_id)), false);
     prevIds.add(Number(linear[i].prev_id));
   }
+  await writeAuditCutoverRow(env, {
+    cutoverId: 0,
+    cutoverAt: '2026-10-04 16:00:00',
+    hmacSinceId: 1,
+  });
   const verified = await verifyAdminAuditRange(env, {});
   assert.equal(verified.chain_ok, true);
-  assert.equal(verified.checked, linear.length);
+  assert.equal(verified.checked, linear.length + 1);
   db.close();
 });
 
@@ -1605,6 +1655,7 @@ test('verify batches walk the whole chain and list stays cheap', async () => {
     prev_id: index === 0 ? 0 : index,
   }));
   const { env, sqlLog } = createAuditDb(seed);
+  await attachSignedCutover(env, { cutoverId: 0, cutoverAt: '2026-10-04 16:00:00', hmacSinceId: 121 });
   const listStarted = performance.now();
   const listed = await listAdminAuditLogs(env, { year: 2026, month: 10, limit: 25 });
   const listMs = performance.now() - listStarted;
@@ -1621,7 +1672,7 @@ test('verify batches walk the whole chain and list stays cheap', async () => {
     expected_prev: first.next_expected_prev,
     limit: 100,
   });
-  assert.equal(second.checked, 20);
+  assert.equal(second.checked, 21);
   assert.equal(second.done, true);
   assert.equal(second.chain_ok, true);
 
@@ -1926,9 +1977,14 @@ test('50 parallel SQLite writes stay a single linear chain with zero NULL prev_i
     assert.equal(Number(linear[i].prev_id), Number(linear[i - 1].id));
     assert.equal(linear[i].prev_sha256, linear[i - 1].payload_sha256);
   }
+  await writeAuditCutoverRow(env, {
+    cutoverId: 0,
+    cutoverAt: '2026-10-04 16:00:00',
+    hmacSinceId: 1,
+  });
   const verified = await verifyAdminAuditRange(env, {});
   assert.equal(verified.chain_ok, true);
-  assert.equal(verified.checked, linear.length);
+  assert.equal(verified.checked, linear.length + 1);
   const perWrite = writeMs / requested;
   console.log(JSON.stringify({
     parallel_write_test: {
@@ -2029,7 +2085,6 @@ test('hand-running .4 then .5 on prod-at-.2 does not add columns; Worker repair 
   const trigger = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='admin_audit_log_linear_insert'").get();
   assert.equal(linearTriggerEnforcesCutoverWindow(trigger.sql), true);
   assert.equal(linearTriggerAllowsLegacyNull(trigger.sql), true);
-  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('old', 'x', NULL, '')").run();
   assert.throws(
     () => db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('fork', 'y', 1, 'nope')").run(),
     /audit-chain-fork/,
@@ -2090,8 +2145,13 @@ test('verify labels in-window hash-correct NULL prev_id as previous site version
     { id: 11, action: 'login', payload_sha256: 'h11', prev_sha256: 'h10', prev_id: 10, created_at: '2026-10-04 16:06:00', enc_version: 1 },
   ];
   const { env, site } = createAuditDb(seed);
-  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_id', '401');
   site.set('audit_chain_cutover_at', '2026-10-04 16:00:00');
+  await attachSignedCutover(env, {
+    cutoverId: 9,
+    cutoverAt: '2026-10-04 16:00:00',
+    hmacSinceId: 11,
+  });
   const batch = await verifyAdminAuditBatch(env, { after_id: 0, limit: 40 });
   assert.equal(batch.breaks.some((item) => item.id === 10), false);
   assert.equal(batch.compatibility.some((item) => item.id === 10), true);
@@ -2323,11 +2383,11 @@ test('D1 query counter is per-request and does not freeze on env', async () => {
 
 test('linear trigger rejects NULL prev_id after the 15-minute window', async () => {
   const db = createProdAtDot2();
+  db.exec(`
+    INSERT INTO site_content (key, value) VALUES ('audit_chain_cutover_id', '1');
+    INSERT INTO site_content (key, value) VALUES ('audit_chain_cutover_at', datetime('now', '-20 minutes'));
+  `);
   await applyIncrementalSchema(sqliteEnv(db));
-  const at = db.prepare("SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at'").get();
-  assert.ok(at?.value);
-  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('old', 'x', NULL, '')").run();
-  db.prepare("UPDATE site_content SET value = datetime('now', '-20 minutes') WHERE key = 'audit_chain_cutover_at'").run();
   assert.throws(
     () => db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('late', 'y', NULL, '')").run(),
     /audit-chain-fork/,
@@ -2536,13 +2596,27 @@ test('v3 keyed HMAC verifies; plain SHA-256 v3 only passes before hmac_since_id'
   const opts = { hmacSinceId: 10, cutoverId: 9 };
   assert.equal((await verifyAuditRowDigest({ ...row, id: 12, payload_sha256: keyed }, env, opts)).ok, true);
   assert.equal((await verifyAuditRowDigest({ ...row, id: 12, payload_sha256: keyed }, env, opts)).keyed, true);
-  const older = await verifyAuditRowDigest({ ...row, id: 8, payload_sha256: plain }, env, opts);
+  const olderProd = await verifyAuditRowDigest({ ...row, id: 8, payload_sha256: plain }, env, opts);
+  assert.equal(olderProd.ok, false);
+  const devEnv = { ...env, [AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV]: '8' };
+  const older = await verifyAuditRowDigest({ ...row, id: 8, payload_sha256: plain }, devEnv, opts);
   assert.equal(older.ok, true);
   assert.equal(older.pre_hmac, true);
-  const atSince = await verifyAuditRowDigest({ ...row, id: 10, payload_sha256: plain }, env, opts);
+  const atSince = await verifyAuditRowDigest({ ...row, id: 10, payload_sha256: plain }, {
+    ...env,
+    [AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV]: '20',
+  }, opts);
   assert.equal(atSince.ok, false);
   const afterSince = await verifyAuditRowDigest({ ...row, id: 11, payload_sha256: plain }, env, opts);
   assert.equal(afterSince.ok, false);
+  const linkedBeforeCutover = await verifyAuditRowDigest({
+    ...row,
+    id: 8,
+    prev_id: 7,
+    payload_sha256: keyed,
+  }, env, opts);
+  assert.equal(linkedBeforeCutover.ok, false);
+  assert.equal(linkedBeforeCutover.reason, 'linked_v3_at_or_before_cutover');
   const v2 = await verifyAuditRowDigest({
     enc_version: 2,
     created_at: 't',
@@ -2597,9 +2671,14 @@ test('T11 forged v3 with plain SHA-256 after hmac_since is a digest break', asyn
     { ...linked, payload_sha256: keyed },
     { ...forged, payload_sha256: plain },
   ]);
-  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_id', '401');
   site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
-  site.set('audit_hmac_since_id', '10');
+  site.set('audit_hmac_since_id', '402');
+  await attachSignedCutover(env, {
+    cutoverId: 9,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 10,
+  });
   const walked = await verifyAdminAuditComplete(env);
   assert.equal(walked.chain_ok, false);
   assert.equal(walked.breaks.some((item) => item.id === 11 && item.kind === 'digest'), true);
@@ -2641,9 +2720,14 @@ test('T12 rewritten v3 suffix with plain SHA-256 digests is a digest break', asy
     { ...edited, payload_sha256: plain10 },
     { ...suffix, payload_sha256: plain11 },
   ]);
-  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_id', '401');
   site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
-  site.set('audit_hmac_since_id', '10');
+  site.set('audit_hmac_since_id', '402');
+  await attachSignedCutover(env, {
+    cutoverId: 9,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 10,
+  });
   const walked = await verifyAdminAuditComplete(env);
   assert.equal(walked.chain_ok, false);
   assert.equal(walked.breaks.filter((item) => item.kind === 'digest').length >= 1, true);
@@ -2685,6 +2769,7 @@ test('T13 deleted row relabeled as enc_version 1 with matching prev hash is a br
   ], {
     cutoverAt: '2026-10-05 03:00:00',
     cutoverId: 9,
+    hmacSinceId: 10,
   });
   assert.equal(classified.breaks.some((item) => item.id === 11), true);
   assert.match(classified.breaks.find((item) => item.id === 11).reason, /enc_version 3/i);
@@ -2695,10 +2780,251 @@ test('T13 deleted row relabeled as enc_version 1 with matching prev hash is a br
     { ...row10, payload_sha256: keyed10 },
     relabeled,
   ]);
-  site.set('audit_chain_cutover_id', '9');
+  site.set('audit_chain_cutover_id', '401');
   site.set('audit_chain_cutover_at', '2026-10-05 03:00:00');
-  site.set('audit_hmac_since_id', '10');
+  site.set('audit_hmac_since_id', '402');
+  await attachSignedCutover(env, {
+    cutoverId: 9,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 10,
+  });
   const walked = await verifyAdminAuditComplete(env);
   assert.equal(walked.chain_ok, false);
   assert.equal(walked.breaks.some((item) => item.id === 11), true);
+});
+
+test('access.denied summary for rejected markup names the construct, not page:join', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  resetAccessDeniedThrottleState();
+  const { env, rows } = createAuditDb();
+  const request = denialRequest('/api/admin/visual-pages/join', { method: 'PUT' });
+  const response = new Response(JSON.stringify({
+    detail: 'onclick event attributes are not allowed',
+  }), {
+    status: 403,
+    headers: { 'content-type': 'application/json' },
+  });
+  const denied = await maybeLogAccessDenial(env, {
+    request,
+    url: new URL(request.url),
+    response,
+    actor: { id: 2, username: 'editor@efhsband.org' },
+  });
+  assert.equal(denied.action, 'access.denied');
+  const payload = JSON.parse(await decryptAuditPayload(env, rows.at(-1).ciphertext));
+  assert.equal(payload.meta.required, 'rejected markup: onclick');
+  assert.match(payload.summary, /rejected markup: onclick/);
+  assert.doesNotMatch(payload.summary, /required page:join/);
+});
+
+test('T17 site_content boundary tamper is ignored; signed log.cutover wins', async () => {
+  const envKey = { AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere' };
+  const rows = [];
+  for (let id = 1; id <= 5; id += 1) {
+    rows.push({
+      id,
+      action: 'login',
+      payload_sha256: `h${id}`,
+      prev_sha256: id === 1 ? '' : `h${id - 1}`,
+      prev_id: id === 1 ? null : id - 1,
+      created_at: '2026-09-01 12:00:00',
+      enc_version: 1,
+    });
+  }
+  const real = {
+    id: 6,
+    created_at: '2026-10-05 03:01:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    key_id: 'k1',
+    ciphertext: 'k1.iv.real',
+    enc_version: 3,
+    prev_id: 5,
+    prev_sha256: 'h5',
+  };
+  const keyed6 = await hmacSha256Hex(envKey, canonicalChainMaterial(real, 3), 'k1');
+  const forged = {
+    ...real,
+    id: 6,
+    ciphertext: 'k1.iv.forged',
+  };
+  const plain6 = await sha256Hex(canonicalChainMaterial(forged, 3));
+  const { env, site } = createAuditDb([
+    ...rows,
+    { ...forged, payload_sha256: plain6 },
+  ]);
+  site.set('audit_chain_cutover_id', '401');
+  site.set('audit_hmac_since_id', '402');
+  await attachSignedCutover(env, {
+    cutoverId: 5,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 6,
+  });
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => item.id === 6), true);
+});
+
+test('DEV-shaped v2 and pre-HMAC v3 after cutover stay INTACT with until-id', async () => {
+  const envKey = {
+    AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere',
+    [AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV]: '16',
+  };
+  const seed = [];
+  for (let id = 1; id <= 10; id += 1) {
+    seed.push({
+      id,
+      action: 'login',
+      payload_sha256: `h${id}`,
+      prev_sha256: id <= 8 ? '' : `h${id - 1}`,
+      prev_id: null,
+      created_at: '2026-09-01 12:00:00',
+      enc_version: 1,
+    });
+  }
+  for (let id = 11; id <= 13; id += 1) {
+    const row = {
+      id,
+      created_at: '2026-10-05 03:01:00',
+      action: 'login',
+      category: 'auth',
+      actor_user_id: 5,
+      actor_username: 'a@efhsband.org',
+      key_id: 'k1',
+      ciphertext: `v2.${id}`,
+      enc_version: 2,
+      prev_id: id - 1,
+      prev_sha256: id === 11 ? 'h10' : seed[id - 2].payload_sha256,
+    };
+    row.payload_sha256 = await sha256Hex(canonicalChainMaterial(row, 2));
+    seed.push(row);
+  }
+  for (let id = 14; id <= 16; id += 1) {
+    const row = {
+      id,
+      created_at: '2026-10-05 03:02:00',
+      action: 'login',
+      category: 'auth',
+      actor_user_id: 5,
+      actor_username: 'a@efhsband.org',
+      key_id: 'k1',
+      ciphertext: `plain.${id}`,
+      enc_version: 3,
+      prev_id: id - 1,
+      prev_sha256: seed[id - 2].payload_sha256,
+    };
+    row.payload_sha256 = await sha256Hex(canonicalChainMaterial(row, 3));
+    seed.push(row);
+  }
+  const keyed = {
+    id: 17,
+    created_at: '2026-10-05 03:03:00',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    actor_username: 'a@efhsband.org',
+    key_id: 'k1',
+    ciphertext: 'k1.iv.keyed',
+    enc_version: 3,
+    prev_id: 16,
+    prev_sha256: seed[15].payload_sha256,
+  };
+  keyed.payload_sha256 = await hmacSha256Hex(envKey, canonicalChainMaterial(keyed, 3), 'k1');
+  seed.push(keyed);
+  const { env } = createAuditDb(seed);
+  env[AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV] = '16';
+  await attachSignedCutover(env, {
+    cutoverId: 10,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 17,
+  });
+  const intact = await verifyAdminAuditComplete(env);
+  assert.equal(intact.chain_ok, true, JSON.stringify(intact.breaks));
+  assert.equal(intact.breaks.length, 0);
+  assert.equal(uniqueAuditBreakIds(intact.breaks).length, 0);
+
+  const prodShaped = createAuditDb(seed);
+  await attachSignedCutover(prodShaped.env, {
+    cutoverId: 10,
+    cutoverAt: '2026-10-05 03:00:00',
+    hmacSinceId: 17,
+  });
+  const prod = await verifyAdminAuditComplete(prodShaped.env);
+  assert.equal(prod.chain_ok, false);
+  assert.equal(prod.breaks.some((item) => item.id >= 14 && item.id <= 16), true);
+});
+
+test('missing log.cutover after linked rows is a break; repair writes it', async () => {
+  const db = createProdAtDot2();
+  const env = sqliteEnv(db);
+  await ensureAuditLogColumns(env);
+  db.exec(AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL);
+  await ensureAuditChainCutover(env);
+  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'h2', 1, 'seed')").run();
+  assert.equal(await signedAuditCutoverExists(env), false);
+  assert.equal(await auditSchemaNeedsRepair(env), true);
+  await repairAuditSchema(env);
+  assert.equal(await signedAuditCutoverExists(env), true);
+  assert.equal(await auditSchemaNeedsRepair(env), false);
+  db.close();
+});
+
+test('site_content audit_ keys are write-once', async () => {
+  const db = createProdAtDot2();
+  const env = sqliteEnv(db);
+  await applyIncrementalSchema(env);
+  assert.throws(
+    () => db.prepare("UPDATE site_content SET value = '401' WHERE key = 'audit_chain_cutover_id'").run(),
+    /audit-settings-write-once/,
+  );
+  assert.throws(
+    () => db.prepare("UPDATE site_content SET value = '402' WHERE key = 'audit_hmac_since_id'").run(),
+    /audit-settings-write-once/,
+  );
+  assert.throws(
+    () => db.prepare("DELETE FROM site_content WHERE key = 'audit_chain_cutover_id'").run(),
+    /audit-settings-write-once/,
+  );
+  db.exec(`${SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL}`);
+  db.exec(`${SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL}`);
+  db.close();
+});
+
+test('v2 rows after hmac_since appear once in the affected-row list', () => {
+  const breaks = [
+    { id: 1001, kind: 'link', reason: 'linked row at or after hmac_since_id must be enc_version 3' },
+    { id: 1001, kind: 'digest', reason: 'recomputed digest does not match stored hash' },
+    { id: 1002, kind: 'link', reason: 'linked row at or after hmac_since_id must be enc_version 3' },
+  ];
+  assert.deepEqual(uniqueAuditBreakIds(breaks), [1001, 1002]);
+  const report = formatAuditGenerationReport([{
+    generation: 2,
+    key_id: 'k2',
+    start_id: 953,
+    end_id: 1576,
+    started_at_et: 'Oct 5, 2026',
+    started_by: 'Trevor',
+  }], breaks);
+  assert.match(report[0], /2 breaks at #1001, #1002/);
+  assert.doesNotMatch(report[0], /#1001, #1001/);
+});
+
+test('package engines and .nvmrc require Node 22 for node:sqlite', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  assert.match(String(pkg.engines?.node || ''), /22/);
+  assert.match(readFileSync(join(root, '.nvmrc'), 'utf8').trim(), /^22/);
+});
+
+test('linked rows without a valid log.cutover are a verify break', async () => {
+  const seed = [
+    { id: 1, action: 'login', payload_sha256: 'h1', prev_sha256: '', prev_id: 0, created_at: '2026-10-04 16:00:00', enc_version: 1 },
+    { id: 2, action: 'login', payload_sha256: 'h2', prev_sha256: 'h1', prev_id: 1, created_at: '2026-10-04 16:01:00', enc_version: 1 },
+  ];
+  const { env } = createAuditDb(seed);
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => /log\.cutover/.test(item.reason || '')), true);
 });

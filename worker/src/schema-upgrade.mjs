@@ -3,6 +3,9 @@ import {
   canonicalChainMaterial,
   hasAuditLogKey,
   hmacSha256Hex,
+  linkedAuditRowsExist,
+  signedAuditCutoverExists,
+  writeAuditCutoverRow,
 } from './admin-audit-log.mjs';
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
 import { migrateStoredUserPermissionGrants } from './page-permissions.mjs';
@@ -169,6 +172,24 @@ BEGIN
 END
 `.trim();
 
+export const SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL = `
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_update
+BEFORE UPDATE ON site_content
+WHEN OLD.key LIKE 'audit_%'
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END
+`.trim();
+
+export const SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL = `
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_delete
+BEFORE DELETE ON site_content
+WHEN OLD.key LIKE 'audit_%'
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END
+`.trim();
+
 export function auditLogSchemaStatements() {
   return [
     AUDIT_LOG_PENDING_TABLE_SQL,
@@ -188,6 +209,8 @@ export function auditLogSchemaStatements() {
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
     AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL,
     AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
   ];
 }
 
@@ -347,17 +370,25 @@ export async function auditSchemaNeedsRepair(env) {
   if (AUDIT_LOG_REQUIRED_COLUMNS.some((column) => !names.has(column.name))) return true;
   const triggerSql = await readAuditLinearTriggerSql(env);
   if (!linearTriggerEnforcesCutoverWindow(triggerSql)) return true;
+  if (await linkedAuditRowsExist(env) && !(await signedAuditCutoverExists(env))) return true;
   return false;
 }
 
 export async function repairAuditSchema(env) {
   await ensureAuditLogColumns(env);
-  await ensureAuditChainCutover(env);
-  await ensureAuditHmacSince(env);
+  const cutover = await ensureAuditChainCutover(env);
+  const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
   await runSchemaStatements(env, [
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL,
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
   ]);
+  await writeAuditCutoverRow(env, {
+    cutoverId: cutover.id,
+    cutoverAt: cutover.at,
+    hmacSinceId: hmac.id,
+  });
 }
 
 export async function applyIncrementalSchema(env, { writeVersion } = {}) {
@@ -372,8 +403,13 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   } catch {
     // users.permissions may be missing on partial fixtures
   }
-  await ensureAuditChainCutover(env);
-  await ensureAuditHmacSince(env);
+  const cutover = await ensureAuditChainCutover(env);
+  const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
+  await writeAuditCutoverRow(env, {
+    cutoverId: cutover.id,
+    cutoverAt: cutover.at,
+    hmacSinceId: hmac.id,
+  });
   await backfillAuditActorNames(env);
   if (typeof writeVersion === 'function') await writeVersion(env);
 }
@@ -408,10 +444,34 @@ async function writeSiteContentIfAbsent(env, key, value) {
   }
 }
 
+async function readSiteContentRows(env, keys = []) {
+  const wanted = (Array.isArray(keys) ? keys : []).filter(Boolean);
+  if (!wanted.length || !env?.DB?.prepare) return new Map();
+  try {
+    const placeholders = wanted.map(() => '?').join(', ');
+    const fetched = await env.DB.prepare(`SELECT key, value FROM site_content WHERE key IN (${placeholders})`)
+      .bind(...wanted)
+      .all();
+    const map = new Map();
+    for (const row of fetched?.results || []) {
+      if (row?.key != null) map.set(String(row.key), row);
+    }
+    return map;
+  } catch {
+    const map = new Map();
+    for (const key of wanted) {
+      const row = await readSiteContentRow(env, key);
+      if (row) map.set(key, row);
+    }
+    return map;
+  }
+}
+
 export async function ensureAuditChainCutover(env) {
   if (!env?.DB?.prepare) return { id: 0, at: '' };
-  const existingIdRow = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_KEY);
-  const existingAtRow = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_AT_KEY);
+  const existing = await readSiteContentRows(env, [AUDIT_CHAIN_CUTOVER_KEY, AUDIT_CHAIN_CUTOVER_AT_KEY]);
+  const existingIdRow = existing.get(AUDIT_CHAIN_CUTOVER_KEY) || null;
+  const existingAtRow = existing.get(AUDIT_CHAIN_CUTOVER_AT_KEY) || null;
   const existingId = existingIdRow?.value == null ? '' : String(existingIdRow.value);
   const existingAt = existingAtRow?.value == null ? '' : String(existingAtRow.value);
   let cutoverId = existingIdRow ? (Number(existingId) || 0) : 0;
@@ -439,14 +499,18 @@ export async function ensureAuditChainCutover(env) {
  * Stamp audit_hmac_since_id once. Prod has no v3 rows so this is cutover_id+1.
  * DEV uses the first HMAC-matching v3 row when one exists. Never re-stamped.
  */
-export async function ensureAuditHmacSince(env) {
+export async function ensureAuditHmacSince(env, { cutoverId = null } = {}) {
   if (!env?.DB?.prepare) return { id: 0 };
   const existingRow = await readSiteContentRow(env, AUDIT_HMAC_SINCE_KEY);
   if (existingRow && String(existingRow.value || '').trim() !== '') {
     return { id: Number(existingRow.value) || 0 };
   }
-  const existingCutover = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_KEY);
-  const fallback = (Number(existingCutover?.value) || 0) + 1;
+  let fallbackCutover = Number(cutoverId);
+  if (!Number.isFinite(fallbackCutover)) {
+    const existingCutover = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_KEY);
+    fallbackCutover = Number(existingCutover?.value) || 0;
+  }
+  const fallback = (fallbackCutover || 0) + 1;
   let since = fallback;
   if (hasAuditLogKey(env)) {
     try {
