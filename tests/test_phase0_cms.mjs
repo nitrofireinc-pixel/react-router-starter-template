@@ -96,9 +96,10 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
   assert.equal(locked.nav_order, 8);
   assert.equal(locked.is_home, 0);
   assert.equal(locked.active, 0);
+  assert.equal(locked.title, 'Student Resources');
   assert.match(locked.body_html, /Edited/);
-  assert.match(workerSrc, /if \(!canManagePageSettings\(auth\.user\) && pageSettingsChanged\(page, existing, rawPayload\)\)/);
-  assert.match(workerSrc, /Permission required: pages/);
+  assert.match(workerSrc, /mayChangeSettings = canManagePageSettings\(auth\.user\) \|\| canEditPageLayout/);
+  assert.match(workerSrc, /Permission required: layout:\$\{existing\.slug\}/);
   assert.match(workerSrc, /page = lockPageSettingsToExisting\(page, existing\)/);
 });
 

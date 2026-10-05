@@ -83,7 +83,6 @@ import {
   startNewAuditLogGeneration,
   summarizeAdminRequestForAudit,
   verifyAdminAuditRange,
-  writeAdminAuditLog,
 } from './admin-audit-log.mjs';
 import {
   deserializeVapidKeys,
@@ -146,6 +145,8 @@ import {
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
 import {
+  contentOnlyForbiddenHtmlViolation,
+  contentOnlyHtmlViolation,
   migrateStoredUserPermissionGrants,
   normalizePageGrants,
   pageSettingsChanged,
@@ -429,7 +430,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005d';
+export const ASSET_VERSION = 'cms-p1-20261005e';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -624,6 +625,7 @@ export function lockPageSettingsToExisting(page, existing) {
     ...page,
     slug: existing.slug,
     path: existing.is_home ? '/' : existing.path,
+    title: existing.title,
     nav_order: Number(existing.nav_order),
     is_home: existing.is_home ? 1 : 0,
     active: Number(existing.active) === 1 ? 1 : 0,
@@ -2239,7 +2241,7 @@ async function migrateAndSeedDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_forms (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, definition_json TEXT NOT NULL DEFAULT \'{}\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', page_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1, prev_sha256 TEXT NOT NULL DEFAULT \'\', prev_id INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1, key_id TEXT NOT NULL DEFAULT \'\', prev_sha256 TEXT NOT NULL DEFAULT \'\', prev_id INTEGER)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8211,11 +8213,12 @@ async function writeMaintenanceAudit(env, request, user, {
   previous = null,
   enabled = null,
   detail = '',
+  ctx = null,
 } = {}) {
   const path = (() => {
     try { return new URL(request.url).pathname; } catch { return '/api/admin/maintenance'; }
   })();
-  await writeAdminAuditLog(env, {
+  await enqueueAdminAudit(env, ctx, {
     request,
     action: 'change.maintenance',
     category: 'site',
@@ -8256,12 +8259,13 @@ async function writeMinutesAudit(env, request, user, {
   beforeHtml = '',
   afterHtml = '',
   detail = '',
+  ctx = null,
 } = {}) {
   const path = (() => {
     try { return new URL(request.url).pathname; } catch { return '/api/admin/minutes'; }
   })();
   const method = String(request?.method || 'POST').toUpperCase();
-  await writeAdminAuditLog(env, {
+  await enqueueAdminAudit(env, ctx, {
     request,
     action,
     category: 'minutes',
@@ -9039,7 +9043,12 @@ function d1UnavailableHtml(path = '/') {
 }
 
 async function handleApi(request, env, url, ctx = null) {
-  await initDb(env);
+  try {
+    await initDb(env);
+  } catch (error) {
+    console.error('initDb_d1_unavailable', String(error?.message || error));
+    return d1UnavailableJson();
+  }
   const isAdminApi = url.pathname.startsWith('/api/admin');
   const mutating = isAdminApi && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
   const session = isAdminApi ? await inspectSessionCookie(request, env) : { user: null };
@@ -10274,7 +10283,7 @@ async function routeApi(request, env, url, ctx = null) {
     const page = Math.floor(offset / pageSize) + 1;
     // Log vault access on first-page opens/refreshes only — not every pager click.
     if (offset === 0) {
-      await writeAdminAuditLog(env, {
+      await enqueueAdminAudit(env, ctx, {
         action: 'security.log.view',
         category: 'security',
         method: 'GET',
@@ -10348,7 +10357,7 @@ async function routeApi(request, env, url, ctx = null) {
       to: String(url.searchParams.get('to') || '').trim(),
       q: String(url.searchParams.get('q') || '').trim(),
     });
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'security.log.export',
       category: 'security',
       method: 'GET',
@@ -10484,7 +10493,7 @@ async function routeApi(request, env, url, ctx = null) {
       min_id: payload.entries[0]?.id || 0,
       max_id: payload.entries.at(-1)?.id || 0,
     });
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'security.log.export',
       category: 'security',
       method: 'GET',
@@ -10746,6 +10755,7 @@ async function routeApi(request, env, url, ctx = null) {
       previous,
       enabled,
       detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+      ctx,
     });
     return jsonResponse(await getSite(env));
   }
@@ -10770,6 +10780,7 @@ async function routeApi(request, env, url, ctx = null) {
           previous,
           enabled,
           detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+          ctx,
         });
       }
     }
@@ -11340,11 +11351,27 @@ async function routeApi(request, env, url, ctx = null) {
     if (isVisualEditorSlug(existing.slug)) {
       page.body_html = existing.body_html;
     }
-    if (!canManagePageSettings(auth.user) && pageSettingsChanged(page, existing, rawPayload)) {
-      return jsonResponse({ detail: 'Permission required: pages' }, 403);
+    const mayChangeSettings = canManagePageSettings(auth.user) || canEditPageLayout(auth.user, existing.slug);
+    if (!mayChangeSettings && pageSettingsChanged(page, existing, rawPayload)) {
+      return jsonResponse({ detail: `Permission required: layout:${existing.slug}` }, 403);
     }
-    if (!canManagePageSettings(auth.user)) {
+    if (!mayChangeSettings) {
       page = lockPageSettingsToExisting(page, existing);
+    }
+    if (
+      !isVisualEditorSlug(existing.slug)
+      && !canEditPageLayout(auth.user, existing.slug)
+      && payloadHasOwn(rawPayload, 'body_html')
+    ) {
+      const incomingHtml = String(rawPayload.body_html || '');
+      const forbidden = contentOnlyForbiddenHtmlViolation(existing.body_html, incomingHtml);
+      if (forbidden) {
+        return jsonResponse({ detail: forbidden, code: 'content_rejected' }, 403);
+      }
+      const incomingViolation = contentOnlyHtmlViolation(existing.body_html, incomingHtml);
+      if (incomingViolation) {
+        return jsonResponse({ detail: incomingViolation, code: 'layout_required' }, 403);
+      }
     }
     if (
       !isVisualEditorSlug(existing.slug)
@@ -12163,6 +12190,7 @@ async function routeApi(request, env, url, ctx = null) {
         after: await sha256Hex(created.body_html || ''),
         afterHtml: created.body_html || '',
         detail: `${created.meeting_date} created`,
+        ctx,
       });
       return jsonResponse(created, 201);
     } catch (error) {
@@ -12217,6 +12245,7 @@ async function routeApi(request, env, url, ctx = null) {
         after: await sha256Hex(created.body_html || ''),
         afterHtml: created.body_html || '',
         detail: `${created.meeting_date} uploaded`,
+        ctx,
       });
       return jsonResponse(created, 201);
     } catch (error) {
@@ -12260,6 +12289,7 @@ async function routeApi(request, env, url, ctx = null) {
         before: await sha256Hex(existing.body_html || ''),
         beforeHtml: existing.body_html || '',
         detail: `${existing.meeting_date} deleted`,
+        ctx,
       });
       return jsonResponse({ ok: true });
     }
@@ -12274,6 +12304,7 @@ async function routeApi(request, env, url, ctx = null) {
         before: await sha256Hex(existing.body_html || ''),
         beforeHtml: existing.body_html || '',
         detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
+        ctx,
       });
       markRequestAuditWritten(request);
       return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
@@ -12302,6 +12333,7 @@ async function routeApi(request, env, url, ctx = null) {
         beforeHtml: existing.body_html || '',
         afterHtml: updated?.body_html || payload.body_html || '',
         detail: afterWindow ? `${existing.meeting_date} edited after 48h` : `${existing.meeting_date} edited`,
+        ctx,
       });
       return jsonResponse(updated);
     } catch (error) {
@@ -12544,7 +12576,7 @@ async function routeApi(request, env, url, ctx = null) {
     const sent = results.filter((item) => item.ok).length;
     const failed = results.length - sent;
     const status = failed && sent ? 207 : failed ? 502 : 200;
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'mail.send',
       category: 'mail',
       method: 'POST',
@@ -12984,7 +13016,12 @@ function renderLoginHtml(nextPath = '/admin') {
 }
 
 async function handleLogin(request, env, ctx = null) {
-  await initDb(env);
+  try {
+    await initDb(env);
+  } catch (error) {
+    console.error('login_d1_unavailable', String(error?.message || error));
+    return d1UnavailableHtml('/admin/login');
+  }
   const requestUrl = new URL(request.url);
   if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
@@ -13021,7 +13058,13 @@ async function handleLogin(request, env, ctx = null) {
     });
     return lockedResponse;
   }
-  const user = await getUserByUsername(env, username);
+  let user;
+  try {
+    user = await getUserByUsername(env, username);
+  } catch (error) {
+    console.error('login_d1_unavailable', String(error?.message || error));
+    return d1UnavailableHtml('/admin/login');
+  }
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     const nextLock = registerLoginFailure(username, ip);
     const lockedNow = Boolean(nextLock.locked);
@@ -13199,7 +13242,7 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
       loggedIn: true,
     });
   }
-  await writeAdminAuditLog(env, {
+  await enqueueAdminAudit(env, ctx, {
     request,
     action: 'page.edit.open',
     category: 'pages',

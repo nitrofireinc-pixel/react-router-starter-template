@@ -106,8 +106,13 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
   const passwordSuccess = Boolean(options.passwordSuccess);
+  const tone = options.tone === 'ok' || options.tone === 'neutral'
+    ? 'ok'
+    : (options.tone === 'break' ? 'break' : '');
   root.classList.toggle('has-icon', Boolean(iconKind));
   root.classList.toggle('is-password-success', passwordSuccess);
+  root.classList.toggle('is-toast-ok', tone === 'ok');
+  root.classList.toggle('is-toast-break', tone === 'break');
   if (icon) {
     if (iconKind === 'envelope') {
       icon.hidden = false;
@@ -133,6 +138,8 @@ function showSavedToast(message = 'Saved.', options = {}) {
       root.classList.remove('is-leaving');
       root.classList.remove('is-password-success');
       root.classList.remove('has-icon');
+      root.classList.remove('is-toast-ok');
+      root.classList.remove('is-toast-break');
     }, 380);
   }, 3000);
 }
@@ -5372,7 +5379,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
       if (failed > 0) {
         const when = formatAuditFailureSince(data.write_failures?.since);
         failEl.hidden = false;
-        failEl.textContent = `${failed} log ${failed === 1 ? 'entry' : 'entries'} couldn't be saved since ${when || 'startup'}. Those actions still happened, but they are missing from this log until they can be written. Check Workers logs for admin_audit_write_failed.`;
+        failEl.textContent = `${failed} log ${failed === 1 ? 'event' : 'events'} couldn't be saved since ${when || 'startup'}. Those actions still happened, but they are missing from this log until they can be written. Check Workers logs for admin_audit_write_failed.`;
       } else {
         failEl.hidden = true;
         failEl.textContent = '';
@@ -8494,7 +8501,8 @@ function bindForms() {
       });
       const report = finished.court_report || lastCourt || {};
       if (court) court.innerHTML = renderSecurityLogCourt(report, checked);
-      showSavedToast(finished.chain_status || 'Verify finished');
+      const intact = Boolean(finished.chain_ok) || /\bINTACT\b/i.test(String(finished.chain_status || ''));
+      showSavedToast(finished.chain_status || 'Verify finished', { tone: intact ? 'ok' : 'break' });
     } catch (error) {
       if (court) court.innerHTML = `<p class="error">${escapeHtml(error.message || 'Verify failed')}</p>`;
     }
@@ -8511,10 +8519,13 @@ function bindForms() {
         ? (current.started_label || current.original_label)
         : [current.started_at_et ? `Started ${current.started_at_et}` : '', current.started_by ? `by ${current.started_by}` : '']
           .filter(Boolean).join(' ');
+      const breakIds = (current.break_ids || []).map((id) => `#${id}`).join(', ');
       parts.push(`<section class="security-log-court-current${current.intact ? '' : ' is-broken'}">
         <h2>${escapeHtml(title)}</h2>
         <p>Rows #${escapeHtml(current.start_id)}–#${escapeHtml(current.end_id)}</p>
         ${start ? `<p>${escapeHtml(start)}</p>` : ''}
+        ${!current.intact && breakIds ? `<p>Affected rows: ${escapeHtml(breakIds)}</p>` : ''}
+        ${!current.intact && (current.guidance || report.guidance) ? `<p>${escapeHtml(current.guidance || report.guidance)}</p>` : ''}
       </section>`);
     }
     previous.forEach((gen) => {
@@ -8537,6 +8548,7 @@ function bindForms() {
       const ids = compatibility.map((item) => `#${item.id}`).join(', ');
       parts.push(`<section class="security-log-court-compat">
         <h2>${escapeHtml(report.compatibility_heading || 'Written by the previous site version during the update')}</h2>
+        <p>This is expected after a site update.</p>
         <p>${escapeHtml(ids)}</p>
       </section>`);
     }

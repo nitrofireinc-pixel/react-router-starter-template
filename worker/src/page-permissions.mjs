@@ -83,8 +83,12 @@ export function pageSettingsChanged(page, existing, raw = null) {
   const requested = raw && typeof raw === 'object' ? raw : null;
   const asked = (key) => !requested || Object.prototype.hasOwnProperty.call(requested, key);
   const nextPath = existing.is_home ? '/' : existing.path;
+  const nextLabel = String(page.nav_label || page.menu_label || page.title || '');
+  const prevLabel = String(existing.nav_label || existing.menu_label || existing.title || '');
   return (asked('slug') && String(page.slug || '') !== String(existing.slug || ''))
     || (asked('path') && String(page.path || '') !== String(nextPath || ''))
+    || (asked('title') && String(page.title || '') !== String(existing.title || ''))
+    || ((asked('nav_label') || asked('menu_label') || asked('title')) && nextLabel !== prevLabel)
     || (asked('nav_order') && Number(page.nav_order) !== Number(existing.nav_order))
     || (asked('is_home') && Boolean(Number(page.is_home)) !== Boolean(Number(existing.is_home)))
     || (asked('active') && Number(page.active) !== Number(existing.active));
@@ -216,6 +220,22 @@ function hasContentOnlyLayoutAttrs(el) {
   ));
 }
 
+function decodeHtmlEntities(value = '') {
+  return String(value || '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body) => {
+    const token = String(body || '').toLowerCase();
+    if (token === 'colon') return ':';
+    if (token === 'tab' || token === 'newline') return '';
+    if (token.startsWith('#x')) return String.fromCharCode(parseInt(token.slice(2), 16) || 0);
+    if (token.startsWith('#')) return String.fromCharCode(Number(token.slice(1)) || 0);
+    return entity;
+  });
+}
+
+function javascriptSchemeCount(html = '') {
+  const decoded = decodeHtmlEntities(String(html || '')).replace(/[\s\u0000-\u001f]+/g, '');
+  return (decoded.match(/javascript:/gi) || []).length;
+}
+
 function forbiddenMarkupCounts(html = '') {
   const counts = new Map();
   const add = (key) => counts.set(key, (counts.get(key) || 0) + 1);
@@ -225,7 +245,8 @@ function forbiddenMarkupCounts(html = '') {
   for (const _ of raw.matchAll(/<iframe[\s>/]/gi)) add('iframe');
   for (const match of raw.matchAll(/\s(on[a-z]+)\s*=/gi)) add(String(match[1] || '').toLowerCase());
   for (const match of raw.matchAll(/\s(data-[a-z0-9_-]*)\s*=/gi)) add(String(match[1] || '').toLowerCase());
-  for (const _ of raw.matchAll(/javascript\s*:/gi)) add('javascript:');
+  const jsCount = javascriptSchemeCount(raw);
+  for (let i = 0; i < jsCount; i += 1) add('javascript:');
   return counts;
 }
 
@@ -264,11 +285,11 @@ export function contentOnlyHtmlViolation(baseline = '', next = '') {
       return `new <${tag}> is not allowed for content-only editors`;
     }
   }
-  const beforeByTag = new Map();
+  const leftoverByTag = new Map();
   for (const el of before) {
-    const list = beforeByTag.get(el.tag) || [];
+    const list = leftoverByTag.get(el.tag) || [];
     list.push(el);
-    beforeByTag.set(el.tag, list);
+    leftoverByTag.set(el.tag, list);
   }
   const afterByTag = new Map();
   for (const el of after) {
@@ -277,19 +298,24 @@ export function contentOnlyHtmlViolation(baseline = '', next = '') {
     afterByTag.set(el.tag, list);
   }
   for (const [tag, afterEls] of afterByTag) {
-    const beforeEls = beforeByTag.get(tag) || [];
-    for (let i = 0; i < afterEls.length; i += 1) {
-      const next = afterEls[i];
-      const prev = beforeEls[i];
+    const leftover = leftoverByTag.get(tag) || [];
+    for (const next of afterEls) {
       const nextAttrs = next.attrMap || {};
-      const prevAttrs = prev?.attrMap || {};
-      for (const [name, value] of Object.entries(nextAttrs)) {
-        if (isContentOnlyContentAttr(tag, name, value)) continue;
-        if (!prev || String(prevAttrs[name] ?? '') !== String(value)) {
-          return `${name} is not allowed on <${tag}> for content-only editors`;
-        }
+      const layoutNames = Object.keys(nextAttrs).filter((name) => (
+        !isContentOnlyContentAttr(tag, name, nextAttrs[name])
+      ));
+      if (!layoutNames.length) continue;
+      const matchAt = leftover.findIndex((prev) => {
+        const prevAttrs = prev.attrMap || {};
+        return layoutNames.every((name) => String(prevAttrs[name] ?? '') === String(nextAttrs[name]));
+      });
+      if (matchAt >= 0) {
+        leftover.splice(matchAt, 1);
+        continue;
       }
+      return `${layoutNames[0]} is not allowed on <${tag}> for content-only editors`;
     }
+    leftoverByTag.set(tag, leftover);
   }
   const sensitive = (els) => els
     .filter((el) => !freelyAddable(el.tag) || hasContentOnlyLayoutAttrs(el))

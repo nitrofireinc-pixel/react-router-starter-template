@@ -2329,6 +2329,13 @@ body.admin-upload-open{overflow:hidden}
   fill:none;
   stroke:currentColor;
 }
+.admin-saved-toast.is-toast-ok .admin-saved-toast-card{
+  background:linear-gradient(145deg,#1b4d2c 0%,#2e7d4f 55%,#3d9b63 100%);
+  box-shadow:0 24px 60px rgba(12,48,24,.35);
+}
+.admin-saved-toast.is-toast-break .admin-saved-toast-card{
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
+}
 .admin-password-toast{
   position:fixed;
   inset:0;
@@ -4872,6 +4879,13 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
   border-radius:10px;
   padding:12px 14px;
   color:#4a4236;
+}
+.security-log-court-compat{
+  background:#eef4fb;
+  border:1px solid #9db6d4;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#1d334d;
 }
 .security-log-court h2{margin:0 0 6px;font-size:1.05rem}
 .security-log-court p{margin:0 0 6px}

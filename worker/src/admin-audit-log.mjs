@@ -29,7 +29,9 @@ export const D1_AUDIT_RETRY_COST = 2;
 export const D1_AUDIT_PENDING_RESERVE = 1;
 export const ADMIN_AUDIT_PENDING_TABLE = 'admin_audit_pending';
 export const AUDIT_CHAIN_BREAK_EXPLAIN =
-  "Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.";
+  "Entries can't be edited or deleted through the website, and the database blocks changes. If someone with direct database access went around that, this check would show a break.";
+export const AUDIT_CHAIN_BREAK_GUIDANCE =
+  'Contact the site maintainer; export the log before making any changes';
 export const AUDIT_LOG_TIMEZONE = 'America/New_York';
 export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
 export const AUDIT_LOG_KEY_ENV = 'AUDIT_LOG_KEY';
@@ -781,7 +783,7 @@ export function canonicalChainMaterial(row = {}, version = null) {
   });
 }
 
-export async function verifyAuditRowDigest(row = {}) {
+export async function verifyAuditRowDigest(row = {}, env = null) {
   const encVersion = Number(row.enc_version);
   if (encVersion === ADMIN_AUDIT_ENC_VERSION) {
     return { recomputed: false, ok: true, legacy: true };
@@ -794,9 +796,25 @@ export async function verifyAuditRowDigest(row = {}) {
     return { recomputed: false, ok: true, legacy: true };
   }
   const expected = String(row.payload_sha256 || '');
-  const actual = await sha256Hex(canonicalChainMaterial(row, encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED
+  const version = encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED
     ? ADMIN_AUDIT_ENC_VERSION_V2
-    : encVersion));
+    : encVersion;
+  const material = canonicalChainMaterial(row, version);
+  if (encVersion === ADMIN_AUDIT_ENC_VERSION_V3) {
+    const keyId = String(row.key_id || row.enc_key_id || parseCiphertextEnvelope(row.ciphertext).key_id || '');
+    if (env && hasAuditLogKey(env, keyId)) {
+      const keyed = await hmacSha256Hex(env, material, keyId);
+      if (expected && expected === keyed) {
+        return { recomputed: true, ok: true, legacy: false, actual: keyed, keyed: true, key_id: keyId };
+      }
+    }
+    const plain = await sha256Hex(material);
+    if (expected && expected === plain) {
+      return { recomputed: true, ok: true, legacy: false, actual: plain, keyed: false, pre_hmac: true };
+    }
+    return { recomputed: true, ok: false, legacy: false, actual: env ? '' : plain, keyed: Boolean(env) };
+  }
+  const actual = await sha256Hex(material);
   return {
     recomputed: true,
     ok: Boolean(expected) && expected === actual,
@@ -1179,10 +1197,59 @@ export function auditLogSecretMaterial(env = {}) {
   return String(env.EFBAND_SECRET || env.AUDIT_LOG_SECRET || 'change-me-before-launch');
 }
 
+function bytesToHex(bytes) {
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** SHA-256 digest as lowercase hex (integrity fingerprint). */
 export async function sha256Hex(value = '') {
   const digest = await crypto.subtle.digest('SHA-256', TEXT.encode(String(value)));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return bytesToHex(digest);
+}
+
+const hmacKeyCache = new Map();
+
+export function resetAuditHmacKeyCache() {
+  hmacKeyCache.clear();
+}
+
+export async function deriveAuditDigestHmacKey(env, keyId = '') {
+  const id = String(keyId || currentAuditKeyId(env) || DEFAULT_AUDIT_KEY_ID).trim().toLowerCase() || DEFAULT_AUDIT_KEY_ID;
+  const secret = auditLogKeyMaterial(env, id);
+  if (!secret) throw new Error('AUDIT_LOG_KEY is not set');
+  const cacheKey = `${id}:${secret.length}`;
+  if (hmacKeyCache.has(cacheKey)) return hmacKeyCache.get(cacheKey);
+  const baseKey = await crypto.subtle.importKey('raw', TEXT.encode(secret), 'HKDF', false, ['deriveKey']);
+  const derived = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: TEXT.encode('efhsband-audit-v3'),
+      info: TEXT.encode(`admin-audit-digest:v3:${id}`),
+    },
+    baseKey,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign', 'verify'],
+  );
+  hmacKeyCache.set(cacheKey, derived);
+  return derived;
+}
+
+export async function hmacSha256Hex(env, material = '', keyId = '') {
+  const key = await deriveAuditDigestHmacKey(env, keyId);
+  const sig = await crypto.subtle.sign('HMAC', key, TEXT.encode(String(material)));
+  return bytesToHex(sig);
+}
+
+export async function computeAuditRowDigest(env, row = {}, version = null) {
+  const encVersion = version == null ? Number(row.enc_version) : Number(version);
+  const material = canonicalChainMaterial(row, encVersion);
+  const keyId = String(row.key_id || row.enc_key_id || parseCiphertextEnvelope(row.ciphertext).key_id || '');
+  if (encVersion === ADMIN_AUDIT_ENC_VERSION_V3 && env && hasAuditLogKey(env, keyId)) {
+    return hmacSha256Hex(env, material, keyId);
+  }
+  return sha256Hex(material);
 }
 
 export async function sha256BytesHex(bytes) {
@@ -1352,7 +1419,6 @@ export async function writeAdminAuditLog(env, entry = {}) {
     ciphertext = `missing.${bytesToBase64(TEXT.encode(canonical))}`;
     encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
     usedKeyId = 'missing';
-    await recordAuditWriteFailure(env, error);
   }
   return insertAuditChainRow(env, {
     createdAt,
@@ -1405,13 +1471,18 @@ async function insertAuditRowOnce(env, {
   prevSha256,
   prevId,
   sourcePendingId = null,
+  usedKeyId = '',
 }) {
+  const withKey = `INSERT INTO ${ADMIN_AUDIT_TABLE}
+      (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, key_id, prev_sha256, prev_id, source_pending_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const withPending = `INSERT INTO ${ADMIN_AUDIT_TABLE}
       (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256, prev_id, source_pending_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const withoutPending = `INSERT INTO ${ADMIN_AUDIT_TABLE}
       (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256, prev_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  assertAuditSqlIsAppendOnly(withKey);
   assertAuditSqlIsAppendOnly(withPending);
   assertAuditSqlIsAppendOnly(withoutPending);
   const binds = [
@@ -1434,12 +1505,42 @@ async function insertAuditRowOnce(env, {
     prevId,
   ];
   try {
-    return await env.DB.prepare(withPending).bind(...binds, sourcePendingId).run();
+    return await env.DB.prepare(withKey).bind(
+      createdAt,
+      action,
+      category,
+      '',
+      '',
+      null,
+      actorUserId,
+      actorUsername,
+      '',
+      '',
+      '',
+      '{}',
+      payloadSha256,
+      ciphertext,
+      encVersion,
+      usedKeyId || '',
+      prevSha256,
+      prevId,
+      sourcePendingId,
+    ).run();
   } catch (error) {
-    if (!/no such column:\s*source_pending_id/i.test(String(error?.message || error || ''))) {
-      throw error;
+    if (!/no such column:\s*key_id/i.test(String(error?.message || error || ''))) {
+      if (!/no such column:\s*source_pending_id/i.test(String(error?.message || error || ''))) {
+        throw error;
+      }
+      return env.DB.prepare(withoutPending).bind(...binds).run();
     }
-    return env.DB.prepare(withoutPending).bind(...binds).run();
+    try {
+      return await env.DB.prepare(withPending).bind(...binds, sourcePendingId).run();
+    } catch (pendingError) {
+      if (!/no such column:\s*source_pending_id/i.test(String(pendingError?.message || pendingError || ''))) {
+        throw pendingError;
+      }
+      return env.DB.prepare(withoutPending).bind(...binds).run();
+    }
   }
 }
 
@@ -1491,7 +1592,7 @@ async function drainPendingAuditRows(env, { maxRows = ADMIN_AUDIT_PENDING_DRAIN 
         const head = await readAuditChainHead(env);
         const prevSha256 = head.payload_sha256;
         const prevId = head.id > 0 ? head.id : 0;
-        const payloadSha256 = await sha256Hex(canonicalChainMaterial({
+        const payloadSha256 = await computeAuditRowDigest(env, {
           enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
           created_at: row.created_at,
           action: row.action,
@@ -1502,7 +1603,7 @@ async function drainPendingAuditRows(env, { maxRows = ADMIN_AUDIT_PENDING_DRAIN 
           ciphertext: row.ciphertext,
           prev_id: prevId,
           prev_sha256: prevSha256,
-        }, ADMIN_AUDIT_ENC_VERSION_V3));
+        }, ADMIN_AUDIT_ENC_VERSION_V3);
         await insertAuditRowOnce(env, {
           createdAt: row.created_at,
           action: row.action,
@@ -1515,6 +1616,7 @@ async function drainPendingAuditRows(env, { maxRows = ADMIN_AUDIT_PENDING_DRAIN 
           prevSha256,
           prevId,
           sourcePendingId: Number(row.id) || null,
+          usedKeyId: row.key_id || '',
         });
         placed = true;
         drained += 1;
@@ -1557,7 +1659,7 @@ async function insertAuditChainRow(env, {
       const head = await readAuditChainHead(env);
       const prevSha256 = head.payload_sha256;
       const prevId = head.id > 0 ? head.id : 0;
-      const payloadSha256 = await sha256Hex(canonicalChainMaterial({
+      const payloadSha256 = await computeAuditRowDigest(env, {
         enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
         created_at: createdAt,
         action,
@@ -1568,7 +1670,7 @@ async function insertAuditChainRow(env, {
         ciphertext,
         prev_id: prevId,
         prev_sha256: prevSha256,
-      }, ADMIN_AUDIT_ENC_VERSION_V3));
+      }, ADMIN_AUDIT_ENC_VERSION_V3);
       const result = await insertAuditRowOnce(env, {
         createdAt,
         action,
@@ -1580,6 +1682,7 @@ async function insertAuditChainRow(env, {
         encVersion: ADMIN_AUDIT_ENC_VERSION_V3,
         prevSha256,
         prevId,
+        usedKeyId,
       });
       return {
         id: result?.meta?.last_row_id || null,
@@ -1601,7 +1704,7 @@ async function insertAuditChainRow(env, {
     }
   }
   try {
-    const pendingSha = await sha256Hex(canonicalChainMaterial({
+    const pendingSha = await computeAuditRowDigest(env, {
       enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
       created_at: createdAt,
       action,
@@ -1612,7 +1715,7 @@ async function insertAuditChainRow(env, {
       ciphertext,
       prev_id: null,
       prev_sha256: '',
-    }, ADMIN_AUDIT_ENC_VERSION_V3));
+    }, ADMIN_AUDIT_ENC_VERSION_V3);
     const queued = await insertPendingAuditRow(env, {
       createdAt,
       action,
@@ -1829,7 +1932,7 @@ export async function maybeAuditAdminApiResponse(env, {
   if (beforeText || afterText) {
     content = await contentEvidenceHashed(beforeText, afterText);
   }
-  const write = writeAdminAuditLog(env, {
+  await enqueueAdminAudit(env, ctx, {
     request,
     action,
     category,
@@ -1861,11 +1964,6 @@ export async function maybeAuditAdminApiResponse(env, {
       ...(beforeSnapshot?.photo ? { photo: beforeSnapshot.photo } : {}),
     },
   });
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil(write);
-    return;
-  }
-  await write;
 }
 
 async function peekDenialDetail(response) {
@@ -2007,8 +2105,10 @@ export async function deserializeEncryptedAuditRow(env, row = {}, { verifyDigest
       const plaintext = await decryptAuditPayload(env, row.ciphertext);
       const encVersion = Number(row.enc_version);
       const digest = verifyDigest
-        ? ((encVersion === ADMIN_AUDIT_ENC_VERSION_V2 || encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED)
-          ? await verifyAuditRowDigest(row)
+        ? ((encVersion === ADMIN_AUDIT_ENC_VERSION_V3
+          || encVersion === ADMIN_AUDIT_ENC_VERSION_V2
+          || encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED)
+          ? await verifyAuditRowDigest(row, env)
           : { ok: String(row.payload_sha256 || '') === await sha256Hex(plaintext), recomputed: true, legacy: encVersion === ADMIN_AUDIT_ENC_VERSION })
         : { ok: true, recomputed: false };
       if (digest.ok === false) {
@@ -2313,8 +2413,23 @@ export function isWithinCutoverWindow(createdAt = '', cutoverAt = '', windowMinu
   return created >= start && created <= start + (Number(windowMinutes) || 15) * 60 * 1000;
 }
 
+export function firstNewFormatLinkedId(rows = [], cutoverId = 0) {
+  const cutoff = Number(cutoverId) || 0;
+  let first = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = Number(row.id) || 0;
+    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
+    if (id > cutoff && linkedId != null) {
+      if (!first || id < first) first = id;
+    }
+  }
+  return first;
+}
+
 export function classifyAuditLinkRows(rows = [], {
   cutoverAt = '',
+  cutoverId = 0,
+  firstLinkedId = null,
   prevHash = '',
   prevId = 0,
   inLegacyPrefix = true,
@@ -2325,6 +2440,10 @@ export function classifyAuditLinkRows(rows = [], {
   let hash = String(prevHash || '');
   let lastId = Number(prevId) || 0;
   let legacyPrefix = Boolean(inLegacyPrefix);
+  const cutoff = Number(cutoverId) || 0;
+  const firstLinked = firstLinkedId == null
+    ? firstNewFormatLinkedId(rows, cutoff)
+    : (Number(firstLinkedId) || 0);
   const updateDate = formatAuditPlainDate(cutoverAt);
   const compatReason = updateDate
     ? `written by the previous site version during the update on ${updateDate}`
@@ -2336,6 +2455,7 @@ export function classifyAuditLinkRows(rows = [], {
     const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
     const hasHashLink = Boolean(prev);
     const hashMatches = prev === hash;
+    const preCutover = cutoff > 0 && id <= cutoff;
 
     if (legacyPrefix && !hasHashLink) {
       legacy.push({ id, kind: 'legacy', reason: 'legacy, pre-chain' });
@@ -2345,21 +2465,39 @@ export function classifyAuditLinkRows(rows = [], {
     }
     legacyPrefix = false;
 
+    if (preCutover) {
+      if (hasHashLink && !hashMatches) {
+        breaks.push({
+          id,
+          kind: 'link',
+          reason: `previous hash does not match row #${lastId}`,
+        });
+      }
+      hash = String(row.payload_sha256 || '');
+      lastId = id;
+      continue;
+    }
+
     if (linkedId == null) {
+      const beforeFirstLinked = !firstLinked || id < firstLinked;
       const inWindow = isWithinCutoverWindow(row.created_at, cutoverAt);
-      if (inWindow && hashMatches) {
+      if (beforeFirstLinked && inWindow && hashMatches) {
         compatibility.push({
           id,
           kind: 'prior_version',
           reason: compatReason,
         });
       } else {
+        let reason = `previous hash does not match row #${lastId}`;
+        if (hashMatches && !beforeFirstLinked) {
+          reason = 'NULL prev_id after the first linked row';
+        } else if (hashMatches) {
+          reason = 'NULL prev_id outside the 15-minute update window';
+        }
         breaks.push({
           id,
           kind: 'link',
-          reason: hashMatches
-            ? 'NULL prev_id outside the 15-minute update window'
-            : `previous hash does not match row #${lastId}`,
+          reason,
         });
       }
     } else if (!hashMatches) {
@@ -2386,6 +2524,7 @@ export function classifyAuditLinkRows(rows = [], {
     prevHash: hash,
     prevId: lastId,
     inLegacyPrefix: legacyPrefix,
+    firstLinkedId: firstLinked,
   };
 }
 
@@ -2538,6 +2677,8 @@ export function buildCourtVerifyReport({
       started_label: current.original_build ? firstSetupLabel : '',
       original_build: Boolean(current.original_build),
       original_label: firstSetupLabel,
+      break_ids: currentBreaks.map((item) => item.id),
+      guidance: currentIntact ? '' : AUDIT_CHAIN_BREAK_GUIDANCE,
     } : null,
     previous: previous.map((gen) => {
       const genBreaks = inRange(breaks, gen.start_id, gen.end_id);
@@ -2554,18 +2695,20 @@ export function buildCourtVerifyReport({
       };
     }),
     legacy: legacyStart != null ? {
-      title: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website or the database, but this check can't prove they weren't changed before linking began.`,
+      title: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website, and the database blocks changes. If someone with direct database access went around that, this check would show a break. This check can't prove they weren't changed before linking began.`,
       start_id: legacyStart,
       end_id: legacyEnd,
-      guarantee: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website or the database, but this check can't prove they weren't changed before linking began.`,
+      guarantee: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website, and the database blocks changes. If someone with direct database access went around that, this check would show a break. This check can't prove they weren't changed before linking began.`,
     } : null,
     compatibility: (Array.isArray(compatibility) ? compatibility : []).map((item) => ({
       id: item.id,
       reason: item.reason || compatHeading.toLowerCase(),
     })),
+    compatibility_note: 'This is expected after a site update.',
     compatibility_heading: compatHeading,
     cutover_at: cutoverAt || '',
     explanation: AUDIT_CHAIN_BREAK_EXPLAIN,
+    guidance: currentIntact ? '' : AUDIT_CHAIN_BREAK_GUIDANCE,
     min_id: Number(minId) || 1,
     max_id: Number(maxId) || 0,
   };
@@ -2579,7 +2722,8 @@ export function formatCourtVerifySummary(report = {}) {
   if (current.intact) {
     return started ? `${started} ${range}: INTACT` : `INTACT ${range}`;
   }
-  return `${current.title} ${range}`;
+  const ids = (current.break_ids || []).map((id) => `#${id}`).join(', ');
+  return ids ? `${current.title} ${range} at ${ids}` : `${current.title} ${range}`;
 }
 
 export function formatAuditGenerationReport(catalog = [], breaks = []) {
@@ -2794,6 +2938,7 @@ export async function readAuditIdExtrema(env) {
 export function auditLinkBreaksFromRows(rows = [], cutover = 0, cutoverAt = '') {
   return classifyAuditLinkRows(rows, {
     cutoverAt,
+    cutoverId: cutover,
     inLegacyPrefix: true,
   }).breaks;
 }
@@ -2811,6 +2956,7 @@ export async function collectAuditLinkState(env) {
   const cutover = await readAuditChainCutoverMeta(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
+    cutoverId: cutover.id,
     inLegacyPrefix: true,
   });
   return {
@@ -2914,6 +3060,7 @@ export async function verifyAdminAuditBatch(env, {
   const cutover = await readAuditChainCutoverMeta(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
+    cutoverId: cutover.id,
     prevHash,
     prevId,
     inLegacyPrefix: afterId === 0,
@@ -2924,10 +3071,10 @@ export async function verifyAdminAuditBatch(env, {
   const compatibility = classified.compatibility;
   for (const row of rows) {
     const id = Number(row.id) || 0;
-    const digest = await verifyAuditRowDigest(row);
+    const digest = await verifyAuditRowDigest(row, env);
     if (digest.recomputed && !digest.ok) {
-      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
-      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
+      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
     }
     prevHash = String(row.payload_sha256 || '');
     prevId = id;
@@ -3009,16 +3156,17 @@ export async function verifyAdminAuditComplete(env) {
   const genesis = await loadAuditGenerations(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
+    cutoverId: cutover.id,
     inLegacyPrefix: true,
   });
   const breaks = [...classified.breaks];
   const digestFailures = [];
   for (const row of rows) {
-    const digest = await verifyAuditRowDigest(row);
+    const digest = await verifyAuditRowDigest(row, env);
     if (digest.recomputed && !digest.ok) {
       const id = Number(row.id) || 0;
-      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
-      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
+      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
+      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored hash' });
     }
   }
   const first = rows[0] || null;

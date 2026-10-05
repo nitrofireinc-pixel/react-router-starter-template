@@ -195,7 +195,8 @@ test('pageSettingsChanged 403s explicit setting edits and ignores omitted fields
     active: 1,
   };
   assert.equal(pageSettingsChanged(attempted, existing, { slug: 'hacked', title: 'X' }), true);
-  assert.equal(pageSettingsChanged(attempted, existing, { title: 'Student Resources', body_html: '<p>x</p>' }), false);
+  assert.equal(pageSettingsChanged({ ...existing, title: 'Hacked' }, { ...existing, title: 'Resources' }, { title: 'Hacked' }), true);
+  assert.equal(pageSettingsChanged(attempted, existing, { body_html: '<p>x</p>' }), false);
   assert.equal(pageSettingsChanged(attempted, existing), true);
 });
 
@@ -336,6 +337,8 @@ test('content-only visual save 403s onclick, data-*, iframe, script, style, and 
     [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
     [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
     [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript&colon;alert(1)">Intro</a></p>'), /javascript/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;avascript:alert(1)">Intro</a></p>'), /javascript/i],
   ];
   for (const [html, detail] of cases) {
     assert.match(contentOnlyForbiddenHtmlViolation(BASE_HTML, html), detail);
@@ -354,6 +357,25 @@ test('content-only visual save 403s onclick, data-*, iframe, script, style, and 
       },
     );
   }
+});
+
+test('content-only save accepts a plain https link next to an existing classed link', async () => {
+  resetVisualPagesSchemaCache();
+  const baseline = BASE_HTML.replace('<p>Intro</p>', '<p>Intro <a class="btn" href="/x">Here</a></p>');
+  const { env } = createVisualEnv(baseline);
+  const added = baseline.replace(
+    '<p>Intro <a class="btn" href="/x">Here</a></p>',
+    '<p>Intro <a href="https://example.com/join">Join</a> <a class="btn" href="/x">Here</a></p>',
+  );
+  assert.equal(contentOnlyHtmlViolation(baseline, added), null);
+  const saved = await saveVisualPage(env, {
+    slug: 'sponsors',
+    html: added,
+    action: 'draft',
+    user: { id: 8, display_name: 'Jamie' },
+    allowStructure: false,
+  });
+  assert.match(saved.draft_html, /https:\/\/example.com\/join/);
 });
 
 test('content-only visual save accepts copy edits and 403s a structural save', async () => {
@@ -554,7 +576,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005d'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005e'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.6'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });

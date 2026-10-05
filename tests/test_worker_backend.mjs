@@ -2363,7 +2363,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005d'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005e'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3397,7 +3397,7 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
               return { value: store.get(key) };
             }
             if (String(sql).includes('admin_audit_log_linear_insert')) {
-              return { sql: "WHEN NEW.prev_id IS NULL THEN audit_chain_cutover_at '+15 minutes'" };
+              return { sql: "WHEN NEW.prev_id IS NULL THEN audit_chain_cutover_at '+15 minutes' audit_chain_cutover_id AND prev_id IS NOT NULL" };
             }
             return null;
           },
@@ -3409,7 +3409,7 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
             calls.push({ type: 'all', sql });
             if (String(sql).includes('pragma_table_info') || String(sql).includes('PRAGMA table_info')) {
               return {
-                results: ['prev_sha256', 'prev_id', 'source_pending_id'].map((name) => ({ name })),
+                results: ['prev_sha256', 'prev_id', 'source_pending_id', 'key_id'].map((name) => ({ name })),
               };
             }
             return { results: [] };

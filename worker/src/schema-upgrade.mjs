@@ -68,6 +68,11 @@ BEGIN
           (SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at'),
           '+15 minutes'
         )
+        OR EXISTS (
+          SELECT 1 FROM admin_audit_log
+          WHERE prev_id IS NOT NULL
+            AND id > CAST(COALESCE((SELECT value FROM site_content WHERE key = 'audit_chain_cutover_id'), '0') AS INTEGER)
+        )
       )
     WHEN (SELECT MAX(id) FROM admin_audit_log) IS NULL THEN
       NEW.prev_id != 0 OR NEW.prev_sha256 != ''
@@ -104,6 +109,7 @@ export const AUDIT_LOG_REQUIRED_COLUMNS = Object.freeze([
   { name: 'prev_sha256', sql: "ALTER TABLE admin_audit_log ADD COLUMN prev_sha256 TEXT NOT NULL DEFAULT ''" },
   { name: 'prev_id', sql: 'ALTER TABLE admin_audit_log ADD COLUMN prev_id INTEGER' },
   { name: 'source_pending_id', sql: 'ALTER TABLE admin_audit_log ADD COLUMN source_pending_id INTEGER' },
+  { name: 'key_id', sql: "ALTER TABLE admin_audit_log ADD COLUMN key_id TEXT NOT NULL DEFAULT ''" },
 ]);
 
 export const AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL = `
@@ -316,7 +322,10 @@ export async function readAuditLinearTriggerSql(env) {
 
 export function linearTriggerEnforcesCutoverWindow(sql = '') {
   const text = String(sql || '');
-  return /audit_chain_cutover_at/i.test(text) && /\+15 minutes/i.test(text);
+  return /audit_chain_cutover_at/i.test(text)
+    && /\+15 minutes/i.test(text)
+    && /audit_chain_cutover_id/i.test(text)
+    && /prev_id IS NOT NULL/i.test(text);
 }
 
 /** True when the trigger still permits NULL-prev inside the cutover window. */
@@ -360,15 +369,23 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   if (typeof writeVersion === 'function') await writeVersion(env);
 }
 
-async function readSiteContentValue(env, key) {
+async function readSiteContentRow(env, key) {
   try {
-    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+    const row = await env.DB.prepare('SELECT key, value FROM site_content WHERE key = ?')
       .bind(key)
       .first();
-    if (row?.value == null || String(row.value).trim() === '') return '';
-    return String(row.value);
+    if (!row || (row.key == null && row.value == null)) return null;
+    return row;
   } catch {
-    return '';
+    try {
+      const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+        .bind(key)
+        .first();
+      if (!row) return null;
+      return { key, value: row.value };
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -384,11 +401,16 @@ async function writeSiteContentIfAbsent(env, key, value) {
 
 export async function ensureAuditChainCutover(env) {
   if (!env?.DB?.prepare) return { id: 0, at: '' };
-  const existingId = await readSiteContentValue(env, AUDIT_CHAIN_CUTOVER_KEY);
-  const existingAt = await readSiteContentValue(env, AUDIT_CHAIN_CUTOVER_AT_KEY);
-  let cutoverId = Number(existingId) || 0;
+  const existingIdRow = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_KEY);
+  const existingAtRow = await readSiteContentRow(env, AUDIT_CHAIN_CUTOVER_AT_KEY);
+  const existingId = existingIdRow?.value == null ? '' : String(existingIdRow.value);
+  const existingAt = existingAtRow?.value == null ? '' : String(existingAtRow.value);
+  let cutoverId = existingIdRow ? (Number(existingId) || 0) : 0;
   let cutoverAt = existingAt;
-  if (!existingId) {
+  if (existingIdRow && existingAtRow) {
+    return { id: cutoverId, at: cutoverAt };
+  }
+  if (!existingIdRow) {
     try {
       const max = await env.DB.prepare('SELECT MAX(id) AS max_id FROM admin_audit_log').first();
       cutoverId = Number(max?.max_id) || 0;
@@ -397,7 +419,7 @@ export async function ensureAuditChainCutover(env) {
     }
     await writeSiteContentIfAbsent(env, AUDIT_CHAIN_CUTOVER_KEY, String(cutoverId));
   }
-  if (!cutoverAt) {
+  if (!existingAtRow) {
     cutoverAt = utcSqliteStamp();
     await writeSiteContentIfAbsent(env, AUDIT_CHAIN_CUTOVER_AT_KEY, cutoverAt);
   }
