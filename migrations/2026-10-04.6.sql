@@ -51,4 +51,12 @@ BEGIN
   SELECT RAISE(ABORT, 'audit-settings-write-once');
 END;
 
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_replace
+BEFORE INSERT ON site_content
+WHEN NEW.key LIKE 'audit_%'
+  AND EXISTS (SELECT 1 FROM site_content WHERE key = NEW.key)
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END;
+
 INSERT INTO site_content (key, value) VALUES ('schema_version', '2026-10-04.6') ON CONFLICT(key) DO UPDATE SET value = excluded.value;

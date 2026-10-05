@@ -3,8 +3,7 @@ import {
   canonicalChainMaterial,
   hasAuditLogKey,
   hmacSha256Hex,
-  linkedAuditRowsExist,
-  signedAuditCutoverExists,
+  canMintSignedCutover,
   writeAuditCutoverRow,
 } from './admin-audit-log.mjs';
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
@@ -190,6 +189,16 @@ BEGIN
 END
 `.trim();
 
+export const SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL = `
+CREATE TRIGGER IF NOT EXISTS site_content_audit_keys_no_replace
+BEFORE INSERT ON site_content
+WHEN NEW.key LIKE 'audit_%'
+  AND EXISTS (SELECT 1 FROM site_content WHERE key = NEW.key)
+BEGIN
+  SELECT RAISE(ABORT, 'audit-settings-write-once');
+END
+`.trim();
+
 export function auditLogSchemaStatements() {
   return [
     AUDIT_LOG_PENDING_TABLE_SQL,
@@ -211,6 +220,7 @@ export function auditLogSchemaStatements() {
     AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL,
     SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
     SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL,
   ];
 }
 
@@ -370,7 +380,6 @@ export async function auditSchemaNeedsRepair(env) {
   if (AUDIT_LOG_REQUIRED_COLUMNS.some((column) => !names.has(column.name))) return true;
   const triggerSql = await readAuditLinearTriggerSql(env);
   if (!linearTriggerEnforcesCutoverWindow(triggerSql)) return true;
-  if (await linkedAuditRowsExist(env) && !(await signedAuditCutoverExists(env))) return true;
   return false;
 }
 
@@ -383,12 +392,15 @@ export async function repairAuditSchema(env) {
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
     SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
     SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
+    SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL,
   ]);
-  await writeAuditCutoverRow(env, {
-    cutoverId: cutover.id,
-    cutoverAt: cutover.at,
-    hmacSinceId: hmac.id,
-  });
+  if (hasAuditLogKey(env) && await canMintSignedCutover(env)) {
+    await writeAuditCutoverRow(env, {
+      cutoverId: cutover.id,
+      cutoverAt: cutover.at,
+      hmacSinceId: hmac.id,
+    });
+  }
 }
 
 export async function applyIncrementalSchema(env, { writeVersion } = {}) {
@@ -405,11 +417,13 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   }
   const cutover = await ensureAuditChainCutover(env);
   const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
-  await writeAuditCutoverRow(env, {
-    cutoverId: cutover.id,
-    cutoverAt: cutover.at,
-    hmacSinceId: hmac.id,
-  });
+  if (hasAuditLogKey(env) && await canMintSignedCutover(env)) {
+    await writeAuditCutoverRow(env, {
+      cutoverId: cutover.id,
+      cutoverAt: cutover.at,
+      hmacSinceId: hmac.id,
+    });
+  }
   await backfillAuditActorNames(env);
   if (typeof writeVersion === 'function') await writeVersion(env);
 }

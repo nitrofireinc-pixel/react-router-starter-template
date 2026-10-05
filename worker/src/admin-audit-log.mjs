@@ -235,6 +235,9 @@ export function markupRejectionConstruct(detail = '') {
   if (/style is not allowed/i.test(text)) return 'style';
   if (/iframe/i.test(text)) return 'iframe';
   if (/svg/i.test(text)) return 'svg';
+  const added = text.match(/new <([a-z0-9]+)>\s+is not allowed/i);
+  if (added) return added[1].toLowerCase();
+  if (/\blinks?\b/i.test(text) && /not allowed/i.test(text)) return 'a';
   const data = text.match(/\b(data-[a-z0-9_-]*)\b/i);
   if (data && /not allowed/i.test(text)) return data[1].toLowerCase();
   return '';
@@ -540,7 +543,9 @@ export function auditSecretEnvName(keyId = DEFAULT_AUDIT_KEY_ID) {
 }
 
 export function currentAuditKeyId(env = {}) {
-  if (generationCache.loaded && generationCache.key_id) return generationCache.key_id;
+  if (generationCache.loaded && generationCache.key_id && hasAuditLogKey(env, generationCache.key_id)) {
+    return generationCache.key_id;
+  }
   return String(env.AUDIT_LOG_KEY_ID || DEFAULT_AUDIT_KEY_ID).trim() || DEFAULT_AUDIT_KEY_ID;
 }
 
@@ -554,7 +559,9 @@ export function hasAuditLogKey(env = {}, keyId = '') {
 }
 
 export async function resolveAuditKeyId(env) {
-  if (generationCache.loaded && generationCache.key_id) return generationCache.key_id;
+  if (generationCache.loaded && generationCache.key_id && hasAuditLogKey(env, generationCache.key_id)) {
+    return generationCache.key_id;
+  }
   if (env?.AUDIT_LOG_KEY_ID) {
     generationCache.key_id = currentAuditKeyId(env);
     generationCache.loaded = true;
@@ -566,14 +573,17 @@ export async function resolveAuditKeyId(env) {
     return generationCache.key_id;
   }
   try {
-    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-      .bind(AUDIT_LOG_GENERATION_KEY)
-      .first();
-    const parsed = JSON.parse(String(row?.value || '{}')) || {};
-    generationCache.key_id = String(parsed.key_id || DEFAULT_AUDIT_KEY_ID).trim() || DEFAULT_AUDIT_KEY_ID;
+    const signed = await latestSignedGenesis(env);
+    const keyId = String(signed?.new_key_id || '').trim();
+    if (keyId && hasAuditLogKey(env, keyId)) {
+      generationCache.key_id = keyId;
+      generationCache.loaded = true;
+      return generationCache.key_id;
+    }
   } catch {
-    generationCache.key_id = DEFAULT_AUDIT_KEY_ID;
+    // fall through to k1
   }
+  generationCache.key_id = DEFAULT_AUDIT_KEY_ID;
   generationCache.loaded = true;
   return generationCache.key_id;
 }
@@ -782,7 +792,7 @@ export function canonicalChainMaterial(row = {}, version = null) {
   const encVersion = version == null ? Number(row.enc_version) : Number(version);
   const keyId = String(row.key_id || row.enc_key_id || parseCiphertextEnvelope(row.ciphertext).key_id || '');
   if (encVersion === ADMIN_AUDIT_ENC_VERSION_V3) {
-    return JSON.stringify({
+    const payload = {
       v: 3,
       prev_id: row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id),
       prev_sha256: String(row.prev_sha256 || ''),
@@ -792,7 +802,12 @@ export function canonicalChainMaterial(row = {}, version = null) {
       actor: actorForChain(row),
       key_id: keyId,
       ciphertext: String(row.ciphertext || ''),
-    });
+    };
+    const cutoverId = Number(row.cutover_id ?? row.cutoverId) || 0;
+    const hmacSinceId = Number(row.hmac_since_id ?? row.hmacSinceId) || 0;
+    if (cutoverId > 0) payload.cutover_id = cutoverId;
+    if (hmacSinceId > 0) payload.hmac_since_id = hmacSinceId;
+    return JSON.stringify(payload);
   }
   return JSON.stringify({
     v: 2,
@@ -862,19 +877,38 @@ export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
   const version = encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED
     ? ADMIN_AUDIT_ENC_VERSION_V2
     : encVersion;
-  const material = canonicalChainMaterial(row, version);
   if (encVersion === ADMIN_AUDIT_ENC_VERSION_V3) {
     const keyId = String(row.key_id || row.enc_key_id || parseCiphertextEnvelope(row.ciphertext).key_id || '');
+    const boundRow = {
+      ...row,
+      cutover_id: cutoverId,
+      hmac_since_id: hmacSinceId,
+    };
+    const unboundRow = { ...row, cutover_id: 0, hmac_since_id: 0 };
     if (env && hasAuditLogKey(env, keyId)) {
-      const keyed = await hmacSha256Hex(env, material, keyId);
+      const boundMaterial = canonicalChainMaterial(boundRow, version);
+      const keyed = await hmacSha256Hex(env, boundMaterial, keyId);
       if (expected && expected === keyed) {
-        return { recomputed: true, ok: true, legacy: false, actual: keyed, keyed: true, key_id: keyId };
+        return { recomputed: true, ok: true, legacy: false, actual: keyed, keyed: true, key_id: keyId, bound: true };
+      }
+      const unboundMaterial = canonicalChainMaterial(unboundRow, version);
+      const legacyKeyed = await hmacSha256Hex(env, unboundMaterial, keyId);
+      if (expected && expected === legacyKeyed) {
+        return {
+          recomputed: true,
+          ok: true,
+          legacy: false,
+          actual: legacyKeyed,
+          keyed: true,
+          key_id: keyId,
+          bound: false,
+        };
       }
     }
     if (signedBoundaryCheck) {
       return { recomputed: true, ok: false, legacy: false, keyed: false, reason: 'hmac_required' };
     }
-    const plain = await sha256Hex(material);
+    const plain = await sha256Hex(canonicalChainMaterial(unboundRow, version));
     if (allowPlainShaV3Row(id, hmacSinceId, env) && expected && expected === plain) {
       return { recomputed: true, ok: true, legacy: false, actual: plain, keyed: false, pre_hmac: true };
     }
@@ -887,6 +921,7 @@ export async function verifyAuditRowDigest(row = {}, env = null, options = {}) {
       reason: atOrAfterHmac || !allowPlainShaV3Row(id, hmacSinceId, env) ? 'hmac_required' : 'digest_mismatch',
     };
   }
+  const material = canonicalChainMaterial(row, version);
   const actual = await sha256Hex(material);
   return {
     recomputed: true,
@@ -903,12 +938,20 @@ export function utcStampNow(now = new Date()) {
 
 const AUDIT_WRITE_RETRY_DELAYS_MS = [80, 200, 450];
 
+function newAuditWriteNonce() {
+  const rand = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${Date.now()}-${rand}`;
+}
+
 async function writeAdminAuditLogWithBackoff(env, entry = {}) {
   let lastError = null;
-  const eventKey = `${String(entry?.action || '')}|${String(entry?.path || '')}|${String(entry?.actor_username || '')}|${String(entry?.created_at || '')}`;
+  const writeNonce = entry.write_nonce || newAuditWriteNonce();
+  const eventKey = `${String(entry?.action || '')}|${String(entry?.path || '')}|${String(entry?.actor_username || '')}|${String(entry?.created_at || '')}|${writeNonce}`;
   for (let attempt = 0; attempt <= AUDIT_WRITE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      const result = await writeAdminAuditLog(env, entry, { recordFailure: false });
+      const result = await writeAdminAuditLog(env, { ...entry, write_nonce: writeNonce }, { recordFailure: false });
       if (result) return result;
       lastError = new Error('audit write returned empty');
     } catch (error) {
@@ -1494,6 +1537,16 @@ export async function writeAdminAuditLog(env, entry = {}, { recordFailure = true
     encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
     usedKeyId = 'missing';
   }
+  let cutoverId = Number(meta.cutover_id) || 0;
+  let hmacSinceId = Number(meta.hmac_since_id) || 0;
+  if (!cutoverId && !hmacSinceId && action !== AUDIT_CUTOVER_ACTION) {
+    const bounds = env.__auditBounds && env.__auditBounds.valid
+      ? env.__auditBounds
+      : await readSignedAuditBoundaries(env);
+    env.__auditBounds = bounds;
+    cutoverId = Number(bounds.id) || 0;
+    hmacSinceId = Number(bounds.hmacSinceId) || 0;
+  }
   return insertAuditChainRow(env, {
     createdAt,
     action,
@@ -1505,6 +1558,9 @@ export async function writeAdminAuditLog(env, entry = {}, { recordFailure = true
     usedKeyId,
     keyed,
     recordFailure,
+    cutoverId,
+    hmacSinceId,
+    writeNonce: entry.write_nonce || newAuditWriteNonce(),
   });
 }
 
@@ -1724,8 +1780,12 @@ async function insertAuditChainRow(env, {
   usedKeyId,
   keyed,
   recordFailure = true,
+  cutoverId = 0,
+  hmacSinceId = 0,
+  writeNonce = '',
 }) {
   let lastError = null;
+  const nonce = writeNonce || newAuditWriteNonce();
   if (auditWriteCanAfford(env, 6)) {
     await drainPendingAuditRows(env, { maxRows: 1 });
   }
@@ -1736,17 +1796,19 @@ async function insertAuditChainRow(env, {
       const prevSha256 = head.payload_sha256;
       const prevId = head.id > 0 ? head.id : 0;
       const payloadSha256 = await computeAuditRowDigest(env, {
-        enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
-        created_at: createdAt,
-        action,
-        category,
-        actor_user_id: actorUserId,
-        actor_username: actorUsername,
-        key_id: usedKeyId,
-        ciphertext,
-        prev_id: prevId,
-        prev_sha256: prevSha256,
-      }, ADMIN_AUDIT_ENC_VERSION_V3);
+          enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
+          created_at: createdAt,
+          action,
+          category,
+          actor_user_id: actorUserId,
+          actor_username: actorUsername,
+          key_id: usedKeyId,
+          ciphertext,
+          prev_id: prevId,
+          prev_sha256: prevSha256,
+          cutover_id: cutoverId,
+          hmac_since_id: hmacSinceId,
+        }, ADMIN_AUDIT_ENC_VERSION_V3);
       const result = await insertAuditRowOnce(env, {
         createdAt,
         action,
@@ -1791,6 +1853,8 @@ async function insertAuditChainRow(env, {
       ciphertext,
       prev_id: null,
       prev_sha256: '',
+      cutover_id: cutoverId,
+      hmac_since_id: hmacSinceId,
     }, ADMIN_AUDIT_ENC_VERSION_V3);
     const queued = await insertPendingAuditRow(env, {
       createdAt,
@@ -1818,7 +1882,7 @@ async function insertAuditChainRow(env, {
     console.error('admin audit log write failed', error?.message || lastError?.message || error);
     if (recordFailure) {
       await recordAuditWriteFailure(env, error || lastError, {
-        eventKey: `${createdAt}|${action}|${actorUsername}`,
+        eventKey: `${createdAt}|${action}|${actorUsername}|${nonce}`,
       });
     }
     return null;
@@ -1852,11 +1916,8 @@ export async function startNewAuditLogGeneration(env, {
   const countRow = await env.DB.prepare(countSql).first();
   let generation = 2;
   try {
-    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-      .bind(AUDIT_LOG_GENERATION_KEY)
-      .first();
-    const parsed = JSON.parse(String(row?.value || '{}')) || {};
-    generation = Number(parsed.generation || 1) + 1;
+    const signed = await latestSignedGenesis(env);
+    generation = (Number(signed?.generation) || 1) + 1;
   } catch {
     generation = 2;
   }
@@ -1904,7 +1965,7 @@ export async function startNewAuditLogGeneration(env, {
   generationCache.loaded = true;
   await env.DB.prepare(
     'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
-  ).bind(AUDIT_LOG_GENERATION_KEY, JSON.stringify({
+  ).bind(`${AUDIT_LOG_GENERATION_KEY}_${generation}`, JSON.stringify({
     key_id: nextId,
     generation,
     started_at: startedAt,
@@ -2667,12 +2728,17 @@ export async function readSignedAuditBoundaries(env) {
     return empty;
   }
   for (const row of rows) {
-    const digest = await verifyAuditRowDigest(row, env, { signedBoundaryCheck: true });
-    if (!digest.ok || !digest.keyed) continue;
     const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
+    if (!decoded?.integrity_ok && decoded?.integrity_error) continue;
     const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
     const cutoverId = Number(meta.cutover_id) || 0;
     const hmacSinceId = Number(meta.hmac_since_id) || 0;
+    const digest = await verifyAuditRowDigest(row, env, {
+      signedBoundaryCheck: true,
+      cutoverId,
+      hmacSinceId,
+    });
+    if (!digest.ok || !digest.keyed) continue;
     if (String(row.action) === AUDIT_CUTOVER_ACTION || (cutoverId && hmacSinceId)) {
       return {
         id: cutoverId,
@@ -2758,8 +2824,95 @@ export function missingCutoverBreak(rows = []) {
   return {
     id: Number(firstLinked.id) || 0,
     kind: 'cutover',
-    reason: 'missing or invalid log.cutover boundary',
+    reason: 'boundary record missing',
   };
+}
+
+export async function v3AuditRowsExist(env) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE enc_version = ${ADMIN_AUDIT_ENC_VERSION_V3} LIMIT 1`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).first();
+    return Boolean(row?.id);
+  } catch {
+    return false;
+  }
+}
+
+export async function linkedRowAfterExists(env, afterId = 0) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE prev_id IS NOT NULL AND id > ? LIMIT 1`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).bind(Number(afterId) || 0).first();
+    return Boolean(row?.id);
+  } catch {
+    return false;
+  }
+}
+
+export async function latestSignedGenesis(env) {
+  if (!env?.DB?.prepare) return null;
+  const sql = `SELECT id, created_at, action, category, actor_user_id, actor_username,
+      ciphertext, enc_version, key_id, payload_sha256, prev_sha256, prev_id
+     FROM ${ADMIN_AUDIT_TABLE}
+     WHERE action = 'log.genesis'
+     ORDER BY id DESC`;
+  assertAuditSqlIsAppendOnly(sql);
+  let rows = [];
+  try {
+    const fetched = await env.DB.prepare(sql).all();
+    rows = fetched?.results || [];
+  } catch {
+    return null;
+  }
+  for (const row of rows) {
+    const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
+    if (!decoded?.integrity_ok && decoded?.integrity_error) continue;
+    const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
+    const digest = await verifyAuditRowDigest(row, env, {
+      signedBoundaryCheck: true,
+      cutoverId: Number(meta.cutover_id) || 0,
+      hmacSinceId: Number(meta.hmac_since_id) || 0,
+    });
+    if (!digest.ok || !digest.keyed) continue;
+    return {
+      id: Number(row.id) || 0,
+      generation: Number(meta.generation) || 0,
+      new_key_id: String(meta.new_key_id || row.key_id || ''),
+      cutover_id: Number(meta.cutover_id) || 0,
+      hmac_since_id: Number(meta.hmac_since_id) || 0,
+    };
+  }
+  return null;
+}
+
+export async function earliestSignedBoundaryId(env) {
+  const signed = await readSignedAuditBoundaries(env);
+  if (signed.valid && (signed.id || signed.hmacSinceId)) {
+    return Math.min(signed.id || signed.hmacSinceId, signed.hmacSinceId || signed.id);
+  }
+  return 0;
+}
+
+export async function canMintSignedCutover(env) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT
+      (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE enc_version = ${ADMIN_AUDIT_ENC_VERSION_V3} LIMIT 1) AS v3_id,
+      (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE prev_id IS NOT NULL LIMIT 1) AS linked_id`;
+  assertAuditSqlIsAppendOnly(sql);
+  let row = null;
+  try {
+    row = await env.DB.prepare(sql).first();
+  } catch {
+    return false;
+  }
+  if (row?.v3_id) return false;
+  if (!row?.linked_id) return true;
+  const earliest = await earliestSignedBoundaryId(env);
+  if (earliest <= 0) return false;
+  return !(await linkedRowAfterExists(env, earliest));
 }
 
 export async function readAuditChainCutover(env) {

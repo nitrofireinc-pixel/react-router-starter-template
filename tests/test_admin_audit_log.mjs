@@ -83,6 +83,8 @@ import {
   uniqueAuditBreakIds,
   markupRejectionConstruct,
   signedAuditCutoverExists,
+  canMintSignedCutover,
+  resolveAuditKeyId,
   AUDIT_ALLOW_LEGACY_V3_UNTIL_ENV,
 } from '../worker/src/admin-audit-log.mjs';
 import {
@@ -94,6 +96,7 @@ import {
   AUDIT_LOG_PENDING_TABLE_SQL,
   SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL,
   SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL,
+  SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL,
   applyIncrementalSchema,
   auditSchemaNeedsRepair,
   ensureAuditChainCutover,
@@ -498,11 +501,11 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
               };
             }
             if (q.includes("action = 'log.genesis'")) {
-              return {
-                results: rows
-                  .filter((row) => row.action === 'log.genesis')
-                  .sort((a, b) => Number(a.id) - Number(b.id)),
-              };
+              const genesis = rows.filter((row) => row.action === 'log.genesis');
+              genesis.sort((a, b) => (q.includes('DESC')
+                ? Number(b.id) - Number(a.id)
+                : Number(a.id) - Number(b.id)));
+              return { results: genesis };
             }
             if (q.includes('FROM users')) {
               const like = String(this.binds[0] || '').replace(/%/g, '').toLowerCase();
@@ -938,7 +941,7 @@ test('new log genesis continues the chain and does not rewrite old rows', async 
   assert.equal(rows[0].payload_sha256, first.payload_sha256);
   assert.equal(rows[1].action, 'log.genesis');
   assert.equal(rows[1].prev_sha256, first.payload_sha256);
-  const stored = JSON.parse(site.get('audit_log_generation'));
+  const stored = JSON.parse(site.get('audit_log_generation_2'));
   assert.equal(stored.key_id, 'k2');
   assert.equal(nextAuditKeyId('k2'), 'k3');
   assert.equal(auditSecretEnvName('k2'), 'AUDIT_LOG_KEY_K2');
@@ -2957,7 +2960,7 @@ test('DEV-shaped v2 and pre-HMAC v3 after cutover stay INTACT with until-id', as
   assert.equal(prod.breaks.some((item) => item.id >= 14 && item.id <= 16), true);
 });
 
-test('missing log.cutover after linked rows is a break; repair writes it', async () => {
+test('missing log.cutover after linked rows is a permanent boundary break', async () => {
   const db = createProdAtDot2();
   const env = sqliteEnv(db);
   await ensureAuditLogColumns(env);
@@ -2965,10 +2968,12 @@ test('missing log.cutover after linked rows is a break; repair writes it', async
   await ensureAuditChainCutover(env);
   db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'h2', 1, 'seed')").run();
   assert.equal(await signedAuditCutoverExists(env), false);
-  assert.equal(await auditSchemaNeedsRepair(env), true);
+  assert.equal(await canMintSignedCutover(env), false);
   await repairAuditSchema(env);
-  assert.equal(await signedAuditCutoverExists(env), true);
-  assert.equal(await auditSchemaNeedsRepair(env), false);
+  assert.equal(await signedAuditCutoverExists(env), false);
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => /boundary record missing/.test(item.reason || '')), true);
   db.close();
 });
 
@@ -2988,8 +2993,13 @@ test('site_content audit_ keys are write-once', async () => {
     () => db.prepare("DELETE FROM site_content WHERE key = 'audit_chain_cutover_id'").run(),
     /audit-settings-write-once/,
   );
+  assert.throws(
+    () => db.prepare("INSERT OR REPLACE INTO site_content (key, value) VALUES ('audit_chain_cutover_id', '401')").run(),
+    /audit-settings-write-once/,
+  );
   db.exec(`${SITE_CONTENT_AUDIT_KEYS_NO_UPDATE_SQL}`);
   db.exec(`${SITE_CONTENT_AUDIT_KEYS_NO_DELETE_SQL}`);
+  db.exec(`${SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL}`);
   db.close();
 });
 
@@ -3026,5 +3036,94 @@ test('linked rows without a valid log.cutover are a verify break', async () => {
   const { env } = createAuditDb(seed);
   const walked = await verifyAdminAuditComplete(env);
   assert.equal(walked.chain_ok, false);
-  assert.equal(walked.breaks.some((item) => /log\.cutover/.test(item.reason || '')), true);
+  assert.equal(walked.breaks.some((item) => /boundary record missing/.test(item.reason || '')), true);
 });
+
+test('M3 links and new form from content-only editors are rejected markup', () => {
+  assert.equal(markupRejectionConstruct('new <form> is not allowed for content-only editors'), 'form');
+  assert.equal(requiredPermissionFromDetail('new <form> is not allowed for content-only editors'), 'rejected markup: form');
+  assert.equal(markupRejectionConstruct('new <a> is not allowed for content-only editors'), 'a');
+  assert.equal(requiredPermissionFromDetail('javascript: links are not allowed'), 'rejected markup: javascript:');
+});
+
+test('M2 distinct lost writes do not share a fingerprint', async () => {
+  resetAuditWriteFailureState();
+  const { env } = createAuditDb();
+  const orig = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const stmt = orig(sql);
+    if (/INSERT INTO admin_audit_(log|pending)/i.test(String(sql))) {
+      stmt.run = async () => { throw new Error('quota'); };
+    }
+    return stmt;
+  };
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'a@efhsband.org' });
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'a@efhsband.org' });
+  const listed = await listAdminAuditLogs(env, { year: 2026, month: 10 });
+  assert.equal(listed.write_failures.count, 2);
+});
+
+test('generation 3 survives cold start from signed genesis not site_content', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, site } = createAuditDb();
+  env.AUDIT_LOG_KEY_K2 = 'unit-audit-key-generation-two';
+  env.AUDIT_LOG_KEY_K3 = 'unit-audit-key-generation-three';
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'agent@efhsband.org' });
+  const g2 = await startNewAuditLogGeneration(env, { reason: 'g2', authorizedBy: 'Trevor' });
+  assert.equal(g2.new_key_id, 'k2');
+  const g3 = await startNewAuditLogGeneration(env, { reason: 'g3', authorizedBy: 'Trevor' });
+  assert.equal(g3.new_key_id, 'k3');
+  site.set('audit_log_generation', JSON.stringify({ key_id: 'k2', generation: 2 }));
+  resetAuditGenerationCache();
+  assert.equal(await resolveAuditKeyId(env), 'k3');
+  const written = await writeAdminAuditLog(env, { action: 'login', actor_username: 'after-cold@efhsband.org' });
+  assert.equal(written.key_id, 'k3');
+});
+
+async function runT21Attack(encVersion) {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const db = createProdAtDot2();
+  const env = sqliteEnv(db);
+  await applyIncrementalSchema(env);
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'a@efhsband.org' });
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'b@efhsband.org' });
+  await writeAdminAuditLog(env, { action: 'login', actor_username: 'c@efhsband.org' });
+  assert.equal(await signedAuditCutoverExists(env), true);
+  db.exec(`
+    DROP TRIGGER IF EXISTS admin_audit_log_no_update;
+    DROP TRIGGER IF EXISTS admin_audit_log_no_delete;
+    DROP TRIGGER IF EXISTS admin_audit_log_linear_insert;
+    DROP TRIGGER IF EXISTS site_content_audit_keys_no_update;
+    DROP TRIGGER IF EXISTS site_content_audit_keys_no_delete;
+    DROP TRIGGER IF EXISTS site_content_audit_keys_no_replace;
+  `);
+  db.prepare("DELETE FROM admin_audit_log WHERE action = 'log.cutover'").run();
+  const last = db.prepare('SELECT id FROM admin_audit_log ORDER BY id DESC LIMIT 1').get();
+  db.prepare('DELETE FROM admin_audit_log WHERE id = ?').run(last.id);
+  db.prepare(`
+    UPDATE admin_audit_log
+       SET enc_version = ?, payload_sha256 = 'plain' || id, ciphertext = 'rewritten'
+     WHERE enc_version = 3
+  `).run(encVersion);
+  db.prepare("INSERT OR REPLACE INTO site_content (key, value) VALUES ('audit_chain_cutover_id', '401')").run();
+  db.prepare("INSERT OR REPLACE INTO site_content (key, value) VALUES ('audit_hmac_since_id', '402')").run();
+  resetDbInitCache();
+  await repairAuditSchema(env);
+  assert.equal(await canMintSignedCutover(env), false);
+  assert.equal(await signedAuditCutoverExists(env), false);
+  const walked = await verifyAdminAuditComplete(env);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => /boundary record missing/.test(item.reason || '')), true);
+  db.close();
+}
+
+test('T21_v1 repair must not sign a planted cutover after v1 rewrite', async () => {
+  await runT21Attack(1);
+});
+
+test('T21_v2 repair must not sign a planted cutover after v2 rewrite', async () => {
+  await runT21Attack(2);
+});
+
