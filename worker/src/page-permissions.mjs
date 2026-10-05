@@ -216,8 +216,39 @@ function hasContentOnlyLayoutAttrs(el) {
   ));
 }
 
+function forbiddenMarkupCounts(html = '') {
+  const counts = new Map();
+  const add = (key) => counts.set(key, (counts.get(key) || 0) + 1);
+  const raw = String(html || '');
+  for (const _ of raw.matchAll(/<script[\s>/]/gi)) add('script');
+  for (const _ of raw.matchAll(/<style[\s>/]/gi)) add('style');
+  for (const _ of raw.matchAll(/<iframe[\s>/]/gi)) add('iframe');
+  for (const match of raw.matchAll(/\s(on[a-z]+)\s*=/gi)) add(String(match[1] || '').toLowerCase());
+  for (const match of raw.matchAll(/\s(data-[a-z0-9_-]*)\s*=/gi)) add(String(match[1] || '').toLowerCase());
+  for (const _ of raw.matchAll(/javascript\s*:/gi)) add('javascript:');
+  return counts;
+}
+
+export function contentOnlyForbiddenHtmlViolation(baseline = '', next = '') {
+  const before = forbiddenMarkupCounts(baseline);
+  const after = forbiddenMarkupCounts(next);
+  for (const [key, count] of after) {
+    if (count <= (before.get(key) || 0)) continue;
+    if (key === 'script') return 'script tags are not allowed';
+    if (key === 'style') return '<style> tags are not allowed';
+    if (key === 'iframe') return 'iframe tags are not allowed';
+    if (key === 'javascript:') return 'javascript: links are not allowed';
+    if (key.startsWith('on')) return `${key} event attributes are not allowed`;
+    if (key.startsWith('data-')) return `${key} attributes are not allowed`;
+    return `${key} is not allowed`;
+  }
+  return null;
+}
+
 /** Returns a reason string when content-only HTML changes layout, else null. */
 export function contentOnlyHtmlViolation(baseline = '', next = '') {
+  const forbidden = contentOnlyForbiddenHtmlViolation(baseline, next);
+  if (forbidden) return forbidden;
   const before = scanHtmlElements(baseline);
   const after = scanHtmlElements(next);
   const baselineHeadings = new Set(

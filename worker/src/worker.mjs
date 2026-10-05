@@ -48,6 +48,7 @@ import {
   AUDIT_BEFORE_VISUAL_SQL,
   PHOTO_QUARANTINE_SORT,
   attachD1QueryCounter,
+  createD1QueryBudget,
   advanceAuditExportSession,
   buildAdminAuditExportCsv,
   buildAdminAuditExportJson,
@@ -141,6 +142,7 @@ import {
   applyIncrementalSchema,
   auditLogSchemaStatements,
   auditSchemaNeedsRepair,
+  repairAuditSchema,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
 import {
@@ -427,7 +429,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005c';
+export const ASSET_VERSION = 'cms-p1-20261005d';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -1934,8 +1936,12 @@ async function inspectSessionCookie(request, env) {
   if (supplied !== expected) {
     return { user: null, expired: false, invalid: true, session_id_hash: sessionIdHash, username: '', uid: null };
   }
-  try {
-    const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    let data = null;
+    try {
+      data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    } catch {
+      return { user: null, expired: false, invalid: true, session_id_hash: sessionIdHash, username: '', uid: null };
+    }
     const deviceClient = expandSessionDevice(data.d);
     if (!isSessionFresh(data.t)) {
       return {
@@ -1948,20 +1954,30 @@ async function inspectSessionCookie(request, env) {
         device_client: deviceClient,
       };
     }
-    const user = data.uid
-      ? await getUserById(env, Number(data.uid))
-      : await getUserByUsername(env, data.u);
-    return {
-      user,
-      expired: false,
-      session_id_hash: sessionIdHash,
-      username: user?.username || data.u || '',
-      uid: user?.id || data.uid || null,
-      device_client: deviceClient,
-    };
-  } catch {
-    return { user: null, expired: false, session_id_hash: sessionIdHash, username: '', uid: null };
-  }
+    try {
+      const user = data.uid
+        ? await getUserById(env, Number(data.uid))
+        : await getUserByUsername(env, data.u);
+      return {
+        user,
+        expired: false,
+        session_id_hash: sessionIdHash,
+        username: user?.username || data.u || '',
+        uid: user?.id || data.uid || null,
+        device_client: deviceClient,
+      };
+    } catch (error) {
+      console.error('session_lookup_d1_failed', String(error?.message || error || 'd1 read failed'));
+      return {
+        user: null,
+        d1Error: true,
+        expired: false,
+        session_id_hash: sessionIdHash,
+        username: String(data.u || ''),
+        uid: data.uid ? Number(data.uid) : null,
+        device_client: deviceClient,
+      };
+    }
 }
 
 async function currentUser(request, env) {
@@ -2169,8 +2185,7 @@ export async function initDb(env) {
       if (current.value === DB_SCHEMA_VERSION) {
         if (await auditSchemaNeedsRepair(env)) {
           console.log('initDb_repair_start', { current: current.value, target: DB_SCHEMA_VERSION });
-          await applyIncrementalSchema(env);
-          await writeDbSchemaVersion(env);
+          await repairAuditSchema(env);
         }
         dbInitVersion = DB_SCHEMA_VERSION;
         return;
@@ -8478,19 +8493,34 @@ export async function requireScheduleBoardAccess(request, env) {
   return auth;
 }
 
-export async function requireSecurityLogAccess(request, env) {
-  const auth = await requireLogin(request, env);
-  if (auth.response) return auth;
-  if (!canAccessSecurityLog(auth.user)) {
-    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: auth.user };
+export async function requireSecurityLogAccess(request, env, { expiredDetail = '' } = {}) {
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) {
+    return {
+      response: jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 }),
+      d1Error: true,
+    };
   }
-  return auth;
+  if (session.expired && expiredDetail) {
+    return { response: jsonResponse({ detail: expiredDetail }, 401), expired: true };
+  }
+  if (!session.user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
+  if (!canAccessSecurityLog(session.user)) {
+    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: session.user };
+  }
+  return { user: session.user, session };
 }
 
 async function requireLogin(request, env) {
-  const user = await currentUser(request, env);
-  if (!user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
-  return { user };
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) {
+    return {
+      response: jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 }),
+      d1Error: true,
+    };
+  }
+  if (!session.user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
+  return { user: session.user, session };
 }
 
 async function requirePermission(request, env, scope) {
@@ -8996,12 +9026,24 @@ export function serializePagePayload(payload, existing = null) {
   };
 }
 
+function d1UnavailableJson() {
+  return jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 });
+}
+
+function d1UnavailableHtml(path = '/') {
+  return liteErrorResponse(503, {
+    path,
+    retryAfter: 2,
+    detail: 'Database temporarily unavailable',
+  });
+}
+
 async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
-  attachD1QueryCounter(env);
   const isAdminApi = url.pathname.startsWith('/api/admin');
   const mutating = isAdminApi && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
   const session = isAdminApi ? await inspectSessionCookie(request, env) : { user: null };
+  if (session.d1Error) return d1UnavailableJson();
   const actor = session.user;
   let skipGeneric = false;
   if (session.expired && mutating) {
@@ -10292,7 +10334,7 @@ async function routeApi(request, env, url, ctx = null) {
     return new Response(guideAsset.body, { status: 200, headers });
   }
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const format = url.pathname.endsWith('.txt') ? 'txt' : 'pdf';
     const payload = await listAdminAuditLogs(env, {
@@ -10356,7 +10398,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if ((url.pathname === '/api/admin/security-log.csv' || url.pathname === '/api/admin/security-log.json') && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const range = {
       limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
@@ -10486,7 +10528,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/export/start' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const body = await request.json().catch(() => ({}));
     const format = String(body.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
@@ -10533,7 +10575,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/export/complete' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const body = await request.json().catch(() => ({}));
     const completed = await completeAuditExportSession(env, body.session_id || '', {
@@ -12947,6 +12989,7 @@ async function handleLogin(request, env, ctx = null) {
   if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
     const session = await inspectSessionCookie(request, env);
+    if (session.d1Error) return d1UnavailableHtml('/admin/login');
     if (session.expired) {
       await logSessionExpired(env, request, session, { path: '/admin/login', method: 'GET', ctx });
     }
@@ -13056,6 +13099,7 @@ function renderAdminAppHtml(user) {
 async function handleAdmin(request, env, ctx = null) {
   await initDb(env);
   const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin');
   if (session.expired) {
     await logSessionExpired(env, request, session, { path: '/admin', method: request.method, ctx });
   }
@@ -13097,6 +13141,7 @@ async function handleAdmin(request, env, ctx = null) {
 async function handleVisualEditorPage(request, env, slug, ctx = null) {
   await initDb(env);
   const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml(`/admin/visual/${String(slug || '').trim().toLowerCase()}`);
   if (session.expired) {
     await logSessionExpired(env, request, session, {
       path: `/admin/visual/${String(slug || '').trim().toLowerCase()}`,
@@ -13191,6 +13236,7 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
 
 async function logout(request, env, ctx = null) {
   const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/logout');
   if (session.expired) {
     await logSessionExpired(env, request, session, { path: '/admin/logout', method: request.method, ctx });
   }
@@ -13956,6 +14002,7 @@ export default {
         if (cached) return applyWorkerSecurityHeaders(cached, url.pathname);
       }
       const opened = openD1Session(request, env);
+      attachD1QueryCounter(opened.env, createD1QueryBudget());
       const response = await dispatchWorker(request, opened.env, ctx);
       await maybeLogAccessDenial(opened.env, {
         request,

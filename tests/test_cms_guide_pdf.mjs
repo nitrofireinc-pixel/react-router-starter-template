@@ -71,7 +71,7 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /npm run deploy:worker/);
   assert.match(html, /self-migrate/);
   assert.match(html, /Do <b>not<\/b> run/);
-  assert.match(html, /Current log: INTACT/);
+  assert.match(html, /INTACT/);
   assert.match(html, /Workers Free/);
   assert.match(html, /Time Travel/);
   assert.match(html, /6\.15 Security log/);

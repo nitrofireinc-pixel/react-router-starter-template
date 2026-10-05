@@ -54,6 +54,8 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/instagram',
   '/api/admin/zernio/instagram/settings',
   '/api/admin/photos',
+  '/api/admin/security-log/verify',
+  '/api/admin/security-log/export',
 ];
 
 let savedToastTimer = null;
@@ -5370,7 +5372,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
       if (failed > 0) {
         const when = formatAuditFailureSince(data.write_failures?.since);
         failEl.hidden = false;
-        failEl.textContent = `${failed} audit writes failed since ${when || 'startup'}`;
+        failEl.textContent = `${failed} log ${failed === 1 ? 'entry' : 'entries'} couldn't be saved since ${when || 'startup'}. Those actions still happened, but they are missing from this log until they can be written. Check Workers logs for admin_audit_write_failed.`;
       } else {
         failEl.hidden = true;
         failEl.textContent = '';
@@ -8492,6 +8494,7 @@ function bindForms() {
       });
       const report = finished.court_report || lastCourt || {};
       if (court) court.innerHTML = renderSecurityLogCourt(report, checked);
+      showSavedToast(finished.chain_status || 'Verify finished');
     } catch (error) {
       if (court) court.innerHTML = `<p class="error">${escapeHtml(error.message || 'Verify failed')}</p>`;
     }
@@ -8500,14 +8503,12 @@ function bindForms() {
     const current = report.current || null;
     const previous = Array.isArray(report.previous) ? report.previous : [];
     const legacy = report.legacy;
+    const compatibility = Array.isArray(report.compatibility) ? report.compatibility : [];
     const parts = [];
     if (current) {
-      const title = current.intact
-        ? (current.original_build ? 'Current log: INTACT' : 'Current log: INTACT')
-        : current.title;
-      const start = current.original_build
-        ? (current.original_label || 'Current log, started with the original security-log build')
-        : [current.started_at_et ? `Started ${escapeHtml(current.started_at_et)}` : '', current.started_by ? `by ${escapeHtml(current.started_by)}` : '']
+      const title = current.title || (current.intact ? 'INTACT' : 'Link breaks');
+      const start = current.started_label || current.original_label
+        || [current.started_at_et ? `Started ${current.started_at_et}` : '', current.started_by ? `by ${current.started_by}` : '']
           .filter(Boolean).join(' ');
       parts.push(`<section class="security-log-court-current${current.intact ? '' : ' is-broken'}">
         <h2>${escapeHtml(title)}</h2>
@@ -8527,7 +8528,15 @@ function bindForms() {
     });
     if (legacy) {
       parts.push(`<section class="security-log-court-legacy">
-        <h2>${escapeHtml(legacy.title)}</h2>
+        <h2>Recorded before tamper-proof linking</h2>
+        <p>${escapeHtml(legacy.guarantee || legacy.title)}</p>
+      </section>`);
+    }
+    if (compatibility.length) {
+      const ids = compatibility.map((item) => `#${item.id}`).join(', ');
+      parts.push(`<section class="security-log-court-compat">
+        <h2>${escapeHtml(report.compatibility_heading || 'Written by the previous site version during the update')}</h2>
+        <p>${escapeHtml(ids)}</p>
       </section>`);
     }
     parts.push(`<details><summary>Technical details</summary>

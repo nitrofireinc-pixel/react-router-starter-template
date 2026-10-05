@@ -325,6 +325,13 @@ export function classifyAccessDenial({
       required: requiredPermissionFromDetail(detail) || inferRequiredPermissionFromPath(clean),
     };
   }
+  if (code === 409 && verb === 'PUT' && /\/api\/admin\/pages\//.test(clean)) {
+    return {
+      action: 'access.denied',
+      category: 'security',
+      required: requiredPermissionFromDetail(detail) || 'visual-editor',
+    };
+  }
   return null;
 }
 
@@ -652,11 +659,23 @@ export function parseCiphertextEnvelope(ciphertext = '') {
   return { kind: 'unknown', key_id: '', raw };
 }
 
-export function attachD1QueryCounter(env) {
-  if (!env?.DB || env.__d1Tracked) return env;
-  env.__d1Tracked = true;
-  env.__d1QueryCount = Number(env.__d1QueryCount) || 0;
+const instrumentedD1 = new WeakSet();
+
+export function createD1QueryBudget(count = 0) {
+  return { count: Math.max(0, Number(count) || 0) };
+}
+
+export function attachD1QueryCounter(env, budget = null) {
+  if (!env?.DB) return env;
   const db = env.DB;
+  const resolved = budget || db.__d1Budget || createD1QueryBudget();
+  db.__d1Budget = resolved;
+  if (instrumentedD1.has(db)) return env;
+  instrumentedD1.add(db);
+  const bump = (n = 1) => {
+    const current = db.__d1Budget || resolved;
+    current.count += Math.max(0, Number(n) || 0);
+  };
   const wrapStatement = (stmt) => {
     if (!stmt || stmt.__d1Wrapped) return stmt;
     stmt.__d1Wrapped = true;
@@ -672,19 +691,19 @@ export function attachD1QueryCounter(env) {
     }
     if (origFirst) {
       stmt.first = async (...args) => {
-        env.__d1QueryCount += 1;
+        bump(1);
         return origFirst(...args);
       };
     }
     if (origAll) {
       stmt.all = async (...args) => {
-        env.__d1QueryCount += 1;
+        bump(1);
         return origAll(...args);
       };
     }
     if (origRun) {
       stmt.run = async (...args) => {
-        env.__d1QueryCount += 1;
+        bump(1);
         return origRun(...args);
       };
     }
@@ -697,7 +716,7 @@ export function attachD1QueryCounter(env) {
   if (typeof db.batch === 'function') {
     const origBatch = db.batch.bind(db);
     db.batch = async (items) => {
-      env.__d1QueryCount += Array.isArray(items) ? items.length : 1;
+      bump(Array.isArray(items) ? items.length : 1);
       return origBatch(items);
     };
   }
@@ -705,12 +724,22 @@ export function attachD1QueryCounter(env) {
 }
 
 export function d1QueryCount(env) {
-  return Number(env?.__d1QueryCount) || 0;
+  return Number(env?.DB?.__d1Budget?.count) || 0;
+}
+
+export function resetD1QueryBudget(env, count = 0) {
+  if (!env?.DB) return createD1QueryBudget(count);
+  const budget = env.DB.__d1Budget || createD1QueryBudget(count);
+  budget.count = Math.max(0, Number(count) || 0);
+  env.DB.__d1Budget = budget;
+  return budget;
 }
 
 export function noteD1Query(env, n = 1) {
-  if (!env) return;
-  env.__d1QueryCount = d1QueryCount(env) + Math.max(0, Number(n) || 0);
+  if (!env?.DB) return;
+  const budget = env.DB.__d1Budget || createD1QueryBudget();
+  budget.count += Math.max(0, Number(n) || 0);
+  env.DB.__d1Budget = budget;
 }
 
 function auditWriteCanAfford(env, extra = D1_AUDIT_RETRY_COST) {
@@ -780,9 +809,36 @@ export function utcStampNow(now = new Date()) {
   return sqliteUtcStamp(date.toISOString());
 }
 
+const AUDIT_WRITE_RETRY_DELAYS_MS = [80, 200, 450];
+
+async function writeAdminAuditLogWithBackoff(env, entry = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= AUDIT_WRITE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const result = await writeAdminAuditLog(env, entry);
+      if (result) return result;
+      lastError = new Error('audit write returned empty');
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < AUDIT_WRITE_RETRY_DELAYS_MS.length) {
+      const wait = AUDIT_WRITE_RETRY_DELAYS_MS[attempt];
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  console.error('admin_audit_write_exhausted', {
+    action: String(entry?.action || ''),
+    category: String(entry?.category || ''),
+    path: String(entry?.path || ''),
+    status: Number(entry?.status) || 0,
+  });
+  await recordAuditWriteFailure(env, lastError);
+  return null;
+}
+
 export async function enqueueAdminAudit(env, ctx, entry = {}) {
   if (entry?.request) markRequestAuditWritten(entry.request);
-  const write = writeAdminAuditLog(env, entry);
+  const write = writeAdminAuditLogWithBackoff(env, entry);
   if (ctx && typeof ctx.waitUntil === 'function') {
     ctx.waitUntil(write);
     return write;
@@ -1755,7 +1811,8 @@ export async function maybeAuditAdminApiResponse(env, {
   const path = String(url?.pathname || '');
   const method = String(request?.method || '').toUpperCase();
   const status = Number(response?.status) || 0;
-  if (status === 401 || status === 403) return;
+  const pageSaveConflict = status === 409 && method === 'PUT' && /\/api\/admin\/pages\//.test(path);
+  if (status === 401 || status === 403 || pageSaveConflict) return;
   const visual = visualPageAuditFromRequest(path, requestSummary, method);
   const category = visual?.category || auditCategoryFromPath(path);
   const action = visual?.action
@@ -1845,9 +1902,10 @@ export async function maybeLogAccessDenial(env, {
 } = {}) {
   if (!response || requestAlreadyWroteAudit(request)) return null;
   const status = Number(response.status) || 0;
-  if (![401, 403, 429, 302, 303].includes(status)) return null;
   const path = sanitizeAuditPath(url?.pathname || request?.url || '');
   const method = String(request?.method || 'GET').toUpperCase();
+  const pageSaveConflict = status === 409 && method === 'PUT' && /\/api\/admin\/pages\//.test(path);
+  if (![401, 403, 429, 302, 303].includes(status) && !pageSaveConflict) return null;
   const location = response.headers?.get?.('location') || '';
   if (isPublicHttpPath(path) && status === 404) return null;
   const detail = forcedDetail || (status === 403 ? await peekDenialDetail(response) : '');
@@ -2222,16 +2280,142 @@ export async function listAdminAuditLogs(env, {
   };
 }
 
-export async function readAuditChainCutover(env) {
+export function sqliteStampToMs(stamp = '') {
+  const raw = String(stamp || '').trim();
+  if (!raw) return NaN;
+  const iso = /T/.test(raw)
+    ? raw
+    : raw.replace(' ', 'T') + (/Z|[+-]\d{2}:\d{2}$/.test(raw) ? '' : 'Z');
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+export function formatAuditPlainDate(stamp = '', timeZone = AUDIT_LOG_TIMEZONE) {
+  const ms = sqliteStampToMs(stamp);
+  if (!Number.isFinite(ms)) return '';
   try {
-    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-      .bind('audit_chain_cutover_id')
-      .first();
-    if (row?.value == null || String(row.value).trim() === '') return 0;
-    return Number(row.value) || 0;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(ms));
   } catch {
-    return 0;
+    return '';
   }
+}
+
+export function isWithinCutoverWindow(createdAt = '', cutoverAt = '', windowMinutes = 15) {
+  const start = sqliteStampToMs(cutoverAt);
+  const created = sqliteStampToMs(createdAt);
+  if (!Number.isFinite(start) || !Number.isFinite(created)) return false;
+  return created >= start && created <= start + (Number(windowMinutes) || 15) * 60 * 1000;
+}
+
+export function classifyAuditLinkRows(rows = [], {
+  cutoverAt = '',
+  prevHash = '',
+  prevId = 0,
+  inLegacyPrefix = true,
+} = {}) {
+  const breaks = [];
+  const legacy = [];
+  const compatibility = [];
+  let hash = String(prevHash || '');
+  let lastId = Number(prevId) || 0;
+  let legacyPrefix = Boolean(inLegacyPrefix);
+  const updateDate = formatAuditPlainDate(cutoverAt);
+  const compatReason = updateDate
+    ? `written by the previous site version during the update on ${updateDate}`
+    : 'written by the previous site version during the update';
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = Number(row.id) || 0;
+    const prev = String(row.prev_sha256 || '');
+    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
+    const hasHashLink = Boolean(prev);
+    const hashMatches = prev === hash;
+
+    if (legacyPrefix && !hasHashLink) {
+      legacy.push({ id, kind: 'legacy', reason: 'legacy, pre-chain' });
+      hash = String(row.payload_sha256 || '');
+      lastId = id;
+      continue;
+    }
+    legacyPrefix = false;
+
+    if (linkedId == null) {
+      const inWindow = isWithinCutoverWindow(row.created_at, cutoverAt);
+      if (inWindow && hashMatches) {
+        compatibility.push({
+          id,
+          kind: 'prior_version',
+          reason: compatReason,
+        });
+      } else {
+        breaks.push({
+          id,
+          kind: 'link',
+          reason: hashMatches
+            ? 'NULL prev_id outside the 15-minute update window'
+            : `previous hash does not match row #${lastId}`,
+        });
+      }
+    } else if (!hashMatches) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: `previous hash does not match row #${lastId}`,
+      });
+    } else if (lastId && linkedId !== lastId && linkedId !== 0) {
+      breaks.push({
+        id,
+        kind: 'link',
+        reason: `prev_id ${linkedId} does not follow #${lastId}`,
+      });
+    }
+
+    hash = String(row.payload_sha256 || '');
+    lastId = id;
+  }
+  return {
+    breaks,
+    legacy,
+    compatibility,
+    prevHash: hash,
+    prevId: lastId,
+    inLegacyPrefix: legacyPrefix,
+  };
+}
+
+export async function readAuditChainCutoverMeta(env) {
+  const meta = { id: 0, at: '' };
+  try {
+    const fetched = await env.DB.prepare(
+      "SELECT key, value FROM site_content WHERE key IN ('audit_chain_cutover_id', 'audit_chain_cutover_at')",
+    ).all();
+    for (const row of fetched?.results || []) {
+      if (row?.key === 'audit_chain_cutover_id') meta.id = Number(row.value) || 0;
+      if (row?.key === 'audit_chain_cutover_at') meta.at = String(row.value || '');
+    }
+  } catch {
+    try {
+      const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+        .bind('audit_chain_cutover_id')
+        .first();
+      if (row?.value != null && String(row.value).trim() !== '') {
+        meta.id = Number(row.value) || 0;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return meta;
+}
+
+export async function readAuditChainCutover(env) {
+  const meta = await readAuditChainCutoverMeta(env);
+  return meta.id;
 }
 
 export async function loadAuditGenerations(env) {
@@ -2320,6 +2504,8 @@ export function buildCourtVerifyReport({
   compatibility = [],
   minId = 1,
   maxId = 0,
+  firstEntryAt = '',
+  cutoverAt = '',
 } = {}) {
   const gens = Array.isArray(catalog) ? catalog : [];
   const current = [...gens].reverse().find((gen) => !gen.historical) || gens[gens.length - 1] || null;
@@ -2332,18 +2518,25 @@ export function buildCourtVerifyReport({
   const legacyIds = (Array.isArray(legacy) ? legacy : []).map((item) => Number(item.id)).filter(Boolean);
   const legacyStart = legacyIds.length ? Math.min(...legacyIds) : null;
   const legacyEnd = legacyIds.length ? Math.max(...legacyIds) : null;
+  const startedDate = formatAuditPlainDate(firstEntryAt);
+  const startedLabel = startedDate
+    ? `Started ${startedDate}, when the Security log was first set up`
+    : '';
+  const updateDate = formatAuditPlainDate(cutoverAt);
+  const compatHeading = updateDate
+    ? `Written by the previous site version during the update on ${updateDate}`
+    : 'Written by the previous site version during the update';
   return {
     current: current ? {
-      title: currentIntact ? 'Current log: INTACT' : `Current log: ${currentBreaks.length} link breaks`,
+      title: currentIntact ? 'INTACT' : `${currentBreaks.length} link breaks`,
       intact: currentIntact,
       start_id: current.start_id,
       end_id: current.end_id || maxId,
       started_at_et: current.started_at_et || '',
       started_by: current.started_by || '',
+      started_label: startedLabel,
       original_build: Boolean(current.original_build),
-      original_label: current.original_build
-        ? 'Current log, started with the original security-log build'
-        : '',
+      original_label: startedLabel,
     } : null,
     previous: previous.map((gen) => {
       const genBreaks = inRange(breaks, gen.start_id, gen.end_id);
@@ -2360,14 +2553,17 @@ export function buildCourtVerifyReport({
       };
     }),
     legacy: legacyStart != null ? {
-      title: `Recorded before tamper-proof linking was added (#${legacyStart}-#${legacyEnd})`,
+      title: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website or the database, but this check can't prove they weren't changed before linking began.`,
       start_id: legacyStart,
       end_id: legacyEnd,
+      guarantee: `Entries #${legacyStart}-#${legacyEnd} were recorded before tamper-proof linking was added. They can't be edited through the website or the database, but this check can't prove they weren't changed before linking began.`,
     } : null,
     compatibility: (Array.isArray(compatibility) ? compatibility : []).map((item) => ({
       id: item.id,
-      reason: item.reason || 'written by the previous site version during the update',
+      reason: item.reason || compatHeading.toLowerCase(),
     })),
+    compatibility_heading: compatHeading,
+    cutover_at: cutoverAt || '',
     explanation: AUDIT_CHAIN_BREAK_EXPLAIN,
     min_id: Number(minId) || 1,
     max_id: Number(maxId) || 0,
@@ -2378,15 +2574,11 @@ export function formatCourtVerifySummary(report = {}) {
   const current = report.current;
   if (!current) return 'Verify finished';
   const range = `#${current.start_id}-#${current.end_id}`;
-  if (current.original_build) {
-    return current.intact
-      ? `Current log, started with the original security-log build ${range}: INTACT`
-      : `${current.title} ${range}`;
+  const started = current.started_label || '';
+  if (current.intact) {
+    return started ? `${started} ${range}: INTACT` : `INTACT ${range}`;
   }
-  const started = current.started_at_et && current.started_by
-    ? ` started ${current.started_at_et} by ${current.started_by}`
-    : '';
-  return `${current.title}${started}, rows ${range}`;
+  return `${current.title} ${range}`;
 }
 
 export function formatAuditGenerationReport(catalog = [], breaks = []) {
@@ -2503,7 +2695,7 @@ export async function readAuditExportSession(env, sessionId = '', {
     return { ok: false, status: 400, detail: 'Export session is invalid' };
   }
   if (Date.now() > Number(session?.exp || 0)) {
-    return { ok: false, status: 403, detail: 'Export session expired' };
+    return { ok: false, status: 403, detail: 'Export session expired, start again' };
   }
   if (actorId != null && Number(session.actor_id) !== Number(actorId)) {
     return { ok: false, status: 403, detail: 'Export session belongs to another user' };
@@ -2549,6 +2741,9 @@ export async function advanceAuditExportSession(env, sessionId, {
 export async function completeAuditExportSession(env, sessionId, { actorId } = {}) {
   const read = await readAuditExportSession(env, sessionId, { actorId });
   if (!read.ok) return read;
+  if ((Number(read.session?.n) || 0) <= 0) {
+    return { ok: false, status: 400, detail: 'No rows were downloaded' };
+  }
   try {
     await env.DB.prepare(
       `INSERT INTO ${AUDIT_EXPORT_SESSIONS_TABLE}
@@ -2595,39 +2790,15 @@ export async function readAuditIdExtrema(env) {
   }
 }
 
-export function auditLinkBreaksFromRows(rows = [], cutover = 0) {
-  const breaks = [];
-  let prevHash = '';
-  let prevId = 0;
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const id = Number(row.id) || 0;
-    const prev = String(row.prev_sha256 || '');
-    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
-    const afterCutover = cutover > 0 && id > cutover;
-    if (afterCutover && linkedId == null) {
-      // Old Worker inserts omit prev_id. The next linked row must still
-      // chain to this id/hash; that is not a break.
-    } else if (prev && prev !== prevHash) {
-      breaks.push({
-        id,
-        kind: 'link',
-        reason: `previous hash does not match row #${prevId}`,
-      });
-    } else if (afterCutover && ((prevId && linkedId !== prevId) || (!prev && prevHash))) {
-      breaks.push({
-        id,
-        kind: 'link',
-        reason: `prev_id ${linkedId} does not follow #${prevId}`,
-      });
-    }
-    prevHash = String(row.payload_sha256 || '');
-    prevId = id;
-  }
-  return breaks;
+export function auditLinkBreaksFromRows(rows = [], cutover = 0, cutoverAt = '') {
+  return classifyAuditLinkRows(rows, {
+    cutoverAt,
+    inLegacyPrefix: true,
+  }).breaks;
 }
 
-export async function collectAuditLinkBreaks(env) {
-  const sql = `SELECT id, prev_id, prev_sha256, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
+export async function collectAuditLinkState(env) {
+  const sql = `SELECT id, created_at, prev_id, prev_sha256, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
   assertAuditSqlIsAppendOnly(sql);
   let rows = [];
   try {
@@ -2636,7 +2807,24 @@ export async function collectAuditLinkBreaks(env) {
   } catch {
     rows = [];
   }
-  return auditLinkBreaksFromRows(rows, await readAuditChainCutover(env));
+  const cutover = await readAuditChainCutoverMeta(env);
+  const classified = classifyAuditLinkRows(rows, {
+    cutoverAt: cutover.at,
+    inLegacyPrefix: true,
+  });
+  return {
+    rows,
+    cutover,
+    breaks: classified.breaks,
+    legacy: classified.legacy,
+    compatibility: classified.compatibility,
+    first_entry_at: rows[0]?.created_at || '',
+  };
+}
+
+export async function collectAuditLinkBreaks(env) {
+  const state = await collectAuditLinkState(env);
+  return state.breaks;
 }
 
 export async function buildAuditExportManifest(env, extra = {}) {
@@ -2650,9 +2838,14 @@ export async function buildAuditExportManifest(env, extra = {}) {
     minId: extrema.min_id || 1,
     maxId: extrema.max_id || head.id,
   });
+  const linkState = extra.link_state || (Array.isArray(extra.breaks) ? null : await collectAuditLinkState(env));
   const breaks = Array.isArray(extra.breaks)
     ? extra.breaks
-    : await collectAuditLinkBreaks(env);
+    : (linkState?.breaks || []);
+  const legacy = Array.isArray(extra.legacy) ? extra.legacy : (linkState?.legacy || []);
+  const compatibility = Array.isArray(extra.compatibility)
+    ? extra.compatibility
+    : (linkState?.compatibility || []);
   const currentGen = [...catalog].reverse().find((gen) => !gen.historical) || catalog[catalog.length - 1];
   const currentBreaks = currentGen
     ? breaks.filter((item) => Number(item.id) >= Number(currentGen.start_id) && Number(item.id) <= Number(currentGen.end_id))
@@ -2674,9 +2867,15 @@ export async function buildAuditExportManifest(env, extra = {}) {
     court_report: buildCourtVerifyReport({
       catalog,
       breaks,
+      legacy,
+      compatibility,
       minId: extrema.min_id || 1,
       maxId: extrema.max_id || head.id,
+      firstEntryAt: extra.first_entry_at || linkState?.first_entry_at || '',
+      cutoverAt: extra.cutover_at || linkState?.cutover?.at || '',
     }),
+    legacy,
+    compatibility,
     chain_ok: currentBreaks.length === 0,
     signed_manifest: signed,
     signed_chain: signed,
@@ -2711,41 +2910,19 @@ export async function verifyAdminAuditBatch(env, {
     if (!prevHash) prevHash = String(neighbor?.payload_sha256 || '');
     if (neighbor?.id) prevId = Number(neighbor.id) || afterId;
   }
-  const cutover = await readAuditChainCutover(env);
-  const breaks = [];
+  const cutover = await readAuditChainCutoverMeta(env);
+  const classified = classifyAuditLinkRows(rows, {
+    cutoverAt: cutover.at,
+    prevHash,
+    prevId,
+    inLegacyPrefix: afterId === 0,
+  });
+  const breaks = [...classified.breaks];
   const digestFailures = [];
-  const legacy = [];
-  const compatibility = [];
+  const legacy = classified.legacy;
+  const compatibility = classified.compatibility;
   for (const row of rows) {
     const id = Number(row.id) || 0;
-    const prev = String(row.prev_sha256 || '');
-    const linkedId = row.prev_id == null || row.prev_id === '' ? null : Number(row.prev_id);
-    const afterCutover = cutover > 0 && id > cutover;
-    const blankLink = !prev && (linkedId == null || linkedId === 0);
-    if (!afterCutover && (blankLink || linkedId == null) && (!prev || prev === prevHash)) {
-      if (blankLink || linkedId == null) {
-        legacy.push({ id, kind: 'legacy', reason: 'legacy, pre-chain' });
-      }
-    }
-    if (afterCutover && linkedId == null) {
-      compatibility.push({
-        id,
-        kind: 'prior_version',
-        reason: 'written by the previous site version during the update',
-      });
-    } else if (prev && prev !== prevHash) {
-      breaks.push({
-        id,
-        kind: 'link',
-        reason: `previous hash does not match row #${prevId || afterId}`,
-      });
-    } else if (afterCutover && ((prevId && linkedId !== prevId) || (!prev && prevHash))) {
-      breaks.push({
-        id,
-        kind: 'link',
-        reason: `prev_id ${linkedId} does not follow #${prevId}`,
-      });
-    }
     const digest = await verifyAuditRowDigest(row);
     if (digest.recomputed && !digest.ok) {
       digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
@@ -2804,6 +2981,8 @@ export async function verifyAdminAuditBatch(env, {
       compatibility,
       minId: Number(extrema?.min_id) || 1,
       maxId: Number(extrema?.max_id) || trueHead.id,
+      firstEntryAt: afterId === 0 ? (first?.created_at || '') : '',
+      cutoverAt: cutover.at,
     }),
     explanation: AUDIT_CHAIN_BREAK_EXPLAIN,
     scope: 'whole_chain',
@@ -2812,98 +2991,98 @@ export async function verifyAdminAuditBatch(env, {
   };
 }
 
-export async function verifyAdminAuditRange(env, options = {}) {
-  if (options.batch || options.after_id != null) {
-    return verifyAdminAuditBatch(env, options);
+export async function verifyAdminAuditComplete(env) {
+  const started = Date.now();
+  const rowsSql = `SELECT id, created_at, action, category, actor_user_id, actor_username, ciphertext, enc_version,
+      payload_sha256, prev_sha256, prev_id
+     FROM ${ADMIN_AUDIT_TABLE} ORDER BY id ASC`;
+  assertAuditSqlIsAppendOnly(rowsSql);
+  let rows = [];
+  try {
+    const fetched = await env.DB.prepare(rowsSql).all();
+    rows = fetched?.results || [];
+  } catch {
+    rows = [];
   }
-  let afterId = 0;
-  let expectedPrev = '';
-  let checked = 0;
-  let chainOk = true;
-  let status = 'Whole chain intact';
-  let breakId = null;
-  const breaks = [];
+  const cutover = await readAuditChainCutoverMeta(env);
+  const genesis = await loadAuditGenerations(env);
+  const classified = classifyAuditLinkRows(rows, {
+    cutoverAt: cutover.at,
+    inLegacyPrefix: true,
+  });
+  const breaks = [...classified.breaks];
   const digestFailures = [];
-  const legacy = [];
-  const compatibility = [];
-  let minId = null;
-  let maxId = null;
-  let head = '';
-  let headId = null;
-  let tail = '';
-  let generations = [];
-  let generationReport = [];
-  let explanation = AUDIT_CHAIN_BREAK_EXPLAIN;
-  while (true) {
-    const batch = await verifyAdminAuditBatch(env, {
-      after_id: afterId,
-      expected_prev: expectedPrev,
-      limit: options.limit || ADMIN_AUDIT_VERIFY_BATCH,
-    });
-    if (minId == null) minId = batch.min_id;
-    if (batch.max_id) maxId = batch.max_id;
-    if (!tail && batch.min_id) tail = String(batch.next_expected_prev || '');
-    checked += Number(batch.checked) || 0;
-    if (batch.chain_head) head = batch.chain_head;
-    if (batch.chain_head_id) headId = batch.chain_head_id;
-    if (Array.isArray(batch.breaks)) breaks.push(...batch.breaks);
-    if (Array.isArray(batch.digest_failures)) digestFailures.push(...batch.digest_failures);
-    if (Array.isArray(batch.legacy)) legacy.push(...batch.legacy);
-    if (Array.isArray(batch.compatibility)) compatibility.push(...batch.compatibility);
-    if (Array.isArray(batch.generations)) generations = batch.generations;
-    if (batch.explanation) explanation = batch.explanation;
-    if (batch.chain_ok === false) {
-      chainOk = false;
-      breakId = breakId || batch.chain_break_id;
+  for (const row of rows) {
+    const digest = await verifyAuditRowDigest(row);
+    if (digest.recomputed && !digest.ok) {
+      const id = Number(row.id) || 0;
+      digestFailures.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
+      breaks.push({ id, kind: 'digest', reason: 'recomputed digest does not match stored SHA-256' });
     }
-    if (batch.done) {
-      generationReport = formatAuditGenerationReport(generations, breaks);
-      break;
-    }
-    afterId = batch.next_after_id;
-    expectedPrev = batch.next_expected_prev;
   }
-  const court = buildCourtVerifyReport({
-    catalog: generations,
-    breaks,
-    digestFailures,
-    legacy,
-    compatibility,
+  const first = rows[0] || null;
+  const last = rows.length ? rows[rows.length - 1] : null;
+  const minId = first ? Number(first.id) : 1;
+  const maxId = last ? Number(last.id) : 0;
+  const catalog = buildAuditGenerationCatalog({
+    genesisRows: genesis,
     minId,
     maxId,
   });
-  status = formatCourtVerifySummary(court);
+  const court = buildCourtVerifyReport({
+    catalog,
+    breaks,
+    digestFailures,
+    legacy: classified.legacy,
+    compatibility: classified.compatibility,
+    minId,
+    maxId,
+    firstEntryAt: first?.created_at || '',
+    cutoverAt: cutover.at,
+  });
+  const status = formatCourtVerifySummary(court);
+  const head = last ? String(last.payload_sha256 || '') : '';
+  const tail = first ? String(first.payload_sha256 || '') : '';
   const material = [
     String(minId || 0),
     String(maxId || 0),
-    String(checked),
+    String(rows.length),
     String(head || ''),
     String(tail || ''),
   ].join('|');
   const signature = await signAuditChainHead(env, material);
   return {
-    chain_ok: chainOk,
+    chain_ok: breaks.length === 0,
     chain_status: status,
-    chain_break_id: breakId,
+    chain_break_id: breaks[0]?.id || null,
     chain_break_ids: breaks.map((item) => item.id),
     breaks,
-    checked,
+    checked: rows.length,
     digest_failures: digestFailures,
-    legacy,
-    compatibility,
+    legacy: classified.legacy,
+    compatibility: classified.compatibility,
     court_report: court,
     min_id: minId,
     max_id: maxId,
     chain_head: head,
-    chain_head_id: headId,
+    chain_head_id: maxId || null,
     chain_tail: tail,
     signed_chain: signature,
-    generations,
-    generation_report: generationReport,
-    explanation,
+    generations: catalog,
+    generation_report: formatAuditGenerationReport(catalog, breaks),
+    explanation: AUDIT_CHAIN_BREAK_EXPLAIN,
     key_configured: hasAuditLogKey(env),
     scope: 'whole_chain',
+    query_count_constant: true,
+    elapsed_ms: Date.now() - started,
   };
+}
+
+export async function verifyAdminAuditRange(env, options = {}) {
+  if (options.batch || options.after_id != null) {
+    return verifyAdminAuditBatch(env, options);
+  }
+  return verifyAdminAuditComplete(env);
 }
 
 function csvEscape(value) {

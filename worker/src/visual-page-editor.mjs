@@ -9,7 +9,12 @@ import {
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
 } from './admin-chrome.mjs';
-import { contentOnlyHtmlViolation, visualStructureSignature, visualStyleSignature } from './page-permissions.mjs';
+import {
+  contentOnlyForbiddenHtmlViolation,
+  contentOnlyHtmlViolation,
+  visualStructureSignature,
+  visualStyleSignature,
+} from './page-permissions.mjs';
 
 export { visualStructureSignature, visualStyleSignature };
 
@@ -796,6 +801,8 @@ export async function saveVisualPage(env, {
     const baseline = sanitizeVisualPageHtml(
       stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
     );
+    const forbidden = contentOnlyForbiddenHtmlViolation(baseline, String(html || ''));
+    if (forbidden) throw layoutRequiredError(key, forbidden);
     const incomingViolation = contentOnlyHtmlViolation(baseline, String(html || ''));
     if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
     const cleanViolation = contentOnlyHtmlViolation(baseline, clean);

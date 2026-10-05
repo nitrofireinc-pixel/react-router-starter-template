@@ -10,6 +10,7 @@ import {
 } from '../worker/src/admin-audit-log.mjs';
 import { renderAdminSidebarHtml } from '../worker/src/admin-chrome.mjs';
 import {
+  contentOnlyForbiddenHtmlViolation,
   contentOnlyHtmlViolation,
   migrateStoredUserPermissionGrants,
   normalizePageGrants,
@@ -325,6 +326,36 @@ test('content-only visual save 403s hidden style on an inner paragraph or span',
   assert.equal(contentOnlyHtmlViolation(BASE_HTML, BASE_HTML.replace('Intro', 'Welcome')), null);
 });
 
+test('content-only visual save 403s onclick, data-*, iframe, script, style, and javascript: links', async () => {
+  resetVisualPagesSchemaCache();
+  const { env } = createVisualEnv();
+  const cases = [
+    [BASE_HTML.replace('<p>Intro</p>', '<p onclick="alert(1)">Intro</p>'), /onclick/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p data-x="1">Intro</p>'), /data-x/i],
+    [`${BASE_HTML}<iframe src="/x"></iframe>`, /iframe/i],
+    [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
+    [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
+    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
+  ];
+  for (const [html, detail] of cases) {
+    assert.match(contentOnlyForbiddenHtmlViolation(BASE_HTML, html), detail);
+    await assert.rejects(
+      () => saveVisualPage(env, {
+        slug: 'sponsors',
+        html,
+        action: 'draft',
+        user: { id: 8, display_name: 'Jamie' },
+        allowStructure: false,
+      }),
+      (error) => {
+        assert.equal(error.status, 403);
+        assert.match(error.message, detail);
+        return true;
+      },
+    );
+  }
+});
+
 test('content-only visual save accepts copy edits and 403s a structural save', async () => {
   resetVisualPagesSchemaCache();
   const { env, count } = createVisualEnv();
@@ -351,7 +382,7 @@ test('content-only visual save accepts copy edits and 403s a structural save', a
     (error) => {
       assert.equal(error.status, 403);
       assert.equal(error.code, 'layout_required');
-      assert.match(error.message, /new <section> is not allowed|layout:sponsors/);
+      assert.match(error.message, /new <section> is not allowed|layout:sponsors|data-visual-block/);
       return true;
     },
   );
@@ -523,7 +554,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005c'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005d'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.6'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });

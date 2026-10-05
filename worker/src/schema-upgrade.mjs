@@ -45,23 +45,30 @@ export const AUDIT_LOG_ACTOR_NAMES_INDEX_SQL =
   'CREATE INDEX IF NOT EXISTS idx_audit_actor_names_user ON admin_audit_actor_names (user_id, id)';
 
 export const AUDIT_CHAIN_CUTOVER_KEY = 'audit_chain_cutover_id';
+export const AUDIT_CHAIN_CUTOVER_AT_KEY = 'audit_chain_cutover_at';
+export const AUDIT_CUTOVER_NULL_PREV_WINDOW_MINUTES = 15;
 
 export const AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL =
   'DROP TRIGGER IF EXISTS admin_audit_log_linear_insert';
 
-/** Old Workers omit prev_id (NULL). New Workers always send prev_id = MAX(id). */
+/**
+ * Linked inserts must follow MAX(id). NULL prev_id is only for the previous
+ * Worker isolate during the 15-minute cutover window (deploy under maintenance).
+ */
 export const AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL = `
 CREATE TRIGGER IF NOT EXISTS admin_audit_log_linear_insert
 BEFORE INSERT ON admin_audit_log
-WHEN (
-  NEW.prev_id IS NOT NULL
-  AND (SELECT COALESCE(MAX(id), 0) FROM admin_audit_log)
-  >=
-  COALESCE((SELECT CAST(value AS INTEGER) FROM site_content WHERE key = 'audit_chain_cutover_id'), 0)
-)
 BEGIN
   SELECT RAISE(ABORT, 'audit-chain-fork')
   WHERE CASE
+    WHEN NEW.prev_id IS NULL THEN
+      (
+        (SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at') IS NULL
+        OR datetime('now') >= datetime(
+          (SELECT value FROM site_content WHERE key = 'audit_chain_cutover_at'),
+          '+15 minutes'
+        )
+      )
     WHEN (SELECT MAX(id) FROM admin_audit_log) IS NULL THEN
       NEW.prev_id != 0 OR NEW.prev_sha256 != ''
     ELSE
@@ -70,6 +77,12 @@ BEGIN
   END;
 END
 `.trim();
+
+export function utcSqliteStamp(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
 
 export const AUDIT_LOG_EXPORT_SESSIONS_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS admin_audit_export_sessions (
@@ -301,8 +314,15 @@ export async function readAuditLinearTriggerSql(env) {
   }
 }
 
+export function linearTriggerEnforcesCutoverWindow(sql = '') {
+  const text = String(sql || '');
+  return /audit_chain_cutover_at/i.test(text) && /\+15 minutes/i.test(text);
+}
+
+/** True when the trigger still permits NULL-prev inside the cutover window. */
 export function linearTriggerAllowsLegacyNull(sql = '') {
-  return /NEW\.prev_id IS NOT NULL/i.test(String(sql || ''));
+  return linearTriggerEnforcesCutoverWindow(sql)
+    || /NEW\.prev_id IS NOT NULL/i.test(String(sql || ''));
 }
 
 export async function auditSchemaNeedsRepair(env) {
@@ -310,8 +330,17 @@ export async function auditSchemaNeedsRepair(env) {
   if (!names.size) return false;
   if (AUDIT_LOG_REQUIRED_COLUMNS.some((column) => !names.has(column.name))) return true;
   const triggerSql = await readAuditLinearTriggerSql(env);
-  if (!linearTriggerAllowsLegacyNull(triggerSql)) return true;
+  if (!linearTriggerEnforcesCutoverWindow(triggerSql)) return true;
   return false;
+}
+
+export async function repairAuditSchema(env) {
+  await ensureAuditLogColumns(env);
+  await ensureAuditChainCutover(env);
+  await runSchemaStatements(env, [
+    AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL,
+    AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
+  ]);
 }
 
 export async function applyIncrementalSchema(env, { writeVersion } = {}) {
@@ -331,33 +360,48 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   if (typeof writeVersion === 'function') await writeVersion(env);
 }
 
-export async function ensureAuditChainCutover(env) {
-  if (!env?.DB?.prepare) return null;
+async function readSiteContentValue(env, key) {
   try {
-    const existing = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
-      .bind(AUDIT_CHAIN_CUTOVER_KEY)
+    const row = await env.DB.prepare('SELECT value FROM site_content WHERE key = ?')
+      .bind(key)
       .first();
-    if (existing?.value != null && String(existing.value).trim() !== '') {
-      return Number(existing.value) || 0;
-    }
+    if (row?.value == null || String(row.value).trim() === '') return '';
+    return String(row.value);
   } catch {
-    // site_content may be missing in unit mocks
+    return '';
   }
-  let cutover = 0;
-  try {
-    const max = await env.DB.prepare('SELECT MAX(id) AS max_id FROM admin_audit_log').first();
-    cutover = Number(max?.max_id) || 0;
-  } catch {
-    cutover = 0;
-  }
+}
+
+async function writeSiteContentIfAbsent(env, key, value) {
   try {
     await env.DB.prepare(
       'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
-    ).bind(AUDIT_CHAIN_CUTOVER_KEY, String(cutover)).run();
+    ).bind(key, String(value)).run();
   } catch {
-    // ignore
+    // site_content may be missing in unit mocks
   }
-  return cutover;
+}
+
+export async function ensureAuditChainCutover(env) {
+  if (!env?.DB?.prepare) return { id: 0, at: '' };
+  const existingId = await readSiteContentValue(env, AUDIT_CHAIN_CUTOVER_KEY);
+  const existingAt = await readSiteContentValue(env, AUDIT_CHAIN_CUTOVER_AT_KEY);
+  let cutoverId = Number(existingId) || 0;
+  let cutoverAt = existingAt;
+  if (!existingId) {
+    try {
+      const max = await env.DB.prepare('SELECT MAX(id) AS max_id FROM admin_audit_log').first();
+      cutoverId = Number(max?.max_id) || 0;
+    } catch {
+      cutoverId = 0;
+    }
+    await writeSiteContentIfAbsent(env, AUDIT_CHAIN_CUTOVER_KEY, String(cutoverId));
+  }
+  if (!cutoverAt) {
+    cutoverAt = utcSqliteStamp();
+    await writeSiteContentIfAbsent(env, AUDIT_CHAIN_CUTOVER_AT_KEY, cutoverAt);
+  }
+  return { id: cutoverId, at: cutoverAt };
 }
 
 export async function backfillAuditActorNames(env) {

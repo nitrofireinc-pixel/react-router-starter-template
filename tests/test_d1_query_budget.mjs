@@ -14,6 +14,7 @@ import worker, {
 } from '../worker/src/worker.mjs';
 import { WORKER_FIRST_ROUTES } from '../worker/src/worker-first-routes.mjs';
 import {
+  D1_REQUEST_QUERY_SOFT_CAP,
   MAX_D1_QUERIES_PER_INVOCATION,
   PREVIOUS_DB_SCHEMA_VERSION,
   applyIncrementalSchema,
@@ -335,4 +336,44 @@ test('photo cache headers and purge rules stay on the Free-plan path', () => {
   assert.equal(shouldInvalidatePublicReadCache('/api/admin/site', 'POST'), true);
   assert.equal(shouldInvalidatePublicReadCache('/api/admin/maintenance', 'POST'), true);
   assert.match(publicPhotoUrl({ id: 1, filename: 'a.jpg', created_at: '2026-01-01' }), /\?v=1-/);
+});
+
+test('every worker route stays at or under 45 D1 queries including retries', async () => {
+  const pages = PUBLIC_ROUTES.map((route) => ({
+    id: route.slug.length,
+    slug: route.slug,
+    path: route.path,
+    title: route.title,
+    body_html: `<section class="content"><div class="wrap"><p>${route.title}</p></div></section>`,
+    nav_order: 1,
+    is_home: route.is_home,
+    active: 1,
+  }));
+  const routes = [
+    ...PUBLIC_ROUTES.map((route) => ({ path: route.path, method: 'GET' })),
+    { path: '/missing-page-404', method: 'GET' },
+    { path: '/admin/login', method: 'GET' },
+    { path: '/admin/login', method: 'POST', body: 'username=nope&password=nope', headers: { 'content-type': 'application/x-www-form-urlencoded' } },
+    { path: '/admin/logout', method: 'GET' },
+    { path: '/admin/visual/join', method: 'GET' },
+    { path: '/api/admin/security-log/verify/complete', method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } },
+    { path: '/api/admin/security-log/export/complete', method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } },
+    { path: '/api/admin/pages/join', method: 'PUT', body: '{"body_html":"<p>x</p>"}', headers: { 'content-type': 'application/json' } },
+  ];
+  const counts = {};
+  for (const route of routes) {
+    resetDbInitCache();
+    const boxed = createCountingEnv(pages);
+    const request = new Request(`https://efhsband-dev.example${route.path}`, {
+      method: route.method,
+      headers: route.headers,
+      body: route.body,
+    });
+    const response = await worker.fetch(request, boxed.env, { waitUntil() {} });
+    assert.ok(response.status < 500, `${route.method} ${route.path} status ${response.status}`);
+    const used = boxed.count();
+    assert.ok(used <= D1_REQUEST_QUERY_SOFT_CAP, `${route.method} ${route.path} used ${used} D1 queries`);
+    counts[`${route.method} ${route.path}`] = { queries: used, status: response.status };
+  }
+  console.log(JSON.stringify({ max_d1_queries_per_route: counts }));
 });
