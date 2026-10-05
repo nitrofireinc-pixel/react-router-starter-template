@@ -4,7 +4,7 @@
  */
 
 export const DEVICE_CLIENT_MAX_JSON = 800;
-export const ADMIN_CLIENT_HINT_ACCEPT = 'Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform';
+export const ADMIN_CLIENT_HINT_ACCEPT = 'Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List';
 
 const NOT_A_BRAND = /not[.\s_-]*a[.\s_-]*brand/i;
 const GENERIC_BRANDS = new Set(['chromium', 'grease', 'gecko', 'webkit']);
@@ -71,6 +71,10 @@ export function parseUserAgentDevice(userAgent = '', hints = {}) {
   const brands = Array.isArray(hints.brands) ? hints.brands : parseSecChUa(hints.ua || hints.secChUa || '');
   const chMobile = hints.mobile == null ? parseClientHintMobile(hints.secChUaMobile) : hints.mobile;
   const chPlatform = clip(hints.platform || hints.secChUaPlatform || '', 40).replace(/^"|"$/g, '');
+  const chPlatformVersion = clip(hints.platformVersion || hints.secChUaPlatformVersion || '', 40).replace(/^"|"$/g, '');
+  const fullBrands = Array.isArray(hints.fullBrands)
+    ? hints.fullBrands
+    : parseSecChUa(hints.fullVersionList || hints.secChUaFullVersionList || '');
 
   let os = '';
   let os_version = '';
@@ -84,6 +88,9 @@ export function parseUserAgentDevice(userAgent = '', hints = {}) {
 
   if (chPlatform) {
     os = chPlatform === 'macOS' || chPlatform === 'Mac OS X' ? 'macOS' : chPlatform;
+  }
+  if (chPlatformVersion) {
+    os_version = versionMajorMinor(chPlatformVersion);
   }
   if (/iPhone|iPad|iPod/.test(ua)) {
     os = /iPad/.test(ua) ? 'iPadOS' : 'iOS';
@@ -109,7 +116,7 @@ export function parseUserAgentDevice(userAgent = '', hints = {}) {
     os = os || 'Linux';
   }
 
-  const brand = preferredClientHintBrand(brands);
+  const brand = preferredClientHintBrand(fullBrands.length ? fullBrands : brands);
   if (brand) {
     browser = brand.name;
     browser_version = versionMajorMinor(brand.version);
@@ -146,13 +153,27 @@ export function parseUserAgentDevice(userAgent = '', hints = {}) {
 }
 
 export function requestClientHints(request) {
-  if (!request?.headers?.get) return { ua: '', mobile: '', platform: '', brands: [] };
+  if (!request?.headers?.get) {
+    return {
+      ua: '',
+      mobile: '',
+      platform: '',
+      platformVersion: '',
+      fullVersionList: '',
+      brands: [],
+      fullBrands: [],
+    };
+  }
   const ua = request.headers.get('sec-ch-ua') || '';
+  const fullVersionList = request.headers.get('sec-ch-ua-full-version-list') || '';
   return {
     ua,
     mobile: request.headers.get('sec-ch-ua-mobile') || '',
     platform: String(request.headers.get('sec-ch-ua-platform') || '').replace(/^"|"$/g, ''),
+    platformVersion: String(request.headers.get('sec-ch-ua-platform-version') || '').replace(/^"|"$/g, ''),
+    fullVersionList,
     brands: parseSecChUa(ua),
+    fullBrands: parseSecChUa(fullVersionList),
   };
 }
 
@@ -233,11 +254,13 @@ export function buildAuditDeviceMeta({
     ...parsed,
     user_agent: ua,
   };
-  if (hints.ua || hints.mobile || hints.platform) {
+  if (hints.ua || hints.mobile || hints.platform || hints.platformVersion || hints.fullVersionList) {
     device.ch = {
       ua: clip(hints.ua, 200),
       mobile: clip(hints.mobile, 8),
       platform: clip(hints.platform, 40),
+      platform_version: clip(hints.platformVersion, 40),
+      full_version_list: clip(hints.fullVersionList, 240),
     };
   }
   const snapshot = sanitizeClientDeviceSnapshot(client);

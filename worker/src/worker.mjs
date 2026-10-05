@@ -61,6 +61,7 @@ import {
   markRequestAuditWritten,
   maybeAuditAdminApiResponse,
   maybeLogAccessDenial,
+  verifyAdminAuditBatch,
   parseAuditUtcDate,
   permissionListFromValue,
   registerLoginFailure,
@@ -414,7 +415,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004z';
+export const ASSET_VERSION = 'cms-p1-20261005a';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2101,7 +2102,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.3';
+export const DB_SCHEMA_VERSION = '2026-10-04.4';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -2206,7 +2207,7 @@ async function migrateAndSeedDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_forms (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, definition_json TEXT NOT NULL DEFAULT \'{}\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', page_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1, prev_sha256 TEXT NOT NULL DEFAULT \'\', prev_id INTEGER)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10169,6 +10170,7 @@ async function routeApi(request, env, url, ctx = null) {
     const from = String(url.searchParams.get('from') || '').trim();
     const to = String(url.searchParams.get('to') || '').trim();
     const q = String(url.searchParams.get('q') || '').trim();
+    const started = Date.now();
     const payload = await listAdminAuditLogs(env, {
       limit: pageSize,
       offset,
@@ -10180,6 +10182,7 @@ async function routeApi(request, env, url, ctx = null) {
       to,
       q,
     });
+    payload.elapsed_ms = Number(payload.elapsed_ms) || (Date.now() - started);
     const totalPages = Math.max(1, Math.ceil((Number(payload.total) || 0) / pageSize) || 1);
     const page = Math.floor(offset / pageSize) + 1;
     // Log vault access on first-page opens/refreshes only — not every pager click.
@@ -10308,33 +10311,72 @@ async function routeApi(request, env, url, ctx = null) {
       to: String(url.searchParams.get('to') || '').trim(),
       q: String(url.searchParams.get('q') || '').trim(),
     };
-    const payload = await listAdminAuditLogs(env, range);
-    const verify = await verifyAdminAuditRange(env, range);
-    await enqueueAdminAudit(env, ctx, {
-      action: 'security.log.export',
-      category: 'security',
-      method: 'GET',
-      path: url.pathname,
-      status: 200,
-      ...auditRequestForensics(request, auth.user),
-      summary: buildAuditSummary({
-        action: 'security.log.export',
-        method: 'GET',
-        path: url.pathname,
-        status: 200,
-        actorUsername: auth.user.username,
-        detail: `exported ${payload.entries.length} entries`,
-      }),
-      meta: {
-        entry_count: payload.entries.length,
+    const batched = url.searchParams.get('batch') === '1';
+    if (batched) {
+      const started = Date.now();
+      const afterId = Math.max(Number(url.searchParams.get('after_id') || 0), 0);
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 100);
+      const payload = await listAdminAuditLogs(env, {
+        ...range,
+        limit,
+        offset: 0,
+        after_id: afterId,
+        order: 'asc',
+      });
+      const nextAfter = payload.entries.length
+        ? Number(payload.entries[payload.entries.length - 1].id)
+        : afterId;
+      const done = payload.entries.length < limit;
+      if (afterId === 0) {
+        await enqueueAdminAudit(env, ctx, {
+          action: 'security.log.export',
+          category: 'security',
+          method: 'GET',
+          path: url.pathname,
+          status: 200,
+          ...auditRequestForensics(request, auth.user),
+          summary: buildAuditSummary({
+            action: 'security.log.export',
+            method: 'GET',
+            path: url.pathname,
+            status: 200,
+            actorUsername: auth.user.username,
+            detail: `exported batch of ${payload.entries.length} entries`,
+          }),
+          meta: {
+            entry_count: payload.entries.length,
+            total: payload.total,
+            format: url.pathname.endsWith('.csv') ? 'csv' : 'json',
+            batch: true,
+          },
+        });
+      }
+      const elapsed_ms = Date.now() - started;
+      if (url.pathname.endsWith('.csv')) {
+        const csvBody = buildAdminAuditExportCsv(payload.entries, null);
+        const [header, ...lines] = csvBody.trimEnd().split('\n');
+        return jsonResponse({
+          header,
+          chunk: lines.filter((line) => line.length).join('\n'),
+          count: payload.entries.length,
+          total: payload.total,
+          next_after_id: nextAfter,
+          done,
+          elapsed_ms,
+        });
+      }
+      return jsonResponse({
+        entries: payload.entries,
+        count: payload.entries.length,
         total: payload.total,
-        format: url.pathname.endsWith('.csv') ? 'csv' : 'json',
-        chain_head: verify.chain_head,
-        signed_chain: verify.signed_chain,
-      },
-    });
+        next_after_id: nextAfter,
+        done,
+        elapsed_ms,
+      });
+    }
+    const payload = await listAdminAuditLogs(env, range);
     if (url.pathname.endsWith('.csv')) {
-      return new Response(buildAdminAuditExportCsv(payload.entries, verify), {
+      return new Response(buildAdminAuditExportCsv(payload.entries, null), {
         status: 200,
         headers: {
           'content-type': 'text/csv; charset=utf-8',
@@ -10343,7 +10385,7 @@ async function routeApi(request, env, url, ctx = null) {
         },
       });
     }
-    return new Response(buildAdminAuditExportJson(payload.entries, verify), {
+    return new Response(buildAdminAuditExportJson(payload.entries, null), {
       status: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -10355,37 +10397,37 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
-    const verify = await verifyAdminAuditRange(env, {
-      year: url.searchParams.get('year'),
-      month: url.searchParams.get('month'),
-      from: String(url.searchParams.get('from') || '').trim(),
-      to: String(url.searchParams.get('to') || '').trim(),
-      action: String(url.searchParams.get('action') || '').trim(),
-      actor: String(url.searchParams.get('actor') || '').trim(),
+    const verify = await verifyAdminAuditBatch(env, {
+      after_id: Number(url.searchParams.get('after_id') || 0),
+      expected_prev: String(url.searchParams.get('expected_prev') || ''),
+      limit: Number(url.searchParams.get('limit') || 100),
     });
-    await enqueueAdminAudit(env, ctx, {
-      action: 'security.log.verify',
-      category: 'security',
-      method: 'GET',
-      path: '/api/admin/security-log/verify',
-      status: 200,
-      ...auditRequestForensics(request, auth.user),
-      summary: buildAuditSummary({
+    if (Number(url.searchParams.get('after_id') || 0) === 0) {
+      await enqueueAdminAudit(env, ctx, {
         action: 'security.log.verify',
+        category: 'security',
         method: 'GET',
         path: '/api/admin/security-log/verify',
         status: 200,
-        actorUsername: auth.user.username,
-        detail: verify.chain_status,
-      }),
-      meta: {
-        checked: verify.checked,
-        chain_ok: verify.chain_ok,
-        chain_head: verify.chain_head,
-        min_id: verify.min_id,
-        max_id: verify.max_id,
-      },
-    });
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'security.log.verify',
+          method: 'GET',
+          path: '/api/admin/security-log/verify',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: verify.chain_status,
+        }),
+        meta: {
+          checked: verify.checked,
+          chain_ok: verify.chain_ok,
+          chain_head: verify.chain_head,
+          min_id: verify.min_id,
+          max_id: verify.max_id,
+          batch: true,
+        },
+      });
+    }
     return jsonResponse(verify);
   }
   if (url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST') {
@@ -14208,7 +14250,7 @@ __ADMIN_SIDEBAR__
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. Free-text search runs on the decrypted rows on this page only.</p>
+  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. The list header reports this page only. Verify integrity walks the whole chain in batches. User search runs in SQL before pagination. Free-text search runs on the decrypted rows on this page only.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
   <p class="status" id="security-log-verify" aria-live="polite"></p>
   <p class="error" id="security-log-write-warning" hidden></p>

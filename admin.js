@@ -5291,7 +5291,10 @@ function initSecurityLogFilters() {
   }
 }
 
+let securityLogLoadSeq = 0;
+
 async function loadSecurityLog({ resetPage = false } = {}) {
+  const loadSeq = ++securityLogLoadSeq;
   if (!isSuperAdmin()) {
     const list = document.querySelector('#security-log-list');
     if (list) list.innerHTML = '<p class="error">Security log is Super Admin only.</p>';
@@ -5346,6 +5349,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   try {
     if (status) status.textContent = 'Loading sealed security log…';
     const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
+    if (loadSeq !== securityLogLoadSeq) return;
     const entries = Array.isArray(data.entries) ? data.entries : [];
     const total = Number(data.total) || entries.length;
     state.securityLogTotal = total;
@@ -5358,10 +5362,8 @@ async function loadSecurityLog({ resetPage = false } = {}) {
       }
     }
     if (chainEl) {
-      chainEl.textContent = data.chain_status || (data.chain_ok === false
-        ? `Break at entry #${data.chain_break_id}`
-        : 'Chain intact');
-      chainEl.className = data.chain_ok === false ? 'error' : 'status security-log-chain-ok';
+      chainEl.textContent = data.chain_status || 'This page — not a full-chain verify';
+      chainEl.className = 'status';
     }
     if (failEl) {
       const failed = Number(data.write_failures?.count || 0);
@@ -8413,6 +8415,7 @@ function bindForms() {
       form.reset();
       form.elements.active.checked = true;
       form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
+      syncPageGrantCovered(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
       await loadUsers();
     } catch (error) {
       let message = 'Could not save user.';
@@ -8444,19 +8447,39 @@ function bindForms() {
   });
   document.querySelector('#verify-security-log')?.addEventListener('click', async () => {
     const out = document.querySelector('#security-log-verify');
-    if (out) out.textContent = 'Verifying hash chain…';
+    if (out) out.textContent = 'Verifying whole hash chain…';
     try {
-      const filters = securityLogFilterValues();
-      const params = new URLSearchParams({
-        year: filters.year,
-        month: filters.month,
-      });
-      if (filters.from) params.set('from', filters.from);
-      if (filters.to) params.set('to', filters.to);
-      const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
+      let afterId = 0;
+      let expectedPrev = '';
+      let checked = 0;
+      let status = 'Whole chain intact';
+      let ok = true;
+      let head = '';
+      while (true) {
+        const params = new URLSearchParams({
+          after_id: String(afterId),
+          expected_prev: expectedPrev,
+          limit: '100',
+        });
+        const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
+        checked += Number(data.checked) || 0;
+        if (data.chain_head) head = data.chain_head;
+        if (out) out.textContent = `Verifying… ${checked} rows`;
+        if (data.chain_ok === false) {
+          ok = false;
+          status = data.chain_status || `Break at entry #${data.chain_break_id}`;
+          break;
+        }
+        if (data.done) {
+          status = data.chain_status || 'Whole chain intact';
+          break;
+        }
+        afterId = Number(data.next_after_id) || afterId;
+        expectedPrev = String(data.next_expected_prev || '');
+      }
       if (out) {
-        out.textContent = `${data.chain_status || 'Checked'} · ${data.checked || 0} rows · head ${String(data.chain_head || '').slice(0, 16)}…`;
-        out.className = data.chain_ok === false ? 'error' : 'status';
+        out.textContent = `${status} · ${checked} rows · head ${String(head || '').slice(0, 16)}${head ? '…' : ''}`;
+        out.className = ok ? 'status' : 'error';
       }
     } catch (error) {
       if (out) {
@@ -8464,6 +8487,64 @@ function bindForms() {
         out.className = 'error';
       }
     }
+  });
+  async function downloadSecurityLogExport(format) {
+    const filters = securityLogFilterValues();
+    const chunks = [];
+    let header = '';
+    let afterId = 0;
+    let done = false;
+    while (!done) {
+      const params = new URLSearchParams({
+        batch: '1',
+        after_id: String(afterId),
+        limit: '50',
+        year: filters.year,
+        month: filters.month,
+      });
+      if (filters.actor) params.set('actor', filters.actor);
+      if (filters.action) params.set('action', filters.action);
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      const data = await jsonFetch(`/api/admin/security-log.${format}?${params.toString()}`);
+      if (format === 'csv') {
+        if (!header) header = data.header || '';
+        if (data.chunk) chunks.push(data.chunk);
+      } else if (Array.isArray(data.entries)) {
+        chunks.push(...data.entries);
+      }
+      done = Boolean(data.done) || !data.next_after_id || data.count === 0;
+      afterId = Number(data.next_after_id) || afterId;
+    }
+    const filename = format === 'csv'
+      ? 'efhsband-security-audit-log.csv'
+      : 'efhsband-security-audit-log.json';
+    const body = format === 'csv'
+      ? `${header}\n${chunks.filter(Boolean).join('\n')}\n`
+      : JSON.stringify({ generated_at: new Date().toISOString(), entries: chunks }, null, 2);
+    const blob = new Blob([body], {
+      type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8',
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(href);
+  }
+  document.querySelector('#download-security-log-csv')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadSecurityLogExport('csv').catch((error) => {
+      const status = document.querySelector('#security-log-status');
+      if (status) status.textContent = error.message || 'CSV export failed';
+    });
+  });
+  document.querySelector('#download-security-log-json')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadSecurityLogExport('json').catch((error) => {
+      const status = document.querySelector('#security-log-status');
+      if (status) status.textContent = error.message || 'JSON export failed';
+    });
   });
   document.querySelector('#security-log-genesis-start')?.addEventListener('click', async () => {
     const status = document.querySelector('#security-log-genesis-status');
@@ -8496,12 +8577,18 @@ function bindForms() {
     }
   });
   let securityLogFilterTimer = null;
-  ['#security-log-actor', '#security-log-action', '#security-log-month', '#security-log-year', '#security-log-from', '#security-log-to', '#security-log-q'].forEach((selector) => {
+  const securityLogSelectFilters = ['#security-log-action', '#security-log-month', '#security-log-year'];
+  const securityLogTextFilters = ['#security-log-actor', '#security-log-from', '#security-log-to', '#security-log-q'];
+  securityLogSelectFilters.forEach((selector) => {
     const el = document.querySelector(selector);
     if (!el) return;
     el.addEventListener('change', () => {
       loadSecurityLog({ resetPage: true }).catch(() => {});
     });
+  });
+  securityLogTextFilters.forEach((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
     el.addEventListener('input', () => {
       clearTimeout(securityLogFilterTimer);
       securityLogFilterTimer = setTimeout(() => {

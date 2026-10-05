@@ -519,6 +519,9 @@ function rewriteOpenTag(tag, rawAttrs) {
   if (style && STYLEABLE_TAGS.has(tag)) {
     open += attr('style', style);
   }
+  if (/(?:^|[\s/])hidden(?:\s|=|\/|>|$)/i.test(attrs)) open += ' hidden';
+  const ariaHidden = quotedAttr(attrs, 'aria-hidden');
+  if (ariaHidden === 'true' || ariaHidden === 'false') open += attr('aria-hidden', ariaHidden);
   if (tag === 'details' && /\bopen\b/i.test(attrs)) open += ' open';
   return `${open}>`;
 }

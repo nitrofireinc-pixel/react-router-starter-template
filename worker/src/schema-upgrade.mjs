@@ -7,11 +7,23 @@ export const MAX_D1_QUERIES_PER_INVOCATION = 40;
 export const AUDIT_LOG_PREV_SHA_COLUMN_SQL =
   "ALTER TABLE admin_audit_log ADD COLUMN prev_sha256 TEXT NOT NULL DEFAULT ''";
 
+export const AUDIT_LOG_PREV_ID_COLUMN_SQL =
+  'ALTER TABLE admin_audit_log ADD COLUMN prev_id INTEGER';
+
 export const AUDIT_LOG_CREATED_INDEX_SQL =
   'CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log (created_at, id)';
 
 export const AUDIT_LOG_ACTION_INDEX_SQL =
   'CREATE INDEX IF NOT EXISTS idx_audit_action_created ON admin_audit_log (action, created_at)';
+
+export const AUDIT_LOG_PREV_ID_UNIQUE_SQL =
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_prev_id ON admin_audit_log (prev_id) WHERE prev_id IS NOT NULL';
+
+export const AUDIT_LOG_ACTOR_USERNAME_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_audit_actor_username ON admin_audit_log (actor_username)';
+
+export const AUDIT_LOG_ACTOR_USER_ID_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_audit_actor_user_id ON admin_audit_log (actor_user_id)';
 
 export const AUDIT_LOG_NO_UPDATE_TRIGGER_SQL = `
 CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update
@@ -32,8 +44,12 @@ END
 export function auditLogSchemaStatements() {
   return [
     AUDIT_LOG_PREV_SHA_COLUMN_SQL,
+    AUDIT_LOG_PREV_ID_COLUMN_SQL,
     AUDIT_LOG_CREATED_INDEX_SQL,
     AUDIT_LOG_ACTION_INDEX_SQL,
+    AUDIT_LOG_PREV_ID_UNIQUE_SQL,
+    AUDIT_LOG_ACTOR_USERNAME_INDEX_SQL,
+    AUDIT_LOG_ACTOR_USER_ID_INDEX_SQL,
     AUDIT_LOG_NO_UPDATE_TRIGGER_SQL,
     AUDIT_LOG_NO_DELETE_TRIGGER_SQL,
   ];
@@ -80,12 +96,12 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.3',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.4',
     '-- Run at deploy time (owner sign-off only):',
-    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.3.sql',
+    '--   npx wrangler d1 execute efhsband-db --remote --file migrations/2026-10-04.4.sql',
     '-- Do NOT run this against production from a laptop or Cloud Agent.',
     '-- migrations/2026-10-04.2.sql is IF NOT EXISTS only (safe to re-run).',
-    '-- prev_sha256 ALTER is applied by Worker initDb / applyIncrementalSchema.',
+    '-- prev_sha256 / prev_id ALTER is applied by Worker initDb / applyIncrementalSchema.',
     '',
     ...statements.map((sql) => `${sql.replace(/\s+/g, ' ').trim()};`),
     '',
@@ -106,19 +122,19 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   }
   const alters = statements.filter((sql) => /^\s*ALTER TABLE/i.test(sql));
   const rest = statements.filter((sql) => !/^\s*ALTER TABLE/i.test(sql));
-  if (typeof env?.DB?.batch === 'function' && rest.length) {
-    await env.DB.batch(rest.map((sql) => env.DB.prepare(sql)));
-  } else {
-    for (const sql of rest) {
-      await env.DB.prepare(sql).run();
-    }
-  }
   for (const sql of alters) {
     try {
       await env.DB.prepare(sql).run();
     } catch (error) {
       if (isIdempotentSchemaError(error)) continue;
       throw error;
+    }
+  }
+  if (typeof env?.DB?.batch === 'function' && rest.length) {
+    await env.DB.batch(rest.map((sql) => env.DB.prepare(sql)));
+  } else {
+    for (const sql of rest) {
+      await env.DB.prepare(sql).run();
     }
   }
   await migrateStoredUserPermissionGrants(env);

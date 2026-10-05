@@ -22,7 +22,7 @@ export function applyWorkerSecurityHeaders(response, pathname = '') {
     headers.set('Accept-CH', ADMIN_CLIENT_HINT_ACCEPT);
     headers.set('Critical-CH', ADMIN_CLIENT_HINT_ACCEPT);
     const existing = headers.get('Permissions-Policy') || '';
-    const hints = 'ch-ua=(self), ch-ua-mobile=(self), ch-ua-platform=(self)';
+    const hints = 'ch-ua=(self), ch-ua-mobile=(self), ch-ua-platform=(self), ch-ua-platform-version=(self), ch-ua-full-version-list=(self)';
     headers.set('Permissions-Policy', existing ? `${existing}, ${hints}` : hints);
   }
   return new Response(response.body, {

@@ -244,6 +244,56 @@ test('content-only visual save 403s style-block CSS changes as layout', async ()
   assert.notEqual(visualStyleSignature(styled), visualStyleSignature(hidden));
 });
 
+test('content-only visual save 403s inline style, class, and hidden on a block', async () => {
+  resetVisualPagesSchemaCache();
+  const { env } = createVisualEnv();
+  const hiddenStyle = BASE_HTML.replace(
+    '<section class="page-hero" data-visual-block="hero">',
+    '<section class="page-hero" data-visual-block="hero" style="display:none">',
+  );
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: hiddenStyle,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => {
+      assert.equal(error.status, 403);
+      assert.equal(error.code, 'layout_required');
+      return true;
+    },
+  );
+  const hiddenAttr = BASE_HTML.replace(
+    'data-visual-block="hero"',
+    'data-visual-block="hero" hidden',
+  );
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: hiddenAttr,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => error.status === 403 && error.code === 'layout_required',
+  );
+  const classed = BASE_HTML.replace('class="page-hero"', 'class="page-hero is-hidden"');
+  await assert.rejects(
+    () => saveVisualPage(env, {
+      slug: 'sponsors',
+      html: classed,
+      action: 'draft',
+      user: { id: 8, display_name: 'Jamie' },
+      allowStructure: false,
+    }),
+    (error) => error.status === 403 && error.code === 'layout_required',
+  );
+  assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(hiddenStyle));
+  assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(hiddenAttr));
+});
+
 test('content-only visual save accepts copy edits and 403s a structural save', async () => {
   resetVisualPagesSchemaCache();
   const { env, count } = createVisualEnv();
@@ -417,6 +467,9 @@ test('Users form and visual editor hide layout for content-only users', () => {
   assert.match(renderVisualEditorHtml('test', { slug: 'sponsors', canLayout: true }), /data-visual-style-editor/);
   assert.match(visualCss, /\.visual-content-only #visual-gjs-sink/);
   assert.match(adminJs, /#new-user[\s\S]*syncPageGrantCovered/);
+  assert.match(adminJs, /User saved\.[\s\S]*syncPageGrantCovered/);
+  assert.match(adminJs, /const securityLogSelectFilters/);
+  assert.match(adminJs, /const securityLogTextFilters/);
 });
 
 test('Worker APIs return layout_required and minutes audit actions without double-logging', () => {
@@ -439,8 +492,8 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004z'/);
-  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.3'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005a'/);
+  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.4'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
 

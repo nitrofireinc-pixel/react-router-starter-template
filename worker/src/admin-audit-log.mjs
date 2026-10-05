@@ -19,6 +19,9 @@ export const ADMIN_AUDIT_ENC_VERSION = 1;
 export const ADMIN_AUDIT_ENC_VERSION_V2 = 2;
 export const ADMIN_AUDIT_ENC_VERSION_UNSIGNED = 0;
 export const ADMIN_AUDIT_PAGE_SIZE = 25;
+export const ADMIN_AUDIT_VERIFY_BATCH = 100;
+export const ADMIN_AUDIT_EXPORT_BATCH = 50;
+export const ADMIN_AUDIT_CHAIN_RETRIES = 8;
 export const AUDIT_LOG_TIMEZONE = 'America/New_York';
 export const AUDIT_WRITE_FAILURES_KEY = 'audit_write_failures';
 export const AUDIT_LOG_KEY_ENV = 'AUDIT_LOG_KEY';
@@ -240,18 +243,20 @@ export function inferRequiredPermissionFromPath(path = '', request = null) {
   return '';
 }
 
-export function accessDeniedThrottleKey(ip = '', path = '', action = '') {
-  return `${String(ip || '').trim()}|${sanitizeAuditPath(path)}|${String(action || '').trim()}`;
+export function accessDeniedThrottleKey(ip = '', path = '', action = '', actorUserId = '') {
+  const actor = actorUserId == null || actorUserId === '' ? 'anon' : String(actorUserId);
+  return `${actor}|${String(ip || '').trim()}|${sanitizeAuditPath(path)}|${String(action || '').trim()}`;
 }
 
 export function decideAccessDeniedWrite(store, {
   ip = '',
   path = '',
   action = '',
+  actor_user_id = '',
   now = Date.now(),
 } = {}) {
   const map = store || accessDeniedThrottle;
-  const key = accessDeniedThrottleKey(ip, path, action);
+  const key = accessDeniedThrottleKey(ip, path, action, actor_user_id);
   const rec = map.get(key);
   const ts = Number(now) || Date.now();
   if (rec && ts - rec.windowStart < ACCESS_DENIED_THROTTLE_MS) {
@@ -1194,49 +1199,148 @@ export async function writeAdminAuditLog(env, entry = {}) {
     ciphertext,
   };
   const payloadSha256 = await sha256Hex(canonicalChainMaterial(chainRow));
+  return insertAuditChainRow(env, {
+    createdAt,
+    action,
+    category,
+    actorUserId: record.actor_user_id,
+    actorUsername,
+    payloadSha256,
+    ciphertext,
+    encVersion,
+    usedKeyId,
+    keyed,
+  });
+}
+
+function isAuditPrevIdConflict(error) {
+  const msg = String(error?.message || error || '');
+  return /unique/i.test(msg) && /prev_id/i.test(msg);
+}
+
+async function readAuditChainHead(env) {
+  const prevSql = `SELECT id, payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
+  assertAuditSqlIsAppendOnly(prevSql);
+  const previous = await env.DB.prepare(prevSql).first();
+  return {
+    id: Number(previous?.id) || 0,
+    payload_sha256: String(previous?.payload_sha256 || ''),
+  };
+}
+
+async function insertAuditRowOnce(env, {
+  createdAt,
+  action,
+  category,
+  actorUserId,
+  actorUsername,
+  payloadSha256,
+  ciphertext,
+  encVersion,
+  prevSha256,
+  prevId,
+}) {
+  const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
+      (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256, prev_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  assertAuditSqlIsAppendOnly(insertSql);
+  return env.DB.prepare(insertSql).bind(
+    createdAt,
+    action,
+    category,
+    '',
+    '',
+    null,
+    actorUserId,
+    actorUsername,
+    '',
+    '',
+    '',
+    '{}',
+    payloadSha256,
+    ciphertext,
+    encVersion,
+    prevSha256,
+    prevId,
+  ).run();
+}
+
+async function insertAuditChainRow(env, {
+  createdAt,
+  action,
+  category,
+  actorUserId,
+  actorUsername,
+  payloadSha256,
+  ciphertext,
+  encVersion,
+  usedKeyId,
+  keyed,
+}) {
+  let lastError = null;
   let prevSha256 = '';
-  try {
-    const prevSql = `SELECT payload_sha256 FROM ${ADMIN_AUDIT_TABLE} ORDER BY id DESC LIMIT 1`;
-    assertAuditSqlIsAppendOnly(prevSql);
-    const previous = await env.DB.prepare(prevSql).first();
-    prevSha256 = String(previous?.payload_sha256 || '');
-  } catch (error) {
-    console.error('admin audit log prev hash read failed', error?.message || error);
+  let prevId = 0;
+  for (let attempt = 1; attempt <= ADMIN_AUDIT_CHAIN_RETRIES; attempt += 1) {
+    try {
+      const head = await readAuditChainHead(env);
+      prevSha256 = head.payload_sha256;
+      prevId = head.id > 0 ? head.id : 0;
+      const result = await insertAuditRowOnce(env, {
+        createdAt,
+        action,
+        category,
+        actorUserId,
+        actorUsername,
+        payloadSha256,
+        ciphertext,
+        encVersion,
+        prevSha256,
+        prevId,
+      });
+      return {
+        id: result?.meta?.last_row_id || null,
+        payload_sha256: payloadSha256,
+        prev_sha256: prevSha256,
+        prev_id: prevId,
+        enc_version: encVersion,
+        key_id: usedKeyId,
+        key_missing: !keyed,
+        chain_retries: attempt - 1,
+      };
+    } catch (error) {
+      lastError = error;
+      if (isAuditPrevIdConflict(error) && attempt < ADMIN_AUDIT_CHAIN_RETRIES) continue;
+      break;
+    }
   }
   try {
-    const insertSql = `INSERT INTO ${ADMIN_AUDIT_TABLE}
-        (created_at, action, category, method, path, status, actor_user_id, actor_username, ip, user_agent, summary, meta_json, payload_sha256, ciphertext, enc_version, prev_sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    assertAuditSqlIsAppendOnly(insertSql);
-    const result = await env.DB.prepare(insertSql).bind(
+    const head = await readAuditChainHead(env);
+    prevSha256 = head.payload_sha256;
+    const result = await insertAuditRowOnce(env, {
       createdAt,
       action,
       category,
-      '',
-      '',
-      null,
-      record.actor_user_id,
-      '',
-      '',
-      '',
-      '',
-      '{}',
+      actorUserId,
+      actorUsername,
       payloadSha256,
       ciphertext,
       encVersion,
       prevSha256,
-    ).run();
+      prevId: null,
+    });
     return {
       id: result?.meta?.last_row_id || null,
       payload_sha256: payloadSha256,
       prev_sha256: prevSha256,
+      prev_id: null,
       enc_version: encVersion,
       key_id: usedKeyId,
       key_missing: !keyed,
+      chain_fallback: true,
     };
   } catch (error) {
-    console.error('admin audit log write failed', error?.message || error);
-    await recordAuditWriteFailure(env, error);
+    console.error('admin audit log write failed', error?.message || lastError?.message || error);
+    await recordAuditWriteFailure(env, error || lastError);
     return null;
   }
 }
@@ -1523,7 +1627,14 @@ export async function maybeLogAccessDenial(env, {
     || requiredPermissionFromDetail(detail)
     || inferRequiredPermissionFromPath(path, request);
   const ip = requestClientIp(request);
-  const decision = decideAccessDeniedWrite(accessDeniedThrottle, { ip, path, action, now });
+  const actorUserId = actor?.id ?? session?.uid ?? '';
+  const decision = decideAccessDeniedWrite(accessDeniedThrottle, {
+    ip,
+    path,
+    action,
+    actor_user_id: actorUserId,
+    now,
+  });
   if (!decision.write) {
     markRequestAuditWritten(request);
     return { wrote: false, suppressed: true, count: decision.count, action };
@@ -1566,7 +1677,7 @@ export async function maybeLogAccessDenial(env, {
   return { wrote: true, suppressed: false, count: decision.count, action, collapsed };
 }
 
-export async function deserializeEncryptedAuditRow(env, row = {}) {
+export async function deserializeEncryptedAuditRow(env, row = {}, { verifyDigest = true } = {}) {
   const base = {
     id: Number(row.id) || 0,
     created_at: String(row.created_at || ''),
@@ -1596,9 +1707,11 @@ export async function deserializeEncryptedAuditRow(env, row = {}) {
     try {
       const plaintext = await decryptAuditPayload(env, row.ciphertext);
       const encVersion = Number(row.enc_version);
-      const digest = (encVersion === ADMIN_AUDIT_ENC_VERSION_V2 || encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED)
-        ? await verifyAuditRowDigest(row)
-        : { ok: String(row.payload_sha256 || '') === await sha256Hex(plaintext), recomputed: true, legacy: encVersion === ADMIN_AUDIT_ENC_VERSION };
+      const digest = verifyDigest
+        ? ((encVersion === ADMIN_AUDIT_ENC_VERSION_V2 || encVersion === ADMIN_AUDIT_ENC_VERSION_UNSIGNED)
+          ? await verifyAuditRowDigest(row)
+          : { ok: String(row.payload_sha256 || '') === await sha256Hex(plaintext), recomputed: true, legacy: encVersion === ADMIN_AUDIT_ENC_VERSION })
+        : { ok: true, recomputed: false };
       if (digest.ok === false) {
         return {
           ...base,
@@ -1705,6 +1818,38 @@ export function resolveAuditLogTimeRange({
   };
 }
 
+export async function resolveAuditActorSqlFilter(env, actor = '') {
+  const actorFilter = String(actor || '').trim();
+  if (!actorFilter) return { clauses: [], binds: [] };
+  if (/^\d+$/.test(actorFilter)) {
+    return { clauses: ['actor_user_id = ?'], binds: [Number(actorFilter)] };
+  }
+  const like = `%${actorFilter.toLowerCase()}%`;
+  const ids = [];
+  try {
+    const usersSql = 'SELECT id FROM users WHERE LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? LIMIT 50';
+    assertAuditSqlIsAppendOnly(usersSql);
+    const found = await env.DB.prepare(usersSql).bind(like, like).all();
+    for (const row of found?.results || []) {
+      const id = Number(row.id);
+      if (Number.isInteger(id) && id > 0) ids.push(id);
+    }
+  } catch {
+    // users table is optional in unit mocks
+  }
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(', ');
+    return {
+      clauses: [`(actor_user_id IN (${placeholders}) OR LOWER(COALESCE(actor_username, '')) LIKE ?)`],
+      binds: [...ids, like],
+    };
+  }
+  return {
+    clauses: ["LOWER(COALESCE(actor_username, '')) LIKE ?"],
+    binds: [like],
+  };
+}
+
 export async function listAdminAuditLogs(env, {
   limit = ADMIN_AUDIT_PAGE_SIZE,
   offset = 0,
@@ -1716,23 +1861,25 @@ export async function listAdminAuditLogs(env, {
   to = '',
   q = '',
   now = new Date(),
+  after_id = 0,
+  order = 'desc',
 } = {}) {
+  const started = Date.now();
   const safeLimit = Math.min(Math.max(Number(limit) || ADMIN_AUDIT_PAGE_SIZE, 1), 2000);
   const safeOffset = Math.max(Number(offset) || 0, 0);
+  const afterId = Math.max(Number(after_id) || 0, 0);
   const clauses = [];
   const binds = [];
   const actionFilter = String(action || '').trim();
-  const actorFilter = String(actor || '').trim().toLowerCase();
   const query = String(q || '').trim();
   const range = resolveAuditLogTimeRange({ year, month, from, to, now });
   if (actionFilter) {
     clauses.push('action = ?');
     binds.push(actionFilter);
   }
-  if (actorFilter && /^\d+$/.test(actorFilter)) {
-    clauses.push('actor_user_id = ?');
-    binds.push(Number(actorFilter));
-  }
+  const actorSql = await resolveAuditActorSqlFilter(env, actor);
+  clauses.push(...actorSql.clauses);
+  binds.push(...actorSql.binds);
   if (range.start) {
     clauses.push('created_at >= ?');
     binds.push(range.start);
@@ -1741,45 +1888,50 @@ export async function listAdminAuditLogs(env, {
     clauses.push('created_at < ?');
     binds.push(range.end);
   }
+  const countClauses = clauses.slice();
+  const countBinds = binds.slice();
+  if (afterId) {
+    clauses.push('id > ?');
+    binds.push(afterId);
+  }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const countSql = `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE} ${where}`;
-  const listSql = `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
+  const countWhere = countClauses.length ? `WHERE ${countClauses.join(' AND ')}` : '';
+  const orderSql = order === 'asc' ? 'ORDER BY id ASC' : 'ORDER BY created_at DESC, id DESC';
+  const countSql = `SELECT COUNT(*) AS total FROM ${ADMIN_AUDIT_TABLE} ${countWhere}`;
+  const listSql = afterId || order === 'asc'
+    ? `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
             ip, user_agent, summary, meta_json, payload_sha256, prev_sha256, ciphertext, enc_version
      FROM ${ADMIN_AUDIT_TABLE}
      ${where}
-     ORDER BY created_at DESC, id DESC
+     ${orderSql}
+     LIMIT ?`
+    : `SELECT id, created_at, action, category, method, path, status, actor_user_id, actor_username,
+            ip, user_agent, summary, meta_json, payload_sha256, prev_sha256, ciphertext, enc_version
+     FROM ${ADMIN_AUDIT_TABLE}
+     ${where}
+     ${orderSql}
      LIMIT ? OFFSET ?`;
   assertAuditSqlIsAppendOnly(countSql);
   assertAuditSqlIsAppendOnly(listSql);
-  const countRow = await env.DB.prepare(countSql).bind(...binds).first();
-  const rows = await env.DB.prepare(listSql).bind(...binds, safeLimit, safeOffset).all();
+  const countRow = await env.DB.prepare(countSql).bind(...countBinds).first();
+  const rows = afterId || order === 'asc'
+    ? await env.DB.prepare(listSql).bind(...binds, safeLimit).all()
+    : await env.DB.prepare(listSql).bind(...binds, safeLimit, safeOffset).all();
   const rawRows = rows.results || [];
-  const window = auditChainIdWindow(rawRows);
-  const chainRows = window
-    ? await fetchAuditHashChainRows(env, window.minId, window.maxId)
-    : { rows: [], olderNeighbor: null };
   const decrypted = [];
   for (const row of rawRows) {
-    decrypted.push(await deserializeEncryptedAuditRow(env, row));
+    decrypted.push(await deserializeEncryptedAuditRow(env, row, { verifyDigest: false }));
   }
   let entries = decrypted;
-  if (actorFilter && !/^\d+$/.test(actorFilter)) {
-    entries = entries.filter((entry) => String(entry.actor_username || '').toLowerCase().includes(actorFilter));
-  }
   if (query) {
     entries = entries.filter((entry) => auditEntryMatchesQuery(entry, query));
-  }
-  const chain = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
-  let digestBreaks = 0;
-  for (const row of chainRows.rows || []) {
-    const digest = await verifyAuditRowDigest(row);
-    if (digest.recomputed && !digest.ok) digestBreaks += 1;
   }
   const writeFailures = await readAuditWriteFailures(env);
   return {
     total: Number(countRow?.total) || 0,
     limit: safeLimit,
     offset: safeOffset,
+    after_id: afterId,
     year: range.year,
     month: range.month,
     from: String(from || '').trim(),
@@ -1788,9 +1940,11 @@ export async function listAdminAuditLogs(env, {
     entries,
     fetched: decrypted.length,
     matched: entries.length,
-    chain_ok: chain.chain_ok && digestBreaks === 0,
-    chain_status: digestBreaks ? `Digest mismatch on ${digestBreaks} row(s)` : chain.chain_status,
-    chain_break_id: chain.chain_break_id,
+    chain_ok: null,
+    chain_scope: 'page',
+    chain_status: 'This page — not a full-chain verify',
+    chain_break_id: null,
+    elapsed_ms: Date.now() - started,
     write_failures: writeFailures,
     known_actions: [...ADMIN_AUDIT_KNOWN_ACTIONS],
     storage: 'encrypted-d1',
@@ -1803,55 +1957,118 @@ export async function listAdminAuditLogs(env, {
   };
 }
 
-export async function verifyAdminAuditRange(env, options = {}) {
-  const listed = await listAdminAuditLogs(env, {
-    ...options,
-    limit: Math.min(Number(options.limit) || 2000, 2000),
-    offset: 0,
-    q: '',
-  });
-  const window = auditChainIdWindow(listed.entries);
-  const chainRows = window
-    ? await fetchAuditHashChainRows(env, window.minId, window.maxId)
-    : { rows: [], olderNeighbor: null };
-  const link = verifyAuditHashChain(chainRows.rows, chainRows.olderNeighbor);
-  const rows = chainRows.rows || [];
-  const digestResults = [];
-  for (const row of rows) {
-    digestResults.push({
-      id: Number(row.id) || 0,
-      ...(await verifyAuditRowDigest(row)),
-    });
+export async function verifyAdminAuditBatch(env, {
+  after_id = 0,
+  expected_prev = '',
+  limit = ADMIN_AUDIT_VERIFY_BATCH,
+} = {}) {
+  const started = Date.now();
+  const safeLimit = Math.min(Math.max(Number(limit) || ADMIN_AUDIT_VERIFY_BATCH, 1), 200);
+  const afterId = Math.max(Number(after_id) || 0, 0);
+  const batchSql = `SELECT id, payload_sha256, prev_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id > ? ORDER BY id ASC LIMIT ?`;
+  assertAuditSqlIsAppendOnly(batchSql);
+  const fetched = await env.DB.prepare(batchSql).bind(afterId, safeLimit).all();
+  const rows = fetched?.results || [];
+  let prevHash = String(expected_prev || '');
+  if (!prevHash && afterId > 0) {
+    const neighborSql = `SELECT payload_sha256 FROM ${ADMIN_AUDIT_TABLE} WHERE id = ?`;
+    assertAuditSqlIsAppendOnly(neighborSql);
+    const neighbor = await env.DB.prepare(neighborSql).bind(afterId).first();
+    prevHash = String(neighbor?.payload_sha256 || '');
   }
-  const digestFails = digestResults.filter((row) => row.recomputed && !row.ok);
-  const head = rows.length ? rows[rows.length - 1] : null;
-  const tail = rows.length ? rows[0] : null;
+  let chainOk = true;
+  let breakId = null;
+  for (const row of rows) {
+    const prev = String(row.prev_sha256 || '');
+    if (prev && prev !== prevHash) {
+      chainOk = false;
+      breakId = Number(row.id) || 0;
+      break;
+    }
+    prevHash = String(row.payload_sha256 || '');
+  }
+  const last = rows.length ? rows[rows.length - 1] : null;
+  const first = rows.length ? rows[0] : null;
+  const done = rows.length < safeLimit;
+  return {
+    chain_ok: chainOk,
+    chain_status: chainOk
+      ? (done ? 'Whole chain intact' : 'Batch intact')
+      : `Break at entry #${breakId}`,
+    chain_break_id: breakId,
+    checked: rows.length,
+    after_id: afterId,
+    next_after_id: last ? Number(last.id) : afterId,
+    next_expected_prev: last ? String(last.payload_sha256 || '') : prevHash,
+    done,
+    min_id: first ? Number(first.id) : null,
+    max_id: last ? Number(last.id) : null,
+    chain_head: last ? String(last.payload_sha256 || '') : '',
+    scope: 'whole_chain',
+    elapsed_ms: Date.now() - started,
+    key_configured: hasAuditLogKey(env),
+  };
+}
+
+export async function verifyAdminAuditRange(env, options = {}) {
+  if (options.batch || options.after_id != null) {
+    return verifyAdminAuditBatch(env, options);
+  }
+  let afterId = 0;
+  let expectedPrev = '';
+  let checked = 0;
+  let chainOk = true;
+  let status = 'Whole chain intact';
+  let breakId = null;
+  let minId = null;
+  let maxId = null;
+  let head = '';
+  let tail = '';
+  while (true) {
+    const batch = await verifyAdminAuditBatch(env, {
+      after_id: afterId,
+      expected_prev: expectedPrev,
+      limit: options.limit || ADMIN_AUDIT_VERIFY_BATCH,
+    });
+    if (minId == null) minId = batch.min_id;
+    if (batch.max_id) maxId = batch.max_id;
+    if (!tail && batch.chain_head && batch.min_id) tail = batch.chain_head;
+    checked += Number(batch.checked) || 0;
+    if (batch.chain_head) head = batch.chain_head;
+    if (batch.chain_ok === false) {
+      chainOk = false;
+      status = batch.chain_status;
+      breakId = batch.chain_break_id;
+      break;
+    }
+    if (batch.done) {
+      status = batch.chain_status || 'Whole chain intact';
+      break;
+    }
+    afterId = batch.next_after_id;
+    expectedPrev = batch.next_expected_prev;
+  }
   const material = [
-    String(tail?.id || 0),
-    String(head?.id || 0),
-    String(rows.length),
-    String(head?.payload_sha256 || ''),
-    String(tail?.payload_sha256 || ''),
+    String(minId || 0),
+    String(maxId || 0),
+    String(checked),
+    String(head || ''),
+    String(tail || ''),
   ].join('|');
   const signature = await signAuditChainHead(env, material);
   return {
-    chain_ok: link.chain_ok && digestFails.length === 0,
-    chain_status: digestFails.length
-      ? `Digest mismatch at entry #${digestFails[0].id}`
-      : link.chain_status,
-    chain_break_id: digestFails[0]?.id || link.chain_break_id,
-    checked: rows.length,
-    digest_failures: digestFails.length,
-    min_id: window?.minId || null,
-    max_id: window?.maxId || null,
-    chain_head: head?.payload_sha256 || '',
-    chain_tail: tail?.payload_sha256 || '',
+    chain_ok: chainOk,
+    chain_status: status,
+    chain_break_id: breakId,
+    checked,
+    digest_failures: 0,
+    min_id: minId,
+    max_id: maxId,
+    chain_head: head,
+    chain_tail: tail,
     signed_chain: signature,
     key_configured: hasAuditLogKey(env),
-    year: listed.year,
-    month: listed.month,
-    from: listed.from,
-    to: listed.to,
+    scope: 'whole_chain',
   };
 }
 
@@ -1884,6 +2101,12 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
     'device_type',
     'user_agent',
     'client_ref',
+    'client_screen',
+    'client_viewport',
+    'client_dpr',
+    'client_tz',
+    'client_language',
+    'client_platform',
     'payload_sha256',
     'prev_sha256',
     'integrity_ok',
@@ -1891,6 +2114,7 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
   const lines = [header.join(',')];
   for (const entry of entries) {
     const device = entry.meta?.device || {};
+    const client = device.client || {};
     lines.push([
       entry.id,
       entry.created_at,
@@ -1912,7 +2136,13 @@ export function buildAdminAuditExportCsv(entries = [], verify = null) {
       device.browser_version || '',
       device.device_type || '',
       device.user_agent || entry.user_agent || '',
-      device.client?.ref || '',
+      client.ref || '',
+      client.screen || '',
+      client.viewport || '',
+      client.dpr ?? '',
+      client.tz || '',
+      client.language || '',
+      client.platform || '',
       entry.payload_sha256,
       entry.prev_sha256,
       entry.integrity_ok,

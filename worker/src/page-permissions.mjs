@@ -110,6 +110,28 @@ function isRepeatableContent(tag, classes) {
   return false;
 }
 
+function hasHiddenAttribute(attrs = '') {
+  return /(?:^|[\s/])hidden(?:\s|=|\/|>|$)/i.test(String(attrs || ''));
+}
+
+function normalizeInlineStyle(style = '') {
+  return String(style || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\s*;\s*/g, ';')
+    .replace(/\s*:\s*/g, ':')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** Inline style / hidden / aria-hidden on a block are layout, not content. */
+export function visualVisibilitySignature(attrs = '') {
+  const hidden = hasHiddenAttribute(attrs) ? 'hidden' : '';
+  const aria = attrFromTag(attrs, 'aria-hidden').toLowerCase();
+  const style = normalizeInlineStyle(attrFromTag(attrs, 'style'));
+  return [hidden, aria ? `aria-hidden=${aria}` : '', style].filter(Boolean).join(';');
+}
+
 /**
  * Ordered structural fingerprint. Text, href, img src/alt, list items, and
  * cards are content. Sections / visual blocks / locked blocks are layout.
@@ -152,7 +174,12 @@ export function visualStructureSignature(html = '') {
       || Boolean(block)
       || locked;
     if (!structural) continue;
-    nodes.push([tag, block || '', [...classes].sort().join('.')].join('|'));
+    nodes.push([
+      tag,
+      block || '',
+      [...classes].sort().join('.'),
+      visualVisibilitySignature(attrs),
+    ].join('|'));
   }
   return nodes.join('>');
 }
