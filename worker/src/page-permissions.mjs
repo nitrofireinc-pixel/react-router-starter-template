@@ -233,6 +233,33 @@ export function contentOnlyHtmlViolation(baseline = '', next = '') {
       return `new <${tag}> is not allowed for content-only editors`;
     }
   }
+  const beforeByTag = new Map();
+  for (const el of before) {
+    const list = beforeByTag.get(el.tag) || [];
+    list.push(el);
+    beforeByTag.set(el.tag, list);
+  }
+  const afterByTag = new Map();
+  for (const el of after) {
+    const list = afterByTag.get(el.tag) || [];
+    list.push(el);
+    afterByTag.set(el.tag, list);
+  }
+  for (const [tag, afterEls] of afterByTag) {
+    const beforeEls = beforeByTag.get(tag) || [];
+    for (let i = 0; i < afterEls.length; i += 1) {
+      const next = afterEls[i];
+      const prev = beforeEls[i];
+      const nextAttrs = next.attrMap || {};
+      const prevAttrs = prev?.attrMap || {};
+      for (const [name, value] of Object.entries(nextAttrs)) {
+        if (isContentOnlyContentAttr(tag, name, value)) continue;
+        if (!prev || String(prevAttrs[name] ?? '') !== String(value)) {
+          return `${name} is not allowed on <${tag}> for content-only editors`;
+        }
+      }
+    }
+  }
   const sensitive = (els) => els
     .filter((el) => !freelyAddable(el.tag) || hasContentOnlyLayoutAttrs(el))
     .map(contentOnlyLayoutFingerprint)

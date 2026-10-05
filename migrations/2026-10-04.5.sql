@@ -1,13 +1,10 @@
 -- Incremental, idempotent migration: 2026-10-04.4 → 2026-10-04.5
--- Linear-chain enforcement, pending drain table, deleted-user name map.
+-- Pending drain table and deleted-user name map.
 -- Do NOT UPDATE or DELETE admin_audit_log rows.
+-- No bare ALTERs — Worker adds source_pending_id via pragma_table_info.
 --
---   npx wrangler d1 execute efhsband-dev-db --remote -c wrangler.dev.toml --file migrations/2026-10-04.5.sql
--- Do NOT run this against production from a laptop or Cloud Agent.
---
--- Column ALTERs are also applied by Worker applyIncrementalSchema (try/catch).
-
-ALTER TABLE admin_audit_log ADD COLUMN source_pending_id INTEGER;
+-- Safe deploy: turn maintenance on, deploy the new Worker, let initDb
+-- self-migrate on the first request. Do not run this file by hand on D1.
 
 CREATE TABLE IF NOT EXISTS admin_audit_pending (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,26 +29,6 @@ CREATE TABLE IF NOT EXISTS admin_audit_actor_names (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_actor_names_user ON admin_audit_actor_names (user_id, id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_source_pending ON admin_audit_log (source_pending_id) WHERE source_pending_id IS NOT NULL;
-
-CREATE TRIGGER IF NOT EXISTS admin_audit_log_linear_insert
-BEFORE INSERT ON admin_audit_log
-WHEN (
-  (SELECT COALESCE(MAX(id), 0) FROM admin_audit_log)
-  >=
-  COALESCE((SELECT CAST(value AS INTEGER) FROM site_content WHERE key = 'audit_chain_cutover_id'), 0)
-)
-BEGIN
-  SELECT RAISE(ABORT, 'audit-chain-fork')
-  WHERE CASE
-    WHEN (SELECT MAX(id) FROM admin_audit_log) IS NULL THEN
-      NEW.prev_id IS NULL OR NEW.prev_id != 0 OR NEW.prev_sha256 != ''
-    ELSE
-      NEW.prev_id IS NULL
-      OR NEW.prev_id != (SELECT MAX(id) FROM admin_audit_log)
-      OR NEW.prev_sha256 != (SELECT payload_sha256 FROM admin_audit_log WHERE id = (SELECT MAX(id) FROM admin_audit_log))
-  END;
-END;
 
 CREATE TRIGGER IF NOT EXISTS admin_audit_pending_no_update
 BEFORE UPDATE ON admin_audit_pending

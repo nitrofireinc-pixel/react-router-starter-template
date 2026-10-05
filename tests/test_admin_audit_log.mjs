@@ -33,6 +33,10 @@ import {
   listAdminAuditLogs,
   createAuditExportSession,
   readAuditExportSession,
+  completeAuditExportSession,
+  attachD1QueryCounter,
+  d1QueryCount,
+  ADMIN_AUDIT_ENC_VERSION_V3,
   formatAuditGenerationReport,
   buildAuditGenerationCatalog,
   buildAuditExportManifest,
@@ -75,6 +79,10 @@ import {
   AUDIT_LOG_PENDING_NO_DELETE_TRIGGER_SQL,
   AUDIT_LOG_PENDING_NO_UPDATE_TRIGGER_SQL,
   AUDIT_LOG_PENDING_TABLE_SQL,
+  applyIncrementalSchema,
+  listTableColumnNames,
+  readAuditLinearTriggerSql,
+  linearTriggerAllowsLegacyNull,
 } from '../worker/src/schema-upgrade.mjs';
 import {
   buildAuditDeviceMeta,
@@ -86,6 +94,11 @@ import {
   sanitizeClientDeviceSnapshot,
   shouldRequestAdminClientHints,
 } from '../worker/src/audit-device.mjs';
+import {
+  DB_SCHEMA_VERSION,
+  initDb,
+  resetDbInitCache,
+} from '../worker/src/worker.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -361,6 +374,7 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
   const rows = seedRows.slice();
   const pending = [];
   const names = actorNames.slice();
+  const sessions = [];
   const site = new Map();
   const sqlLog = [];
   const env = {
@@ -377,6 +391,17 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
             if (q.includes('FROM site_content')) {
               const value = site.get(this.binds[0]);
               return value == null ? null : { value };
+            }
+            if (q.includes('pragma_table_info') || q.includes('PRAGMA table_info')) {
+              return null;
+            }
+            if (q.includes("name = 'admin_audit_log_linear_insert'")) {
+              return { sql: 'WHEN ( NEW.prev_id IS NOT NULL' };
+            }
+            if (q.includes('FROM admin_audit_export_sessions')) {
+              const sid = String(this.binds[0] || '');
+              const found = sessions.find((row) => row.sid === sid && row.kind === 'complete');
+              return found || null;
             }
             if (q.includes('COUNT(*)')) {
               return { total: applyListFilters(rows, q, this.binds).result.length };
@@ -407,6 +432,12 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
             return null;
           },
           async all() {
+            if (q.includes('pragma_table_info') || q.includes('PRAGMA table_info')) {
+              return {
+                results: ['id', 'created_at', 'action', 'category', 'payload_sha256', 'ciphertext', 'enc_version', 'prev_sha256', 'prev_id', 'source_pending_id']
+                  .map((name) => ({ name })),
+              };
+            }
             if (q.includes('FROM admin_audit_pending')) {
               const drained = new Set(rows.map((row) => Number(row.source_pending_id)).filter(Boolean));
               const open = pending.filter((row) => !drained.has(Number(row.id)));
@@ -497,6 +528,22 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
               pending.push(row);
               return { success: true, meta: { last_row_id: row.id } };
             }
+            if (q.includes('INSERT INTO admin_audit_export_sessions')) {
+              const kindMatch = q.match(/kind\s*,\s*token_hash|\?\s*,\s*\?\s*,\s*\?\s*,\s*\?\s*,\s*'([^']+)'/);
+              const kind = q.includes("'complete'") ? 'complete'
+                : q.includes("'start'") ? 'start'
+                  : (kindMatch?.[1] || this.binds[4]);
+              sessions.push({
+                id: sessions.length + 1,
+                sid: this.binds[0],
+                actor_id: this.binds[1],
+                format: this.binds[2],
+                filters_json: this.binds[3],
+                kind,
+                token_hash: this.binds[this.binds.length - 1],
+              });
+              return { success: true, meta: { last_row_id: sessions.length } };
+            }
             if (q.includes('INSERT INTO admin_audit_actor_names')) {
               names.push({
                 user_id: this.binds[0],
@@ -535,7 +582,7 @@ function createAuditDb(seedRows = [], { users = [], actorNames = [] } = {}) {
       },
     },
   };
-  return { env, rows, pending, names, site, sqlLog };
+  return { env, rows, pending, names, sessions, site, sqlLog };
 }
 
 test('visual editor mutations log as change.pages with slug and kind', async () => {
@@ -720,9 +767,13 @@ test('new rows hash ciphertext plus index columns and stay decryptable', async (
     action: rows[0].action,
     category: rows[0].category,
     actor_user_id: rows[0].actor_user_id,
+    actor_username: rows[0].actor_username,
     key_id: 'k1',
     ciphertext: rows[0].ciphertext,
-  }));
+    prev_id: rows[0].prev_id,
+    prev_sha256: rows[0].prev_sha256,
+    enc_version: 3,
+  }, 3));
   assert.equal(rows[0].payload_sha256, expected);
   const listed = await listAdminAuditLogs(env, { year: 2026, month: 10, limit: 25 });
   assert.equal(listed.entries[0].actor_username, 'agent@efhsband.org');
@@ -1579,12 +1630,13 @@ test('admin.js verify walks batches and does not double-bind select filters', ()
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /securityLogSelectFilters/);
   assert.match(adminJs, /securityLogTextFilters/);
-  assert.match(adminJs, /Verifying whole hash chain/);
+  assert.match(adminJs, /Checking the whole log/);
   assert.match(adminJs, /This page — not a full-chain verify/);
   assert.match(adminJs, /downloadSecurityLogExport/);
   assert.match(adminJs, /security-log\/export\/start/);
   assert.match(adminJs, /session_id/);
-  assert.match(adminJs, /True chain head/);
+  assert.match(adminJs, /security-log-court/);
+  assert.match(adminJs, /Export downloaded and logged/);
   const selectBlock = adminJs.slice(
     adminJs.indexOf('const securityLogSelectFilters'),
     adminJs.indexOf('securityLogTextFilters.forEach'),
@@ -1592,31 +1644,24 @@ test('admin.js verify walks batches and does not double-bind select filters', ()
   assert.doesNotMatch(selectBlock, /addEventListener\('input'/);
 });
 
-test('2026-10-04.4.sql adds prev_id then the unique index and linear trigger', () => {
+test('2026-10-04.4.sql is idempotent on a database that already has prev_sha256', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE admin_audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       action TEXT NOT NULL,
-      actor_user_id INTEGER,
       actor_username TEXT NOT NULL DEFAULT '',
-      payload_sha256 TEXT NOT NULL DEFAULT ''
+      actor_user_id INTEGER,
+      payload_sha256 TEXT NOT NULL DEFAULT '',
+      prev_sha256 TEXT NOT NULL DEFAULT '',
+      prev_id INTEGER
     );
     CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
   db.exec(readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'));
-  const cols = db.prepare('PRAGMA table_info(admin_audit_log)').all().map((col) => col.name);
-  assert.equal(cols.includes('prev_id'), true);
-  assert.equal(cols.includes('prev_sha256'), true);
-  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'aaa', 0, '')").run();
-  assert.throws(
-    () => db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('x', 'bbb', NULL, 'aaa')").run(),
-    /audit-chain-fork/,
-  );
-  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('login', 'bbb', 1, 'aaa')").run();
-  const count = db.prepare('SELECT COUNT(*) AS total FROM admin_audit_log').get();
-  assert.equal(count.total, 2);
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'));
+  const version = db.prepare("SELECT value FROM site_content WHERE key = 'schema_version'").get();
+  assert.equal(version.value, '2026-10-04.4');
   db.close();
 });
 
@@ -1653,13 +1698,20 @@ test('export session is signed and required', async () => {
     filters: { month: 10, year: 2026 },
   });
   assert.match(started.session_id, /\./);
-  const ok = await readAuditExportSession(env, started.session_id);
+  const ok = await readAuditExportSession(env, started.session_id, { actorId: 1, format: 'csv', filters: { month: 10, year: 2026 } });
   assert.equal(ok.ok, true);
   assert.equal(ok.session.format, 'csv');
+  const other = await readAuditExportSession(env, started.session_id, { actorId: 99 });
+  assert.equal(other.ok, false);
   const missing = await readAuditExportSession(env, '');
   assert.equal(missing.ok, false);
   const bad = await readAuditExportSession(env, `${started.session_id}x`);
   assert.equal(bad.ok, false);
+  const done = await completeAuditExportSession(env, started.session_id, { actorId: 1 });
+  assert.equal(done.ok, true);
+  const replay = await completeAuditExportSession(env, started.session_id, { actorId: 1 });
+  assert.equal(replay.ok, false);
+  assert.equal(replay.status, 409);
 });
 
 test('export manifest keeps every generation even when the last batch starts mid-chain', async () => {
@@ -1696,6 +1748,7 @@ test('export manifest keeps every generation even when the last batch starts mid
     breaks: [{ id: 790 }],
   });
   assert.equal(manifest.chain_head_id, 1011);
+  assert.equal(manifest.min_id, 971);
   assert.match(manifest.signed_manifest || '', /./);
   assert.equal(manifest.generation_report.length, 2);
   assert.match(manifest.generation_report[0], /Generation 1 \(historical, closed by genesis #953\)/);
@@ -1839,4 +1892,230 @@ test('50 parallel SQLite writes stay a single linear chain with zero NULL prev_i
     },
   }));
   db.close();
+});
+
+function sqliteEnv(db) {
+  return {
+    EFBAND_SECRET: 'unit-test-secret',
+    AUDIT_LOG_KEY: 'unit-audit-key-do-not-use-elsewhere',
+    DB: {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        return {
+          binds: [],
+          bind(...args) { this.binds = args; return this; },
+          async first() {
+            try { return stmt.get(...this.binds) || null; } catch { return null; }
+          },
+          async all() {
+            try { return { results: stmt.all(...this.binds) }; } catch { return { results: [] }; }
+          },
+          async run() {
+            const info = stmt.run(...this.binds);
+            return { success: true, meta: { last_row_id: Number(info.lastInsertRowid) } };
+          },
+        };
+      },
+      async batch(items) {
+        const out = [];
+        for (const item of items || []) out.push(await item.run());
+        return out;
+      },
+    },
+  };
+}
+
+function createProdAtDot2() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, permissions TEXT);
+    CREATE TABLE photos (id INTEGER PRIMARY KEY, filename TEXT, sort_order INTEGER, created_at TEXT);
+    CREATE TABLE sponsors (id INTEGER PRIMARY KEY, active INTEGER, sort_order INTEGER);
+    CREATE TABLE booster_members (id INTEGER PRIMARY KEY, active INTEGER, sort_order INTEGER);
+    CREATE TABLE staff_members (id INTEGER PRIMARY KEY, active INTEGER, sort_order INTEGER);
+    CREATE TABLE caldev_events (id INTEGER PRIMARY KEY, track TEXT, start_date TEXT, start_time TEXT);
+    CREATE TABLE events (id INTEGER PRIMARY KEY, show_on_boosters INTEGER, event_year INTEGER);
+    CREATE TABLE admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      action TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'admin',
+      method TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL DEFAULT '',
+      status INTEGER,
+      actor_user_id INTEGER,
+      actor_username TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      meta_json TEXT NOT NULL DEFAULT '{}',
+      payload_sha256 TEXT NOT NULL DEFAULT '',
+      ciphertext TEXT NOT NULL DEFAULT '',
+      enc_version INTEGER NOT NULL DEFAULT 1
+    );
+    INSERT INTO site_content (key, value) VALUES ('schema_version', '2026-10-04.2');
+    INSERT INTO admin_audit_log (action, payload_sha256) VALUES ('login', 'seed');
+  `);
+  return db;
+}
+
+test('hand-running .4 then .5 on prod-at-.2 does not add columns; Worker repair does', async () => {
+  const db = createProdAtDot2();
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'));
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.5.sql'), 'utf8'));
+  const version = db.prepare("SELECT value FROM site_content WHERE key = 'schema_version'").get().value;
+  assert.equal(version, '2026-10-04.5');
+  const before = db.prepare('PRAGMA table_info(admin_audit_log)').all().map((col) => col.name);
+  assert.equal(before.includes('prev_id'), false);
+  await applyIncrementalSchema(sqliteEnv(db), {
+    writeVersion: async (env) => {
+      await env.DB.prepare("INSERT INTO site_content (key, value) VALUES ('schema_version', '2026-10-04.6') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    },
+  });
+  const after = db.prepare('PRAGMA table_info(admin_audit_log)').all().map((col) => col.name);
+  assert.equal(after.includes('prev_id'), true);
+  assert.equal(after.includes('prev_sha256'), true);
+  assert.equal(after.includes('source_pending_id'), true);
+  const trigger = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='admin_audit_log_linear_insert'").get();
+  assert.equal(linearTriggerAllowsLegacyNull(trigger.sql), true);
+  db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('old', 'x', NULL, '')").run();
+  assert.throws(
+    () => db.prepare("INSERT INTO admin_audit_log (action, payload_sha256, prev_id, prev_sha256) VALUES ('fork', 'y', 1, 'nope')").run(),
+    /audit-chain-fork/,
+  );
+  db.close();
+});
+
+test('new Worker self-migrates prod-at-.2 without hand-run SQL', async () => {
+  const db = createProdAtDot2();
+  await applyIncrementalSchema(sqliteEnv(db), {
+    writeVersion: async (env) => {
+      await env.DB.prepare("INSERT INTO site_content (key, value) VALUES ('schema_version', '2026-10-04.6') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    },
+  });
+  const names = [...await listTableColumnNames(sqliteEnv(db), 'admin_audit_log')];
+  assert.equal(names.includes('prev_id'), true);
+  const sql = await readAuditLinearTriggerSql(sqliteEnv(db));
+  assert.equal(linearTriggerAllowsLegacyNull(sql), true);
+  db.close();
+});
+
+test('v3 digest covers prev_id and prev_sha256; v2 rows keep their own rule', async () => {
+  const v3 = canonicalChainMaterial({
+    enc_version: ADMIN_AUDIT_ENC_VERSION_V3,
+    created_at: 't',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    key_id: 'k1',
+    ciphertext: 'ciph',
+    prev_id: 9,
+    prev_sha256: 'prev',
+  }, ADMIN_AUDIT_ENC_VERSION_V3);
+  assert.match(v3, /"v":3/);
+  assert.match(v3, /"prev_id":9/);
+  assert.match(v3, /"prev_sha256":"prev"/);
+  const v2 = canonicalChainMaterial({
+    enc_version: 2,
+    created_at: 't',
+    action: 'login',
+    category: 'auth',
+    actor_user_id: 5,
+    key_id: 'k1',
+    ciphertext: 'ciph',
+    prev_id: 9,
+    prev_sha256: 'prev',
+  }, 2);
+  assert.match(v2, /"v":2/);
+  assert.doesNotMatch(v2, /prev_id/);
+});
+
+test('verify labels post-cutover NULL prev_id as previous site version, not a break', async () => {
+  resetAuditWriteFailureState();
+  const seed = [
+    { id: 10, action: 'login', payload_sha256: 'h10', prev_sha256: 'h9', prev_id: 9, created_at: '2026-10-04 16:00:00', enc_version: 1 },
+    { id: 11, action: 'login', payload_sha256: 'h11', prev_sha256: '', prev_id: null, created_at: '2026-10-04 16:00:00', enc_version: 1 },
+    { id: 12, action: 'login', payload_sha256: 'h12', prev_sha256: 'h11', prev_id: 11, created_at: '2026-10-04 16:00:00', enc_version: 1 },
+  ];
+  const { env, site } = createAuditDb(seed);
+  site.set('audit_chain_cutover_id', '9');
+  const batch = await verifyAdminAuditBatch(env, { after_id: 0, limit: 40 });
+  assert.equal(batch.breaks.some((item) => item.id === 11), false);
+  assert.equal(batch.compatibility.some((item) => item.id === 11), true);
+  assert.match(batch.compatibility[0].reason, /previous site version/);
+  assert.equal(batch.breaks.some((item) => item.id === 12), false);
+});
+
+test('audited write under forced conflicts stays at or under 45 queries and queues pending', async () => {
+  resetAuditWriteFailureState();
+  resetAuditGenerationCache();
+  const { env, pending } = createAuditDb([{
+    id: 1,
+    action: 'login',
+    payload_sha256: 'h1',
+    prev_sha256: '',
+    prev_id: 0,
+    created_at: '2026-10-04 16:00:00',
+  }]);
+  attachD1QueryCounter(env);
+  env.__d1QueryCount = 17;
+  const origPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const stmt = origPrepare(sql);
+    if (String(sql).includes('INSERT INTO admin_audit_log')) {
+      stmt.run = async () => {
+        throw new Error('UNIQUE constraint failed: admin_audit_log.prev_id');
+      };
+    }
+    return stmt;
+  };
+  const written = await writeAdminAuditLog(env, { action: 'change.pages', actor_username: 'agent@efhsband.org' });
+  assert.equal(written?.queued, true);
+  assert.ok(pending.length >= 1);
+  assert.ok(d1QueryCount(env) <= 45, `used ${d1QueryCount(env)} queries`);
+  console.log(JSON.stringify({ audited_save_forced_conflicts: { queries: d1QueryCount(env), pending: pending.length } }));
+});
+
+test('initDb repairs a claimed .5 database that is missing columns and the linear trigger', async () => {
+  const db = createProdAtDot2();
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'));
+  db.exec(readFileSync(join(root, 'migrations/2026-10-04.5.sql'), 'utf8'));
+  assert.equal(db.prepare("SELECT value FROM site_content WHERE key = 'schema_version'").get().value, '2026-10-04.5');
+  resetDbInitCache();
+  await initDb(sqliteEnv(db));
+  const names = db.prepare('PRAGMA table_info(admin_audit_log)').all().map((col) => col.name);
+  assert.equal(names.includes('prev_id'), true);
+  assert.equal(names.includes('prev_sha256'), true);
+  const version = db.prepare("SELECT value FROM site_content WHERE key = 'schema_version'").get().value;
+  assert.equal(version, DB_SCHEMA_VERSION);
+  const trigger = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='admin_audit_log_linear_insert'").get();
+  assert.equal(linearTriggerAllowsLegacyNull(trigger.sql), true);
+  db.close();
+});
+
+test('full-walk verify court report is not the last batch slogan', async () => {
+  resetAuditWriteFailureState();
+  const seed = [];
+  for (let id = 1; id <= 45; id += 1) {
+    seed.push({
+      id,
+      action: 'login',
+      payload_sha256: `h${id}`,
+      prev_sha256: id === 1 ? '' : (id === 2 ? 'WRONG' : `h${id - 1}`),
+      prev_id: id === 1 ? 0 : id - 1,
+      created_at: '2026-10-04 16:00:00',
+      enc_version: 1,
+    });
+  }
+  const { env, site } = createAuditDb(seed);
+  site.set('audit_chain_cutover_id', '0');
+  const walked = await verifyAdminAuditRange(env, { limit: 20 });
+  assert.equal(walked.checked, 45);
+  assert.equal(walked.chain_ok, false);
+  assert.equal(walked.breaks.some((item) => item.id === 2), true);
+  assert.doesNotMatch(walked.chain_status, /Whole chain intact/i);
+  assert.match(walked.court_report.current.title, /link breaks|INTACT/i);
+  const csv = buildAdminAuditExportCsv(seed.slice(0, 2), walked);
+  assert.match(csv, /chain_ok,false/);
 });

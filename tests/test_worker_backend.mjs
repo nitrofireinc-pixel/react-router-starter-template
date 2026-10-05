@@ -2363,7 +2363,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005c'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3396,7 +3396,10 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
               if (!store.has(key)) return null;
               return { value: store.get(key) };
             }
-            throw new Error(`unexpected first(): ${sql}`);
+            if (String(sql).includes('admin_audit_log_linear_insert')) {
+              return { sql: 'WHEN ( NEW.prev_id IS NOT NULL' };
+            }
+            return null;
           },
           async run() {
             calls.push({ type: 'run', sql });
@@ -3404,7 +3407,12 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
           },
           async all() {
             calls.push({ type: 'all', sql });
-            throw new Error(`unexpected all(): ${sql}`);
+            if (String(sql).includes('pragma_table_info') || String(sql).includes('PRAGMA table_info')) {
+              return {
+                results: ['prev_sha256', 'prev_id', 'source_pending_id'].map((name) => ({ name })),
+              };
+            }
+            return { results: [] };
           },
         };
         return statement;
@@ -3417,7 +3425,7 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
   };
   await initDb(env);
   await initDb(env);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.some((call) => call.type === 'batch' || call.type === 'run'), false);
   assert.equal(calls[0].type, 'first');
   assert.match(calls[0].sql, /site_content/);
 });
@@ -3435,7 +3443,7 @@ test('initDb memoizes after first successful schema check in-isolate', async () 
             return { value: DB_SCHEMA_VERSION };
           },
           async run() { throw new Error('unexpected run'); },
-          async all() { throw new Error('unexpected all'); },
+          async all() { return { results: [] }; },
         };
       },
       async batch() { throw new Error('unexpected batch'); },

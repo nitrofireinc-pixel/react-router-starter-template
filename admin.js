@@ -8446,17 +8446,22 @@ function bindForms() {
     loadSecurityLog({ resetPage: true }).catch(() => {});
   });
   document.querySelector('#verify-security-log')?.addEventListener('click', async () => {
+    const court = document.querySelector('#security-log-court');
     const out = document.querySelector('#security-log-verify');
-    if (out) out.textContent = 'Verifying whole hash chain…';
+    if (court) {
+      court.hidden = false;
+      court.innerHTML = '<p>Checking the whole log…</p>';
+    }
+    if (out) out.textContent = '';
     try {
       let afterId = 0;
       let expectedPrev = '';
       let checked = 0;
       const breaks = [];
-      let catalog = [];
-      let explanation = '';
-      let head = '';
-      let headId = null;
+      const digestFailures = [];
+      const legacy = [];
+      const compatibility = [];
+      let lastCourt = null;
       while (true) {
         const params = new URLSearchParams({
           after_id: String(afterId),
@@ -8465,41 +8470,72 @@ function bindForms() {
         });
         const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
         checked += Number(data.checked) || 0;
-        if (data.chain_head) head = data.chain_head;
-        if (data.chain_head_id) headId = data.chain_head_id;
         if (Array.isArray(data.breaks)) breaks.push(...data.breaks);
-        if (Array.isArray(data.generations) && data.generations.length) catalog = data.generations;
-        if (data.explanation) explanation = data.explanation;
-        if (out) out.textContent = `Verifying… ${checked} rows`;
+        if (Array.isArray(data.digest_failures)) digestFailures.push(...data.digest_failures);
+        if (Array.isArray(data.legacy)) legacy.push(...data.legacy);
+        if (Array.isArray(data.compatibility)) compatibility.push(...data.compatibility);
+        if (data.court_report) lastCourt = data.court_report;
+        if (court) court.innerHTML = `<p>Checking the whole log… ${checked} rows</p>`;
         if (data.done) break;
         afterId = Number(data.next_after_id) || afterId;
         expectedPrev = String(data.next_expected_prev || '');
       }
-      const report = (catalog || []).map((gen) => {
-        const genBreaks = breaks.filter((item) => Number(item.id) >= Number(gen.start_id) && Number(item.id) <= Number(gen.end_id));
-        const ids = genBreaks.map((item) => `#${item.id}`).join(', ');
-        if (gen.historical) {
-          return `Generation 1 (historical, closed by genesis #${gen.closed_by}): ${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'}${ids ? ` at ${ids}` : ''}, reason recorded in genesis row`;
-        }
-        const status = genBreaks.length
-          ? `${genBreaks.length} break${genBreaks.length === 1 ? '' : 's'} at ${ids}`
-          : 'INTACT';
-        return `Generation ${gen.generation} (${gen.key_id || 'k1'}), started ${gen.started_at_et || 'at original build'} by ${gen.started_by || 'unknown'}, rows #${gen.start_id}-#${gen.end_id}: ${status}`;
+      const finished = await jsonFetch('/api/admin/security-log/verify/complete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          checked,
+          digest_failures: digestFailures,
+          legacy,
+          compatibility,
+        }),
       });
-      const lines = report.length ? report : [breaks.length ? `Breaks at ${breaks.map((item) => `#${item.id}`).join(', ')}` : 'Whole chain intact'];
-      if (headId) lines.push(`True chain head: #${headId} ${String(head || '').slice(0, 16)}${head ? '…' : ''}`);
-      if (explanation) lines.push(explanation);
-      if (out) {
-        out.textContent = `${lines.join(' · ')} · ${checked} rows`;
-        out.className = breaks.length ? 'error' : 'status';
-      }
+      const report = finished.court_report || lastCourt || {};
+      if (court) court.innerHTML = renderSecurityLogCourt(report, checked);
     } catch (error) {
-      if (out) {
-        out.textContent = error.message || 'Verify failed';
-        out.className = 'error';
-      }
+      if (court) court.innerHTML = `<p class="error">${escapeHtml(error.message || 'Verify failed')}</p>`;
     }
   });
+  function renderSecurityLogCourt(report, checked) {
+    const current = report.current || null;
+    const previous = Array.isArray(report.previous) ? report.previous : [];
+    const legacy = report.legacy;
+    const parts = [];
+    if (current) {
+      const title = current.intact
+        ? (current.original_build ? 'Current log: INTACT' : 'Current log: INTACT')
+        : current.title;
+      const start = current.original_build
+        ? (current.original_label || 'Current log, started with the original security-log build')
+        : [current.started_at_et ? `Started ${escapeHtml(current.started_at_et)}` : '', current.started_by ? `by ${escapeHtml(current.started_by)}` : '']
+          .filter(Boolean).join(' ');
+      parts.push(`<section class="security-log-court-current${current.intact ? '' : ' is-broken'}">
+        <h2>${escapeHtml(title)}</h2>
+        <p>Rows #${escapeHtml(current.start_id)}–#${escapeHtml(current.end_id)}</p>
+        ${start ? `<p>${escapeHtml(start)}</p>` : ''}
+      </section>`);
+    }
+    previous.forEach((gen) => {
+      const ids = (gen.break_ids || []).map((id) => `#${id}`).join(', ');
+      parts.push(`<section class="security-log-court-previous">
+        <h2>Previous log (closed)</h2>
+        ${gen.reason ? `<p>${escapeHtml(gen.reason)}</p>` : ''}
+        <p>Rows #${escapeHtml(gen.start_id)}–#${escapeHtml(gen.end_id)}</p>
+        <p>${gen.link_breaks} link breaks, ${gen.altered_rows} altered rows</p>
+        ${ids ? `<details><summary>Row numbers</summary><p>${escapeHtml(ids)}</p></details>` : ''}
+      </section>`);
+    });
+    if (legacy) {
+      parts.push(`<section class="security-log-court-legacy">
+        <h2>${escapeHtml(legacy.title)}</h2>
+      </section>`);
+    }
+    parts.push(`<details><summary>Technical details</summary>
+      <p>${checked} rows checked.</p>
+      ${report.explanation ? `<p>${escapeHtml(report.explanation)}</p>` : ''}
+    </details>`);
+    return parts.join('');
+  }
   async function sha256HexClient(value) {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value || '')));
     return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -8511,13 +8547,12 @@ function bindForms() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ format, ...filters }),
     });
-    const sessionId = started.session_id;
+    let sessionId = started.session_id;
     if (!sessionId) throw new Error('Export session was not created');
     const chunks = [];
     let header = '';
     let afterId = 0;
     let done = false;
-    let runningHash = '';
     let manifest = null;
     let minId = null;
     let maxId = null;
@@ -8527,7 +8562,6 @@ function bindForms() {
         batch: '1',
         session_id: sessionId,
         after_id: String(afterId),
-        running_hash: runningHash,
         limit: '50',
         year: filters.year,
         month: filters.month,
@@ -8544,9 +8578,9 @@ function bindForms() {
         chunks.push(...data.entries);
       }
       count += Number(data.count) || 0;
-      if (minId == null && (data.entries?.[0]?.id || afterId)) minId = Number(data.entries?.[0]?.id || afterId);
-      if (data.next_after_id) maxId = Number(data.next_after_id);
-      runningHash = String(data.running_hash || runningHash);
+      if (data.min_id != null && minId == null) minId = Number(data.min_id);
+      if (data.max_id != null) maxId = Number(data.max_id);
+      if (data.session_id) sessionId = data.session_id;
       if (data.manifest) manifest = data.manifest;
       done = Boolean(data.done) || !data.next_after_id || data.count === 0;
       afterId = Number(data.next_after_id) || afterId;
@@ -8582,10 +8616,6 @@ function bindForms() {
       body: JSON.stringify({
         session_id: sessionId,
         client_sha256: clientSha,
-        server_running_hash: runningHash,
-        min_id: minId,
-        max_id: maxId,
-        count,
       }),
     });
     const blob = new Blob([body], {
@@ -8597,6 +8627,7 @@ function bindForms() {
     link.download = filename;
     link.click();
     URL.revokeObjectURL(href);
+    showSavedToast('Export downloaded and logged');
   }
   document.querySelector('#download-security-log-csv')?.addEventListener('click', (event) => {
     event.preventDefault();

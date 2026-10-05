@@ -51,8 +51,8 @@ export function canEditVisualLayout(user, slug, canEditPageLayout) {
   return false;
 }
 
-function layoutRequiredError(slug) {
-  const error = new Error(`Permission required: layout:${normalizeVisualSlug(slug)}`);
+function layoutRequiredError(slug, detail = '') {
+  const error = new Error(detail || `Permission required: layout:${normalizeVisualSlug(slug)}`);
   error.status = 403;
   error.code = 'layout_required';
   return error;
@@ -796,12 +796,15 @@ export async function saveVisualPage(env, {
     const baseline = sanitizeVisualPageHtml(
       stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
     );
+    const incomingViolation = contentOnlyHtmlViolation(baseline, String(html || ''));
+    if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
+    const cleanViolation = contentOnlyHtmlViolation(baseline, clean);
     if (
       visualStructureSignature(clean) !== visualStructureSignature(baseline)
       || visualStyleSignature(clean) !== visualStyleSignature(baseline)
-      || contentOnlyHtmlViolation(baseline, clean)
+      || cleanViolation
     ) {
-      throw layoutRequiredError(key);
+      throw layoutRequiredError(key, cleanViolation || `Permission required: layout:${key}`);
     }
   }
   const kind = action === 'publish' ? 'publish' : 'draft';

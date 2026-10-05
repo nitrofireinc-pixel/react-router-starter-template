@@ -47,14 +47,20 @@ import {
   ADMIN_AUDIT_PAGE_SIZE,
   AUDIT_BEFORE_VISUAL_SQL,
   PHOTO_QUARANTINE_SORT,
+  attachD1QueryCounter,
+  advanceAuditExportSession,
   buildAdminAuditExportCsv,
   buildAdminAuditExportJson,
   buildAdminAuditExportPdfBase64,
+  buildAdminAuditExportText,
+  buildCourtVerifyReport,
+  completeAuditExportSession,
   buildAuditExportManifest,
   buildAuditSummary,
   clearLoginFailures,
   contentEvidenceHashed,
   createAuditExportSession,
+  formatCourtVerifySummary,
   enqueueAdminAudit,
   enrichMailAuditMeta,
   inspectLoginLock,
@@ -134,6 +140,7 @@ import {
 import {
   applyIncrementalSchema,
   auditLogSchemaStatements,
+  auditSchemaNeedsRepair,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
 import {
@@ -420,7 +427,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005b';
+export const ASSET_VERSION = 'cms-p1-20261005c';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2107,7 +2114,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.5';
+export const DB_SCHEMA_VERSION = '2026-10-04.6';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -2160,6 +2167,11 @@ export async function initDb(env) {
         return;
       }
       if (current.value === DB_SCHEMA_VERSION) {
+        if (await auditSchemaNeedsRepair(env)) {
+          console.log('initDb_repair_start', { current: current.value, target: DB_SCHEMA_VERSION });
+          await applyIncrementalSchema(env);
+          await writeDbSchemaVersion(env);
+        }
         dbInitVersion = DB_SCHEMA_VERSION;
         return;
       }
@@ -8986,6 +8998,7 @@ export function serializePagePayload(payload, existing = null) {
 
 async function handleApi(request, env, url, ctx = null) {
   await initDb(env);
+  attachD1QueryCounter(env);
   const isAdminApi = url.pathname.startsWith('/api/admin');
   const mutating = isAdminApi && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
   const session = isAdminApi ? await inspectSessionCookie(request, env) : { user: null };
@@ -9043,6 +9056,7 @@ async function routeApi(request, env, url, ctx = null) {
       url.pathname === '/api/admin/security-log/genesis'
       || url.pathname === '/api/admin/security-log/export/start'
       || url.pathname === '/api/admin/security-log/export/complete'
+      || url.pathname === '/api/admin/security-log/verify/complete'
     );
     if (!allowedWrite) {
       return jsonResponse({
@@ -10280,6 +10294,7 @@ async function routeApi(request, env, url, ctx = null) {
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
+    const format = url.pathname.endsWith('.txt') ? 'txt' : 'pdf';
     const payload = await listAdminAuditLogs(env, {
       limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
       offset: 0,
@@ -10307,14 +10322,26 @@ async function routeApi(request, env, url, ctx = null) {
         path: url.pathname,
         status: 200,
         actorUsername: auth.user.username,
-        detail: `exported ${payload.entries.length} entries`,
+        detail: `exported ${payload.entries.length} ${format} entries`,
       }),
       meta: {
         entry_count: payload.entries.length,
         total: payload.total,
-        format: 'pdf',
+        format,
       },
     });
+    if (format === 'txt') {
+      return new Response(buildAdminAuditExportText(payload.entries), {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': 'attachment; filename="efhsband-security-audit-log.txt"',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+          'x-robots-tag': 'noindex, nofollow',
+        },
+      });
+    }
     const pdfBase64 = buildAdminAuditExportPdfBase64(payload.entries);
     const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
     return new Response(bytes, {
@@ -10345,8 +10372,12 @@ async function routeApi(request, env, url, ctx = null) {
     const batched = url.searchParams.get('batch') === '1';
     const format = url.pathname.endsWith('.csv') ? 'csv' : 'json';
     if (batched) {
-      const sessionRead = await readAuditExportSession(env, url.searchParams.get('session_id') || '');
-      if (!sessionRead.ok) return jsonResponse({ detail: sessionRead.detail }, sessionRead.status || 400);
+      const preview = await readAuditExportSession(env, url.searchParams.get('session_id') || '', {
+        actorId: auth.user.id,
+        format,
+        filters: range,
+      });
+      if (!preview.ok) return jsonResponse({ detail: preview.detail }, preview.status || 400);
       const started = Date.now();
       const afterId = Math.max(Number(url.searchParams.get('after_id') || 0), 0);
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 100);
@@ -10361,44 +10392,48 @@ async function routeApi(request, env, url, ctx = null) {
         ? Number(payload.entries[payload.entries.length - 1].id)
         : afterId;
       const done = payload.entries.length < limit;
-      const prevHash = String(url.searchParams.get('running_hash') || '');
-      const runningHash = await nextAuditExportRunningHash(prevHash, payload.entries);
+      const stepped = await advanceAuditExportSession(env, url.searchParams.get('session_id') || '', {
+        actorId: auth.user.id,
+        format,
+        filters: range,
+        entries: payload.entries,
+      });
+      if (!stepped.ok) return jsonResponse({ detail: stepped.detail }, stepped.status || 400);
       let manifest = null;
       if (done) {
         manifest = await buildAuditExportManifest(env, {
-          count: payload.total,
-          running_hash: runningHash,
-          min_id: payload.entries[0]?.id || afterId,
-          max_id: nextAfter,
+          count: stepped.session.n,
+          running_hash: stepped.server_running_hash,
+          min_id: stepped.session.min_id || payload.entries[0]?.id || afterId,
+          max_id: stepped.session.max_id || nextAfter,
         });
       }
       const elapsed_ms = Date.now() - started;
+      const shared = {
+        count: payload.entries.length,
+        total: payload.total,
+        next_after_id: nextAfter,
+        running_hash: stepped.session_id,
+        server_running_hash: stepped.server_running_hash,
+        session_id: stepped.session_id,
+        min_id: stepped.session.min_id,
+        max_id: stepped.session.max_id,
+        manifest,
+        done,
+        elapsed_ms,
+      };
       if (format === 'csv') {
         const csvBody = buildAdminAuditExportCsv(payload.entries, done ? manifest : null);
         const [header, ...lines] = csvBody.trimEnd().split('\n');
         return jsonResponse({
           header,
           chunk: lines.filter((line) => line.length && !/^(chain_|signed_|generation,)/.test(line)).join('\n'),
-          count: payload.entries.length,
-          total: payload.total,
-          next_after_id: nextAfter,
-          running_hash: runningHash,
-          session_id: sessionRead.session.sid,
-          manifest,
-          done,
-          elapsed_ms,
+          ...shared,
         });
       }
       return jsonResponse({
         entries: payload.entries,
-        count: payload.entries.length,
-        total: payload.total,
-        next_after_id: nextAfter,
-        running_hash: runningHash,
-        session_id: sessionRead.session.sid,
-        manifest,
-        done,
-        elapsed_ms,
+        ...shared,
       });
     }
     const payload = await listAdminAuditLogs(env, range);
@@ -10501,10 +10536,11 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireSecurityLogAccess(request, env);
     if (auth.response) return auth.response;
     const body = await request.json().catch(() => ({}));
-    const sessionRead = await readAuditExportSession(env, body.session_id || '');
-    if (!sessionRead.ok) return jsonResponse({ detail: sessionRead.detail }, sessionRead.status || 400);
+    const completed = await completeAuditExportSession(env, body.session_id || '', {
+      actorId: auth.user.id,
+    });
+    if (!completed.ok) return jsonResponse({ detail: completed.detail }, completed.status || 400);
     const clientSha = String(body.client_sha256 || '').trim().toLowerCase();
-    const serverHash = String(body.server_running_hash || body.running_hash || '').trim().toLowerCase();
     await enqueueAdminAudit(env, ctx, {
       action: 'security.log.export.complete',
       category: 'security',
@@ -10518,20 +10554,26 @@ async function routeApi(request, env, url, ctx = null) {
         path: url.pathname,
         status: 200,
         actorUsername: auth.user.username,
-        detail: `${body.count || 0} rows`,
+        detail: `${completed.session.n || 0} rows`,
       }),
       meta: {
-        session_id: sessionRead.session.sid,
-        format: sessionRead.session.format,
-        min_id: Number(body.min_id) || null,
-        max_id: Number(body.max_id) || null,
-        row_count: Number(body.count) || 0,
+        session_id: completed.session.sid,
+        format: completed.session.format,
+        min_id: completed.session.min_id,
+        max_id: completed.session.max_id,
+        row_count: completed.session.n || 0,
         client_sha256: clientSha,
-        server_running_hash: serverHash,
-        filters: sessionRead.session.filters || {},
+        server_running_hash: completed.server_running_hash,
+        filters: completed.session.filters || {},
       },
     });
-    return jsonResponse({ ok: true, session_id: sessionRead.session.sid });
+    return jsonResponse({
+      ok: true,
+      session_id: completed.session.sid,
+      min_id: completed.session.min_id,
+      max_id: completed.session.max_id,
+      row_count: completed.session.n || 0,
+    });
   }
   if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
     const auth = await requireSecurityLogAccess(request, env);
@@ -10569,36 +10611,56 @@ async function routeApi(request, env, url, ctx = null) {
         },
       });
     }
-    if (verify.done) {
-      await enqueueAdminAudit(env, ctx, {
-        action: 'security.log.verify',
-        category: 'security',
-        method: 'GET',
-        path: '/api/admin/security-log/verify',
-        status: 200,
-        ...auditRequestForensics(request, auth.user),
-        summary: buildAuditSummary({
-          action: 'security.log.verify',
-          method: 'GET',
-          path: '/api/admin/security-log/verify',
-          status: 200,
-          actorUsername: auth.user.username,
-          detail: verify.chain_status,
-        }),
-        meta: {
-          phase: 'complete',
-          checked: verify.checked,
-          chain_ok: verify.chain_ok,
-          chain_head: verify.chain_head,
-          chain_head_id: verify.chain_head_id,
-          breaks: verify.chain_break_ids,
-          min_id: verify.min_id,
-          max_id: verify.max_id,
-          batch: true,
-        },
-      });
-    }
     return jsonResponse(verify);
+  }
+  if (url.pathname === '/api/admin/security-log/verify/complete' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    await request.json().catch(() => ({}));
+    const walked = await verifyAdminAuditRange(env, {});
+    const court = walked.court_report || buildCourtVerifyReport({
+      catalog: walked.generations || [],
+      breaks: walked.breaks || [],
+      digestFailures: walked.digest_failures || [],
+      legacy: walked.legacy || [],
+      compatibility: walked.compatibility || [],
+      minId: walked.min_id,
+      maxId: walked.max_id,
+    });
+    const detail = formatCourtVerifySummary(court);
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.verify',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.verify',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: {
+        phase: 'complete',
+        checked: walked.checked,
+        chain_ok: walked.chain_ok,
+        breaks: (walked.breaks || []).map((item) => item.id),
+        court_report: court,
+        min_id: walked.min_id,
+        max_id: walked.max_id,
+      },
+    });
+    return jsonResponse({
+      ok: true,
+      court_report: court,
+      chain_status: detail,
+      generation_report: walked.generation_report,
+      checked: walked.checked,
+      chain_ok: walked.chain_ok,
+    });
   }
   if (url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST') {
     const auth = await requireSecurityLogAccess(request, env);
@@ -11229,6 +11291,9 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
+    if (isVisualEditorSlug(existing.slug) && payloadHasOwn(rawPayload, 'body_html')) {
+      return jsonResponse({ detail: 'Use the visual editor for this page' }, 409);
+    }
     let page = serializePagePayload(rawPayload, existing);
     if (isVisualEditorSlug(existing.slug)) {
       page.body_html = existing.body_html;
@@ -14409,6 +14474,7 @@ __ADMIN_SIDEBAR__
 </div>
 </section>
 <section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">
     <label>Month<select id="security-log-month">
@@ -14423,9 +14489,9 @@ __ADMIN_SIDEBAR__
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. The list header reports this page only. Verify integrity walks every row to the true last entry, recomputes each digest, and lists every break by id, grouped by generation. A break means a row’s previous-id or previous-hash does not match the sealed row before it, or its stored SHA-256 does not match a fresh digest. Rows cannot be edited or deleted: database triggers abort UPDATE and DELETE. User search matches usernames still in Users plus the plaintext actor name on each row and a deleted-user name map. Free-text search runs on the decrypted rows on this page only.</p>
+  <p class="muted">This page lists the current month only. Use <b>Verify integrity</b> to walk the whole log. Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
-  <p class="status" id="security-log-verify" aria-live="polite"></p>
+  <p class="status" id="security-log-verify" hidden></p>
   <p class="error" id="security-log-write-warning" hidden></p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
   <details class="security-log-genesis">

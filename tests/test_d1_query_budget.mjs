@@ -22,7 +22,7 @@ import {
 } from '../worker/src/schema-upgrade.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PUBLIC_GET_BUDGET = 10;
+const PUBLIC_GET_BUDGET = 12;
 
 const PUBLIC_ROUTES = [
   { path: '/', slug: 'home', title: 'Home', is_home: 1, needsPhotos: true, isHome: true },
@@ -206,6 +206,7 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
     readFileSync(join(root, 'migrations/2026-10-04.3.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.5.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.6.sql'), 'utf8'),
   ].join('\n');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
@@ -214,11 +215,13 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
   assert.equal(normalize(sqlFile).includes('CREATE TRIGGER IF NOT EXISTS admin_audit_log_no_update'), true);
   assert.equal(normalize(sqlFile).includes('idx_audit_created'), true);
   assert.equal(sqlFile.includes('prev_sha256'), true);
-  assert.equal(normalize(sqlFile).includes('ALTER TABLE admin_audit_log ADD COLUMN prev_id'), true);
-  assert.equal(normalize(sqlFile).includes('admin_audit_log_linear_insert'), true);
+  assert.equal(normalize(sqlFile).includes('ALTER TABLE admin_audit_log ADD COLUMN'), false);
+  assert.equal(normalize(sqlFile).includes('admin_audit_export_sessions'), true);
   assert.equal(normalize(sqlFile).includes("schema_version"), true);
   for (const statement of incrementalSchemaStatements()) {
     if (/^\s*ALTER TABLE/i.test(statement)) continue;
+    if (/admin_audit_log_linear_insert/i.test(statement)) continue;
+    if (/idx_audit_prev_id|idx_audit_source_pending/i.test(statement)) continue;
     assert.equal(normalize(sqlFile).includes(normalize(statement)), true, statement.slice(0, 60));
   }
   assert.equal(normalize(rendered).includes('visual_pages'), true);

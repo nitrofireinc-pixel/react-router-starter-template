@@ -45,7 +45,7 @@ function createErrorEnv({
     if (throwOnDb) throw new Error('d1 exploded');
     const text = String(sql || '');
     if (type === 'first' && text.includes('FROM site_content WHERE key')) {
-      return { value: '2026-10-04.5' };
+      return { value: '2026-10-04.6' };
     }
     if (text.includes('FROM site_content WHERE key IN')) {
       const results = [
@@ -276,7 +276,7 @@ test('D1 query count on 404 stays within the public GET budget and does not add 
   const first = await worker.fetch(new Request('https://efhsband.org/missing-page.html'), boxed.env, { waitUntil() {} });
   assert.equal(first.status, 404);
   const cold = boxed.queryCounter.n;
-  assert.ok(cold <= 10, `404 cold used ${cold} D1 queries`);
+  assert.ok(cold <= 12, `404 cold used ${cold} D1 queries`);
   boxed.queryCounter.n = 0;
   const second = await worker.fetch(new Request('https://efhsband.org/missing-page.html'), boxed.env, { waitUntil() {} });
   assert.equal(second.status, 404);
@@ -306,7 +306,7 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
-  assert.equal(ASSET_VERSION, 'cms-p1-20261005b');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261005c');
   assert.match(workerSrc, /export async function renderErrorPage/);
   assert.match(workerSrc, /liteErrorResponse\(500/);
   assert.match(workerSrc, /Error pages/);

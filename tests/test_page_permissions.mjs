@@ -320,8 +320,8 @@ test('content-only visual save 403s hidden style on an inner paragraph or span',
     }),
     (error) => error.status === 403 && error.code === 'layout_required',
   );
-  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenP), /style|hidden|attribute/i);
-  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenSpan), /span|style|attribute/i);
+  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenP), /style is not allowed on <p>/i);
+  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenSpan), /span|style/i);
   assert.equal(contentOnlyHtmlViolation(BASE_HTML, BASE_HTML.replace('Intro', 'Welcome')), null);
 });
 
@@ -351,7 +351,7 @@ test('content-only visual save accepts copy edits and 403s a structural save', a
     (error) => {
       assert.equal(error.status, 403);
       assert.equal(error.code, 'layout_required');
-      assert.match(error.message, /layout:sponsors/);
+      assert.match(error.message, /new <section> is not allowed|layout:sponsors/);
       return true;
     },
   );
@@ -523,8 +523,8 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005b'/);
-  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.5'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005c'/);
+  assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.6'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });
 

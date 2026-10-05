@@ -4850,6 +4850,32 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 .security-log-filter-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .security-log-filter-grid .full{grid-column:1/-1}
 .security-log-chain-ok{color:var(--navy);font-weight:800}
+.security-log-court{display:grid;gap:12px;margin:12px 0 16px}
+.security-log-court-current{
+  background:#e8f6ec;
+  border:2px solid #157a3a;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#0f3d1f;
+}
+.security-log-court-current.is-broken{background:#fdecea;border-color:#b42318;color:#7a1b14}
+.security-log-court-previous{
+  background:#eef1f4;
+  border:1px solid #c5ccd4;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#2b3443;
+}
+.security-log-court-legacy{
+  background:#f4f1ea;
+  border:1px solid #d8d0c0;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#4a4236;
+}
+.security-log-court h2{margin:0 0 6px;font-size:1.05rem}
+.security-log-court p{margin:0 0 6px}
+.security-log-court details{margin-top:8px}
 #security-log-write-warning:not([hidden]){margin:8px 0 0}
 .security-log-panel,
 .security-log-panel .admin-card,

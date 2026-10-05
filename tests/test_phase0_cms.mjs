@@ -410,6 +410,7 @@ test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
 
 test('Phase 0 old Pages editor cannot overwrite visual-managed page bodies', () => {
   assert.match(workerSrc, /isVisualEditorSlug\(existing\.slug\)/);
+  assert.match(workerSrc, /Use the visual editor for this page/);
   assert.match(workerSrc, /page\.body_html = existing\.body_html/);
   assert.match(workerSrc, /function isVisualPilotSlug|isVisualPilotSlug,/);
   assert.match(adminSrc, /isVisualEditorPageSlug/);
@@ -650,10 +651,9 @@ test('Pages API fetch handler keeps visual page bodies and saves Home', async ()
     headers: { cookie, 'content-type': 'application/json' },
     body: JSON.stringify({ title: 'Join the Band', body_html: '<p>Hacked</p>' }),
   }), env, {});
-  assert.equal(joinRes.status, 200, await joinRes.clone().text());
+  assert.equal(joinRes.status, 409, await joinRes.clone().text());
   const joinBody = await joinRes.json();
-  assert.match(String(joinBody.body_html || ''), /<p>Join<\/p>/);
-  assert.doesNotMatch(String(joinBody.body_html || ''), /Hacked/);
+  assert.match(String(joinBody.detail || ''), /Use the visual editor for this page/);
 
   const saveRes = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/home', {
     method: 'PUT',
