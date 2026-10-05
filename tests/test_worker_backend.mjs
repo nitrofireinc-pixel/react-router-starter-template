@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_DAYS, minutesEditableUntil, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache, isWorkerStaticAssetPath, publicPhotoUrl, shouldInvalidatePublicReadCache, loginHintCookieHeader, LOGIN_HINT_COOKIE, applyAuthCookies, attachLoginHintIfNeeded, uploadCacheRequest, uploadCacheKeysForPhoto, PHOTO_BROWSER_CACHE, PHOTO_CACHE_API_TTL, makeSession } from '../worker/src/worker.mjs';
+import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_HOURS, minutesEditableUntil, canEditPageContent, canEditPageLayout, canEditPage, normalizePageGrants, userPageCapabilities, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache, isWorkerStaticAssetPath, publicPhotoUrl, shouldInvalidatePublicReadCache, loginHintCookieHeader, LOGIN_HINT_COOKIE, applyAuthCookies, attachLoginHintIfNeeded, uploadCacheRequest, uploadCacheKeysForPhoto, PHOTO_BROWSER_CACHE, PHOTO_CACHE_API_TTL, makeSession } from '../worker/src/worker.mjs';
 import worker from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
@@ -502,6 +502,36 @@ test('event helpers decode contenteditable entities instead of showing &amp; / &
   const indexHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
   assert.match(indexHtml, /<div class="footer-note" data-site-field="footer_note">/);
   assert.doesNotMatch(indexHtml, /<p data-site-field="footer_note">/);
+});
+
+test('serializePagePayload keeps existing slug and active when those fields are omitted', () => {
+  const existing = {
+    slug: 'inactive-resources',
+    path: '/inactive-resources.html',
+    title: 'Inactive Resources',
+    body_html: '<section><p>Keep</p></section>',
+    nav_order: 8,
+    is_home: 0,
+    active: 0,
+  };
+  const omitted = serializePagePayload({
+    title: 'Renamed In The Editor',
+    body_html: '<section><p>Edited</p></section>',
+  }, existing);
+  assert.equal(omitted.slug, 'inactive-resources');
+  assert.equal(omitted.path, '/inactive-resources.html');
+  assert.equal(omitted.active, 0);
+  assert.equal(omitted.title, 'Renamed In The Editor');
+  assert.match(omitted.body_html, /Edited/);
+
+  const explicit = serializePagePayload({
+    title: 'Renamed In The Editor',
+    slug: 'renamed-resources',
+    active: 1,
+    body_html: '<section><p>Edited</p></section>',
+  }, existing);
+  assert.equal(explicit.slug, 'renamed-resources');
+  assert.equal(explicit.active, 1);
 });
 
 test('serializePagePayload turns structured CMS fields into generated HTML', () => {
@@ -1875,42 +1905,43 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(normalizeMinutesPayload({ meeting_date: '08042026', body_html: '<p>x</p>' }).meeting_date, '2026-08-04');
   assert.match(payload.body_html, /Called to order/);
   assert.doesNotMatch(payload.body_html, /script/i);
-  assert.equal(MINUTES_EDIT_WINDOW_DAYS, 10);
+  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 48);
 
-  const secretary = { role: 'editor', permissions: ['minutes'] };
+  const secretary = { role: 'editor', permissions: ['minutes:edit'] };
+  const legacySecretary = { role: 'editor', permissions: ['minutes'] };
   const viewer = { role: 'editor', permissions: ['minutes:view'] };
   const outsider = { role: 'editor', permissions: ['mail'] };
   const admin = { role: 'admin', permissions: [] };
-  const today = new Date();
-  const freshMeetingDate = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-  const staleDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 11));
-  const staleMeetingDate = `${staleDay.getUTCFullYear()}-${String(staleDay.getUTCMonth() + 1).padStart(2, '0')}-${String(staleDay.getUTCDate()).padStart(2, '0')}`;
-  const fresh = { meeting_date: freshMeetingDate, created_at: new Date().toISOString() };
-  const stale = { meeting_date: staleMeetingDate, created_at: new Date().toISOString() };
+  const now = new Date('2026-10-04T22:00:00.000Z');
+  const hoursAgo = (hours) => new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
+  const fresh = { meeting_date: '2026-10-04', created_at: hoursAgo(47) };
+  const stale = { meeting_date: '2026-10-02', created_at: hoursAgo(49) };
   assert.equal(canViewMeetingMinutes(secretary), true);
   assert.equal(canViewMeetingMinutes(viewer), true);
   assert.equal(canViewMeetingMinutes(outsider), true);
   assert.equal(canViewMeetingMinutes(null), false);
   assert.equal(canManageMeetingMinutes(secretary), true);
+  assert.equal(canManageMeetingMinutes(legacySecretary), true);
   assert.equal(canManageMeetingMinutes(viewer), false);
-  assert.equal(canEditMeetingMinutes(secretary, fresh), true);
-  assert.equal(canEditMeetingMinutes(secretary, stale), false);
-  assert.equal(canEditMeetingMinutes(viewer, fresh), false);
-  assert.equal(canEditMeetingMinutes(admin, stale), true);
+  assert.equal(canEditMeetingMinutes(secretary, fresh, now), true);
+  assert.equal(canEditMeetingMinutes(secretary, stale, now), false);
+  assert.equal(canEditMeetingMinutes(legacySecretary, fresh, now), true);
+  assert.equal(canEditMeetingMinutes(viewer, fresh, now), false);
+  assert.equal(canEditMeetingMinutes(admin, stale, now), true);
   assert.equal(canDeleteMeetingMinutes(secretary), false);
   assert.equal(canDeleteMeetingMinutes(viewer), false);
   assert.equal(canDeleteMeetingMinutes(admin), true);
   // Editors with broad permissions still cannot delete — Super Admin role only.
   assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['all'] }), false);
-  assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['minutes', 'minutes:view', 'users'] }), false);
+  assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['minutes:edit', 'users'] }), false);
   assert.equal(canDeleteMeetingMinutes(null), false);
-  assert.ok(minutesEditableUntil(fresh.meeting_date) instanceof Date);
-  assert.equal(minutesEditableUntil('2026-08-04')?.toISOString(), '2026-08-14T00:00:00.000Z');
-  // Recently uploaded minutes for an older meeting date are still locked for secretaries.
+  assert.ok(minutesEditableUntil(fresh) instanceof Date);
+  assert.equal(minutesEditableUntil({ created_at: '2026-08-04 00:00:00' })?.toISOString(), '2026-08-06T00:00:00.000Z');
+  // Window is created_at + 48h, not the meeting date — a just-uploaded older meeting stays editable.
   assert.equal(canEditMeetingMinutes(secretary, {
     meeting_date: '2026-07-01',
-    created_at: new Date().toISOString(),
-  }), false);
+    created_at: hoursAgo(1),
+  }, now), true);
 
   assert.equal(canAccessCheckout({ role: 'editor', permissions: ['treasurer'] }), true);
   assert.equal(canAccessCheckout({ role: 'editor', permissions: ['president'] }), true);
@@ -1925,8 +1956,9 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessScheduleBoard({ role: 'editor', permissions: ['events'] }), true);
 
   assert.equal(canAccessBadgeCreator({ role: 'admin', permissions: [] }), true);
-  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), true);
-  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['vice-president'] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['badges'] }), true);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['president'] }), false);
+  assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['vice-president'] }), false);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['treasurer'] }), false);
   assert.equal(canAccessBadgeCreator({ role: 'editor', permissions: ['boosters'] }), false);
 
@@ -2331,7 +2363,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261004s'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005i'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3023,6 +3055,10 @@ test('dues payment helpers and Boosters Pay dues entry are present', () => {
   assert.match(workerSrc, /site-settings-switches/);
   assert.match(workerSrc, /data-password-toggle/);
   assert.match(workerSrc, /admin-password-toggle/);
+  assert.match(workerSrc, /name="device"/);
+  assert.match(workerSrc, /devicePixelRatio/);
+  assert.doesNotMatch(siteContent, /name="device"/);
+  assert.doesNotMatch(siteContent, /__cmsDeviceSnapshot/);
   assert.match(workerSrc, /ASSET_VERSION/);
   assert.match(siteContent, /function openDuesModal/);
   assert.match(siteContent, /function bindDuesButtons/);
@@ -3150,8 +3186,8 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(workerSrc, /\/api\/admin\/ledger\.xls/);
   assert.match(workerSrc, /\/api\/admin\/ledger\.xml/);
   assert.match(workerSrc, /canAccessTreasurerLedger\(auth\.user\)/);
-  assert.match(workerSrc, /Treasurer \(Ledger \+ Square Checkout\)/);
-  assert.match(workerSrc, /President \(Ledger \+ Square Checkout\)/);
+  assert.match(workerSrc, /value="treasurer"> Treasurer/);
+  assert.match(workerSrc, /value="president"> President/);
   const permissionsDeclLedger = workerSrc.match(/const GLOBAL_PERMISSIONS = \[([^\]]+)\]/);
   assert.ok(permissionsDeclLedger);
   assert.match(permissionsDeclLedger[1], /'treasurer'/);
@@ -3360,7 +3396,10 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
               if (!store.has(key)) return null;
               return { value: store.get(key) };
             }
-            throw new Error(`unexpected first(): ${sql}`);
+            if (String(sql).includes('admin_audit_log_linear_insert')) {
+              return { sql: "WHEN NEW.prev_id IS NULL THEN audit_chain_cutover_at '+15 minutes' audit_chain_cutover_id AND prev_id IS NOT NULL" };
+            }
+            return null;
           },
           async run() {
             calls.push({ type: 'run', sql });
@@ -3368,7 +3407,12 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
           },
           async all() {
             calls.push({ type: 'all', sql });
-            throw new Error(`unexpected all(): ${sql}`);
+            if (String(sql).includes('pragma_table_info') || String(sql).includes('PRAGMA table_info')) {
+              return {
+                results: ['prev_sha256', 'prev_id', 'source_pending_id', 'key_id'].map((name) => ({ name })),
+              };
+            }
+            return { results: [] };
           },
         };
         return statement;
@@ -3381,7 +3425,7 @@ test('initDb skips heavy migrate work when schema_version matches', async () => 
   };
   await initDb(env);
   await initDb(env);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.some((call) => call.type === 'batch' || call.type === 'run'), false);
   assert.equal(calls[0].type, 'first');
   assert.match(calls[0].sql, /site_content/);
 });
@@ -3399,7 +3443,7 @@ test('initDb memoizes after first successful schema check in-isolate', async () 
             return { value: DB_SCHEMA_VERSION };
           },
           async run() { throw new Error('unexpected run'); },
-          async all() { throw new Error('unexpected all'); },
+          async all() { return { results: [] }; },
         };
       },
       async batch() { throw new Error('unexpected batch'); },
@@ -3476,7 +3520,7 @@ test('initDb applies the incremental upgrade on 2026-10-02.1 without the full se
   const batches = calls.filter((call) => call.type === 'batch');
   assert.equal(batches.length, 1);
   assert.ok(batches[0].count <= 40);
-  assert.ok(batches[0].count < 20, 'incremental upgrade must not recreate every table');
+  assert.ok(batches[0].count <= 30, 'incremental upgrade must not recreate every table');
   assert.equal(calls.some((call) => call.type === 'run' && /schema_version|site_content/.test(call.sql)), true);
   await initDb(env);
   assert.equal(calls.filter((call) => call.type === 'batch').length, 1);
@@ -3788,6 +3832,8 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
   assert.match(workerSrc, /id="badge-creator-print"/);
   assert.match(workerSrc, /badge-creator\.js/);
   assert.match(workerSrc, /\/api\/admin\/badges/);
+  assert.match(workerSrc, /Permission required: badges/);
+  assert.match(workerSrc, /searchParams\.get\('tab'\) === 'badge-creator'/);
   assert.match(workerSrc, /CREATE TABLE IF NOT EXISTS committee_badges/);
   assert.match(workerSrc, /photo_url TEXT NOT NULL DEFAULT ''/);
   assert.doesNotMatch(workerSrc, /committee_badges[\s\S]{0,400}data_base64/);

@@ -44,6 +44,7 @@ CONTACT_DEFAULT_EMAIL = ""
 CONTACT_EMAIL_PROVIDER = "none"
 DEV_UPLOAD_ORIGIN = "https://efhsband.org"
 DEV_ERROR_HOOK = "1"
+AUDIT_ALLOW_LEGACY_V3_UNTIL_ID = "1576"
 
 [[d1_databases]]
 binding = "DB"

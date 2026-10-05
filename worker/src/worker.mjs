@@ -45,15 +45,44 @@ import {
 import {
   ADMIN_AUDIT_KNOWN_ACTIONS,
   ADMIN_AUDIT_PAGE_SIZE,
+  AUDIT_BEFORE_VISUAL_SQL,
+  PHOTO_QUARANTINE_SORT,
+  attachD1QueryCounter,
+  createD1QueryBudget,
+  advanceAuditExportSession,
+  buildAdminAuditExportCsv,
+  buildAdminAuditExportJson,
   buildAdminAuditExportPdfBase64,
+  buildAdminAuditExportText,
+  buildCourtVerifyReport,
+  completeAuditExportSession,
+  buildAuditExportManifest,
   buildAuditSummary,
+  clearLoginFailures,
+  contentEvidenceHashed,
+  createAuditExportSession,
+  formatCourtVerifySummary,
+  enqueueAdminAudit,
   enrichMailAuditMeta,
+  inspectLoginLock,
   isSecurityLogPath,
   listAdminAuditLogs,
+  markRequestAuditWritten,
   maybeAuditAdminApiResponse,
+  maybeLogAccessDenial,
+  nextAuditExportRunningHash,
+  verifyAdminAuditBatch,
+  parseAuditUtcDate,
+  permissionListFromValue,
+  readAuditExportSession,
+  recordAuditActorName,
+  registerLoginFailure,
   requestClientIp,
+  requestCountry,
+  sha256BytesHex,
+  startNewAuditLogGeneration,
   summarizeAdminRequestForAudit,
-  writeAdminAuditLog,
+  verifyAdminAuditRange,
 } from './admin-audit-log.mjs';
 import {
   deserializeVapidKeys,
@@ -111,8 +140,25 @@ import {
 import {
   applyIncrementalSchema,
   auditLogSchemaStatements,
+  auditSchemaNeedsRepair,
+  repairAuditSchema,
   schemaNeedsIncrementalUpgrade,
 } from './schema-upgrade.mjs';
+import {
+  contentOnlyForbiddenHtmlViolation,
+  contentOnlyHtmlViolation,
+  migrateStoredUserPermissionGrants,
+  normalizePageGrants,
+  pageSettingsChanged,
+  parsePermissionList,
+  visualStructureSignature,
+  visualStyleSignature,
+} from './page-permissions.mjs';
+import {
+  compactSessionDevice,
+  expandSessionDevice,
+  sanitizeClientDeviceSnapshot,
+} from './audit-device.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
 import {
   DEFAULT_ERROR_PAGES,
@@ -139,9 +185,11 @@ export {
 };
 import {
   VISUAL_EDITOR_PATH_PREFIX,
+  canEditVisualLayout,
   canEditVisualPage,
   isVisualEditorSlug,
   isVisualPilotSlug,
+  extractEditableJoinHtml,
   loadVisualPageState,
   normalizeVisualSavePayload,
   pageHasVisualPublish,
@@ -379,11 +427,11 @@ export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes', 'minutes:view', 'forms'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261004s';
+export const ASSET_VERSION = 'cms-p1-20261005i';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -550,19 +598,10 @@ export function normalizePageSlug(value) {
   return slug || 'page';
 }
 
+export { normalizePageGrants, pageSettingsChanged, visualStructureSignature, visualStyleSignature };
+
 export function parsePermissions(value) {
-  const forbidden = new Set(['security-log', 'security', 'audit', 'audit-log', 'admin-audit']);
-  const filterSafe = (items) => items
-    .filter((item) => typeof item === 'string')
-    .map((item) => String(item).trim())
-    .filter((item) => item && !forbidden.has(item.toLowerCase()));
-  if (Array.isArray(value)) return filterSafe(value);
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? filterSafe(parsed) : [];
-  } catch {
-    return [];
-  }
+  return parsePermissionList(value);
 }
 
 export function isSuperAdmin(user) {
@@ -576,12 +615,18 @@ export function canManagePageSettings(user) {
   return isSuperAdmin(user) || hasPermission(user, 'pages');
 }
 
+/** Maintenance mode is Super Admin only — never the `site` grant. */
+export function canToggleMaintenanceMode(user) {
+  return isSuperAdmin(user);
+}
+
 export function lockPageSettingsToExisting(page, existing) {
   if (!page || !existing) return page;
   return {
     ...page,
     slug: existing.slug,
     path: existing.is_home ? '/' : existing.path,
+    title: existing.title,
     nav_order: Number(existing.nav_order),
     is_home: existing.is_home ? 1 : 0,
     active: Number(existing.active) === 1 ? 1 : 0,
@@ -599,7 +644,14 @@ function permissionKey(item) {
 }
 
 export function actorHeldPermissionKeys(actor) {
-  return new Set(parsePermissions(actor?.permissions).map(permissionKey));
+  const keys = new Set(parsePermissions(actor?.permissions).map(permissionKey));
+  if (keys.has('minutes')) keys.add('minutes:edit');
+  if (keys.has('minutes:edit')) keys.add('minutes');
+  for (const key of [...keys]) {
+    const layout = key.match(/^layout:(.+)$/);
+    if (layout) keys.add(`page:${layout[1]}`);
+  }
+  return keys;
 }
 
 export function sanitizeAssignablePermissions(actor, permissions) {
@@ -1594,13 +1646,9 @@ export function canNotifyCalendarSubscribers(user) {
   );
 }
 
-/** Badge Creator: Super Admin, President, or Vice President. */
+/** Badge Creator: Super Admin or the explicit badges grant. */
 export function canAccessBadgeCreator(user) {
-  return (
-    isSuperAdmin(user)
-    || hasPermission(user, 'president')
-    || hasPermission(user, 'vice-president')
-  );
+  return isSuperAdmin(user) || hasPermission(user, 'badges');
 }
 
 const COMMITTEE_BADGE_ROLES = [
@@ -1835,8 +1883,11 @@ async function hmacSign(value, secret) {
   return base64Url(await crypto.subtle.sign('HMAC', key, TEXT.encode(value)));
 }
 
-export async function makeSession(user, env) {
-  const payload = base64Url(TEXT.encode(JSON.stringify({ uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) })));
+export async function makeSession(user, env, extras = {}) {
+  const payloadObj = { uid: user.id, u: user.username, t: Math.floor(Date.now() / 1000) };
+  const packed = compactSessionDevice(extras.device || extras.device_client || null);
+  if (packed) payloadObj.d = packed;
+  const payload = base64Url(TEXT.encode(JSON.stringify(payloadObj)));
   return `${payload}.${await hmacSign(payload, sessionSecret(env))}`;
 }
 
@@ -1877,17 +1928,173 @@ export function attachLoginHintIfNeeded(request, response, user) {
   return response;
 }
 
-async function currentUser(request, env) {
+async function inspectSessionCookie(request, env) {
   const value = getCookie(request, SESSION_COOKIE);
-  if (!value || !value.includes('.')) return null;
+  if (!value || !value.includes('.')) {
+    return { user: null, expired: false, session_id_hash: '', username: '', uid: null };
+  }
   const [payload, supplied] = value.split('.');
   const expected = await hmacSign(payload, sessionSecret(env));
-  if (supplied !== expected) return null;
+  const sessionIdHash = await sha256Hex(value);
+  if (supplied !== expected) {
+    return { user: null, expired: false, invalid: true, session_id_hash: sessionIdHash, username: '', uid: null };
+  }
+    let data = null;
+    try {
+      data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
+    } catch {
+      return { user: null, expired: false, invalid: true, session_id_hash: sessionIdHash, username: '', uid: null };
+    }
+    const deviceClient = expandSessionDevice(data.d);
+    if (!isSessionFresh(data.t)) {
+      return {
+        user: null,
+        expired: true,
+        session_id_hash: sessionIdHash,
+        username: String(data.u || ''),
+        uid: data.uid ? Number(data.uid) : null,
+        issued_at: data.t,
+        device_client: deviceClient,
+      };
+    }
+    try {
+      const user = data.uid
+        ? await getUserById(env, Number(data.uid))
+        : await getUserByUsername(env, data.u);
+      return {
+        user,
+        expired: false,
+        session_id_hash: sessionIdHash,
+        username: user?.username || data.u || '',
+        uid: user?.id || data.uid || null,
+        device_client: deviceClient,
+      };
+    } catch (error) {
+      console.error('session_lookup_d1_failed', String(error?.message || error || 'd1 read failed'));
+      return {
+        user: null,
+        d1Error: true,
+        expired: false,
+        session_id_hash: sessionIdHash,
+        username: String(data.u || ''),
+        uid: data.uid ? Number(data.uid) : null,
+        device_client: deviceClient,
+      };
+    }
+}
+
+async function currentUser(request, env) {
+  return (await inspectSessionCookie(request, env)).user;
+}
+
+function auditRequestForensics(request, actor = null, session = null) {
+  return {
+    actor_user_id: actor?.id ?? session?.uid ?? null,
+    actor_username: actor?.username || session?.username || '',
+    ip: requestClientIp(request),
+    country: requestCountry(request),
+    user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: session?.session_id_hash || '',
+    device_client: session?.device_client || null,
+  };
+}
+
+async function logSessionExpired(env, request, session, {
+  path = '',
+  method = 'GET',
+  ctx = null,
+} = {}) {
+  if (!session?.expired) return;
+  await enqueueAdminAudit(env, ctx, {
+    request,
+    action: 'session.expired',
+    category: 'auth',
+    method: String(method || 'GET').toUpperCase(),
+    path,
+    status: 401,
+    ...auditRequestForensics(request, null, session),
+    summary: buildAuditSummary({
+      action: 'session.expired',
+      method: String(method || 'GET').toUpperCase(),
+      path,
+      status: 401,
+      actorUsername: session.username || 'unknown',
+      detail: 'session TTL exceeded',
+    }),
+    meta: { issued_at: session.issued_at || null },
+  });
+}
+
+async function snapshotAdminMutationBefore(env, pathname = '', method = '') {
+  const verb = String(method || '').toUpperCase();
+  const path = String(pathname || '');
   try {
-    const data = JSON.parse(READ_TEXT.decode(fromBase64Url(payload)));
-    if (!isSessionFresh(data.t)) return null;
-    if (data.uid) return getUserById(env, Number(data.uid));
-    if (data.u) return getUserByUsername(env, data.u);
+    const page = path.match(/^\/api\/admin\/pages\/([a-z0-9-]+)$/);
+    if (page && (verb === 'PUT' || verb === 'DELETE')) {
+      const row = await env.DB.prepare('SELECT slug, title, body_html, active FROM cms_pages WHERE slug = ?').bind(page[1]).first();
+      if (!row) return null;
+      return {
+        target: row.slug,
+        content_before: String(row.body_html || ''),
+        extra: { title: row.title, active: row.active },
+      };
+    }
+    const visual = path.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)/);
+    if (visual && (verb === 'PUT' || verb === 'POST')) {
+      const row = await env.DB.prepare(AUDIT_BEFORE_VISUAL_SQL).bind(visual[1]).first();
+      if (!row) return null;
+      return {
+        target: row.slug,
+        content_before: String(row.draft_html || row.published_html || ''),
+      };
+    }
+    if (path === '/api/admin/ensembles/body' && verb === 'PUT') {
+      const row = await env.DB.prepare("SELECT body_html FROM cms_pages WHERE slug = 'ensembles'").first();
+      return row ? { target: 'ensembles', content_before: String(row.body_html || '') } : null;
+    }
+    if (path === '/api/admin/site' && verb === 'POST') {
+      const rows = await env.DB.prepare(
+        "SELECT key, value FROM site_content WHERE key IN ('title','hero_title','hero_subtitle','footer_note','maintenance_mode','error_pages')",
+      ).all();
+      const map = Object.fromEntries((rows?.results || []).map((item) => [item.key, item.value]));
+      return { target: 'site', content_before: JSON.stringify(map) };
+    }
+    const user = path.match(/^\/api\/admin\/users\/(\d+)$/);
+    if (user && (verb === 'PUT' || verb === 'DELETE')) {
+      const row = await env.DB.prepare(
+        'SELECT id, username, display_name, role, permissions, active FROM users WHERE id = ?',
+      ).bind(Number(user[1])).first();
+      if (!row) return null;
+      return {
+        target: `user:${row.id}`,
+        grants: {
+          before: permissionListFromValue(row.permissions),
+          username: row.username,
+          role: row.role,
+          active: row.active,
+        },
+      };
+    }
+    const photo = path.match(/^\/api\/admin\/photos\/(\d+)$/);
+    if (photo && verb === 'DELETE') {
+      const row = await env.DB.prepare(
+        'SELECT id, filename, original_name, content_type, data_base64, sort_order FROM photos WHERE id = ?',
+      ).bind(Number(photo[1])).first();
+      if (!row) return null;
+      const bytes = photoBytesFromStored(row.data_base64);
+      return {
+        target: `photo:${row.id}`,
+        photo: {
+          id: row.id,
+          filename: row.filename,
+          original_name: row.original_name,
+          type: row.content_type,
+          size: bytes?.byteLength || 0,
+          sha256: bytes ? await sha256BytesHex(bytes) : '',
+          quarantined: true,
+        },
+      };
+    }
   } catch {
     return null;
   }
@@ -1926,7 +2133,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.2';
+export const DB_SCHEMA_VERSION = '2026-10-04.6';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -1979,6 +2186,10 @@ export async function initDb(env) {
         return;
       }
       if (current.value === DB_SCHEMA_VERSION) {
+        if (await auditSchemaNeedsRepair(env)) {
+          console.log('initDb_repair_start', { current: current.value, target: DB_SCHEMA_VERSION });
+          await repairAuditSchema(env);
+        }
         dbInitVersion = DB_SCHEMA_VERSION;
         return;
       }
@@ -2031,7 +2242,7 @@ async function migrateAndSeedDb(env) {
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_pages (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, body_html TEXT NOT NULL DEFAULT \'\', nav_order INTEGER NOT NULL DEFAULT 0, is_home INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS form_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT \'inkind\', payload_json TEXT NOT NULL DEFAULT \'{}\', delivered INTEGER NOT NULL DEFAULT 0, delivery_error TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS cms_forms (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL, definition_json TEXT NOT NULL DEFAULT \'{}\', recipient_user_ids TEXT NOT NULL DEFAULT \'[]\', page_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, category TEXT NOT NULL DEFAULT \'admin\', method TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL DEFAULT \'\', status INTEGER, actor_user_id INTEGER, actor_username TEXT NOT NULL DEFAULT \'\', ip TEXT NOT NULL DEFAULT \'\', user_agent TEXT NOT NULL DEFAULT \'\', summary TEXT NOT NULL DEFAULT \'\', meta_json TEXT NOT NULL DEFAULT \'\{\}\', payload_sha256 TEXT NOT NULL DEFAULT \'\', ciphertext TEXT NOT NULL DEFAULT \'\', enc_version INTEGER NOT NULL DEFAULT 1, key_id TEXT NOT NULL DEFAULT \'\', prev_sha256 TEXT NOT NULL DEFAULT \'\', prev_id INTEGER)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS payment_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_type TEXT NOT NULL DEFAULT \'\', ref_id INTEGER, name TEXT NOT NULL DEFAULT \'\', address TEXT NOT NULL DEFAULT \'\', amount_cents INTEGER NOT NULL DEFAULT 0, amount_display TEXT NOT NULL DEFAULT \'\', package TEXT NOT NULL DEFAULT \'\', note TEXT NOT NULL DEFAULT \'\', money_exchanged INTEGER NOT NULL DEFAULT 1, paid_at TEXT NOT NULL DEFAULT \'\', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(kind, ref_type, ref_id))'),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS caldev_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7067,6 +7278,24 @@ export function isPublicCmsPageActive(page) {
   return Boolean(page) && Number(page.active) === 1;
 }
 
+/** Dedicated Coming Soon placeholders Trevor keeps on the public site. */
+export function isDeliberateComingSoonPage(page = {}) {
+  const slug = String(page?.slug || '').trim().toLowerCase();
+  return COMING_SOON_PAGES.some((item) => item.slug === slug);
+}
+
+export function canPreviewUnpublishedCmsPage(user, page = {}) {
+  return Boolean(user) && canEditPageContent(user, page?.slug);
+}
+
+/** Inactive pages 404 unless they are Coming Soon or the visitor can edit them. */
+export function shouldServePublicCmsPage(page, user = null) {
+  if (!page) return false;
+  if (isPublicCmsPageActive(page)) return true;
+  if (isDeliberateComingSoonPage(page)) return true;
+  return canPreviewUnpublishedCmsPage(user, page);
+}
+
 /** Public form POST must follow Coming Soon when the CMS page is inactive. */
 export function publicFormSubmitGate(page) {
   if (page && isPublicCmsPageActive(page)) return { ok: true };
@@ -7492,11 +7721,85 @@ export function formatUserLastLoginDisplay(value, {
   }
 }
 
-function canEditPage(user, slug) {
-  return hasPermission(user, 'pages') || hasPermission(user, `page:${slug}`);
+export function canEditPageContent(user, slug) {
+  const key = String(slug || '').trim().toLowerCase();
+  if (!key) return false;
+  return hasPermission(user, 'pages') || hasPermission(user, `page:${key}`) || hasPermission(user, `layout:${key}`);
 }
 
-export const MINUTES_EDIT_WINDOW_DAYS = 10;
+/** Content-only alias so existing callers keep their meaning. */
+export function canEditPage(user, slug) {
+  return canEditPageContent(user, slug);
+}
+
+export function canEditPageLayout(user, slug) {
+  const key = String(slug || '').trim().toLowerCase();
+  if (!key) return false;
+  return hasPermission(user, 'pages') || hasPermission(user, `layout:${key}`);
+}
+
+export function userPageCapabilities(user, slugs = []) {
+  const list = Array.isArray(slugs) ? slugs : [];
+  return {
+    pages: hasPermission(user, 'pages'),
+    content_slugs: list.filter((slug) => canEditPageContent(user, slug)),
+    layout_slugs: list.filter((slug) => canEditPageLayout(user, slug)),
+    minutes_edit: canManageMeetingMinutes(user),
+    badges: canAccessBadgeCreator(user),
+  };
+}
+
+export function adminSidebarAllows(user, tab) {
+  if (!user) return true;
+  switch (String(tab || '')) {
+    case 'dashboard':
+    case 'mail':
+    case 'minutes':
+      return true;
+    case 'staff':
+      return hasPermission(user, 'staff') || canEditPageContent(user, 'directors');
+    case 'ensembles':
+      return canEditPageContent(user, 'ensembles');
+    case 'booster-members':
+      return hasPermission(user, 'boosters') || canEditPageContent(user, 'boosters');
+    case 'badge-creator':
+      return canAccessBadgeCreator(user);
+    case 'events':
+      return hasPermission(user, 'events') || hasPermission(user, 'events:manage');
+    case 'sponsors':
+      return hasPermission(user, 'sponsors') || canEditPageContent(user, 'sponsors');
+    case 'sponsors-page':
+      return canEditPageContent(user, 'sponsors');
+    case 'become-a-sponsor':
+      return canEditPageContent(user, 'become-a-sponsor');
+    case 'contact':
+      return hasPermission(user, 'contact') || canEditPageContent(user, 'contact');
+    case 'forms':
+      return canAccessFormsPage(user);
+    case 'ledger':
+      return canAccessTreasurerLedger(user);
+    case 'checkout':
+      return canAccessCheckout(user);
+    case 'users':
+      return hasPermission(user, 'users');
+    case 'caldev':
+      return canAccessScheduleBoard(user);
+    case 'security-log':
+      return canAccessSecurityLog(user);
+    case 'social':
+    case 'site':
+      return hasPermission(user, 'site');
+    case 'photos':
+      return hasPermission(user, 'photos');
+    case 'pages':
+      return hasPermission(user, 'pages')
+        || parsePermissions(user.permissions).some((item) => /^(page|layout):/.test(String(item)));
+    default:
+      return true;
+  }
+}
+
+export const MINUTES_EDIT_WINDOW_HOURS = 48;
 
 export function parseMeetingDateInput(value) {
   const raw = String(value || '').trim();
@@ -7868,16 +8171,19 @@ export async function parseBoostersMinutesDocx(arrayBuffer, filename = '') {
   };
 }
 
-export function minutesEditableUntil(meetingDate) {
-  // 10-day secretary edit window starts on the meeting date (not upload/submit time).
-  const iso = parseMeetingDateInput(meetingDate) || (
-    String(meetingDate || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(meetingDate) : ''
-  );
-  if (!iso) return null;
-  const [year, month, day] = iso.split('-').map(Number);
-  const start = Date.UTC(year, month - 1, day);
-  if (Number.isNaN(start)) return null;
-  return new Date(start + (MINUTES_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+export function minutesEditableUntil(recordOrCreatedAt) {
+  const raw = recordOrCreatedAt && typeof recordOrCreatedAt === 'object'
+    ? recordOrCreatedAt.created_at
+    : recordOrCreatedAt;
+  const created = parseAuditUtcDate(raw);
+  if (!created) return null;
+  return new Date(created.getTime() + (MINUTES_EDIT_WINDOW_HOURS * 60 * 60 * 1000));
+}
+
+export function minutesWithinEditWindow(record, now = new Date()) {
+  const until = minutesEditableUntil(record);
+  if (!until) return false;
+  return now.getTime() <= until.getTime();
 }
 
 export function canViewMeetingMinutes(user) {
@@ -7886,24 +8192,112 @@ export function canViewMeetingMinutes(user) {
 }
 
 export function canManageMeetingMinutes(user) {
-  // Secretary / create-edit capability (time window applied separately).
   if (!user) return false;
-  return isSuperAdmin(user) || hasPermission(user, 'minutes');
+  return isSuperAdmin(user) || hasPermission(user, 'minutes:edit') || hasPermission(user, 'minutes');
 }
 
 export function canEditMeetingMinutes(user, record, now = new Date()) {
   if (!user || !record) return false;
-  if (!canManageMeetingMinutes(user)) return false;
   if (isSuperAdmin(user)) return true;
-  const until = minutesEditableUntil(record.meeting_date);
-  if (!until) return false;
-  return now.getTime() <= until.getTime();
+  if (!canManageMeetingMinutes(user)) return false;
+  return minutesWithinEditWindow(record, now);
 }
 
 export function canDeleteMeetingMinutes(user) {
   // Hard rule: secretaries and view-only users can never delete minutes.
   // Only users with the Super Admin role (role === 'admin') may delete.
   return Boolean(user) && isSuperAdmin(user);
+}
+
+async function writeMaintenanceAudit(env, request, user, {
+  status,
+  previous = null,
+  enabled = null,
+  detail = '',
+  ctx = null,
+} = {}) {
+  const path = (() => {
+    try { return new URL(request.url).pathname; } catch { return '/api/admin/maintenance'; }
+  })();
+  await enqueueAdminAudit(env, ctx, {
+    request,
+    action: 'change.maintenance',
+    category: 'site',
+    method: String(request?.method || 'POST').toUpperCase(),
+    path,
+    status,
+    actor_user_id: user?.id,
+    actor_username: user?.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action: 'change.maintenance',
+      method: String(request?.method || 'POST').toUpperCase(),
+      path,
+      status,
+      actorUsername: user?.username,
+      detail,
+    }),
+    meta: {
+      previous: previous == null ? null : (previous ? 1 : 0),
+      enabled: enabled == null ? null : (enabled ? 1 : 0),
+    },
+  });
+  markRequestAuditWritten(request);
+}
+
+export async function sha256Hex(value) {
+  const buf = await crypto.subtle.digest('SHA-256', TEXT.encode(String(value || '')));
+  return [...new Uint8Array(buf)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function writeMinutesAudit(env, request, user, {
+  action,
+  status,
+  minutes = null,
+  before = '',
+  after = '',
+  beforeHtml = '',
+  afterHtml = '',
+  detail = '',
+  ctx = null,
+} = {}) {
+  const path = (() => {
+    try { return new URL(request.url).pathname; } catch { return '/api/admin/minutes'; }
+  })();
+  const method = String(request?.method || 'POST').toUpperCase();
+  await enqueueAdminAudit(env, ctx, {
+    request,
+    action,
+    category: 'minutes',
+    method,
+    path,
+    status,
+    actor_user_id: user?.id,
+    actor_username: user?.username,
+    ip: requestClientIp(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action,
+      method,
+      path,
+      status,
+      actorUsername: user?.username,
+      detail,
+    }),
+    meta: {
+      minutes_id: minutes?.id || null,
+      meeting_date: minutes?.meeting_date || '',
+      created_at: minutes?.created_at || '',
+      within_window: minutesWithinEditWindow(minutes),
+      before_sha256: before,
+      after_sha256: after,
+      content: (beforeHtml || afterHtml || minutes?.body_html)
+        ? await contentEvidenceHashed(beforeHtml, afterHtml || minutes?.body_html || '')
+        : null,
+    },
+  });
+  markRequestAuditWritten(request);
 }
 
 export function renderMinutesDocumentHtml(site = {}, minutes = {}, { embed = false } = {}) {
@@ -8052,7 +8446,7 @@ function serializeMinutesRow(row, user = null) {
     created_by_name: row.created_by_name || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
-    editable_until: minutesEditableUntil(row.meeting_date)?.toISOString() || null,
+    editable_until: minutesEditableUntil(row)?.toISOString() || null,
     can_view: canViewMeetingMinutes(user),
     can_edit: canEditMeetingMinutes(user, row),
     can_manage: canManageMeetingMinutes(user),
@@ -8104,19 +8498,34 @@ export async function requireScheduleBoardAccess(request, env) {
   return auth;
 }
 
-export async function requireSecurityLogAccess(request, env) {
-  const auth = await requireLogin(request, env);
-  if (auth.response) return auth;
-  if (!canAccessSecurityLog(auth.user)) {
-    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: auth.user };
+export async function requireSecurityLogAccess(request, env, { expiredDetail = '' } = {}) {
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) {
+    return {
+      response: jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 }),
+      d1Error: true,
+    };
   }
-  return auth;
+  if (session.expired && expiredDetail) {
+    return { response: jsonResponse({ detail: expiredDetail }, 401), expired: true };
+  }
+  if (!session.user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
+  if (!canAccessSecurityLog(session.user)) {
+    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: session.user };
+  }
+  return { user: session.user, session };
 }
 
 async function requireLogin(request, env) {
-  const user = await currentUser(request, env);
-  if (!user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
-  return { user };
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) {
+    return {
+      response: jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 }),
+      d1Error: true,
+    };
+  }
+  if (!session.user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
+  return { user: session.user, session };
 }
 
 async function requirePermission(request, env, scope) {
@@ -8567,57 +8976,119 @@ export function sanitizeHomeBodyHtml(html = '') {
   return sanitizeHomeAllowlistHtml(source);
 }
 
+function payloadHasOwn(payload, key) {
+  return Boolean(payload) && Object.prototype.hasOwnProperty.call(payload, key);
+}
+
 export function serializePagePayload(payload, existing = null) {
-  const slug = normalizePageSlug(payload.slug || payload.title || existing?.slug);
-  const path = payload.path ? normalizeStaticPath(payload.path) : pagePathFromSlug(slug);
+  const raw = payload && typeof payload === 'object' ? payload : {};
+  const slug = existing && !payloadHasOwn(raw, 'slug')
+    ? normalizePageSlug(existing.slug)
+    : normalizePageSlug(raw.slug || raw.title || existing?.slug);
+  const path = payloadHasOwn(raw, 'path')
+    ? (raw.path ? normalizeStaticPath(raw.path) : pagePathFromSlug(slug))
+    : (existing
+      ? (Number(existing.is_home) ? '/' : (existing.path || pagePathFromSlug(existing.slug || slug)))
+      : pagePathFromSlug(slug));
   const defaultHtml = '<section><div class="wrap"><h1>New Page</h1><p>Edit this page in the CMS.</p></div></section>';
   let body_html;
   if (slug === 'home') {
-    if (payload.body_html != null && String(payload.body_html).trim()) {
-      body_html = sanitizeHomeBodyHtml(payload.body_html);
+    if (raw.body_html != null && String(raw.body_html).trim()) {
+      body_html = sanitizeHomeBodyHtml(raw.body_html);
     } else {
       const baseHtml = String(existing?.body_html ?? defaultHtml);
       const cards = normalizeHomeFeatureCards({
         ...extractHomeFeatureCards(baseHtml),
-        ...payload,
+        ...raw,
       });
       body_html = applyHomeFeatureCards(baseHtml, cards);
     }
-  } else if (hasStructuredPageFields(payload)) {
-    body_html = generateStructuredPageHtml({ title: payload.title || existing?.title, ...payload });
+  } else if (hasStructuredPageFields(raw)) {
+    body_html = generateStructuredPageHtml({ title: raw.title || existing?.title, ...raw });
   } else {
-    body_html = String(payload.body_html ?? existing?.body_html ?? defaultHtml);
+    body_html = String(raw.body_html ?? existing?.body_html ?? defaultHtml);
   }
   if (slug !== 'home') {
     body_html = sanitizeCmsPageHtml(body_html);
   }
+  const title = existing && !payloadHasOwn(raw, 'title')
+    ? String(existing.title || 'Untitled Page').trim()
+    : String(raw.title || existing?.title || 'Untitled Page').trim();
+  const active = existing && !payloadHasOwn(raw, 'active')
+    ? (Number(existing.active) ? 1 : 0)
+    : (raw.active === false || raw.active === 0 ? 0 : 1);
+  const isHome = existing && !payloadHasOwn(raw, 'is_home') && !payloadHasOwn(raw, 'slug')
+    ? (Number(existing.is_home) ? 1 : 0)
+    : (slug === 'home' || raw.is_home ? 1 : 0);
   return {
     slug,
-    path: slug === 'home' ? '/' : path,
-    title: String(payload.title || existing?.title || 'Untitled Page').trim(),
+    path: slug === 'home' || isHome ? '/' : path,
+    title,
     body_html,
-    nav_order: Number(payload.nav_order ?? existing?.nav_order ?? 99),
-    is_home: slug === 'home' || payload.is_home ? 1 : 0,
-    active: payload.active === false || payload.active === 0 ? 0 : 1,
+    nav_order: Number(raw.nav_order ?? existing?.nav_order ?? 99),
+    is_home: isHome,
+    active,
   };
 }
 
+function d1UnavailableJson() {
+  return jsonResponse({ detail: 'Database temporarily unavailable' }, 503, { retryAfter: 2 });
+}
+
+function d1UnavailableHtml(path = '/') {
+  return liteErrorResponse(503, {
+    path,
+    retryAfter: 2,
+    detail: 'Database temporarily unavailable',
+  });
+}
+
 async function handleApi(request, env, url, ctx = null) {
-  await initDb(env);
+  try {
+    await initDb(env);
+  } catch (error) {
+    console.error('initDb_d1_unavailable', String(error?.message || error));
+    return d1UnavailableJson();
+  }
+  const isAdminApi = url.pathname.startsWith('/api/admin');
+  const mutating = isAdminApi && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+  const session = isAdminApi ? await inspectSessionCookie(request, env) : { user: null };
+  if (session.d1Error) return d1UnavailableJson();
+  const actor = session.user;
+  let skipGeneric = false;
+  if (session.expired && mutating) {
+    await logSessionExpired(env, request, session, {
+      path: url.pathname,
+      method: request.method,
+      ctx,
+    });
+    skipGeneric = true;
+  }
   let requestSummary = null;
-  const actor = url.pathname.startsWith('/api/admin')
-    ? await currentUser(request, env)
-    : null;
-  if (url.pathname.startsWith('/api/admin') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+  let beforeSnapshot = null;
+  if (mutating) {
     requestSummary = await summarizeAdminRequestForAudit(request);
+    beforeSnapshot = await snapshotAdminMutationBefore(env, url.pathname, request.method);
   }
   const response = await routeApi(request, env, url, ctx);
-  await maybeAuditAdminApiResponse(env, {
+  if (!skipGeneric) {
+    await maybeAuditAdminApiResponse(env, {
+      request,
+      url,
+      response,
+      actor,
+      requestSummary,
+      beforeSnapshot,
+      sessionIdHash: session.session_id_hash || '',
+      ctx,
+    });
+  }
+  await maybeLogAccessDenial(env, {
     request,
     url,
     response,
     actor,
-    requestSummary,
+    session,
     ctx,
   });
   if (response.ok && shouldInvalidatePublicReadCache(url.pathname, request.method)) {
@@ -8630,14 +9101,23 @@ async function handleApi(request, env, url, ctx = null) {
 
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
-  // Security log is immutable: no create/update/delete endpoints.
+  // Security log rows are immutable. POST is allowed only for genesis and
+  // export session start/complete (those write additional sealed rows).
   if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
-    return jsonResponse({
-      detail: 'Security log is view and print only. Editing is not allowed.',
-      access: 'super_admin_only',
-      mode: 'view_print_only',
-      editable: false,
-    }, 405);
+    const allowedWrite = request.method === 'POST' && (
+      url.pathname === '/api/admin/security-log/genesis'
+      || url.pathname === '/api/admin/security-log/export/start'
+      || url.pathname === '/api/admin/security-log/export/complete'
+      || url.pathname === '/api/admin/security-log/verify/complete'
+    );
+    if (!allowedWrite) {
+      return jsonResponse({
+        detail: 'Security log is view and print only. Editing is not allowed.',
+        access: 'super_admin_only',
+        mode: 'view_print_only',
+        editable: false,
+      }, 405);
+    }
   }
   if (url.pathname === '/api/site' && request.method === 'GET') {
     return jsonResponse(await cachedPublicRead('site', () => getSite(env), { ctx }));
@@ -9591,11 +10071,13 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const formsAccessIds = await getFormsAccessUserIds(env);
+    const catalog = await getPages(env, true);
     return jsonResponse({
       user: publicUser(auth.user),
       permissions: GLOBAL_PERMISSIONS,
       forms_access: canAccessFormsPage(auth.user, formsAccessIds),
-      pages: (await getPages(env, true)).map((page) => ({
+      capabilities: userPageCapabilities(auth.user, catalog.map((page) => page.slug)),
+      pages: catalog.map((page) => ({
         slug: page.slug,
         title: page.title,
         path: page.path,
@@ -9785,6 +10267,7 @@ async function routeApi(request, env, url, ctx = null) {
     const from = String(url.searchParams.get('from') || '').trim();
     const to = String(url.searchParams.get('to') || '').trim();
     const q = String(url.searchParams.get('q') || '').trim();
+    const started = Date.now();
     const payload = await listAdminAuditLogs(env, {
       limit: pageSize,
       offset,
@@ -9796,11 +10279,12 @@ async function routeApi(request, env, url, ctx = null) {
       to,
       q,
     });
+    payload.elapsed_ms = Number(payload.elapsed_ms) || (Date.now() - started);
     const totalPages = Math.max(1, Math.ceil((Number(payload.total) || 0) / pageSize) || 1);
     const page = Math.floor(offset / pageSize) + 1;
     // Log vault access on first-page opens/refreshes only — not every pager click.
     if (offset === 0) {
-      await writeAdminAuditLog(env, {
+      await enqueueAdminAudit(env, ctx, {
         action: 'security.log.view',
         category: 'security',
         method: 'GET',
@@ -9860,8 +10344,9 @@ async function routeApi(request, env, url, ctx = null) {
     return new Response(guideAsset.body, { status: 200, headers });
   }
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
+    const format = url.pathname.endsWith('.txt') ? 'txt' : 'pdf';
     const payload = await listAdminAuditLogs(env, {
       limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
       offset: 0,
@@ -9873,7 +10358,7 @@ async function routeApi(request, env, url, ctx = null) {
       to: String(url.searchParams.get('to') || '').trim(),
       q: String(url.searchParams.get('q') || '').trim(),
     });
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'security.log.export',
       category: 'security',
       method: 'GET',
@@ -9889,14 +10374,26 @@ async function routeApi(request, env, url, ctx = null) {
         path: url.pathname,
         status: 200,
         actorUsername: auth.user.username,
-        detail: `exported ${payload.entries.length} entries`,
+        detail: `exported ${payload.entries.length} ${format} entries`,
       }),
       meta: {
         entry_count: payload.entries.length,
         total: payload.total,
-        format: 'pdf',
+        format,
       },
     });
+    if (format === 'txt') {
+      return new Response(buildAdminAuditExportText(payload.entries), {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': 'attachment; filename="efhsband-security-audit-log.txt"',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+          'x-robots-tag': 'noindex, nofollow',
+        },
+      });
+    }
     const pdfBase64 = buildAdminAuditExportPdfBase64(payload.entries);
     const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
     return new Response(bytes, {
@@ -9910,12 +10407,384 @@ async function routeApi(request, env, url, ctx = null) {
       },
     });
   }
+  if ((url.pathname === '/api/admin/security-log.csv' || url.pathname === '/api/admin/security-log.json') && request.method === 'GET') {
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    if (auth.response) return auth.response;
+    const range = {
+      limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
+      offset: 0,
+      action: String(url.searchParams.get('action') || '').trim(),
+      actor: String(url.searchParams.get('actor') || '').trim(),
+      year: url.searchParams.get('year'),
+      month: url.searchParams.get('month'),
+      from: String(url.searchParams.get('from') || '').trim(),
+      to: String(url.searchParams.get('to') || '').trim(),
+      q: String(url.searchParams.get('q') || '').trim(),
+    };
+    const batched = url.searchParams.get('batch') === '1';
+    const format = url.pathname.endsWith('.csv') ? 'csv' : 'json';
+    if (batched) {
+      const preview = await readAuditExportSession(env, url.searchParams.get('session_id') || '', {
+        actorId: auth.user.id,
+        format,
+        filters: range,
+      });
+      if (!preview.ok) return jsonResponse({ detail: preview.detail }, preview.status || 400);
+      const started = Date.now();
+      const afterId = Math.max(Number(url.searchParams.get('after_id') || 0), 0);
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 100);
+      const payload = await listAdminAuditLogs(env, {
+        ...range,
+        limit,
+        offset: 0,
+        after_id: afterId,
+        order: 'asc',
+      });
+      const nextAfter = payload.entries.length
+        ? Number(payload.entries[payload.entries.length - 1].id)
+        : afterId;
+      const done = payload.entries.length < limit;
+      const stepped = await advanceAuditExportSession(env, url.searchParams.get('session_id') || '', {
+        actorId: auth.user.id,
+        format,
+        filters: range,
+        entries: payload.entries,
+      });
+      if (!stepped.ok) return jsonResponse({ detail: stepped.detail }, stepped.status || 400);
+      let manifest = null;
+      if (done) {
+        manifest = await buildAuditExportManifest(env, {
+          count: stepped.session.n,
+          running_hash: stepped.server_running_hash,
+          min_id: stepped.session.min_id || payload.entries[0]?.id || afterId,
+          max_id: stepped.session.max_id || nextAfter,
+        });
+      }
+      const elapsed_ms = Date.now() - started;
+      const shared = {
+        count: payload.entries.length,
+        total: payload.total,
+        next_after_id: nextAfter,
+        running_hash: stepped.session_id,
+        server_running_hash: stepped.server_running_hash,
+        session_id: stepped.session_id,
+        min_id: stepped.session.min_id,
+        max_id: stepped.session.max_id,
+        manifest,
+        done,
+        elapsed_ms,
+      };
+      if (format === 'csv') {
+        const csvBody = buildAdminAuditExportCsv(payload.entries, done ? manifest : null);
+        const [header, ...lines] = csvBody.trimEnd().split('\n');
+        return jsonResponse({
+          header,
+          chunk: lines.filter((line) => line.length && !/^(chain_|signed_|generation,)/.test(line)).join('\n'),
+          ...shared,
+        });
+      }
+      return jsonResponse({
+        entries: payload.entries,
+        ...shared,
+      });
+    }
+    const payload = await listAdminAuditLogs(env, range);
+    const manifest = await buildAuditExportManifest(env, {
+      count: payload.entries.length,
+      min_id: payload.entries[0]?.id || 0,
+      max_id: payload.entries.at(-1)?.id || 0,
+    });
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export',
+      category: 'security',
+      method: 'GET',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export',
+        method: 'GET',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `exported ${payload.entries.length} ${format} entries`,
+      }),
+      meta: {
+        entry_count: payload.entries.length,
+        total: payload.total,
+        format,
+        batch: false,
+        chain_head: manifest.chain_head,
+        signed_manifest: manifest.signed_manifest,
+      },
+    });
+    if (format === 'csv') {
+      return new Response(buildAdminAuditExportCsv(payload.entries, manifest), {
+        status: 200,
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="efhsband-security-audit-log.csv"',
+          'cache-control': 'no-store',
+        },
+      });
+    }
+    return new Response(buildAdminAuditExportJson(payload.entries, manifest), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': 'attachment; filename="efhsband-security-audit-log.json"',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/export/start' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    if (auth.response) return auth.response;
+    const body = await request.json().catch(() => ({}));
+    const format = String(body.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
+    const filters = {
+      action: String(body.action || '').trim(),
+      actor: String(body.actor || '').trim(),
+      year: body.year ?? null,
+      month: body.month ?? null,
+      from: String(body.from || '').trim(),
+      to: String(body.to || '').trim(),
+      q: String(body.q || '').trim(),
+    };
+    const started = await createAuditExportSession(env, {
+      actorId: auth.user.id,
+      format,
+      filters,
+    });
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export.start',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export.start',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `${format} ${filters.from || ''} ${filters.to || ''}`.trim(),
+      }),
+      meta: {
+        session_id: started.session.sid,
+        format,
+        filters,
+      },
+    });
+    return jsonResponse({
+      session_id: started.session_id,
+      sid: started.session.sid,
+      format,
+      filters,
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/export/complete' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    if (auth.response) return auth.response;
+    const body = await request.json().catch(() => ({}));
+    const completed = await completeAuditExportSession(env, body.session_id || '', {
+      actorId: auth.user.id,
+    });
+    if (!completed.ok) return jsonResponse({ detail: completed.detail }, completed.status || 400);
+    const clientSha = String(body.client_sha256 || '').trim().toLowerCase();
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.export.complete',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.export.complete',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: `${completed.session.n || 0} rows`,
+      }),
+      meta: {
+        session_id: completed.session.sid,
+        format: completed.session.format,
+        min_id: completed.session.min_id,
+        max_id: completed.session.max_id,
+        row_count: completed.session.n || 0,
+        client_sha256: clientSha,
+        server_running_hash: completed.server_running_hash,
+        filters: completed.session.filters || {},
+      },
+    });
+    return jsonResponse({
+      ok: true,
+      session_id: completed.session.sid,
+      min_id: completed.session.min_id,
+      max_id: completed.session.max_id,
+      row_count: completed.session.n || 0,
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const verify = await verifyAdminAuditBatch(env, {
+      after_id: Number(url.searchParams.get('after_id') || 0),
+      expected_prev: String(url.searchParams.get('expected_prev') || ''),
+      limit: Number(url.searchParams.get('limit') || 40),
+    });
+    if (Number(url.searchParams.get('after_id') || 0) === 0) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'security.log.verify',
+        category: 'security',
+        method: 'GET',
+        path: '/api/admin/security-log/verify',
+        status: 200,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'security.log.verify',
+          method: 'GET',
+          path: '/api/admin/security-log/verify',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: verify.chain_status,
+        }),
+        meta: {
+          phase: 'start',
+          checked: verify.checked,
+          chain_ok: verify.chain_ok,
+          chain_head: verify.chain_head,
+          chain_head_id: verify.chain_head_id,
+          min_id: verify.min_id,
+          max_id: verify.max_id,
+          batch: true,
+        },
+      });
+    }
+    return jsonResponse(verify);
+  }
+  if (url.pathname === '/api/admin/security-log/verify/complete' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    await request.json().catch(() => ({}));
+    const walked = await verifyAdminAuditRange(env, {});
+    const court = walked.court_report || buildCourtVerifyReport({
+      catalog: walked.generations || [],
+      breaks: walked.breaks || [],
+      digestFailures: walked.digest_failures || [],
+      legacy: walked.legacy || [],
+      compatibility: walked.compatibility || [],
+      minId: walked.min_id,
+      maxId: walked.max_id,
+    });
+    const detail = formatCourtVerifySummary(court);
+    await enqueueAdminAudit(env, ctx, {
+      action: 'security.log.verify',
+      category: 'security',
+      method: 'POST',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'security.log.verify',
+        method: 'POST',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: {
+        phase: 'complete',
+        checked: walked.checked,
+        chain_ok: walked.chain_ok,
+        breaks: (walked.breaks || []).map((item) => item.id),
+        court_report: court,
+        min_id: walked.min_id,
+        max_id: walked.max_id,
+      },
+    });
+    return jsonResponse({
+      ok: true,
+      court_report: court,
+      chain_status: detail,
+      generation_report: walked.generation_report,
+      checked: walked.checked,
+      chain_ok: walked.chain_ok,
+    });
+  }
+  if (url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST') {
+    const auth = await requireSecurityLogAccess(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const confirm = String(payload.confirm || '').trim();
+    const reason = String(payload.reason || '').trim();
+    const authorizedBy = String(payload.authorized_by || '').trim();
+    if (confirm !== 'START NEW LOG' || authorizedBy.toLowerCase() !== 'trevor' || reason.length < 8) {
+      return jsonResponse({
+        detail: 'New log requires Trevor’s authorization, confirm text START NEW LOG, and a reason of at least 8 characters.',
+      }, 422);
+    }
+    const started = await startNewAuditLogGeneration(env, {
+      reason,
+      authorizedBy,
+      actor: auth.user,
+      request,
+    });
+    if (!started.ok) return jsonResponse(started, started.status || 409);
+    return jsonResponse(started, 201);
+  }
 
+  if (url.pathname === '/api/admin/maintenance' && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    const payload = await request.json().catch(() => ({}));
+    const site = await getSite(env);
+    const previous = isMaintenanceMode(site);
+    const enabled = isMaintenanceMode({
+      maintenance_mode: payload.maintenance_mode !== undefined ? payload.maintenance_mode : payload.enabled,
+    });
+    if (!canToggleMaintenanceMode(auth.user)) {
+      return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
+    }
+    await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+      .bind('maintenance_mode', enabled ? '1' : '0')
+      .run();
+    await writeMaintenanceAudit(env, request, auth.user, {
+      status: 200,
+      previous,
+      enabled,
+      detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+      ctx,
+    });
+    return jsonResponse(await getSite(env));
+  }
 
   if (url.pathname === '/api/admin/site' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const payload = await request.json();
+    if (payload.maintenance_mode !== undefined) {
+      const site = await getSite(env);
+      const previous = isMaintenanceMode(site);
+      const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode });
+      if (!canToggleMaintenanceMode(auth.user)) {
+        return jsonResponse({ detail: 'Only Super Admins can change maintenance mode.' }, 403);
+      }
+      if (enabled !== previous) {
+        await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+          .bind('maintenance_mode', enabled ? '1' : '0')
+          .run();
+        await writeMaintenanceAudit(env, request, auth.user, {
+          status: 200,
+          previous,
+          enabled,
+          detail: enabled ? 'Maintenance mode on' : 'Maintenance mode off',
+          ctx,
+        });
+      }
+    }
     for (const key of ['title', 'hero_title', 'hero_subtitle', 'footer_note', 'logo_url']) {
       if (payload[key] === undefined) continue;
       let value = String(payload[key]);
@@ -9924,10 +10793,6 @@ async function routeApi(request, env, url, ctx = null) {
         value = looksLikeHtml(value) ? sanitizeRichHtml(value) : value;
       }
       await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value).run();
-    }
-    if (payload.maintenance_mode !== undefined) {
-      const enabled = isMaintenanceMode({ maintenance_mode: payload.maintenance_mode }) ? '1' : '0';
-      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance_mode', enabled).run();
     }
     if (payload.error_pages !== undefined) {
       const packed = normalizeErrorPages(payload.error_pages);
@@ -10159,11 +11024,64 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     const payload = await request.json();
     const check = validateSelfPasswordChange(payload);
-    if (!check.ok) return jsonResponse({ detail: check.detail }, check.status);
+    if (!check.ok) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'password.change',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: check.status,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'password.change',
+          method: 'POST',
+          path: '/api/admin/password',
+          status: check.status,
+          actorUsername: auth.user.username,
+          detail: 'validation failed',
+        }),
+        meta: { target_user_id: auth.user.id },
+      });
+      return jsonResponse({ detail: check.detail }, check.status);
+    }
     if (!(await verifyPassword(check.current_password, auth.user.password_hash))) {
+      await enqueueAdminAudit(env, ctx, {
+        action: 'password.change',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: 400,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'password.change',
+          method: 'POST',
+          path: '/api/admin/password',
+          status: 400,
+          actorUsername: auth.user.username,
+          detail: 'current password incorrect',
+        }),
+        meta: { target_user_id: auth.user.id },
+      });
       return jsonResponse({ detail: 'Current password is incorrect' }, 400);
     }
     await updatePassword(env, auth.user.id, check.new_password);
+    await enqueueAdminAudit(env, ctx, {
+      action: 'password.change',
+      category: 'users',
+      method: 'POST',
+      path: '/api/admin/password',
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'password.change',
+        method: 'POST',
+        path: '/api/admin/password',
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: 'password updated',
+      }),
+      meta: { target_user_id: auth.user.id },
+    });
     return jsonResponse({ ok: true });
   }
 
@@ -10187,8 +11105,33 @@ async function routeApi(request, env, url, ctx = null) {
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
     const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
     try {
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(sanitizeAssignablePermissions(auth.user, payload.permissions)), payload.active === false ? 0 : 1).run();
+      const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
+      const afterGrants = permissionListFromValue(created?.permissions);
+      await recordAuditActorName(env, created);
+      await enqueueAdminAudit(env, ctx, {
+        action: 'user.create',
+        category: 'users',
+        method: 'POST',
+        path: '/api/admin/users',
+        status: 200,
+        ...auditRequestForensics(request, auth.user),
+        summary: buildAuditSummary({
+          action: 'user.create',
+          method: 'POST',
+          path: '/api/admin/users',
+          status: 200,
+          actorUsername: auth.user.username,
+          detail: created?.username || username,
+        }),
+        meta: {
+          target_user_id: created?.id,
+          target_username: created?.username || username,
+          role: created?.role,
+          grants: { before: [], after: afterGrants },
+        },
+      });
       return jsonResponse(publicUser(created));
     } catch (error) {
       const message = String(error?.message || error || '');
@@ -10221,27 +11164,79 @@ async function routeApi(request, env, url, ctx = null) {
     const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
       ? (existing.role === 'admin' ? 'admin' : 'editor')
       : (wantsAdmin ? 'admin' : 'editor');
+    const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
     const permissions = JSON.stringify(
       Number(auth.user.id) === id && !isSuperAdmin(auth.user)
-        ? parsePermissions(existing.permissions)
-        : sanitizeAssignablePermissions(auth.user, nextPayload.permissions),
+        ? normalizePageGrants(parsePermissions(existing.permissions), slugs)
+        : normalizePageGrants(sanitizeAssignablePermissions(auth.user, nextPayload.permissions), slugs),
     );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
     if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
-    return jsonResponse(publicUser(await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first()));
+    const updated = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first();
+    await recordAuditActorName(env, updated || { id, username: existing.username, display_name: displayName });
+    await enqueueAdminAudit(env, ctx, {
+      action: 'user.edit',
+      category: 'users',
+      method: 'PUT',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'user.edit',
+        method: 'PUT',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: updated?.username || existing.username,
+      }),
+      meta: {
+        target_user_id: id,
+        target_username: updated?.username || existing.username,
+        password_changed: Boolean(nextPayload.password),
+        grants: {
+          before: permissionListFromValue(existing.permissions),
+          after: permissionListFromValue(updated?.permissions || permissions),
+        },
+        role: { before: existing.role, after: updated?.role || role },
+      },
+    });
+    return jsonResponse(publicUser(updated));
   }
   if (userMatch && request.method === 'DELETE') {
     const auth = await requirePermission(request, env, 'users');
     if (auth.response) return auth.response;
     if (Number(userMatch[1]) === auth.user.id) return jsonResponse({ detail: 'You cannot delete your own account' }, 400);
-    const existing = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
+    const existing = await env.DB.prepare('SELECT id, username, display_name, role, permissions FROM users WHERE id = ?').bind(Number(userMatch[1])).first();
     if (!existing) return jsonResponse({ detail: 'User not found' }, 404);
     if (isSuperAdmin(existing) && !isSuperAdmin(auth.user)) {
       return jsonResponse({ detail: 'Only Super Admins can delete Super Admin accounts' }, 403);
     }
+    await recordAuditActorName(env, existing);
     await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(Number(userMatch[1])).run();
+    await enqueueAdminAudit(env, ctx, {
+      action: 'user.delete',
+      category: 'users',
+      method: 'DELETE',
+      path: url.pathname,
+      status: 200,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'user.delete',
+        method: 'DELETE',
+        path: url.pathname,
+        status: 200,
+        actorUsername: auth.user.username,
+        detail: existing.username || String(existing.id),
+      }),
+      meta: {
+        target_user_id: existing.id,
+        target_username: existing.username,
+        grants: { before: permissionListFromValue(existing.permissions), after: [] },
+        role: existing.role,
+      },
+    });
     return jsonResponse({ ok: true });
   }
 
@@ -10259,7 +11254,11 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const state = await loadVisualPageState(env, slug);
     if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
-    return jsonResponse(state);
+    return jsonResponse({
+      ...state,
+      can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
+      can_settings: canManagePageSettings(auth.user),
+    });
   }
   if (visualPageMatch && request.method === 'PUT') {
     const auth = await requireLogin(request, env);
@@ -10272,18 +11271,30 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${slug}` }, 403);
     }
     const raw = await request.json().catch(() => ({}));
-    const parsed = normalizeVisualSavePayload(raw);
-    if (!parsed.ok) return jsonResponse({ detail: parsed.detail }, parsed.status);
+    const rawHtml = extractEditableJoinHtml(raw.html ?? raw.body_html ?? '');
+    const parsed = normalizeVisualSavePayload({ ...raw, html: rawHtml });
+    const allowStructure = canEditPageLayout(auth.user, slug);
+    if (!parsed.ok && allowStructure) {
+      return jsonResponse({ detail: parsed.detail }, parsed.status);
+    }
     try {
       const state = await saveVisualPage(env, {
         slug,
-        html: parsed.html,
-        action: parsed.action,
+        html: rawHtml,
+        action: parsed.action || 'draft',
         user: auth.user,
+        allowStructure,
       });
-      return jsonResponse(state);
+      return jsonResponse({
+        ...state,
+        can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
+        can_settings: canManagePageSettings(auth.user),
+      });
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Save failed' }, Number(error.status) || 400);
+      return jsonResponse({
+        detail: error.message || 'Save failed',
+        ...(error.code ? { code: error.code } : {}),
+      }, Number(error.status) || 400);
     }
   }
   if (visualRestoreMatch && request.method === 'POST') {
@@ -10298,9 +11309,14 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const raw = await request.json().catch(() => ({}));
     try {
-      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user, slug));
+      return jsonResponse(await restoreVisualVersion(env, raw.version_id, auth.user, slug, {
+        allowStructure: canEditPageLayout(auth.user, slug),
+      }));
     } catch (error) {
-      return jsonResponse({ detail: error.message || 'Restore failed' }, Number(error.status) || 400);
+      return jsonResponse({
+        detail: error.message || 'Restore failed',
+        ...(error.code ? { code: error.code } : {}),
+      }, Number(error.status) || 400);
     }
   }
 
@@ -10333,12 +11349,47 @@ async function routeApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: `Permission required: page:${existing.slug}` }, 403);
     }
     const rawPayload = await request.json().catch(() => ({}));
+    if (isVisualEditorSlug(existing.slug) && payloadHasOwn(rawPayload, 'body_html')) {
+      return jsonResponse({ detail: 'Use the visual editor for this page' }, 409);
+    }
     let page = serializePagePayload(rawPayload, existing);
     if (isVisualEditorSlug(existing.slug)) {
       page.body_html = existing.body_html;
     }
-    if (!canManagePageSettings(auth.user)) {
+    const mayChangeSettings = canManagePageSettings(auth.user) || canEditPageLayout(auth.user, existing.slug);
+    if (!mayChangeSettings && pageSettingsChanged(page, existing, rawPayload)) {
+      return jsonResponse({ detail: `Permission required: layout:${existing.slug}` }, 403);
+    }
+    if (!mayChangeSettings) {
       page = lockPageSettingsToExisting(page, existing);
+    }
+    if (
+      !isVisualEditorSlug(existing.slug)
+      && !canEditPageLayout(auth.user, existing.slug)
+      && payloadHasOwn(rawPayload, 'body_html')
+    ) {
+      const incomingHtml = String(rawPayload.body_html || '');
+      const forbidden = contentOnlyForbiddenHtmlViolation(existing.body_html, incomingHtml);
+      if (forbidden) {
+        return jsonResponse({ detail: forbidden, code: 'content_rejected' }, 403);
+      }
+      const incomingViolation = contentOnlyHtmlViolation(existing.body_html, incomingHtml);
+      if (incomingViolation) {
+        return jsonResponse({ detail: incomingViolation, code: 'layout_required' }, 403);
+      }
+    }
+    if (
+      !isVisualEditorSlug(existing.slug)
+      && !canEditPageLayout(auth.user, existing.slug)
+      && (
+        visualStructureSignature(page.body_html) !== visualStructureSignature(existing.body_html)
+        || visualStyleSignature(page.body_html) !== visualStyleSignature(existing.body_html)
+      )
+    ) {
+      return jsonResponse({
+        detail: `Permission required: layout:${existing.slug}`,
+        code: 'layout_required',
+      }, 403);
     }
     if (existing.slug === 'home') page.slug = 'home';
     if (existing.is_home) page.path = '/';
@@ -10395,6 +11446,15 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const payload = await request.json().catch(() => ({}));
     const nextBody = applyEnsemblesBodyHtml(page.body_html || '', payload.body_html || '');
+    if (
+      !canEditPageLayout(auth.user, 'ensembles')
+      && visualStructureSignature(nextBody) !== visualStructureSignature(page.body_html)
+    ) {
+      return jsonResponse({
+        detail: 'Permission required: layout:ensembles',
+        code: 'layout_required',
+      }, 403);
+    }
     await env.DB.prepare(
       'UPDATE cms_pages SET body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).bind(nextBody, page.id).run();
@@ -11032,7 +12092,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     return jsonResponse(await getCommitteeBadges(env));
   }
@@ -11040,7 +12100,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     const badge = normalizeCommitteeBadgePayload(await request.json());
     if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
@@ -11067,7 +12127,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canAccessBadgeCreator(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: president or vice-president' }, 403);
+      return jsonResponse({ detail: 'Permission required: badges' }, 403);
     }
     await ensureCommitteeBadgesSchema(env);
     const id = Number(badgeMatch[1]);
@@ -11109,7 +12169,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let payload;
     try {
@@ -11128,6 +12188,15 @@ async function routeApi(request, env, url, ctx = null) {
       if (!created?.id) {
         return jsonResponse({ detail: 'Minutes saved but could not be reloaded. Refresh and check the list.' }, 500);
       }
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 201,
+        minutes: created,
+        after: await sha256Hex(created.body_html || ''),
+        afterHtml: created.body_html || '',
+        detail: `${created.meeting_date} created`,
+        ctx,
+      });
       return jsonResponse(created, 201);
     } catch (error) {
       return jsonResponse({ detail: `Could not save minutes: ${error?.message || error}` }, 500);
@@ -11137,7 +12206,7 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     if (!canManageMeetingMinutes(auth.user)) {
-      return jsonResponse({ detail: 'Permission required: minutes' }, 403);
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
     }
     let form;
     try {
@@ -11174,6 +12243,15 @@ async function routeApi(request, env, url, ctx = null) {
       if (!created?.id) {
         return jsonResponse({ detail: 'Minutes uploaded but could not be reloaded. Refresh and check the list.' }, 500);
       }
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.create',
+        status: 201,
+        minutes: created,
+        after: await sha256Hex(created.body_html || ''),
+        afterHtml: created.body_html || '',
+        detail: `${created.meeting_date} uploaded`,
+        ctx,
+      });
       return jsonResponse(created, 201);
     } catch (error) {
       return jsonResponse({ detail: `Could not save uploaded minutes: ${error?.message || error}` }, 500);
@@ -11209,10 +12287,32 @@ async function routeApi(request, env, url, ctx = null) {
         return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
       }
       await env.DB.prepare('DELETE FROM booster_meeting_minutes WHERE id = ?').bind(id).run();
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.delete',
+        status: 200,
+        minutes: existing,
+        before: await sha256Hex(existing.body_html || ''),
+        beforeHtml: existing.body_html || '',
+        detail: `${existing.meeting_date} deleted`,
+        ctx,
+      });
       return jsonResponse({ ok: true });
     }
+    if (!canManageMeetingMinutes(auth.user)) {
+      return jsonResponse({ detail: 'Permission required: minutes:edit' }, 403);
+    }
     if (!canEditMeetingMinutes(auth.user, existing)) {
-      return jsonResponse({ detail: 'Meeting minutes can only be edited by the secretary within 10 days of the meeting date' }, 403);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: 'minutes.edit',
+        status: 403,
+        minutes: existing,
+        before: await sha256Hex(existing.body_html || ''),
+        beforeHtml: existing.body_html || '',
+        detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
+        ctx,
+      });
+      markRequestAuditWritten(request);
+      return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
     }
     let payload;
     try {
@@ -11223,10 +12323,24 @@ async function routeApi(request, env, url, ctx = null) {
     if (!payload.meeting_date) return jsonResponse({ detail: 'Meeting date is required' }, 422);
     if (!payload.body_html.replace(/<[^>]+>/g, '').trim()) return jsonResponse({ detail: 'Minutes content is required' }, 422);
     try {
+      const beforeSha = await sha256Hex(existing.body_html || '');
       await env.DB.prepare(
         'UPDATE booster_meeting_minutes SET meeting_date = ?, body_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       ).bind(payload.meeting_date, payload.body_html, id).run();
-      return jsonResponse(await getMeetingMinutesById(env, id, auth.user));
+      const updated = await getMeetingMinutesById(env, id, auth.user);
+      const afterWindow = isSuperAdmin(auth.user) && !minutesWithinEditWindow(existing);
+      await writeMinutesAudit(env, request, auth.user, {
+        action: afterWindow ? 'minutes.edit.admin_after_window' : 'minutes.edit',
+        status: 200,
+        minutes: updated || existing,
+        before: beforeSha,
+        after: await sha256Hex(updated?.body_html || payload.body_html || ''),
+        beforeHtml: existing.body_html || '',
+        afterHtml: updated?.body_html || payload.body_html || '',
+        detail: afterWindow ? `${existing.meeting_date} edited after 48h` : `${existing.meeting_date} edited`,
+        ctx,
+      });
+      return jsonResponse(updated);
     } catch (error) {
       return jsonResponse({ detail: `Could not update minutes: ${error?.message || error}` }, 500);
     }
@@ -11334,12 +12448,31 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/mail/test-no-reply' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'mail');
     if (auth.response) return auth.response;
+    const logMailTest = (status, detail, extra = {}) => enqueueAdminAudit(env, ctx, {
+      action: 'mail.test',
+      category: 'mail',
+      method: 'POST',
+      path: '/api/admin/mail/test-no-reply',
+      status,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'mail.test',
+        method: 'POST',
+        path: '/api/admin/mail/test-no-reply',
+        status,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: extra,
+    });
     if (!env.RESEND_API_KEY) {
+      await logMailTest(503, 'RESEND_API_KEY is not configured');
       return jsonResponse({ ok: false, detail: 'RESEND_API_KEY is not configured' }, 503);
     }
     const payload = await request.json().catch(() => ({}));
     const to = String(payload.to || auth.user?.username || '').trim().toLowerCase();
     if (!isValidEmail(to)) {
+      await logMailTest(422, 'invalid test recipient');
       return jsonResponse({ detail: 'Provide a valid test recipient email' }, 422);
     }
     try {
@@ -11356,6 +12489,7 @@ async function routeApi(request, env, url, ctx = null) {
         fromEmail: SPONSOR_INVOICE_FROM_EMAIL,
         fromName: SPONSOR_INVOICE_FROM_NAME,
       });
+      await logMailTest(200, `sent to ${to}`, { to });
       return jsonResponse({
         ok: true,
         from: `${SPONSOR_INVOICE_FROM_NAME} <${SPONSOR_INVOICE_FROM_EMAIL}>`,
@@ -11363,33 +12497,68 @@ async function routeApi(request, env, url, ctx = null) {
         detail: `Test email sent to ${to} from ${SPONSOR_INVOICE_FROM_EMAIL}.`,
       });
     } catch (error) {
+      await logMailTest(502, error?.message || 'Could not send test email', { to });
       return jsonResponse({ ok: false, detail: error?.message || 'Could not send test email' }, 502);
     }
   }
   if (url.pathname === '/api/admin/mail' && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
+    const logMailFailure = (status, detail, extra = {}) => enqueueAdminAudit(env, ctx, {
+      action: 'mail.send',
+      category: 'mail',
+      method: 'POST',
+      path: '/api/admin/mail',
+      status,
+      ...auditRequestForensics(request, auth.user),
+      summary: buildAuditSummary({
+        action: 'mail.send',
+        method: 'POST',
+        path: '/api/admin/mail',
+        status,
+        actorUsername: auth.user.username,
+        detail,
+      }),
+      meta: extra,
+    });
     let mail;
     try {
       mail = await parseAdminMailRequest(request);
     } catch (error) {
+      await logMailFailure(422, 'invalid mail request');
       return jsonResponse({ detail: String(error?.message || error || 'Invalid mail request') }, 422);
     }
-    if (!mail.user_ids.length) return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
-    if (!mail.subject) return jsonResponse({ detail: 'Subject is required.' }, 422);
-    if (!mail.html && !mail.text) return jsonResponse({ detail: 'Message body is required.' }, 422);
+    if (!mail.user_ids.length) {
+      await logMailFailure(422, 'no recipients');
+      return jsonResponse({ detail: 'Select at least one recipient.' }, 422);
+    }
+    if (!mail.subject) {
+      await logMailFailure(422, 'subject required');
+      return jsonResponse({ detail: 'Subject is required.' }, 422);
+    }
+    if (!mail.html && !mail.text) {
+      await logMailFailure(422, 'body required');
+      return jsonResponse({ detail: 'Message body is required.' }, 422);
+    }
     if (resolveContactEmailProvider(env) !== 'resend') {
+      await logMailFailure(503, 'resend not configured');
       return jsonResponse({ detail: 'Mail requires Resend. Add RESEND_API_KEY in Cloudflare Pages secrets.' }, 503);
     }
     const sender = resolveAdminMailSender(auth.user);
-    if (!sender.ok) return jsonResponse({ detail: sender.detail }, 422);
+    if (!sender.ok) {
+      await logMailFailure(422, sender.detail || 'invalid sender');
+      return jsonResponse({ detail: sender.detail }, 422);
+    }
 
     const placeholders = mail.user_ids.map(() => '?').join(', ');
     const rows = await env.DB.prepare(
       `SELECT id, username, display_name, active FROM users WHERE id IN (${placeholders})`
     ).bind(...mail.user_ids).all();
     const users = (rows.results || []).filter((user) => Number(user.active) !== 0 && isValidEmail(user.username));
-    if (!users.length) return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+    if (!users.length) {
+      await logMailFailure(422, 'no valid recipient emails');
+      return jsonResponse({ detail: 'No selected users have a valid email username.' }, 422);
+    }
 
     const results = [];
     for (const user of users) {
@@ -11412,7 +12581,7 @@ async function routeApi(request, env, url, ctx = null) {
     const sent = results.filter((item) => item.ok).length;
     const failed = results.length - sent;
     const status = failed && sent ? 207 : failed ? 502 : 200;
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
       action: 'mail.send',
       category: 'mail',
       method: 'POST',
@@ -11705,9 +12874,9 @@ async function routeApi(request, env, url, ctx = null) {
       if (usage.length) {
         return jsonResponse({ detail: `This image is still used as ${usage.join(', ')}. Remove or replace it there before deleting.` }, 409);
       }
-      await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run();
+      await env.DB.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').bind(PHOTO_QUARANTINE_SORT, id).run();
       await purgeUploadCache(photo);
-      return jsonResponse({ ok: true });
+      return jsonResponse({ ok: true, quarantined: true });
     }
     const meta = normalizePhotoMetaPayload(await request.json(), photo);
     if (!meta.alt_text) return jsonResponse({ detail: 'Alt text is required' }, 422);
@@ -11806,11 +12975,13 @@ async function handleUploadGet(request, env, url, ctx = null) {
   const key = decodeURIComponent(url.pathname.replace('/uploads/', ''));
   let row;
   try {
-    row = await env.DB.prepare('SELECT content_type, data_base64 FROM photos WHERE filename = ?').bind(key).first();
+    row = await env.DB.prepare('SELECT content_type, data_base64, sort_order FROM photos WHERE filename = ?').bind(key).first();
   } catch (error) {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   }
-  if (!row) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  if (!row || Number(row.sort_order) <= PHOTO_QUARANTINE_SORT) {
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
   try {
     const bytes = photoBytesFromStored(row.data_base64);
     if (!bytes || !bytes.byteLength) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
@@ -11849,49 +13020,77 @@ function renderLoginHtml(nextPath = '/admin') {
   );
 }
 
-async function handleLogin(request, env) {
-  await initDb(env);
+async function handleLogin(request, env, ctx = null) {
+  try {
+    await initDb(env);
+  } catch (error) {
+    console.error('login_d1_unavailable', String(error?.message || error));
+    return d1UnavailableHtml('/admin/login');
+  }
   const requestUrl = new URL(request.url);
   if (request.method === 'GET' || request.method === 'HEAD') {
     const nextPath = sanitizeAdminReturnPath(requestUrl.searchParams.get('next') || '/admin');
-    // Already authenticated users should not stay on the login form with a live session.
-    if (await currentUser(request, env)) return redirect(nextPath);
+    const session = await inspectSessionCookie(request, env);
+    if (session.d1Error) return d1UnavailableHtml('/admin/login');
+    if (session.expired) {
+      await logSessionExpired(env, request, session, { path: '/admin/login', method: 'GET', ctx });
+    }
+    if (session.user) return redirect(nextPath);
     return htmlResponse(renderLoginHtml(nextPath));
   }
   const form = await request.formData();
   const username = String(form.get('username') || '').trim();
   const password = String(form.get('password') || '');
+  const deviceClient = sanitizeClientDeviceSnapshot(form.get('device'));
   const nextPath = sanitizeAdminReturnPath(form.get('next') || requestUrl.searchParams.get('next') || '/admin');
-  const user = await getUserByUsername(env, username);
-  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
-    // Always clear any existing session on failed login so a stale cookie cannot
-    // keep granting access after an invalid password attempt.
-    await writeAdminAuditLog(env, {
-      action: 'login.failed',
-      category: 'auth',
-      method: 'POST',
-      path: '/admin/login',
-      status: 401,
-      actor_username: username,
-      ip: requestClientIp(request),
-      user_agent: request.headers.get('user-agent') || '',
-      summary: buildAuditSummary({
-        action: 'login.failed',
-        method: 'POST',
-        path: '/admin/login',
-        status: 401,
-        actorUsername: username || 'unknown',
-        detail: 'invalid credentials',
-      }),
-      meta: { username, next: nextPath },
-    });
-    return applyAuthCookies(
+  const ip = requestClientIp(request);
+  const lock = inspectLoginLock(username, ip);
+  if (lock.locked) {
+    const lockedResponse = applyAuthCookies(
       htmlResponse(
-        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Invalid username or password.</p></form>"),
-        401,
+        renderLoginHtml(nextPath).replace('</form>', "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"),
+        429,
       ),
       { token: '', maxAge: 0 },
     );
+    await maybeLogAccessDenial(env, {
+      request,
+      url: requestUrl,
+      response: lockedResponse,
+      actor: username ? { username } : null,
+      ctx,
+      deviceClient,
+    });
+    return lockedResponse;
+  }
+  let user;
+  try {
+    user = await getUserByUsername(env, username);
+  } catch (error) {
+    console.error('login_d1_unavailable', String(error?.message || error));
+    return d1UnavailableHtml('/admin/login');
+  }
+  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
+    const nextLock = registerLoginFailure(username, ip);
+    const lockedNow = Boolean(nextLock.locked);
+    const failedResponse = applyAuthCookies(
+      htmlResponse(
+        renderLoginHtml(nextPath).replace('</form>', lockedNow
+          ? "<p class='error'>Too many failed sign-in attempts. Try again later.</p></form>"
+          : "<p class='error'>Invalid username or password.</p></form>"),
+        lockedNow ? 429 : 401,
+      ),
+      { token: '', maxAge: 0 },
+    );
+    await maybeLogAccessDenial(env, {
+      request,
+      url: requestUrl,
+      response: failedResponse,
+      actor: username ? { username } : null,
+      ctx,
+      deviceClient,
+    });
+    return failedResponse;
   }
   try {
     await env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
@@ -11900,7 +13099,10 @@ async function handleLogin(request, env) {
   } catch {
     // Best-effort; login should still succeed if the column is missing mid-deploy.
   }
-  await writeAdminAuditLog(env, {
+  clearLoginFailures(username, ip);
+  const token = await makeSession(user, env, { device: deviceClient });
+  await enqueueAdminAudit(env, ctx, {
+    request,
     action: 'login',
     category: 'auth',
     method: 'POST',
@@ -11908,8 +13110,12 @@ async function handleLogin(request, env) {
     status: 302,
     actor_user_id: user.id,
     actor_username: user.username,
-    ip: requestClientIp(request),
+    ip,
+    country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: await sha256Hex(token),
+    include_device_client: true,
+    device_client: deviceClient,
     summary: buildAuditSummary({
       action: 'login',
       method: 'POST',
@@ -11926,22 +13132,83 @@ async function handleLogin(request, env) {
   });
   const response = redirect(nextPath);
   return applyAuthCookies(response, {
-    token: await makeSession(user, env),
+    token,
     maxAge: SESSION_TTL_SECONDS,
   });
 }
 
-async function handleAdmin(request, env) {
-  await initDb(env);
-  const user = await currentUser(request, env);
-  if (!user) return redirect('/admin/login');
-  return attachLoginHintIfNeeded(request, htmlResponse(ADMIN_HTML), user);
+function renderAdminAppHtml(user) {
+  return ADMIN_HTML.replace('__ADMIN_SIDEBAR__', renderAdminSidebarHtml(ASSET_VERSION, {
+    user,
+    allow: (tab) => adminSidebarAllows(user, tab),
+  }));
 }
 
-async function handleVisualEditorPage(request, env, slug) {
+async function handleAdmin(request, env, ctx = null) {
   await initDb(env);
-  const user = await currentUser(request, env);
-  if (!user) return redirect('/admin/login');
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin');
+  if (session.expired) {
+    await logSessionExpired(env, request, session, { path: '/admin', method: request.method, ctx });
+  }
+  const user = session.user;
+  const url = new URL(request.url);
+  if (!user) {
+    const loginRedirect = redirect('/admin/login');
+    await maybeLogAccessDenial(env, {
+      request,
+      url,
+      response: loginRedirect,
+      session,
+      ctx,
+    });
+    return loginRedirect;
+  }
+  if (url.searchParams.get('tab') === 'badge-creator' && !canAccessBadgeCreator(user)) {
+    const denied = attachLoginHintIfNeeded(request, await renderErrorPage(403, {
+      request,
+      env,
+      url,
+      loggedIn: true,
+      detail: 'Permission required: badges',
+    }), user);
+    await maybeLogAccessDenial(env, {
+      request,
+      url,
+      response: denied,
+      actor: user,
+      session,
+      ctx,
+      forcedDetail: 'Permission required: badges',
+    });
+    return denied;
+  }
+  return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
+}
+
+async function handleVisualEditorPage(request, env, slug, ctx = null) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml(`/admin/visual/${String(slug || '').trim().toLowerCase()}`);
+  if (session.expired) {
+    await logSessionExpired(env, request, session, {
+      path: `/admin/visual/${String(slug || '').trim().toLowerCase()}`,
+      method: request.method,
+      ctx,
+    });
+  }
+  const user = session.user;
+  if (!user) {
+    const loginRedirect = redirect('/admin/login');
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: loginRedirect,
+      session,
+      ctx,
+    });
+    return loginRedirect;
+  }
   const key = String(slug || '').trim().toLowerCase();
   if (!isVisualEditorSlug(key)) {
     return renderErrorPage(404, {
@@ -11953,13 +13220,23 @@ async function handleVisualEditorPage(request, env, slug) {
     });
   }
   if (!canEditVisualPage(user, key, canEditPage)) {
-    return renderErrorPage(403, {
+    const denied = await renderErrorPage(403, {
       request,
       env,
       url: new URL(request.url),
       loggedIn: true,
       detail: `Permission required: page:${key}`,
     });
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: denied,
+      actor: user,
+      session,
+      ctx,
+      forcedDetail: `Permission required: page:${key}`,
+    });
+    return denied;
   }
   const cms = await getPageBySlug(env, key, true);
   if (!cms) {
@@ -11970,7 +13247,8 @@ async function handleVisualEditorPage(request, env, slug) {
       loggedIn: true,
     });
   }
-  await writeAdminAuditLog(env, {
+  await enqueueAdminAudit(env, ctx, {
+    request,
     action: 'page.edit.open',
     category: 'pages',
     method: 'GET',
@@ -11979,7 +13257,9 @@ async function handleVisualEditorPage(request, env, slug) {
     actor_user_id: user.id,
     actor_username: user.username,
     ip: requestClientIp(request),
+    country: requestCountry(request),
     user_agent: request.headers.get('user-agent') || '',
+    session_id_hash: session.session_id_hash || '',
     summary: buildAuditSummary({
       action: 'page.edit.open',
       method: 'GET',
@@ -11995,13 +13275,23 @@ async function handleVisualEditorPage(request, env, slug) {
     slug: key,
     path: cms.path,
     active: cms.active,
+    user,
+    canLayout: canEditVisualLayout(user, key, canEditPageLayout),
+    canSettings: canManagePageSettings(user),
+    allow: (tab) => adminSidebarAllows(user, tab),
   })), user);
 }
 
-async function logout(request, env) {
-  const user = await currentUser(request, env);
+async function logout(request, env, ctx = null) {
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/logout');
+  if (session.expired) {
+    await logSessionExpired(env, request, session, { path: '/admin/logout', method: request.method, ctx });
+  }
+  const user = session.user;
   if (user) {
-    await writeAdminAuditLog(env, {
+    await enqueueAdminAudit(env, ctx, {
+      request,
       action: 'logout',
       category: 'auth',
       method: String(request?.method || 'POST').toUpperCase(),
@@ -12010,7 +13300,9 @@ async function logout(request, env) {
       actor_user_id: user.id,
       actor_username: user.username,
       ip: requestClientIp(request),
+      country: requestCountry(request),
       user_agent: request.headers.get('user-agent') || '',
+      session_id_hash: session.session_id_hash || '',
       summary: buildAuditSummary({
         action: 'logout',
         method: String(request?.method || 'POST').toUpperCase(),
@@ -12165,7 +13457,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
 function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
-  const isComingSoonPage = COMING_SOON_PAGES.some((item) => item.slug === page.slug)
+  const isComingSoonPage = isDeliberateComingSoonPage(page)
     || !isPublicCmsPageActive(page);
   const bodyHtml = renderPageBody(page, sponsors, staff, boosterMembers, site, {
     calendarHighlights,
@@ -12523,7 +13815,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
   }
   const path = url.pathname === '/' ? '/' : normalizePublicHtmlPath(url.pathname);
   if (path === '/' || path.endsWith('.html')) {
-    // Include inactive rows so unpublished CMS pages (ensembles) still use renderCmsPage
+    // Include inactive rows so unpublished CMS pages can 404 (or preview) here
     // instead of falling through to the unthemed static HTML draft.
     const today = easternTodayIso();
     const page = await cachedPublicRead(`page-path:${path}`, async () => {
@@ -12531,8 +13823,14 @@ async function serveStaticOrCms(request, env, url, ctx) {
       return mapCmsPage((result.results || [])[0] || null);
     }, { ctx });
     if (page) {
-      const livePage = publicCmsPageForRender(page);
-      const pageIsLive = isPublicCmsPageActive(page);
+      if (!shouldServePublicCmsPage(page, user)) {
+        return withHint(await renderPublicNotFound(env, url, { loggedIn, ctx }));
+      }
+      const previewUnpublished = !isPublicCmsPageActive(page)
+        && !isDeliberateComingSoonPage(page)
+        && canPreviewUnpublishedCmsPage(user, page);
+      const livePage = previewUnpublished ? { ...page, active: 1 } : publicCmsPageForRender(page);
+      const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
       const isFundraising = pageIsLive && page.slug === 'fundraising';
       const reads = await loadPublicCmsReads(env, {
@@ -12722,18 +14020,18 @@ async function dispatchWorker(request, env, ctx) {
       target.searchParams.set('donate', '1');
       return Response.redirect(target.toString(), 302);
     }
-    if (url.pathname === '/admin/login') return handleLogin(request, env);
+    if (url.pathname === '/admin/login') return handleLogin(request, env, ctx);
     // Accept GET or POST so visiting /admin/logout never falls through to the public homepage
     // (relative asset paths like styles.css break under /admin/* and show an unstyled page).
-    if (url.pathname === '/admin/logout') return logout(request, env);
+    if (url.pathname === '/admin/logout') return logout(request, env, ctx);
     if (url.pathname === '/admin/zernio/facebook/connect') return handleZernioFacebookConnect(request, env);
     if (url.pathname === '/admin/zernio/facebook/callback') return handleZernioFacebookCallback(request, env);
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
-    if (url.pathname === '/admin') return handleAdmin(request, env);
+    if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
     const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
     if (visualEditorMatch) {
-      return handleVisualEditorPage(request, env, visualEditorMatch[1]);
+      return handleVisualEditorPage(request, env, visualEditorMatch[1], ctx);
     }
     if (url.pathname.startsWith('/admin/')) return redirect('/admin');
     if (url.pathname.startsWith('/uploads/')) return handleUploadGet(request, env, url, ctx);
@@ -12745,23 +14043,30 @@ export default {
     try {
       const url = new URL(request.url);
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
-        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url));
+        return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url), url.pathname);
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
         const cached = await matchUploadCache(url);
-        if (cached) return applyWorkerSecurityHeaders(cached);
+        if (cached) return applyWorkerSecurityHeaders(cached, url.pathname);
       }
       const opened = openD1Session(request, env);
+      attachD1QueryCounter(opened.env, createD1QueryBudget());
       const response = await dispatchWorker(request, opened.env, ctx);
-      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session));
+      await maybeLogAccessDenial(opened.env, {
+        request,
+        url,
+        response,
+        ctx,
+      });
+      return applyWorkerSecurityHeaders(attachD1Bookmark(response, opened.session), url.pathname);
     } catch (error) {
       console.error('worker_exception', String(error?.stack || error?.message || error));
       try {
         const failUrl = new URL(request.url);
         if (wantsJsonRequest(request, failUrl.pathname)) {
-          return applyWorkerSecurityHeaders(jsonResponse({ detail: 'Server error' }, 500));
+          return applyWorkerSecurityHeaders(jsonResponse({ detail: 'Server error' }, 500), failUrl.pathname);
         }
-        return applyWorkerSecurityHeaders(liteErrorResponse(500, { path: failUrl.pathname }));
+        return applyWorkerSecurityHeaders(liteErrorResponse(500, { path: failUrl.pathname }), failUrl.pathname);
       } catch {
         return applyWorkerSecurityHeaders(liteErrorResponse(500));
       }
@@ -12769,12 +14074,12 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="device" value="" autocomplete="off"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script><script>(function(){try{var field=document.querySelector("input[name=device]");if(!field)return;var fill=function(){try{field.value=JSON.stringify({screen:[screen.width||0,screen.height||0],dpr:window.devicePixelRatio||1,viewport:[window.innerWidth||0,window.innerHeight||0],tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),language:navigator.language||"",platform:navigator.platform||""});}catch(e){}};fill();var form=field.form;if(form)form.addEventListener("submit",fill);}catch(e){}})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
 ${renderAdminChromeBar()}
 ${renderAdminSidebarBackdrop()}
-${renderAdminSidebarHtml(ASSET_VERSION)}
+__ADMIN_SIDEBAR__
 <section class="admin-workspace">
 <section id="tab-dashboard" class="cms-panel dashboard-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1 id="dashboard-welcome">Welcome back</h1><p>Changes save to the shared CMS database and publish to the public East Forsyth Band website.</p></div><a class="btn primary" href="/">View Site</a></div><div id="dashboard-cards" class="dashboard-cards"></div></section>
 <section id="tab-pages" class="cms-panel editor-panel"><div class="panel-head"><div><p class="kicker">Website Pages</p><h1 data-page-editor-title>Select a page to edit</h1><p>Site admins manage pages here. Editors with page permissions edit assigned page bodies from Manage. Edit text in the live preview, then save to publish.</p></div><button class="btn outline" type="button" id="new-page" hidden>Add Page</button></div><div class="editor-layout page-visual-layout"><div class="page-canvas-shell"><div class="page-canvas-sticky"><div class="page-canvas-toolbar"><div><strong>Live page preview</strong><small>Click any text to edit · Select text, then use the Formatting bar for color/bold/size · Save to publish</small></div><span class="page-dirty-chip" data-page-dirty-chip>Unsaved</span><span class="page-canvas-chip" data-page-layout-chip>Standard layout</span></div><div id="rich-text-toolbar" class="rich-text-toolbar" hidden><div class="rich-text-toolbar-main"><span class="rich-text-toolbar-label">Formatting</span><button type="button" data-rich="bold" title="Bold"><b>B</b></button><button type="button" data-rich="italic" title="Italic"><i>I</i></button><button type="button" data-rich="underline" title="Underline"><u>U</u></button><label class="rich-color" title="Text color"><span>Color</span><input type="color" id="rich-text-color" value="#002142"></label><label class="rich-size" title="Font size"><span>Size</span><select id="rich-text-size"><option value="">Normal</option><option value="14px">Small</option><option value="18px">Medium</option><option value="22px">Large</option><option value="28px">Extra large</option></select></label><button type="button" data-rich="insertUnorderedList" title="Bulleted list">• List</button><button type="button" data-rich-insert-photo title="Insert a photo at the cursor">Photo</button></div><small class="rich-text-hint">Select text, then apply formatting. Use List to add or remove bullets. Click Photo to insert an image, then drag a corner to resize or Delete photo to remove it.</small></div></div><div id="page-preview" class="page-preview" hidden aria-label="Editable page preview"></div><div class="page-preview-empty" data-page-preview-empty><p class="kicker">Visual editor</p><h2>Choose a page to begin</h2><p>Open any page from the left menu. The preview matches the public layout and stays editable like Squarespace or Drupal.</p></div></div>
@@ -12898,7 +14203,7 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
     <label class="full">429 copy<input name="error_429_copy" maxlength="280"></label>
   </div>
 </div>
-<div class="site-settings-switches"><label class="toggle-line"><span><b>Maintenance mode</b><small>When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">
@@ -13263,7 +14568,8 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">
     <label>Month<select id="security-log-month">
@@ -13278,17 +14584,27 @@ ${renderAdminSidebarHtml(ASSET_VERSION)}
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">Append-only encrypted vault (<span class="mono">admin_audit_log</span>) with AES-256-GCM + SHA-256 integrity and a hash chain on new rows. Isolated from website pages and logos. Free-text search runs on the decrypted rows on this page only.</p>
+  <p class="muted">This page lists the current month only. Use <b>Verify integrity</b> to walk the whole log. Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
+  <p class="status" id="security-log-verify" hidden></p>
   <p class="error" id="security-log-write-warning" hidden></p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
+  <details class="security-log-genesis">
+    <summary>Start a new log generation (Trevor authorization required)</summary>
+    <p class="muted">Keeps every old row. The next Cloudflare secret <code>AUDIT_LOG_KEY_Kn</code> must already be piped in with a CSPRNG. This writes <code>log.genesis</code> and continues the hash chain.</p>
+    <label>Reason<textarea id="security-log-genesis-reason" rows="2" maxlength="400" placeholder="Why this generation is starting"></textarea></label>
+    <label>Authorized by<input id="security-log-genesis-by" value="Trevor" autocomplete="off"></label>
+    <label class="checkline"><input type="checkbox" id="security-log-genesis-confirm"> I confirm START NEW LOG</label>
+    <button class="btn outline" type="button" id="security-log-genesis-start">Start new log</button>
+    <p class="status" id="security-log-genesis-status" aria-live="polite"></p>
+  </details>
 </div>
 <div class="admin-card">
   <div id="security-log-list" class="security-log-list" aria-live="polite"></div>
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset><legend>Global permissions</legend><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo</label><label class="checkline"><input type="checkbox" name="permissions" value="pages"> Add/remove/manage all pages</label><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Manage contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Manage directors &amp; staff</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Manage booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send mail to CMS users</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Create calendar events (edit/delete your own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events (edit/delete any)</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Upload/delete photos</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes"> Meeting Minutes Secretary (add/edit)</label><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President (Ledger + Square Checkout)</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms (create, edit, and delete public forms)</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President (Square Checkout)</label></fieldset><fieldset><legend>Page edit permissions</legend><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (create/edit, 48h)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

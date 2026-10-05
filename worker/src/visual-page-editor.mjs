@@ -9,6 +9,14 @@ import {
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
 } from './admin-chrome.mjs';
+import {
+  contentOnlyForbiddenHtmlViolation,
+  contentOnlyHtmlViolation,
+  visualStructureSignature,
+  visualStyleSignature,
+} from './page-permissions.mjs';
+
+export { visualStructureSignature, visualStyleSignature };
 
 export const VISUAL_PILOT_SLUG = 'join';
 export const VISUAL_PILOT_PATH = '/join.html';
@@ -40,6 +48,19 @@ export function canEditVisualPage(user, slug, canEditPage) {
   if (!user || !isVisualEditorSlug(slug)) return false;
   if (typeof canEditPage === 'function') return Boolean(canEditPage(user, normalizeVisualSlug(slug)));
   return false;
+}
+
+export function canEditVisualLayout(user, slug, canEditPageLayout) {
+  if (!user || !isVisualEditorSlug(slug)) return false;
+  if (typeof canEditPageLayout === 'function') return Boolean(canEditPageLayout(user, normalizeVisualSlug(slug)));
+  return false;
+}
+
+function layoutRequiredError(slug, detail = '') {
+  const error = new Error(detail || `Permission required: layout:${normalizeVisualSlug(slug)}`);
+  error.status = 403;
+  error.code = 'layout_required';
+  return error;
 }
 
 export function canEditVisualPilot(user, canEditPage) {
@@ -503,6 +524,9 @@ function rewriteOpenTag(tag, rawAttrs) {
   if (style && STYLEABLE_TAGS.has(tag)) {
     open += attr('style', style);
   }
+  if (/(?:^|[\s/])hidden(?:\s|=|\/|>|$)/i.test(attrs)) open += ' hidden';
+  const ariaHidden = quotedAttr(attrs, 'aria-hidden');
+  if (ariaHidden === 'true' || ariaHidden === 'false') open += attr('aria-hidden', ariaHidden);
   if (tag === 'details' && /\bopen\b/i.test(attrs)) open += ' open';
   return `${open}>`;
 }
@@ -632,11 +656,12 @@ export function isNearEmptyVisualHtml(html = '') {
 
 export function normalizeVisualSavePayload(raw = {}, existingHtml = '') {
   const action = String(raw.action || raw.kind || 'draft').toLowerCase() === 'publish' ? 'publish' : 'draft';
-  const html = sanitizeVisualPageHtml(extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml));
+  const rawHtml = extractEditableJoinHtml(raw.html ?? raw.body_html ?? existingHtml);
+  const html = sanitizeVisualPageHtml(rawHtml);
   if (!html || isNearEmptyVisualHtml(html)) {
-    return { ok: false, status: 422, detail: 'Add some page content before saving.' };
+    return { ok: false, status: 422, detail: 'Add some page content before saving.', action, rawHtml };
   }
-  return { ok: true, action, html };
+  return { ok: true, action, html, rawHtml };
 }
 
 export function trimVisualVersions(rows = [], limit = VISUAL_VERSION_LIMIT) {
@@ -749,6 +774,7 @@ export async function saveVisualPage(env, {
   html,
   action = 'draft',
   user = null,
+  allowStructure = true,
 } = {}) {
   const key = normalizeVisualSlug(slug);
   if (!isVisualEditorSlug(key)) {
@@ -757,22 +783,46 @@ export async function saveVisualPage(env, {
     throw error;
   }
   await ensureVisualPagesSchema(env);
-  const cms = await env.DB.prepare('SELECT slug FROM cms_pages WHERE slug = ?').bind(key).first();
+  const cms = await env.DB.prepare('SELECT slug, body_html FROM cms_pages WHERE slug = ?').bind(key).first();
   if (!cms) {
     const error = new Error('Page not found');
     error.status = 404;
     throw error;
   }
-  const clean = sanitizeVisualPageHtml(html);
+  const stored = await env.DB.prepare(
+    'SELECT slug, draft_html, published_html FROM visual_pages WHERE slug = ?',
+  ).bind(key).first();
+  const incoming = String(html || '');
+  let baseline = '';
+  if (allowStructure === false) {
+    baseline = sanitizeVisualPageHtml(
+      stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
+    );
+    const forbidden = contentOnlyForbiddenHtmlViolation(baseline, incoming);
+    if (forbidden) throw layoutRequiredError(key, forbidden);
+    const incomingViolation = contentOnlyHtmlViolation(baseline, incoming);
+    if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
+  }
+  const clean = sanitizeVisualPageHtml(incoming);
   if (!clean || isNearEmptyVisualHtml(clean)) {
     const error = new Error('Add some page content before saving.');
     error.status = 422;
     throw error;
   }
+  if (allowStructure === false) {
+    const cleanViolation = contentOnlyHtmlViolation(baseline, clean);
+    if (
+      visualStructureSignature(clean) !== visualStructureSignature(baseline)
+      || visualStyleSignature(clean) !== visualStyleSignature(baseline)
+      || cleanViolation
+    ) {
+      throw layoutRequiredError(key, cleanViolation || `Permission required: layout:${key}`);
+    }
+  }
   const kind = action === 'publish' ? 'publish' : 'draft';
   const actorId = Number(user?.id) || null;
   const actorName = String(user?.display_name || user?.username || '').trim();
-  const existing = await env.DB.prepare('SELECT slug FROM visual_pages WHERE slug = ?').bind(key).first();
+  const existing = stored;
   if (existing) {
     if (kind === 'publish') {
       await env.DB.prepare(`
@@ -819,7 +869,7 @@ export async function saveVisualPage(env, {
   return loadVisualPageState(env, key);
 }
 
-export async function restoreVisualVersion(env, versionId, user = null, slug = VISUAL_PILOT_SLUG) {
+export async function restoreVisualVersion(env, versionId, user = null, slug = VISUAL_PILOT_SLUG, options = {}) {
   const key = normalizeVisualSlug(slug);
   await ensureVisualPagesSchema(env);
   const id = Number(versionId);
@@ -836,7 +886,13 @@ export async function restoreVisualVersion(env, versionId, user = null, slug = V
     error.status = 404;
     throw error;
   }
-  return saveVisualPage(env, { slug: key, html: row.html, action: 'draft', user });
+  return saveVisualPage(env, {
+    slug: key,
+    html: row.html,
+    action: 'draft',
+    user,
+    allowStructure: options.allowStructure !== false,
+  });
 }
 
 export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
@@ -846,10 +902,31 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   const path = String(options.path || (slug === VISUAL_PILOT_SLUG ? VISUAL_PILOT_PATH : `/${slug}.html`)).trim()
     || `/${slug}.html`;
   const pageActive = Number(options.active) !== 0;
+  const canLayout = options.canLayout !== false;
+  const canSettings = options.canSettings !== false;
   const bannerLabel = pageActive ? 'This page is being edited' : 'Coming Soon (inactive)';
   const inactiveNote = pageActive
     ? ''
     : '<p class="visual-inactive-banner">Coming Soon (inactive) — visitors don\'t see this content until the page is turned on in Settings</p>';
+  const layoutTools = canLayout
+    ? `<button type="button" class="visual-banner-btn" data-visual-add>Add section</button>`
+    : '';
+  const historyTool = canLayout
+    ? `<button type="button" class="visual-banner-btn" data-visual-history>History</button>`
+    : '';
+  const addDrawer = canLayout
+    ? `<aside class="visual-add-drawer" data-visual-add-drawer hidden>
+    <div class="visual-add-drawer-head">
+      <h2>Add a section</h2>
+      <button type="button" data-visual-add-close>Close</button>
+    </div>
+    <div class="visual-add-grid" data-visual-add-grid></div>
+  </aside>
+  <aside class="visual-history-drawer" data-visual-versions hidden></aside>`
+    : '';
+  const styleSink = canLayout
+    ? '<div id="visual-gjs-sink" data-visual-style-editor hidden></div>'
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -860,10 +937,10 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   <link rel="stylesheet" href="/admin-nav.css?v=${v}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
-<body class="visual-editor-body" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}">
+<body class="visual-editor-body${canLayout ? '' : ' visual-content-only'}" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}" data-can-layout="${canLayout ? '1' : '0'}" data-can-settings="${canSettings ? '1' : '0'}">
   ${renderAdminChromeBar()}
   ${renderAdminSidebarBackdrop()}
-  ${renderAdminSidebarHtml(v)}
+  ${renderAdminSidebarHtml(v, { user: options.user, allow: options.allow })}
   <div class="visual-phone-gate" data-visual-phone-gate>
     <div class="visual-phone-gate-card">
       <h1>Please edit pages on a computer or tablet.</h1>
@@ -883,7 +960,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
     </div>
     ${inactiveNote}
     <div class="visual-edit-banner-tools">
-      <button type="button" class="visual-banner-btn" data-visual-add>Add section</button>
+      ${layoutTools}
       <button type="button" class="visual-banner-btn" data-visual-undo>Undo</button>
       <button type="button" class="visual-banner-btn" data-visual-redo>Redo</button>
       <label class="visual-device-select">Width
@@ -895,7 +972,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
           <option value="Small">320</option>
         </select>
       </label>
-      <button type="button" class="visual-banner-btn" data-visual-history>History</button>
+      ${historyTool}
       <button type="button" class="visual-banner-btn" data-visual-draft>Save draft</button>
       <button type="button" class="visual-banner-btn visual-banner-btn-primary" data-visual-publish>Publish</button>
       <a class="visual-banner-btn" href="/admin" data-visual-exit>Exit</a>
@@ -904,14 +981,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   <p class="visual-editor-status" data-visual-status hidden></p>
   <div class="visual-editor-stage">
     <div id="gjs"></div>
-    <aside class="visual-add-drawer" data-visual-add-drawer hidden>
-    <div class="visual-add-drawer-head">
-      <h2>Add a section</h2>
-      <button type="button" data-visual-add-close>Close</button>
-    </div>
-    <div class="visual-add-grid" data-visual-add-grid></div>
-  </aside>
-  <aside class="visual-history-drawer" data-visual-versions hidden></aside>
+    ${addDrawer}
   </div>
   </div>
   <div class="visual-modal" data-visual-image-modal hidden>
@@ -946,6 +1016,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
       </div>
     </div>
   </div>
+  ${styleSink}
   <script src="/admin-nav.js?v=${v}"></script>
   <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>

@@ -59,6 +59,7 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /Form Builder/);
   assert.match(html, /Notify Me/);
   assert.match(html, /maintenance mode/i);
+  assert.match(html, /old Worker isolate that writes a Security log row after the first new linked row will abort/i);
   assert.match(html, /Meeting Minutes/);
   assert.match(html, /Ledger/);
   assert.match(html, /Instagram/);
@@ -69,11 +70,18 @@ test('Website Guide HTML covers the content-admin guide topics', () => {
   assert.match(html, /efhsband-live/);
   assert.match(html, /efhsband-dev/);
   assert.match(html, /npm run deploy:worker/);
+  assert.match(html, /self-migrate/);
+  assert.match(html, /Do <b>not<\/b> run/);
+  assert.match(html, /INTACT/);
   assert.match(html, /Workers Free/);
   assert.match(html, /Time Travel/);
   assert.match(html, /6\.15 Security log/);
   assert.match(html, /change\.pages/);
   assert.match(html, /page\.edit\.open/);
+  assert.match(html, /access\.denied/);
+  assert.match(html, /access\.unauthenticated/);
+  assert.match(html, /Sec-CH-UA/);
+  assert.match(html, /session hash/);
   assert.match(html, /25 entries per page/);
   assert.match(html, /Chain intact/);
   assert.doesNotMatch(html, /Not live on production yet/);

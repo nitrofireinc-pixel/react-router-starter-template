@@ -12,6 +12,7 @@
     return;
   }
   window.efhsAdminNav?.init?.();
+  const canLayout = document.body?.dataset?.canLayout !== '0';
   const statusEl = document.querySelector('[data-visual-status]');
   const addDrawer = document.querySelector('[data-visual-add-drawer]');
   const addGrid = document.querySelector('[data-visual-add-grid]');
@@ -208,10 +209,12 @@
     forceClass: false,
     panels: { defaults: [] },
     blockManager: { blocks: [] },
-    layerManager: { appendTo: '#visual-gjs-sink' },
-    styleManager: { appendTo: '#visual-gjs-sink' },
-    traitManager: { appendTo: '#visual-gjs-sink' },
-    selectorManager: { componentFirst: true, appendTo: '#visual-gjs-sink' },
+    layerManager: canLayout ? { appendTo: '#visual-gjs-sink' } : { custom: true },
+    styleManager: canLayout ? { appendTo: '#visual-gjs-sink' } : { custom: true },
+    traitManager: canLayout ? { appendTo: '#visual-gjs-sink' } : { custom: true },
+    selectorManager: canLayout
+      ? { componentFirst: true, appendTo: '#visual-gjs-sink' }
+      : { componentFirst: true, custom: true },
     deviceManager: {
       devices: [
         { id: 'Desktop', name: '1920', width: '' },
@@ -306,15 +309,15 @@
       selectable: true,
       hoverable: true,
       highlightable: true,
-      draggable: true,
-      copyable: true,
-      removable: true,
+      draggable: canLayout,
+      copyable: canLayout,
+      removable: canLayout,
       editable: textTags.includes(tag),
-      droppable: ['section', 'div', 'article', 'aside', 'figure'].includes(tag),
-      resizable: {
+      droppable: canLayout && ['section', 'div', 'article', 'aside', 'figure'].includes(tag),
+      resizable: canLayout ? {
         tl: 1, tc: 1, tr: 1, cl: 1, cr: 1, bl: 1, bc: 1, br: 1,
         minDim: 24,
-      },
+      } : false,
     });
     if (isDetails) {
       comp.set({
@@ -773,13 +776,17 @@
     if (selectableParent(comp)) {
       toolbar.push(tool('visual-parent', 'Select parent', svgIcon('M8 2.2 2.8 7.2h2.6V13.8h5.2V7.2h2.6z')));
     }
-    toolbar.push(tool('tlb-move', 'Move', svgIcon('M8.7 1.4h-1.4l-2 2 1 1L7.3 3.6v2.7H4.6l.8-1-1-1-2 2 2 2 1-1-.8-1h2.7v2.7l-1.1-1.1-1 1 2 2 2-2-1-1-1.1 1.1V8.3h2.7l-.8 1 1 1 2-2-2-2-1 1 .8 1H8.7V3.6l1.1 1.1 1-1z')));
-    toolbar.push(tool('tlb-clone', 'Copy', svgIcon('M6 3.2h7.2v7.2H6zm-2.4 2.4h1.6v6.4h6.4v1.6H3.6z')));
+    if (canLayout) {
+      toolbar.push(tool('tlb-move', 'Move', svgIcon('M8.7 1.4h-1.4l-2 2 1 1L7.3 3.6v2.7H4.6l.8-1-1-1-2 2 2 2 1-1-.8-1h2.7v2.7l-1.1-1.1-1 1 2 2 2-2-1-1-1.1 1.1V8.3h2.7l-.8 1 1 1 2-2-2-2-1 1 .8 1H8.7V3.6l1.1 1.1 1-1z')));
+      toolbar.push(tool('tlb-clone', 'Copy', svgIcon('M6 3.2h7.2v7.2H6zm-2.4 2.4h1.6v6.4h6.4v1.6H3.6z')));
+    }
     if (tag === 'img' || (comp.find && comp.find('img').length)) {
       toolbar.push(tool('visual-image', 'Image', svgIcon('M2.2 3.2h11.6v9.6H2.2zm1.6 1.6v6.4h8.4V4.8zM4.6 9.2l2-2.2 1.5 1.6 2.1-2.4 2 2.2v2H4.6zm2.2-3.4a1 1 0 1 0 0 2 1 1 0 0 0 0-2z')));
     }
     toolbar.push(tool('visual-link', 'Link', svgIcon('M6.3 8.9a2.6 2.6 0 0 1 0-3.7l1.6-1.6a2.6 2.6 0 0 1 3.7 3.7l-.8.8-1.1-1.1.8-.8a1.1 1.1 0 1 0-1.5-1.5L7.4 6.3A1.1 1.1 0 0 0 9 7.8l-1.1 1.1zm3.4-1.8a2.6 2.6 0 0 1 0 3.7L8.1 12.4a2.6 2.6 0 1 1-3.7-3.7l.8-.8 1.1 1.1-.8.8a1.1 1.1 0 1 0 1.5 1.5l1.6-1.6a1.1 1.1 0 0 0-1.6-1.5z')));
-    toolbar.push(tool('tlb-delete', 'Delete', svgIcon('M3.2 4.2h9.6v1.3H3.2zm2 2.2h1.3v6.2H5.2zm4.3 0h1.3v6.2H9.5zM6.1 2.2h3.8l.7 1.1H5.4z')));
+    if (canLayout) {
+      toolbar.push(tool('tlb-delete', 'Delete', svgIcon('M3.2 4.2h9.6v1.3H3.2zm2 2.2h1.3v6.2H5.2zm4.3 0h1.3v6.2H9.5zM6.1 2.2h3.8l.7 1.1H5.4z')));
+    }
     comp.set('toolbar', toolbar);
     clampSelectionToolbarSoon();
   });
@@ -1071,7 +1078,9 @@
       clearDirty();
       clearLoadHistory();
       bootstrapped = true;
-      setStatus('Click any part of the page to select it, then move, resize, add, or delete.');
+      setStatus(canLayout
+        ? 'Click any part of the page to select it, then move, resize, add, or delete.'
+        : 'Click any part of the page to select it, then edit the text.');
     } catch (error) {
       if (error.status === 401) {
         window.location.href = '/admin/login';

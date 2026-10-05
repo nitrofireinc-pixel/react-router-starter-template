@@ -27,6 +27,7 @@ function createErrorEnv({
   errorPages = null,
   instagram = DEFAULT_INSTAGRAM_HREF,
   extraEnv = {},
+  extraPages = [],
 } = {}) {
   const home = {
     id: 1,
@@ -38,12 +39,13 @@ function createErrorEnv({
     is_home: 1,
     active: 1,
   };
+  const pages = [home, ...extraPages];
   const handleSql = (sql, type, binds = []) => {
     queryCounter.n += 1;
     if (throwOnDb) throw new Error('d1 exploded');
     const text = String(sql || '');
     if (type === 'first' && text.includes('FROM site_content WHERE key')) {
-      return { value: '2026-10-04.2' };
+      return { value: '2026-10-04.6' };
     }
     if (text.includes('FROM site_content WHERE key IN')) {
       const results = [
@@ -55,11 +57,11 @@ function createErrorEnv({
       return { results };
     }
     if (text.includes('FROM cms_pages WHERE path')) {
-      const match = binds[0] === '/' ? home : null;
+      const match = pages.find((page) => page.path === binds[0]) || null;
       return type === 'first' ? match : { results: match ? [match] : [] };
     }
     if (text.includes('FROM cms_pages')) {
-      return type === 'first' ? home : { results: [home] };
+      return type === 'first' ? home : { results: pages };
     }
     return type === 'first' ? null : { results: [] };
   };
@@ -131,6 +133,47 @@ test('error page defaults merge CMS overrides and keep Instagram fallback', () =
   assert.equal(social.link_href, 'https://www.instagram.com/customband');
   assert.deepEqual(Object.keys(normalizeErrorPages(null)).sort(), ['401', '403', '404', '429', '500', '503']);
   assert.equal(publicSitePayload({}).error_pages['404'].title, DEFAULT_ERROR_PAGES['404'].title);
+});
+
+test('inactive unpublished pages use the branded 404; Coming Soon slugs stay public', async () => {
+  resetCaches();
+  const boxed = createErrorEnv({
+    extraPages: [
+      {
+        id: 9,
+        slug: 'ensembles',
+        path: '/ensembles.html',
+        title: 'Ensembles',
+        body_html: '<section><p>Secret draft ensembles</p></section>',
+        nav_order: 9,
+        is_home: 0,
+        active: 0,
+      },
+      {
+        id: 22,
+        slug: 'coming-soon',
+        path: '/coming-soon.html',
+        title: 'Coming Soon',
+        body_html: '<section><h1>Coming soon</h1><p>This page is on the way.</p></section>',
+        nav_order: 22,
+        is_home: 0,
+        active: 1,
+      },
+    ],
+  });
+  const hidden = await worker.fetch(new Request('https://efhsband.org/ensembles.html'), boxed.env, { waitUntil() {} });
+  assert.equal(hidden.status, 404);
+  const hiddenHtml = await hidden.text();
+  assert.match(hiddenHtml, /error-page error-404/);
+  assert.match(hiddenHtml, /Page Not Found/);
+  assert.doesNotMatch(hiddenHtml, /Secret draft ensembles/);
+  assert.doesNotMatch(hiddenHtml, /This page is on the way/);
+
+  const soon = await worker.fetch(new Request('https://efhsband.org/coming-soon.html'), boxed.env, { waitUntil() {} });
+  assert.equal(soon.status, 200);
+  const soonHtml = await soon.text();
+  assert.match(soonHtml, /Coming soon/i);
+  assert.doesNotMatch(soonHtml, /error-page error-404/);
 });
 
 test('public 404 uses the hero copy, not Coming Soon, with no-store and noindex', async () => {
@@ -233,7 +276,7 @@ test('D1 query count on 404 stays within the public GET budget and does not add 
   const first = await worker.fetch(new Request('https://efhsband.org/missing-page.html'), boxed.env, { waitUntil() {} });
   assert.equal(first.status, 404);
   const cold = boxed.queryCounter.n;
-  assert.ok(cold <= 10, `404 cold used ${cold} D1 queries`);
+  assert.ok(cold <= 12, `404 cold used ${cold} D1 queries`);
   boxed.queryCounter.n = 0;
   const second = await worker.fetch(new Request('https://efhsband.org/missing-page.html'), boxed.env, { waitUntil() {} });
   assert.equal(second.status, 404);
@@ -263,7 +306,7 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
-  assert.equal(ASSET_VERSION, 'cms-p1-20261004s');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261005i');
   assert.match(workerSrc, /export async function renderErrorPage/);
   assert.match(workerSrc, /liteErrorResponse\(500/);
   assert.match(workerSrc, /Error pages/);

@@ -1,3 +1,38 @@
+function collectAdminDeviceSnapshot() {
+  try {
+    return {
+      screen: [window.screen?.width || 0, window.screen?.height || 0],
+      dpr: window.devicePixelRatio || 1,
+      viewport: [window.innerWidth || 0, window.innerHeight || 0],
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      language: navigator.language || '',
+      platform: navigator.platform || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatSecurityLogDevice(entry) {
+  const device = entry?.meta?.device;
+  if (!device || typeof device !== 'object') return '';
+  const parts = [];
+  if (device.browser) parts.push([device.browser, device.browser_version].filter(Boolean).join(' '));
+  if (device.os) parts.push([device.os, device.os_version].filter(Boolean).join(' '));
+  if (device.device_type) parts.push(device.device_type);
+  if (device.client?.ref) {
+    parts.push(`client via session ${String(device.client.ref).slice(0, 12)}`);
+  } else if (device.client) {
+    if (device.client.screen) parts.push(`screen ${device.client.screen}`);
+    if (device.client.viewport) parts.push(`viewport ${device.client.viewport}`);
+    if (device.client.tz) parts.push(device.client.tz);
+    if (device.client.language) parts.push(device.client.language);
+  }
+  if (!parts.length && !device.user_agent) return '';
+  const ua = device.user_agent ? `<p class="muted mono">UA: ${escapeHtml(device.user_agent)}</p>` : '';
+  return `${parts.length ? `<p class="muted">Device: ${escapeHtml(parts.join(' · '))}</p>` : ''}${ua}`;
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -19,6 +54,8 @@ const SAVE_TOAST_EXCLUDE = [
   '/api/admin/zernio/instagram',
   '/api/admin/zernio/instagram/settings',
   '/api/admin/photos',
+  '/api/admin/security-log/verify',
+  '/api/admin/security-log/export',
 ];
 
 let savedToastTimer = null;
@@ -69,8 +106,13 @@ function showSavedToast(message = 'Saved.', options = {}) {
   }
   const iconKind = options.icon === 'envelope' || options.icon === 'key' ? options.icon : '';
   const passwordSuccess = Boolean(options.passwordSuccess);
+  const tone = options.tone === 'ok' || options.tone === 'neutral'
+    ? 'ok'
+    : (options.tone === 'break' ? 'break' : '');
   root.classList.toggle('has-icon', Boolean(iconKind));
   root.classList.toggle('is-password-success', passwordSuccess);
+  root.classList.toggle('is-toast-ok', tone === 'ok');
+  root.classList.toggle('is-toast-break', tone === 'break');
   if (icon) {
     if (iconKind === 'envelope') {
       icon.hidden = false;
@@ -96,6 +138,8 @@ function showSavedToast(message = 'Saved.', options = {}) {
       root.classList.remove('is-leaving');
       root.classList.remove('is-password-success');
       root.classList.remove('has-icon');
+      root.classList.remove('is-toast-ok');
+      root.classList.remove('is-toast-break');
     }, 380);
   }, 3000);
 }
@@ -401,7 +445,7 @@ function isScheduleBoardOnlyUser() {
 }
 
 function canAccessBadgeCreator() {
-  return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+  return isSuperAdmin() || hasPermission('badges') || Boolean(state.me?.capabilities?.badges);
 }
 
 function canAccessForms() {
@@ -442,7 +486,12 @@ function eventCreatorLabel(event) {
 
 function canEditPage(pageOrSlug) {
   const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
-  return hasPermission('pages') || hasPermission(`page:${slug}`);
+  return hasPermission('pages') || hasPermission(`page:${slug}`) || hasPermission(`layout:${slug}`);
+}
+
+function canEditPageLayout(pageOrSlug) {
+  const slug = typeof pageOrSlug === 'string' ? pageOrSlug : pageOrSlug.slug;
+  return hasPermission('pages') || hasPermission(`layout:${slug}`);
 }
 
 function canEditSponsors() {
@@ -471,8 +520,7 @@ function canSendMail() {
 }
 
 function canManageMinutes() {
-  // Secretary permission only (`minutes`). Super Admins inherit via hasPermission().
-  return hasPermission('minutes');
+  return hasPermission('minutes:edit') || hasPermission('minutes') || Boolean(state.me?.capabilities?.minutes_edit);
 }
 
 function canViewMinutes() {
@@ -553,7 +601,7 @@ function formPayload(form) {
   const active = formControl(form, 'active');
   if (active) payload.active = Boolean(active.checked);
   const maintenanceMode = formControl(form, 'maintenance_mode');
-  if (maintenanceMode) payload.maintenance_mode = Boolean(maintenanceMode.checked);
+  if (maintenanceMode) delete payload.maintenance_mode;
   const boostersDuesEnabled = formControl(form, 'boosters_dues_enabled');
   if (boostersDuesEnabled) payload.boosters_dues_enabled = Boolean(boostersDuesEnabled.checked);
   const notifyEmail = formControl(form, 'notify_email_subscribers');
@@ -3745,6 +3793,8 @@ async function loadSite() {
   state.site = await jsonFetch('/api/site');
   const duesSetting = document.querySelector('[data-boosters-dues-setting]');
   if (duesSetting) duesSetting.hidden = !isSuperAdmin();
+  const maintenanceSetting = document.querySelector('[data-maintenance-mode-setting]');
+  if (maintenanceSetting) maintenanceSetting.hidden = !isSuperAdmin();
   const form = document.querySelector('#site-form');
   fillForm(form, state.site);
   fillErrorPagesForm(form, state.site?.error_pages);
@@ -3896,9 +3946,61 @@ function editPage(slug, { skipGuard = false } = {}) {
 function renderPagePermissionBoxes() {
   const box = document.querySelector('#page-permission-boxes');
   if (!box) return;
-  const pages = ((state.pageCatalog?.length ? state.pageCatalog : state.pages) || [])
-    .filter((page) => !isFormMakerPage(page) && page.slug !== 'in-kind');
-  box.innerHTML = pages.map(page => `<label class="checkline"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}"> ${escapeHtml(page.title)}</label>`).join('');
+  const pages = (state.pageCatalog?.length ? state.pageCatalog : state.pages) || [];
+  const pagesGrant = document.querySelector('[data-pages-grant]');
+  box.innerHTML = `
+    <table class="page-grant-table" id="page-grant-table">
+      <thead><tr><th>Page</th><th>Slug</th><th>Edit content</th><th>Change layout</th></tr></thead>
+      <tbody>
+        ${pages.map((page) => `
+          <tr>
+            <td>${escapeHtml(page.title || page.slug)}</td>
+            <td><code>${escapeHtml(page.slug)}</code></td>
+            <td><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}" data-content-slug="${escapeHtml(page.slug)}" aria-label="Edit content: ${escapeHtml(page.title || page.slug)}"></td>
+            <td><input type="checkbox" name="permissions" value="layout:${escapeHtml(page.slug)}" data-layout-slug="${escapeHtml(page.slug)}" aria-label="Change layout: ${escapeHtml(page.title || page.slug)}"></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+  bindPageGrantTable(box, pagesGrant);
+}
+
+function syncPageGrantRow(root, layoutBox, pagesGrant) {
+  const slug = layoutBox.dataset.layoutSlug;
+  const content = root.querySelector(`[data-content-slug="${CSS.escape(slug)}"]`);
+  if (!content) return;
+  if (layoutBox.checked) {
+    content.checked = true;
+    content.disabled = true;
+  } else {
+    content.disabled = Boolean(pagesGrant?.checked);
+  }
+}
+
+function syncPageGrantCovered(root = document.querySelector('#page-permission-boxes'), pagesGrant = document.querySelector('[data-pages-grant]')) {
+  if (!root) return;
+  const table = root.querySelector('#page-grant-table');
+  const covered = Boolean(pagesGrant?.checked);
+  if (table) table.classList.toggle('is-covered', covered);
+  root.querySelectorAll('input[name="permissions"]').forEach((input) => {
+    if (covered) {
+      input.disabled = true;
+    } else if (input.dataset.layoutSlug) {
+      input.disabled = false;
+      syncPageGrantRow(root, input, pagesGrant);
+    } else if (input.dataset.contentSlug) {
+      const layout = root.querySelector(`[data-layout-slug="${CSS.escape(input.dataset.contentSlug)}"]`);
+      input.disabled = Boolean(layout?.checked);
+    }
+  });
+}
+
+function bindPageGrantTable(root, pagesGrant) {
+  if (!root) return;
+  root.querySelectorAll('[data-layout-slug]').forEach((layoutBox) => {
+    layoutBox.addEventListener('change', () => syncPageGrantRow(root, layoutBox, pagesGrant));
+  });
+  pagesGrant?.addEventListener('change', () => syncPageGrantCovered(root, pagesGrant));
+  syncPageGrantCovered(root, pagesGrant);
 }
 
 async function loadSponsorAdSettings() {
@@ -5198,7 +5300,10 @@ function initSecurityLogFilters() {
   }
 }
 
+let securityLogLoadSeq = 0;
+
 async function loadSecurityLog({ resetPage = false } = {}) {
+  const loadSeq = ++securityLogLoadSeq;
   if (!isSuperAdmin()) {
     const list = document.querySelector('#security-log-list');
     if (list) list.innerHTML = '<p class="error">Security log is Super Admin only.</p>';
@@ -5210,6 +5315,8 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   const chainEl = document.querySelector('#security-log-chain');
   const failEl = document.querySelector('#security-log-write-warning');
   const download = document.querySelector('#download-security-log');
+  const downloadCsv = document.querySelector('#download-security-log-csv');
+  const downloadJson = document.querySelector('#download-security-log-json');
   const pager = document.querySelector('#security-log-pager');
   if (!list) return;
   if (resetPage) state.securityLogPage = 1;
@@ -5228,21 +5335,30 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.q) params.set('q', filters.q);
+  const exportParams = new URLSearchParams({
+    year: filters.year,
+    month: filters.month,
+  });
+  if (filters.actor) exportParams.set('actor', filters.actor);
+  if (filters.action) exportParams.set('action', filters.action);
+  if (filters.from) exportParams.set('from', filters.from);
+  if (filters.to) exportParams.set('to', filters.to);
   if (download) {
-    const pdfParams = new URLSearchParams({
-      year: filters.year,
-      month: filters.month,
-    });
-    if (filters.actor) pdfParams.set('actor', filters.actor);
-    if (filters.action) pdfParams.set('action', filters.action);
-    if (filters.from) pdfParams.set('from', filters.from);
-    if (filters.to) pdfParams.set('to', filters.to);
-    download.href = `/api/admin/security-log.pdf?${pdfParams.toString()}`;
+    download.href = `/api/admin/security-log.pdf?${exportParams.toString()}`;
     download.setAttribute('rel', 'noopener');
+  }
+  if (downloadCsv) {
+    downloadCsv.href = `/api/admin/security-log.csv?${exportParams.toString()}`;
+    downloadCsv.setAttribute('rel', 'noopener');
+  }
+  if (downloadJson) {
+    downloadJson.href = `/api/admin/security-log.json?${exportParams.toString()}`;
+    downloadJson.setAttribute('rel', 'noopener');
   }
   try {
     if (status) status.textContent = 'Loading sealed security log…';
     const data = await jsonFetch(`/api/admin/security-log?${params.toString()}`);
+    if (loadSeq !== securityLogLoadSeq) return;
     const entries = Array.isArray(data.entries) ? data.entries : [];
     const total = Number(data.total) || entries.length;
     state.securityLogTotal = total;
@@ -5255,17 +5371,15 @@ async function loadSecurityLog({ resetPage = false } = {}) {
       }
     }
     if (chainEl) {
-      chainEl.textContent = data.chain_status || (data.chain_ok === false
-        ? `Break at entry #${data.chain_break_id}`
-        : 'Chain intact');
-      chainEl.className = data.chain_ok === false ? 'error' : 'status security-log-chain-ok';
+      chainEl.textContent = data.chain_status || 'This page — not a full-chain verify';
+      chainEl.className = 'status';
     }
     if (failEl) {
       const failed = Number(data.write_failures?.count || 0);
       if (failed > 0) {
         const when = formatAuditFailureSince(data.write_failures?.since);
         failEl.hidden = false;
-        failEl.textContent = `${failed} audit writes failed since ${when || 'startup'}`;
+        failEl.textContent = `${failed} log ${failed === 1 ? 'event' : 'events'} couldn't be saved since ${when || 'startup'}. Those actions still happened, but they are missing from this log until they can be written. Check Workers logs for admin_audit_write_failed.`;
       } else {
         failEl.hidden = true;
         failEl.textContent = '';
@@ -5296,7 +5410,10 @@ async function loadSecurityLog({ resetPage = false } = {}) {
           </header>
           <p>${summary}</p>
           ${route ? `<p class="muted mono">${route}</p>` : ''}
-          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}</p>` : ''}
+          ${entry.ip ? `<p class="muted">IP: ${escapeHtml(entry.ip)}${entry.country ? ` · ${escapeHtml(entry.country)}` : ''}</p>` : ''}
+          ${formatSecurityLogDevice(entry)}
+          ${entry.session_id_hash ? `<p class="muted mono">Session: ${escapeHtml(entry.session_id_hash)}</p>` : ''}
+          ${entry.key_id ? `<p class="muted mono">Key: ${escapeHtml(entry.key_id)}</p>` : ''}
           ${integrity}
           ${sha}
           ${meta}
@@ -5391,9 +5508,12 @@ async function loadUsers() {
       role: user.role,
       password: '',
     });
+    const held = Array.isArray(user.permissions) ? user.permissions : [];
     form.querySelectorAll('input[name="permissions"]').forEach((input) => {
-      input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
+      input.checked = held.includes(input.value)
+        || (input.value === 'minutes:edit' && held.includes('minutes'));
     });
+    bindPageGrantTable(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
     form.elements.active.checked = Boolean(user.active);
     const editingSelf = Number(user.id) === Number(state.me?.user?.id);
     const lockOwnPrivileges = editingSelf && !isSuperAdmin();
@@ -7245,7 +7365,7 @@ function renderMinutesView(item) {
   if (item.created_by_name) meta.push(`Recorded by ${item.created_by_name}`);
   if (item.created_at) meta.push(`Submitted ${new Date(item.created_at).toLocaleString()}`);
   if (item.can_edit && item.editable_until) {
-    meta.push(`Editable until ${new Date(item.editable_until).toLocaleDateString()} (10 days from meeting date)`);
+    meta.push(`Editable until ${new Date(item.editable_until).toLocaleString()} (48 hours from creation)`);
   } else if (!item.can_edit) {
     meta.push(isSuperAdmin() ? 'Locked for secretaries · Super Admin can still edit' : 'View only');
   }
@@ -7687,9 +7807,11 @@ function bindForms() {
     const form = event.currentTarget;
     const status = document.querySelector('#site-status');
     const payload = formPayload(form);
-    payload.maintenance_mode = Boolean(form.elements.maintenance_mode?.checked);
-    if (form.elements.boosters_dues_enabled) {
+    delete payload.maintenance_mode;
+    if (isSuperAdmin() && form.elements.boosters_dues_enabled) {
       payload.boosters_dues_enabled = Boolean(form.elements.boosters_dues_enabled.checked);
+    } else {
+      delete payload.boosters_dues_enabled;
     }
     payload.error_pages = collectErrorPages(form);
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
@@ -7702,9 +7824,32 @@ function bindForms() {
           ? ' Band dues card is visible on Boosters.'
           : ' Band dues card is hidden on Boosters.')
         : '';
-      status.textContent = saved.maintenance_mode
-        ? `Saved. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.${duesNote}`
-        : `Saved. The public site is live again.${duesNote}`;
+      status.textContent = `Saved.${duesNote}`;
+    }
+  });
+
+  const maintenanceToggle = document.querySelector('#site-form [name="maintenance_mode"]');
+  maintenanceToggle?.addEventListener('change', async () => {
+    if (!isSuperAdmin()) {
+      maintenanceToggle.checked = Boolean(state.site?.maintenance_mode);
+      return;
+    }
+    const status = document.querySelector('#site-status');
+    const enabled = Boolean(maintenanceToggle.checked);
+    try {
+      const saved = await jsonFetch('/api/admin/maintenance', {
+        method: 'POST',
+        body: JSON.stringify({ maintenance_mode: enabled }),
+      });
+      state.site = saved;
+      if (status) {
+        status.textContent = saved.maintenance_mode
+          ? 'Maintenance mode on. Public and non-super-admin users see maintenance.html. Super Admins can preview site pages with a banner.'
+          : 'Maintenance mode off. The public site is live again.';
+      }
+    } catch (error) {
+      maintenanceToggle.checked = Boolean(state.site?.maintenance_mode);
+      if (status) status.textContent = error?.message || 'Could not change maintenance mode.';
     }
   });
 
@@ -8279,6 +8424,7 @@ function bindForms() {
       form.reset();
       form.elements.active.checked = true;
       form.querySelectorAll('input[name="permissions"]').forEach(input => { input.checked = false; });
+      syncPageGrantCovered(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
       await loadUsers();
     } catch (error) {
       let message = 'Could not save user.';
@@ -8302,18 +8448,266 @@ function bindForms() {
     });
     const roleSelect = form.querySelector('[name="role"]');
     if (roleSelect) roleSelect.disabled = false;
+    syncPageGrantCovered(document.querySelector('#page-permission-boxes'), form.querySelector('[data-pages-grant]'));
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
     loadSecurityLog({ resetPage: true }).catch(() => {});
   });
+  document.querySelector('#verify-security-log')?.addEventListener('click', async () => {
+    const court = document.querySelector('#security-log-court');
+    const out = document.querySelector('#security-log-verify');
+    if (court) {
+      court.hidden = false;
+      court.innerHTML = '<p>Checking the whole log…</p>';
+    }
+    if (out) out.textContent = '';
+    try {
+      let afterId = 0;
+      let expectedPrev = '';
+      let checked = 0;
+      const breaks = [];
+      const digestFailures = [];
+      const legacy = [];
+      const compatibility = [];
+      let lastCourt = null;
+      while (true) {
+        const params = new URLSearchParams({
+          after_id: String(afterId),
+          expected_prev: expectedPrev,
+          limit: '40',
+        });
+        const data = await jsonFetch(`/api/admin/security-log/verify?${params.toString()}`);
+        checked += Number(data.checked) || 0;
+        if (Array.isArray(data.breaks)) breaks.push(...data.breaks);
+        if (Array.isArray(data.digest_failures)) digestFailures.push(...data.digest_failures);
+        if (Array.isArray(data.legacy)) legacy.push(...data.legacy);
+        if (Array.isArray(data.compatibility)) compatibility.push(...data.compatibility);
+        if (data.court_report) lastCourt = data.court_report;
+        if (court) court.innerHTML = `<p>Checking the whole log… ${checked} rows</p>`;
+        if (data.done) break;
+        afterId = Number(data.next_after_id) || afterId;
+        expectedPrev = String(data.next_expected_prev || '');
+      }
+      const finished = await jsonFetch('/api/admin/security-log/verify/complete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          checked,
+          digest_failures: digestFailures,
+          legacy,
+          compatibility,
+        }),
+      });
+      const report = finished.court_report || lastCourt || {};
+      if (court) court.innerHTML = renderSecurityLogCourt(report, checked);
+      const intact = Boolean(finished.chain_ok) || /\bINTACT\b/i.test(String(finished.chain_status || ''));
+      showSavedToast(finished.chain_status || 'Verify finished', { tone: intact ? 'ok' : 'break' });
+    } catch (error) {
+      if (court) court.innerHTML = `<p class="error">${escapeHtml(error.message || 'Verify failed')}</p>`;
+    }
+  });
+  function renderSecurityLogCourt(report, checked) {
+    const current = report.current || null;
+    const previous = Array.isArray(report.previous) ? report.previous : [];
+    const legacy = report.legacy;
+    const compatibility = Array.isArray(report.compatibility) ? report.compatibility : [];
+    const parts = [];
+    if (current) {
+      const title = current.title || (current.intact ? 'INTACT' : 'Link breaks');
+      const start = current.original_build
+        ? (current.started_label || current.original_label)
+        : [current.started_at_et ? `Started ${current.started_at_et}` : '', current.started_by ? `by ${current.started_by}` : '']
+          .filter(Boolean).join(' ');
+      const breakIds = (current.break_ids || []).map((id) => `#${id}`).join(', ');
+      parts.push(`<section class="security-log-court-current${current.intact ? '' : ' is-broken'}">
+        <h2>${escapeHtml(title)}</h2>
+        <p>Rows #${escapeHtml(current.start_id)}–#${escapeHtml(current.end_id)}</p>
+        ${start ? `<p>${escapeHtml(start)}</p>` : ''}
+        ${!current.intact && breakIds ? `<p>Affected rows: ${escapeHtml(breakIds)}</p>` : ''}
+        ${!current.intact && (current.guidance || report.guidance) ? `<p>${escapeHtml(current.guidance || report.guidance)}</p>` : ''}
+      </section>`);
+    }
+    previous.forEach((gen) => {
+      const ids = (gen.break_ids || []).map((id) => `#${id}`).join(', ');
+      parts.push(`<section class="security-log-court-previous">
+        <h2>Previous log (closed)</h2>
+        ${gen.reason ? `<p>${escapeHtml(gen.reason)}</p>` : ''}
+        <p>Rows #${escapeHtml(gen.start_id)}–#${escapeHtml(gen.end_id)}</p>
+        <p>${gen.link_breaks} link breaks, ${gen.altered_rows} altered rows</p>
+        ${ids ? `<details><summary>Row numbers</summary><p>${escapeHtml(ids)}</p></details>` : ''}
+      </section>`);
+    });
+    if (legacy) {
+      parts.push(`<section class="security-log-court-legacy">
+        <h2>Recorded before tamper-proof linking</h2>
+        <p>${escapeHtml(legacy.guarantee || legacy.title)}</p>
+      </section>`);
+    }
+    if (compatibility.length) {
+      const ids = compatibility.map((item) => `#${item.id}`).join(', ');
+      parts.push(`<section class="security-log-court-compat">
+        <h2>${escapeHtml(report.compatibility_heading || 'Written by the previous site version during the update')}</h2>
+        <p>This is expected after a site update.</p>
+        <p>${escapeHtml(ids)}</p>
+      </section>`);
+    }
+    parts.push(`<details><summary>Technical details</summary>
+      <p>${checked} rows checked.</p>
+      ${report.explanation ? `<p>${escapeHtml(report.explanation)}</p>` : ''}
+    </details>`);
+    return parts.join('');
+  }
+  async function sha256HexClient(value) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value || '')));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function downloadSecurityLogExport(format) {
+    const filters = securityLogFilterValues();
+    const started = await jsonFetch('/api/admin/security-log/export/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ format, ...filters }),
+    });
+    let sessionId = started.session_id;
+    if (!sessionId) throw new Error('Export session was not created');
+    const chunks = [];
+    let header = '';
+    let afterId = 0;
+    let done = false;
+    let manifest = null;
+    let minId = null;
+    let maxId = null;
+    let count = 0;
+    while (!done) {
+      const params = new URLSearchParams({
+        batch: '1',
+        session_id: sessionId,
+        after_id: String(afterId),
+        limit: '50',
+        year: filters.year,
+        month: filters.month,
+      });
+      if (filters.actor) params.set('actor', filters.actor);
+      if (filters.action) params.set('action', filters.action);
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      const data = await jsonFetch(`/api/admin/security-log.${format}?${params.toString()}`);
+      if (format === 'csv') {
+        if (!header) header = data.header || '';
+        if (data.chunk) chunks.push(data.chunk);
+      } else if (Array.isArray(data.entries)) {
+        chunks.push(...data.entries);
+      }
+      count += Number(data.count) || 0;
+      if (data.min_id != null && minId == null) minId = Number(data.min_id);
+      if (data.max_id != null) maxId = Number(data.max_id);
+      if (data.session_id) sessionId = data.session_id;
+      if (data.manifest) manifest = data.manifest;
+      done = Boolean(data.done) || !data.next_after_id || data.count === 0;
+      afterId = Number(data.next_after_id) || afterId;
+    }
+    const filename = format === 'csv'
+      ? 'efhsband-security-audit-log.csv'
+      : 'efhsband-security-audit-log.json';
+    let body;
+    if (format === 'csv') {
+      const extras = [];
+      if (manifest) {
+        extras.push(`chain_ok,${manifest.chain_ok ?? ''}`);
+        extras.push(`chain_head,${manifest.chain_head || ''}`);
+        extras.push(`signed_manifest,${manifest.signed_manifest || manifest.signed_chain || ''}`);
+        for (const line of manifest.generation_report || []) extras.push(`generation,${line}`);
+      }
+      body = `${header}\n${chunks.filter(Boolean).join('\n')}\n${extras.join('\n')}\n`;
+    } else {
+      body = JSON.stringify({
+        generated_at: new Date().toISOString(),
+        access: 'super_admin_only',
+        editable: false,
+        encryption: 'aes-256-gcm',
+        integrity: 'sha-256-hash-chain',
+        verify: manifest,
+        entries: chunks,
+      }, null, 2);
+    }
+    const clientSha = await sha256HexClient(body);
+    await jsonFetch('/api/admin/security-log/export/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        client_sha256: clientSha,
+      }),
+    });
+    const blob = new Blob([body], {
+      type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8',
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(href);
+    showSavedToast('Export downloaded and logged');
+  }
+  document.querySelector('#download-security-log-csv')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadSecurityLogExport('csv').catch((error) => {
+      const status = document.querySelector('#security-log-status');
+      if (status) status.textContent = error.message || 'CSV export failed';
+    });
+  });
+  document.querySelector('#download-security-log-json')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadSecurityLogExport('json').catch((error) => {
+      const status = document.querySelector('#security-log-status');
+      if (status) status.textContent = error.message || 'JSON export failed';
+    });
+  });
+  document.querySelector('#security-log-genesis-start')?.addEventListener('click', async () => {
+    const status = document.querySelector('#security-log-genesis-status');
+    const reason = String(document.querySelector('#security-log-genesis-reason')?.value || '').trim();
+    const authorizedBy = String(document.querySelector('#security-log-genesis-by')?.value || '').trim();
+    const confirmed = Boolean(document.querySelector('#security-log-genesis-confirm')?.checked);
+    if (!confirmed || authorizedBy.toLowerCase() !== 'trevor' || reason.length < 8) {
+      if (status) status.textContent = 'Trevor must authorize, check the confirm box, and enter a reason.';
+      return;
+    }
+    if (status) status.textContent = 'Starting new log generation…';
+    try {
+      const data = await jsonFetch('/api/admin/security-log/genesis', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          confirm: 'START NEW LOG',
+          reason,
+          authorized_by: authorizedBy,
+        }),
+      });
+      if (status) {
+        status.textContent = data.ok
+          ? `New log generation ${data.generation} started (${data.new_key_id}). Old rows were not changed.`
+          : (data.detail || 'Could not start a new log');
+      }
+      loadSecurityLog({ resetPage: true }).catch(() => {});
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not start a new log';
+    }
+  });
   let securityLogFilterTimer = null;
-  ['#security-log-actor', '#security-log-action', '#security-log-month', '#security-log-year', '#security-log-from', '#security-log-to', '#security-log-q'].forEach((selector) => {
+  const securityLogSelectFilters = ['#security-log-action', '#security-log-month', '#security-log-year'];
+  const securityLogTextFilters = ['#security-log-actor', '#security-log-from', '#security-log-to', '#security-log-q'];
+  securityLogSelectFilters.forEach((selector) => {
     const el = document.querySelector(selector);
     if (!el) return;
     el.addEventListener('change', () => {
       loadSecurityLog({ resetPage: true }).catch(() => {});
     });
+  });
+  securityLogTextFilters.forEach((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return;
     el.addEventListener('input', () => {
       clearTimeout(securityLogFilterTimer);
       securityLogFilterTimer = setTimeout(() => {
@@ -8630,6 +9024,8 @@ window.jsonFetch = jsonFetch;
 window.prepareImageFileForUpload = prepareImageFileForUpload;
 window.uploadPreparedGalleryPhoto = uploadPreparedGalleryPhoto;
 window.canAccessBadgeCreator = canAccessBadgeCreator;
+
+try { window.__cmsDeviceSnapshot = collectAdminDeviceSnapshot(); } catch { /* admin-only; never block CMS */ }
 
 bindFormRichEditors();
 bindPageVisualEditor();

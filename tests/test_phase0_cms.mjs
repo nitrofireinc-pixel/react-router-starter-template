@@ -96,8 +96,10 @@ test('Phase 0.2 page-scoped editors cannot change slug, nav order, or home flag'
   assert.equal(locked.nav_order, 8);
   assert.equal(locked.is_home, 0);
   assert.equal(locked.active, 0);
+  assert.equal(locked.title, 'Student Resources');
   assert.match(locked.body_html, /Edited/);
-  assert.match(workerSrc, /if \(!canManagePageSettings\(auth\.user\)\)/);
+  assert.match(workerSrc, /mayChangeSettings = canManagePageSettings\(auth\.user\) \|\| canEditPageLayout/);
+  assert.match(workerSrc, /Permission required: layout:\$\{existing\.slug\}/);
   assert.match(workerSrc, /page = lockPageSettingsToExisting\(page, existing\)/);
 });
 
@@ -131,7 +133,7 @@ test('Phase 0.4 inactive CMS pages render Coming Soon instead of their body', ()
   assert.match(publicPage.body_html, /Student Resources/);
   assert.doesNotMatch(publicPage.body_html, /Secret handbook text/);
   assert.equal(publicCmsPageForRender({ ...inactive, active: 1 }).body_html, inactive.body_html);
-  assert.match(workerSrc, /const livePage = publicCmsPageForRender\(page\)/);
+  assert.match(workerSrc, /previewUnpublished \? \{ \.\.\.page, active: 1 \} : publicCmsPageForRender\(page\)/);
 });
 
 test('Phase 0.5 migrateAndSeedDb never overwrites an existing cms_pages body', () => {
@@ -166,7 +168,8 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.doesNotMatch(workerSrc, /President, Vice President, and Super Admin editing for the public Calendar/);
   assert.match(adminSrc, /if \(button\.dataset\.tab === 'events'\) allowed = false;/);
   const chromeSrc = readFileSync(join(root, 'worker/src/admin-chrome.mjs'), 'utf8');
-  assert.match(chromeSrc, /data-tab="events" hidden/);
+  assert.match(chromeSrc, /data-tab="events"\$\{hide\('events'\)\}/);
+  assert.match(chromeSrc, /defaultHidden = new Set\(\['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log'\]\)/);
   assert.match(workerSrc, /canNotifyCalendarSubscribers\(auth\.user\)/);
   assert.doesNotMatch(adminSrc, /\['Calendar Events'/);
 });
@@ -408,6 +411,7 @@ test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
 
 test('Phase 0 old Pages editor cannot overwrite visual-managed page bodies', () => {
   assert.match(workerSrc, /isVisualEditorSlug\(existing\.slug\)/);
+  assert.match(workerSrc, /Use the visual editor for this page/);
   assert.match(workerSrc, /page\.body_html = existing\.body_html/);
   assert.match(workerSrc, /function isVisualPilotSlug|isVisualPilotSlug,/);
   assert.match(adminSrc, /isVisualEditorPageSlug/);
@@ -648,10 +652,9 @@ test('Pages API fetch handler keeps visual page bodies and saves Home', async ()
     headers: { cookie, 'content-type': 'application/json' },
     body: JSON.stringify({ title: 'Join the Band', body_html: '<p>Hacked</p>' }),
   }), env, {});
-  assert.equal(joinRes.status, 200, await joinRes.clone().text());
+  assert.equal(joinRes.status, 409, await joinRes.clone().text());
   const joinBody = await joinRes.json();
-  assert.match(String(joinBody.body_html || ''), /<p>Join<\/p>/);
-  assert.doesNotMatch(String(joinBody.body_html || ''), /Hacked/);
+  assert.match(String(joinBody.detail || ''), /Use the visual editor for this page/);
 
   const saveRes = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/home', {
     method: 'PUT',

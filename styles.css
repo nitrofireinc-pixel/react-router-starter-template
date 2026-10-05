@@ -2329,6 +2329,13 @@ body.admin-upload-open{overflow:hidden}
   fill:none;
   stroke:currentColor;
 }
+.admin-saved-toast.is-toast-ok .admin-saved-toast-card{
+  background:linear-gradient(145deg,#1b4d2c 0%,#2e7d4f 55%,#3d9b63 100%);
+  box-shadow:0 24px 60px rgba(12,48,24,.35);
+}
+.admin-saved-toast.is-toast-break .admin-saved-toast-card{
+  background:linear-gradient(145deg,#8b1218 0%,#c62828 55%,#e53935 100%);
+}
 .admin-password-toast{
   position:fixed;
   inset:0;
@@ -4850,6 +4857,39 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 .security-log-filter-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .security-log-filter-grid .full{grid-column:1/-1}
 .security-log-chain-ok{color:var(--navy);font-weight:800}
+.security-log-court{display:grid;gap:12px;margin:12px 0 16px}
+.security-log-court-current{
+  background:#e8f6ec;
+  border:2px solid #157a3a;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#0f3d1f;
+}
+.security-log-court-current.is-broken{background:#fdecea;border-color:#b42318;color:#7a1b14}
+.security-log-court-previous{
+  background:#eef1f4;
+  border:1px solid #c5ccd4;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#2b3443;
+}
+.security-log-court-legacy{
+  background:#f4f1ea;
+  border:1px solid #d8d0c0;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#4a4236;
+}
+.security-log-court-compat{
+  background:#eef4fb;
+  border:1px solid #9db6d4;
+  border-radius:10px;
+  padding:12px 14px;
+  color:#1d334d;
+}
+.security-log-court h2{margin:0 0 6px;font-size:1.05rem}
+.security-log-court p{margin:0 0 6px}
+.security-log-court details{margin-top:8px}
 #security-log-write-warning:not([hidden]){margin:8px 0 0}
 .security-log-panel,
 .security-log-panel .admin-card,
@@ -6430,3 +6470,12 @@ body.cms-caldev-editor-open .admin-workspace{
     justify-content:flex-start;
   }
 }
+
+.user-grant-group{margin:0 0 12px;padding:0;border:0}
+.user-grant-group legend{font-weight:800;color:#10233c;margin:0 0 8px}
+.page-grant-note{margin:0 0 10px}
+.page-grant-table{width:100%;border-collapse:collapse;font-size:.92rem}
+.page-grant-table th,.page-grant-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #d5deea;vertical-align:middle}
+.page-grant-table th{color:#64748b;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase}
+.page-grant-table.is-covered{opacity:.55}
+.page-grant-table input{width:18px;height:18px}

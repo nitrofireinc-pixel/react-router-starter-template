@@ -477,3 +477,10 @@ body.visual-page-join main *{
 @media (min-width:1920px){
   .visual-editor-body{max-width:1920px;margin:0 auto}
 }
+.visual-content-only #visual-gjs-sink,
+.visual-content-only [data-visual-style-editor],
+.visual-content-only .gjs-sm-sectors,
+.visual-content-only .gjs-sm-sector,
+.visual-content-only .gjs-clm-tags{
+  display:none !important;
+}
