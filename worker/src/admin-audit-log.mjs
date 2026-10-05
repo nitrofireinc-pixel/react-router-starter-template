@@ -521,6 +521,8 @@ export function requestCountry(request) {
 
 export const AUDIT_BEFORE_VISUAL_SQL = 'SELECT slug, draft_html, published_html FROM visual_pages WHERE slug = ?';
 export const AUDIT_LOG_GENERATION_KEY = 'audit_log_generation';
+export const AUDIT_CUTOVER_MINTED_KEY = 'audit_cutover_minted';
+export const AUDIT_CHAIN_CUTOVER_ID_KEY = 'audit_chain_cutover_id';
 export const AUDIT_LOG_SINCE_NOTE = 'This site has been logged since the original CMS security-log build.';
 
 const generationCache = { key_id: '', loaded: false };
@@ -1537,9 +1539,12 @@ export async function writeAdminAuditLog(env, entry = {}, { recordFailure = true
     encVersion = ADMIN_AUDIT_ENC_VERSION_UNSIGNED;
     usedKeyId = 'missing';
   }
-  let cutoverId = Number(meta.cutover_id) || 0;
-  let hmacSinceId = Number(meta.hmac_since_id) || 0;
-  if (!cutoverId && !hmacSinceId && action !== AUDIT_CUTOVER_ACTION) {
+  let cutoverId = 0;
+  let hmacSinceId = 0;
+  if (action === AUDIT_CUTOVER_ACTION) {
+    cutoverId = Number(meta.cutover_id) || 0;
+    hmacSinceId = Number(meta.hmac_since_id) || 0;
+  } else {
     const bounds = env.__auditBounds && env.__auditBounds.valid
       ? env.__auditBounds
       : await readSignedAuditBoundaries(env);
@@ -2625,7 +2630,7 @@ export function classifyAuditLinkRows(rows = [], {
     const hashMatches = prev === hash;
     const preCutover = cutoff > 0 && id <= cutoff;
 
-    if (legacyPrefix && !hasHashLink) {
+    if (legacyPrefix && !hasHashLink && !(cutoff > 0 && id > cutoff)) {
       legacy.push({ id, kind: 'legacy', reason: 'legacy, pre-chain' });
       hash = String(row.payload_sha256 || '');
       lastId = id;
@@ -2727,7 +2732,8 @@ export async function readSignedAuditBoundaries(env) {
   } catch {
     return empty;
   }
-  for (const row of rows) {
+  const cutoverRows = rows.filter((row) => String(row.action) === AUDIT_CUTOVER_ACTION);
+  for (const row of cutoverRows) {
     const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
     if (!decoded?.integrity_ok && decoded?.integrity_error) continue;
     const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
@@ -2801,7 +2807,104 @@ export async function writeAuditCutoverRow(env, {
       hmac_since_id: Number(hmacSinceId) || 0,
     },
   });
+  if (env) env.__auditBounds = null;
+  if (written?.id) {
+    await persistCutoverMintedMarker(env, {
+      cutoverId,
+      cutoverAt,
+      hmacSinceId,
+    });
+  }
   return written || { id: 0 };
+}
+
+function cutoverMintedMaterial({ cutoverId = 0, cutoverAt = '', hmacSinceId = 0 } = {}) {
+  return JSON.stringify({
+    v: 1,
+    cutover_id: Number(cutoverId) || 0,
+    cutover_at: String(cutoverAt || ''),
+    hmac_since_id: Number(hmacSinceId) || 0,
+  });
+}
+
+export async function persistCutoverMintedMarker(env, {
+  cutoverId = 0,
+  cutoverAt = '',
+  hmacSinceId = 0,
+} = {}) {
+  if (!env?.DB?.prepare || !hasAuditLogKey(env, DEFAULT_AUDIT_KEY_ID)) return false;
+  const mac = await hmacSha256Hex(env, cutoverMintedMaterial({
+    cutoverId,
+    cutoverAt,
+    hmacSinceId,
+  }), DEFAULT_AUDIT_KEY_ID);
+  try {
+    await env.DB.prepare(
+      'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
+    ).bind(AUDIT_CUTOVER_MINTED_KEY, JSON.stringify({
+      cutover_id: Number(cutoverId) || 0,
+      cutover_at: String(cutoverAt || ''),
+      hmac_since_id: Number(hmacSinceId) || 0,
+      key_id: DEFAULT_AUDIT_KEY_ID,
+      mac,
+    })).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readCutoverMintedMarker(env) {
+  const empty = { valid: false, cutoverId: 0, hmacSinceId: 0, at: '' };
+  if (!env?.DB?.prepare) return empty;
+  const sql = 'SELECT value FROM site_content WHERE key = ?';
+  let raw = '';
+  try {
+    const row = await env.DB.prepare(sql).bind(AUDIT_CUTOVER_MINTED_KEY).first();
+    raw = String(row?.value || '');
+  } catch {
+    return empty;
+  }
+  if (!raw) return empty;
+  let parsed = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return empty;
+  }
+  const cutoverId = Number(parsed.cutover_id) || 0;
+  const hmacSinceId = Number(parsed.hmac_since_id) || 0;
+  const at = String(parsed.cutover_at || '');
+  const keyId = String(parsed.key_id || DEFAULT_AUDIT_KEY_ID);
+  if (!hasAuditLogKey(env, keyId)) return empty;
+  const expected = await hmacSha256Hex(env, cutoverMintedMaterial({
+    cutoverId,
+    cutoverAt: at,
+    hmacSinceId,
+  }), keyId);
+  if (!expected || expected !== String(parsed.mac || '')) return empty;
+  return { valid: true, cutoverId, hmacSinceId, at };
+}
+
+export async function resolveVerifyBoundaries(env) {
+  const signed = await readSignedAuditBoundaries(env);
+  const marker = await readCutoverMintedMarker(env);
+  if (marker.valid) {
+    const signedId = signed.valid ? Number(signed.id) || 0 : 0;
+    const signedHmac = signed.valid ? Number(signed.hmacSinceId) || 0 : 0;
+    return {
+      id: signedId ? Math.min(signedId, marker.cutoverId || signedId) : marker.cutoverId,
+      at: marker.at || signed.at,
+      hmacSinceId: signedHmac
+        ? (marker.hmacSinceId ? Math.min(signedHmac, marker.hmacSinceId) : signedHmac)
+        : (marker.hmacSinceId || 0),
+      valid: signed.valid,
+      markerValid: true,
+      source: signed.source || 'minted',
+      rowId: signed.rowId,
+    };
+  }
+  return { ...signed, markerValid: false };
 }
 
 export function uniqueAuditBreakIds(items = []) {
@@ -2814,6 +2917,25 @@ export function uniqueAuditBreakIds(items = []) {
     ids.push(id);
   }
   return ids;
+}
+
+export async function auditMintHistoryExists(env) {
+  if (!env?.DB?.prepare) return false;
+  const sql = `SELECT
+      (SELECT value FROM site_content WHERE key = '${AUDIT_CUTOVER_MINTED_KEY}' LIMIT 1) AS minted,
+      (SELECT value FROM site_content WHERE key = '${AUDIT_CHAIN_CUTOVER_ID_KEY}' LIMIT 1) AS cutover_key,
+      (SELECT seq FROM sqlite_sequence WHERE name = '${ADMIN_AUDIT_TABLE}' LIMIT 1) AS seq,
+      (SELECT COUNT(*) FROM ${ADMIN_AUDIT_TABLE}) AS row_count`;
+  assertAuditSqlIsAppendOnly(sql);
+  try {
+    const row = await env.DB.prepare(sql).first();
+    if (row?.minted || row?.cutover_key) return true;
+    const seq = Number(row?.seq) || 0;
+    const count = Number(row?.row_count) || 0;
+    return seq > 0 && count > 0 && seq > count;
+  } catch {
+    return false;
+  }
 }
 
 export function missingCutoverBreak(rows = []) {
@@ -2867,14 +2989,15 @@ export async function latestSignedGenesis(env) {
   } catch {
     return null;
   }
+  const bounds = await readSignedAuditBoundaries(env);
   for (const row of rows) {
     const decoded = await deserializeEncryptedAuditRow(env, row, { verifyDigest: false });
     if (!decoded?.integrity_ok && decoded?.integrity_error) continue;
     const meta = decoded?.meta && typeof decoded.meta === 'object' ? decoded.meta : {};
     const digest = await verifyAuditRowDigest(row, env, {
       signedBoundaryCheck: true,
-      cutoverId: Number(meta.cutover_id) || 0,
-      hmacSinceId: Number(meta.hmac_since_id) || 0,
+      cutoverId: Number(bounds.id) || 0,
+      hmacSinceId: Number(bounds.hmacSinceId) || 0,
     });
     if (!digest.ok || !digest.keyed) continue;
     return {
@@ -2889,8 +3012,8 @@ export async function latestSignedGenesis(env) {
 }
 
 export async function earliestSignedBoundaryId(env) {
-  const signed = await readSignedAuditBoundaries(env);
-  if (signed.valid && (signed.id || signed.hmacSinceId)) {
+  const signed = await resolveVerifyBoundaries(env);
+  if ((signed.valid || signed.markerValid) && (signed.id || signed.hmacSinceId)) {
     return Math.min(signed.id || signed.hmacSinceId, signed.hmacSinceId || signed.id);
   }
   return 0;
@@ -2900,7 +3023,12 @@ export async function canMintSignedCutover(env) {
   if (!env?.DB?.prepare) return false;
   const sql = `SELECT
       (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE enc_version = ${ADMIN_AUDIT_ENC_VERSION_V3} LIMIT 1) AS v3_id,
-      (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE prev_id IS NOT NULL LIMIT 1) AS linked_id`;
+      (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE prev_id IS NOT NULL LIMIT 1) AS linked_id,
+      (SELECT id FROM ${ADMIN_AUDIT_TABLE} WHERE action = 'log.cutover' LIMIT 1) AS cutover_row,
+      (SELECT value FROM site_content WHERE key = '${AUDIT_CUTOVER_MINTED_KEY}' LIMIT 1) AS minted,
+      (SELECT value FROM site_content WHERE key = '${AUDIT_CHAIN_CUTOVER_ID_KEY}' LIMIT 1) AS cutover_key,
+      (SELECT seq FROM sqlite_sequence WHERE name = '${ADMIN_AUDIT_TABLE}' LIMIT 1) AS seq,
+      (SELECT COUNT(*) FROM ${ADMIN_AUDIT_TABLE}) AS row_count`;
   assertAuditSqlIsAppendOnly(sql);
   let row = null;
   try {
@@ -2908,7 +3036,10 @@ export async function canMintSignedCutover(env) {
   } catch {
     return false;
   }
-  if (row?.v3_id) return false;
+  if (row?.v3_id || row?.cutover_row || row?.minted || row?.cutover_key) return false;
+  const seq = Number(row?.seq) || 0;
+  const count = Number(row?.row_count) || 0;
+  if (seq > 0 && count > 0 && seq > count) return false;
   if (!row?.linked_id) return true;
   const earliest = await earliestSignedBoundaryId(env);
   if (earliest <= 0) return false;
@@ -3318,7 +3449,7 @@ export async function collectAuditLinkState(env) {
   } catch {
     rows = [];
   }
-  const cutover = await readSignedAuditBoundaries(env);
+  const cutover = await resolveVerifyBoundaries(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
     cutoverId: cutover.id,
@@ -3423,7 +3554,7 @@ export async function verifyAdminAuditBatch(env, {
     if (!prevHash) prevHash = String(neighbor?.payload_sha256 || '');
     if (neighbor?.id) prevId = Number(neighbor.id) || afterId;
   }
-  const cutover = await readSignedAuditBoundaries(env);
+  const cutover = await resolveVerifyBoundaries(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
     cutoverId: cutover.id,
@@ -3436,8 +3567,15 @@ export async function verifyAdminAuditBatch(env, {
   const digestFailures = [];
   const legacy = classified.legacy;
   const compatibility = classified.compatibility;
-  if (!cutover.valid && rows.some((row) => row.prev_id != null && row.prev_id !== '')) {
-    const missing = missingCutoverBreak(rows);
+  if (!cutover.valid && (
+    rows.some((row) => row.prev_id != null && row.prev_id !== '')
+    || await auditMintHistoryExists(env)
+  )) {
+    const missing = missingCutoverBreak(rows) || {
+      id: Number(rows[0]?.id) || 0,
+      kind: 'cutover',
+      reason: 'boundary record missing',
+    };
     if (missing) breaks.push(missing);
   }
   for (const row of rows) {
@@ -3528,7 +3666,7 @@ export async function verifyAdminAuditComplete(env) {
   } catch {
     rows = [];
   }
-  const cutover = await readSignedAuditBoundaries(env);
+  const cutover = await resolveVerifyBoundaries(env);
   const genesis = await loadAuditGenerations(env);
   const classified = classifyAuditLinkRows(rows, {
     cutoverAt: cutover.at,
@@ -3538,8 +3676,15 @@ export async function verifyAdminAuditComplete(env) {
   });
   const breaks = [...classified.breaks];
   const digestFailures = [];
-  if (!cutover.valid && rows.some((row) => row.prev_id != null && row.prev_id !== '')) {
-    const missing = missingCutoverBreak(rows);
+  if (!cutover.valid && (
+    rows.some((row) => row.prev_id != null && row.prev_id !== '')
+    || await auditMintHistoryExists(env)
+  )) {
+    const missing = missingCutoverBreak(rows) || {
+      id: Number(rows[0]?.id) || 0,
+      kind: 'cutover',
+      reason: 'boundary record missing',
+    };
     if (missing) breaks.push(missing);
   }
   for (const row of rows) {

@@ -385,8 +385,6 @@ export async function auditSchemaNeedsRepair(env) {
 
 export async function repairAuditSchema(env) {
   await ensureAuditLogColumns(env);
-  const cutover = await ensureAuditChainCutover(env);
-  const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
   await runSchemaStatements(env, [
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_DROP_SQL,
     AUDIT_LOG_LINEAR_INSERT_TRIGGER_SQL,
@@ -395,6 +393,8 @@ export async function repairAuditSchema(env) {
     SITE_CONTENT_AUDIT_KEYS_NO_REPLACE_SQL,
   ]);
   if (hasAuditLogKey(env) && await canMintSignedCutover(env)) {
+    const cutover = await ensureAuditChainCutover(env);
+    const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
     await writeAuditCutoverRow(env, {
       cutoverId: cutover.id,
       cutoverAt: cutover.at,
@@ -415,9 +415,9 @@ export async function applyIncrementalSchema(env, { writeVersion } = {}) {
   } catch {
     // users.permissions may be missing on partial fixtures
   }
-  const cutover = await ensureAuditChainCutover(env);
-  const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
   if (hasAuditLogKey(env) && await canMintSignedCutover(env)) {
+    const cutover = await ensureAuditChainCutover(env);
+    const hmac = await ensureAuditHmacSince(env, { cutoverId: cutover.id });
     await writeAuditCutoverRow(env, {
       cutoverId: cutover.id,
       cutoverAt: cutover.at,
