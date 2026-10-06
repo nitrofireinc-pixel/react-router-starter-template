@@ -381,7 +381,23 @@ function canAccessLedger() {
 }
 
 function canAccessScheduleBoard() {
+  return isSuperAdmin()
+    || hasPermission('president')
+    || hasPermission('vice-president')
+    || hasPermission('events')
+    || hasPermission('events:manage')
+    || hasPermission('calendar');
+}
+
+function canNotifyCalendarSubscribers() {
   return isSuperAdmin() || hasPermission('president') || hasPermission('vice-president');
+}
+
+function isScheduleBoardOnlyUser() {
+  if (isSuperAdmin() || !canAccessScheduleBoard()) return false;
+  const perms = (state.me?.user?.permissions || []).map((item) => String(item).trim().toLowerCase());
+  if (!perms.length) return false;
+  return perms.every((item) => item === 'events' || item === 'events:manage' || item === 'calendar');
 }
 
 function canAccessBadgeCreator() {
@@ -1704,6 +1720,12 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const payload = pagePayload(form);
   const original = payload.original_slug;
   delete payload.original_slug;
+  if (original === 'join' || payload.slug === 'join') {
+    if (status) {
+      status.innerHTML = 'Join the Band is edited in the visual editor. <a href="/admin/visual/join">Open the Join visual editor</a> to save this page.';
+    }
+    return false;
+  }
   const isHomeSave = original === 'home' || payload.slug === 'home' || payload.layout === 'home';
   if (!isHomeSave && !plainTextFromHtml(payload.heading)) {
     if (status) status.textContent = 'Add a page heading in the live preview before saving.';
@@ -2841,17 +2863,44 @@ function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
   });
 }
 
+function canOpenAdminTab(name) {
+  const tab = String(name || '').trim();
+  const scheduleOnly = isScheduleBoardOnlyUser();
+  if (tab === 'dashboard' || tab === 'mail') return !scheduleOnly;
+  if (tab === 'pages') {
+    return (state.pages || []).some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage()));
+  }
+  if (tab === 'sponsors') return canEditSponsors();
+  if (tab === 'ledger') return canAccessLedger();
+  if (tab === 'checkout') return canAccessCheckout();
+  if (tab === 'staff') return canEditStaff();
+  if (tab === 'ensembles') return canEditPage('ensembles');
+  if (tab === 'booster-members') return canEditBoosterMembers();
+  if (tab === 'minutes') return canViewMinutes() && !scheduleOnly;
+  if (tab === 'badge-creator') return canAccessBadgeCreator();
+  if (tab === 'contact') return canEditContact();
+  if (tab === 'site' || tab === 'social') return hasPermission('site');
+  if (tab === 'users') return hasPermission('users');
+  if (tab === 'security-log') return isSuperAdmin();
+  if (tab === 'forms') return canAccessForms();
+  if (tab === 'caldev') return canAccessScheduleBoard();
+  if (tab === 'photos') return hasPermission('photos');
+  if (tab === 'events') return false;
+  return false;
+}
+
+function hideCalendarFinishedControls() {
+  const allow = canNotifyCalendarSubscribers();
+  document.querySelectorAll('#caldev-finished-top, [data-cms-caldev-finished], .cms-caldev-finished-bar').forEach((el) => {
+    el.hidden = !allow;
+  });
+  const top = document.querySelector('#caldev-finished-top');
+  const actions = top?.closest('.panel-actions');
+  if (actions) actions.hidden = !allow;
+}
+
 function activateTab(name) {
-    if (name === 'security-log' && !isSuperAdmin()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'forms' && !canAccessForms()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'caldev' && !canAccessScheduleBoard()) {
-    return Promise.resolve(false);
-  }
-  if (name === 'badge-creator' && !canAccessBadgeCreator()) {
+  if (!canOpenAdminTab(name)) {
     return Promise.resolve(false);
   }
   const pagesPanel = document.querySelector('#tab-pages');
@@ -2902,7 +2951,7 @@ function activateTab(name) {
       loadSecurityLog({ resetPage: true }).catch(() => {});
     }
     if (name === 'caldev') {
-      if (!isSuperAdmin()) return;
+      if (!canAccessScheduleBoard()) return;
       loadCaldevEvents().catch(() => {});
     }
     if (name === 'events') {
@@ -3059,9 +3108,10 @@ function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
   document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
 
+  const scheduleOnly = isScheduleBoardOnlyUser();
   const panels = {
-    dashboard: true,
-    mail: true,
+    dashboard: !scheduleOnly,
+    mail: !scheduleOnly,
     // Page editor panel stays available for Manage page-body shortcuts (e.g. Ensembles).
     pages: state.pages.some((page) => canEditPage(page) || (page.slug === 'boosters' && canEditBoostersPage())),
     sponsors: canEditSponsors(),
@@ -3070,7 +3120,7 @@ function showAllowedPanels() {
     staff: canEditStaff(),
     ensembles: canEditPage('ensembles'),
     'booster-members': canEditBoosterMembers(),
-    minutes: canViewMinutes(),
+    minutes: canViewMinutes() && !scheduleOnly,
     'badge-creator': canAccessBadgeCreator(),
     contact: canEditContact(),
     site: hasPermission('site'),
@@ -3088,12 +3138,13 @@ function showAllowedPanels() {
     // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
     if (button.dataset.tab === 'events') allowed = false;
     if (button.dataset.tab === 'caldev') allowed = canAccessScheduleBoard();
+    if (scheduleOnly && (button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail')) allowed = false;
     button.hidden = !allowed;
     button.onclick = () => activateTab(button.dataset.tab);
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
   const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = canAccessBoostersMenu();
+  const boostersAccess = !scheduleOnly && canAccessBoostersMenu();
   if (boostersMenu) {
     boostersMenu.hidden = !boostersAccess;
     if (boostersAccess) manageVisible = true;
@@ -3174,11 +3225,12 @@ function showAllowedPanels() {
     const panel = document.querySelector(`#tab-${name}`);
     if (panel) panel.hidden = !allowed;
   });
+  hideCalendarFinishedControls();
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
   renderDashboard();
-  activateTab('dashboard');
+  activateTab(scheduleOnly ? 'caldev' : 'dashboard');
 }
 
 function bindAdminNavToggle() {
@@ -3676,10 +3728,7 @@ function renderDashboard() {
     canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
     hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
     hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canCreateEvents() && !isSuperAdmin()
-      ? ['Calendar Events', 'Add events you own, or manage all events if granted elevated access.', 'events', 'Program', 'tab']
-      : !isSuperAdmin() && canViewEvents() && ['Calendar Events', 'Browse calendar events by month (view only).', 'events', 'Program', 'tab'],
-    canAccessScheduleBoard() && ['Schedule Board', 'Edit the public calendar with drag-and-drop. Meetings also show on Boosters. Press Finished to email calendar subscribers.', 'caldev', 'Program', 'tab', 'caldev'],
+    canAccessScheduleBoard() && ['Schedule Board', 'Add and edit events for the public Calendar.', 'caldev', 'Program', 'tab', 'caldev'],
   ].filter(Boolean);
   // Always pin Security Log after every other dashboard card (now and for future additions).
   if (isSuperAdmin()) {
@@ -3746,6 +3795,20 @@ function editPage(slug, { skipGuard = false } = {}) {
       fundraisingNotify.hidden = page.slug !== 'fundraising';
       const notifyInput = fundraisingNotify.querySelector('input[name="notify_email_subscribers"]');
       if (notifyInput && page.slug === 'fundraising') notifyInput.checked = true;
+    }
+    let visualHint = form.querySelector('[data-visual-pilot-hint]');
+    if (!visualHint) {
+      visualHint = document.createElement('p');
+      visualHint.className = 'notice';
+      visualHint.setAttribute('data-visual-pilot-hint', '');
+      form.insertBefore(visualHint, form.querySelector('.form-grid, .page-meta-grid'));
+    }
+    if (page.slug === 'join') {
+      visualHint.hidden = false;
+      visualHint.innerHTML = 'Join the Band is managed in the visual editor. The old Pages editor cannot save this page. <a href="/admin/visual/join">Open the Join visual editor</a>';
+    } else {
+      visualHint.hidden = true;
+      visualHint.textContent = '';
     }
     syncPagePhotoToolbar();
     form.querySelector('[data-home-hint]').hidden = !isHomePage;
@@ -5175,6 +5238,13 @@ async function loadUsers() {
       input.checked = Array.isArray(user.permissions) && user.permissions.includes(input.value);
     });
     form.elements.active.checked = Boolean(user.active);
+    const editingSelf = Number(user.id) === Number(state.me?.user?.id);
+    const lockOwnPrivileges = editingSelf && !isSuperAdmin();
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = lockOwnPrivileges;
+    form.querySelectorAll('input[name="permissions"]').forEach((input) => {
+      input.disabled = lockOwnPrivileges;
+    });
     const status = document.querySelector('#user-status');
     if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5443,6 +5513,7 @@ async function mountCaldevCmsBoard() {
   if (!mountEl || !canAccessScheduleBoard()) return;
   if (window.CaldevCmsBoard?.mount) {
     await window.CaldevCmsBoard.mount(mountEl);
+    hideCalendarFinishedControls();
     return;
   }
   mountEl.innerHTML = '<p class="draft">Schedule Board editor failed to load. Refresh and try again.</p>';
@@ -5458,7 +5529,7 @@ function bindCaldevPanel() {
   window.__caldevPanelBound = true;
 
   async function notifyCalendarFinished() {
-    if (!canAccessScheduleBoard()) return;
+    if (!canNotifyCalendarSubscribers()) return;
     if (!confirm('Email calendar subscribers that the schedule board is finished/updated? Fundraising subscribers are not included.')) return;
     try {
       const result = await jsonFetch('/api/admin/caldev/notify-finished', {
@@ -8035,6 +8106,11 @@ function bindForms() {
       return;
     }
     payload.permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
+    const editingSelf = Number(id) === Number(state.me?.user?.id);
+    if (editingSelf && !isSuperAdmin()) {
+      payload.role = state.me.user.role;
+      payload.permissions = Array.isArray(state.me.user.permissions) ? [...state.me.user.permissions] : [];
+    }
     delete payload.id;
     if (!payload.password) delete payload.password;
     status.textContent = 'Saving…';
@@ -8061,7 +8137,12 @@ function bindForms() {
     const form = document.querySelector('#user-form');
     form.reset();
     form.elements.active.checked = true;
-    form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = false);
+    form.querySelectorAll('input[name="permissions"]').forEach(input => {
+      input.checked = false;
+      input.disabled = false;
+    });
+    const roleSelect = form.querySelector('[name="role"]');
+    if (roleSelect) roleSelect.disabled = false;
   });
 
   document.querySelector('#refresh-security-log')?.addEventListener('click', () => {
