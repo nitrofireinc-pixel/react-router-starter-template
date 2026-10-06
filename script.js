@@ -1,5 +1,5 @@
 function isMobileNavViewport() {
-  return Boolean(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
 }
 
 function ensureNavBackdrop() {
@@ -75,12 +75,12 @@ function setMobileNavOpen(open) {
   }
 }
 
-function placeMenuButtonInTray() {
-  const tray = ensureMobileNavTray();
+function placeMenuButtonLeading() {
+  const header = document.querySelector('header.site-header');
   const button = document.querySelector('.menu-button');
-  if (!tray || !button) return button;
-  if (button.parentElement !== tray) {
-    tray.insertBefore(button, tray.firstChild);
+  if (!header || !button) return button;
+  if (header.firstElementChild !== button) {
+    header.insertBefore(button, header.firstElementChild);
   }
   return button;
 }
@@ -92,7 +92,7 @@ function utilityAuthHost() {
 function placeHeaderQuickActions() {
   const nav = document.querySelector('#site-nav') || document.querySelector('header.site-header nav');
   const actions = ensureHeaderQuickActions();
-  const menuButton = placeMenuButtonInTray();
+  const menuButton = placeMenuButtonLeading();
   if (!nav || !actions) return;
   const notify = document.querySelector('[data-notify-me]');
   const addHome = document.querySelector('[data-add-home]');
@@ -145,7 +145,7 @@ function placeHeaderQuickActions() {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 760px)');
+    const media = window.matchMedia('(max-width: 1024px)');
     const onChange = () => placeHeaderQuickActions();
     if (media.addEventListener) media.addEventListener('change', onChange);
     else if (media.addListener) media.addListener(onChange);
@@ -794,7 +794,7 @@ function syncAddToHomeButtonState(button) {
   });
 
   if (window.matchMedia) {
-    const media = window.matchMedia('(max-width: 760px)');
+    const media = window.matchMedia('(max-width: 1024px)');
     const onChange = () => {
       syncAddToHomeButtonState(button);
       placeHeaderQuickActions();

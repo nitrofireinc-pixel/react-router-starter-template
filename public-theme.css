@@ -123,7 +123,7 @@ body.efhs-theme .header-inner{
 body.efhs-theme .brand{
   margin:0;
   justify-content:flex-start;
-  gap:12px;
+  gap:8px;
   color:#fff;
   text-align:left;
 }
@@ -135,6 +135,7 @@ body.efhs-theme .brand .brand-logo{
 body.efhs-theme .brand .brand-mark{
   width:48px;
   height:48px;
+  margin-inline-start:0;
   background:transparent;
   filter:drop-shadow(0 2px 8px rgba(0,0,0,.65));
 }
@@ -147,14 +148,22 @@ body.efhs-theme header.site-header .brand [data-site-field="title"]{
   color:#fff;
   letter-spacing:.06em;
   text-transform:uppercase;
-  max-width:14rem;
+  max-width:none;
+  width:max-content;
+  flex:0 1 auto;
+  min-width:0;
   text-shadow:0 1px 2px rgba(0,0,0,.82),0 0 16px rgba(0,8,20,.55);
 }
+body.efhs-theme header.site-header .brand [data-site-field="title"]{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+}
 body.efhs-theme header.site-header .brand .brand-title-rest::before{
-  content:" ";
+  content:none;
 }
 body.efhs-theme header.site-header .brand [data-site-field="title"] small{
-  display:inline;
+  display:block;
   font-size:inherit;
   font-weight:inherit;
   letter-spacing:inherit;
@@ -839,29 +848,89 @@ body.efhs-theme .footer h3{
   }
 }
 
-/* ---------- Tablet ---------- */
+/* Compact header through tablet: hamburger | page-centered title | login + bell */
 @media (max-width:1024px){
-  body.efhs-theme header.site-header nav a,
-  body.efhs-theme header.site-header nav .nav-notify-me,
-  body.efhs-theme header.site-header nav .nav-support-toggle{
-    padding:8px 7px;
-    font-size:.7rem;
+  body.efhs-theme header.site-header,
+  body.efhs-theme .site-chrome{
+    position:relative;
+    top:auto;
+    margin:0;
   }
-  body.efhs-theme .photo-gallery,
-  #page-preview .photo-gallery{
-    columns:2;
-  }
-}
-
-/* ---------- Phone: keep existing drawer behavior ---------- */
-@media (max-width:760px){
   body.efhs-theme header.site-header{
+    display:grid;
+    grid-template-columns:minmax(4.5rem,1fr) auto minmax(4.5rem,1fr);
+    grid-template-areas:"menu brand actions";
+    align-items:center;
+    height:clamp(56px,14vw,72px);
+    min-height:56px;
+    max-height:72px;
+    padding:0 clamp(4px,1.6vw,12px);
+    column-gap:4px;
     border-top:1px solid #fff;
+    background-image:
+      linear-gradient(180deg,rgba(0,18,40,.34) 0%,rgba(1,36,74,.40) 100%),
+      var(--efhs-header-banner);
+    background-size:cover;
+    background-position:center 50%;
+    background-repeat:no-repeat;
   }
+  body.efhs-theme .menu-button{
+    display:inline-flex;
+    grid-area:menu;
+    justify-self:start;
+    align-self:center;
+    margin:0;
+    z-index:95;
+    width:clamp(32px,8vw,40px);
+    height:clamp(32px,8vw,40px);
+    flex:0 0 auto;
+  }
+  body.efhs-theme .header-inner{
+    grid-area:brand;
+    justify-self:center;
+    align-self:center;
+    justify-content:center;
+    padding:0;
+    height:auto;
+    min-height:0;
+    width:auto;
+    min-width:0;
+    max-width:100%;
+    flex:0 0 auto;
+    overflow:visible;
+    background:none;
+  }
+  body.efhs-theme .brand{
+    justify-content:center;
+    gap:clamp(3px,1vw,8px);
+    min-width:0;
+    flex:0 0 auto;
+    max-width:100%;
+  }
+  body.efhs-theme .brand .brand-logo{
+    height:clamp(18px,5.2vw,28px);
+    width:auto;
+    flex:0 0 auto;
+  }
+  body.efhs-theme .brand .brand-mark{
+    height:clamp(20px,6vw,32px);
+    width:clamp(20px,6vw,32px);
+    flex:0 0 auto;
+    margin-inline-start:0;
+  }
+  body.efhs-theme .header-quick-actions .nav-notify-me,
+  body.efhs-theme .header-quick-actions .nav-add-home{
+    width:clamp(32px,8vw,40px);
+    height:clamp(32px,8vw,40px);
+    flex:0 0 auto;
+  }
+  body.efhs-theme .header-quick-actions{gap:0}
   body.efhs-theme .header-quick-actions .utility-auth{
     color:#eaf2ff;
-    font-size:.68rem;
-    letter-spacing:.12em;
+    height:clamp(32px,8vw,40px);
+    padding:0 clamp(2px,.8vw,8px);
+    letter-spacing:.04em;
+    font-size:clamp(.52rem,2vw,.68rem);
     text-transform:uppercase;
   }
   body.efhs-theme .header-quick-actions .utility-auth:hover,
@@ -871,70 +940,13 @@ body.efhs-theme .footer h3{
     outline:2px solid #fff;
     outline-offset:2px;
   }
-  body.efhs-theme header.site-header,
-  body.efhs-theme .site-chrome{
-    position:relative;
-    top:auto;
-    margin:0;
-  }
-  body.efhs-theme header.site-header{
-    display:flex;
-    flex-direction:row;
-    flex-wrap:nowrap;
-    align-items:center;
-    height:66px;
-    min-height:66px;
-    max-height:66px;
-    padding:0 8px;
-    column-gap:6px;
-    background-image:
-      linear-gradient(180deg,rgba(0,18,40,.34) 0%,rgba(1,36,74,.40) 100%),
-      var(--efhs-header-banner);
-    background-size:cover;
-    background-position:center 50%;
-    background-repeat:no-repeat;
-  }
-  body.efhs-theme .header-inner{
-    justify-content:flex-start;
-    padding:0;
-    height:66px;
-    min-height:66px;
-    width:auto;
-    min-width:auto;
-    flex:1 1 auto;
-    overflow:visible;
-    background:none;
-  }
-  body.efhs-theme .brand{
-    justify-content:flex-start;
-    gap:4px;
-    min-width:0;
-    flex:1 1 auto;
-    max-width:100%;
-  }
-  body.efhs-theme .brand .brand-logo{height:24px;width:auto;flex:0 0 auto}
-  body.efhs-theme .brand .brand-mark{height:28px;width:28px;flex:0 0 28px}
-  body.efhs-theme .menu-button,
-  body.efhs-theme .header-quick-actions .nav-notify-me,
-  body.efhs-theme .header-quick-actions .nav-add-home{
-    width:36px;
-    height:36px;
-    flex:0 0 36px;
-  }
-  body.efhs-theme .header-quick-actions{gap:0}
-  body.efhs-theme .header-quick-actions .utility-auth{
-    height:36px;
-    padding:0 4px;
-    letter-spacing:.04em;
-    font-size:.62rem;
-  }
   body.efhs-theme header.site-header .brand span,
   body.efhs-theme header.site-header .brand [data-site-field="title"]{
     text-align:left;
     max-width:none;
-    min-width:max-content;
-    flex:1 1 auto;
-    font-size:.74rem!important;
+    min-width:0;
+    flex:0 1 auto;
+    font-size:clamp(.58rem,2.35vw,.82rem)!important;
     line-height:1.02;
     letter-spacing:.02em;
     display:flex;
@@ -947,16 +959,16 @@ body.efhs-theme .footer h3{
   body.efhs-theme header.site-header .brand [data-site-field="title"] small{
     display:block;
     font-family:"Work Sans",system-ui,sans-serif;
-    font-size:.55rem!important;
+    font-size:clamp(.46rem,1.7vw,.58rem)!important;
     font-weight:800;
-    letter-spacing:.1em;
+    letter-spacing:.08em;
     line-height:1.1;
     color:#4da3ff;
     white-space:nowrap;
   }
   body.efhs-theme header.site-header .brand .brand-title-rest{
     display:block;
-    font-size:.74rem!important;
+    font-size:clamp(.58rem,2.35vw,.82rem)!important;
     font-weight:700;
     letter-spacing:.01em;
     line-height:1.02;
@@ -968,14 +980,18 @@ body.efhs-theme .footer h3{
   }
   body.efhs-theme .mobile-nav-tray{
     display:flex;
+    grid-area:actions;
+    justify-self:end;
+    align-self:center;
     width:auto;
     min-height:0;
-    margin-left:auto;
+    margin-left:0;
     padding:0;
     background:transparent;
     border:0;
+    justify-content:flex-end;
   }
-  body.efhs-theme .header-donate{display:none}
+  body.efhs-theme .header-donate{display:none!important}
   /* Drawer list only: white panel + navy links. Keep the navy title tray/close button. */
   body.efhs-theme header.site-header nav,
   body.efhs-theme header.site-header #site-nav{
@@ -1048,6 +1064,46 @@ body.efhs-theme .footer h3{
     color:var(--efhs-navy);
     box-shadow:inset 3px 0 0 var(--efhs-blue);
   }
+}
+
+/* Extra-narrow phones: keep the same 3-column balance, just shrink chrome. */
+@media (max-width:360px){
+  body.efhs-theme header.site-header{
+    grid-template-columns:minmax(3.75rem,1fr) minmax(0,auto) minmax(3.75rem,1fr);
+    padding:0 4px;
+    column-gap:2px;
+  }
+  body.efhs-theme .header-quick-actions .nav-add-home{display:none!important}
+  body.efhs-theme header.site-header .brand span,
+  body.efhs-theme header.site-header .brand [data-site-field="title"],
+  body.efhs-theme header.site-header .brand .brand-title-rest{
+    font-size:clamp(.52rem,2.2vw,.72rem)!important;
+  }
+}
+
+/* Landscape phones: shorter header so the title row does not eat the viewport. */
+@media (max-width:1024px) and (max-height:500px) and (orientation:landscape){
+  body.efhs-theme header.site-header{
+    height:clamp(48px,18vh,58px);
+    min-height:48px;
+    max-height:58px;
+    padding:0 clamp(6px,1.4vw,14px);
+  }
+  body.efhs-theme .brand .brand-logo{
+    height:clamp(16px,4.4vw,24px);
+  }
+  body.efhs-theme .brand .brand-mark{
+    height:clamp(18px,5vw,26px);
+    width:clamp(18px,5vw,26px);
+  }
+}
+
+/* Phone page/hero layout only. Header/drawer rules live in the 1024 block. */
+@media (max-width:760px){
+  body.efhs-theme .photo-gallery,
+  #page-preview .photo-gallery{
+    columns:1;
+  }
   body.efhs-theme .hero .wrap,
   #page-preview .hero .wrap{
     grid-template-columns:1fr;
@@ -1085,10 +1141,6 @@ body.efhs-theme .footer h3{
   #page-preview .page-hero{
     padding:48px 16px 72px;
     min-height:180px;
-  }
-  body.efhs-theme .photo-gallery,
-  #page-preview .photo-gallery{
-    columns:1;
   }
   body.efhs-theme .person,
   #page-preview .person{
