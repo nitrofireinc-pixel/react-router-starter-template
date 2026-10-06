@@ -4807,6 +4807,45 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 .caldev-section{padding-top:8px;min-width:0;max-width:100%}
 .caldev-wrap{max-width:1180px;min-width:0;width:100%}
 .caldev-app{display:grid;gap:16px;min-width:0;max-width:100%}
+.caldev-deadline-banner,
+.cms-caldev-deadline-banners .caldev-deadline-banner{
+  width:100%;
+  margin:0;
+  padding:12px 16px;
+  background:var(--red);
+  color:#fff;
+  text-align:center;
+  font-weight:800;
+  font-size:clamp(.95rem,2.4vw,1.12rem);
+  line-height:1.4;
+  border:0;
+  border-radius:16px;
+  box-sizing:border-box;
+}
+.cms-caldev-deadline-banners{
+  display:grid;
+  gap:8px;
+}
+.cms-caldev-deadline-banners[hidden]{display:none!important}
+.caldev-deadline-banner a,
+.caldev-deadline-banner button{
+  color:#fff;
+  background:transparent;
+  border:0;
+  padding:0;
+  font:inherit;
+  font-weight:900;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+.caldev-deadline-banner a:hover,
+.caldev-deadline-banner a:focus-visible,
+.caldev-deadline-banner button:hover,
+.caldev-deadline-banner button:focus-visible{
+  color:var(--gold);
+  outline:none;
+}
 .caldev-toolbar{
   display:grid;justify-items:center;gap:12px;text-align:center;
   padding:14px 16px;border:1px solid #d5deea;border-radius:18px;background:#fff;
