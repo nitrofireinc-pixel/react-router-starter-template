@@ -2137,6 +2137,34 @@ test('staff auth lives in the utility bar, not the main public nav', () => {
   assert.match(styles, /body\.maintenance-preview \.site-chrome header\.site-header\{top:auto\}/);
 });
 
+test('public homepage stacks nav under a centered banner and hides the hero card', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
+  const headerHtml = workerSrc.match(/<div class="utility">[\s\S]*?<\/header>/)?.[0] || '';
+  assert.doesNotMatch(headerHtml, /<hr class=/);
+  assert.doesNotMatch(headerHtml, /site-utility-rule/);
+  assert.ok(headerHtml.indexOf('class="utility"') < headerHtml.indexOf('class="header-inner"'));
+  assert.ok(headerHtml.indexOf('class="header-inner"') < headerHtml.indexOf('id="site-nav"'));
+  assert.match(headerHtml, /class="brand-logo"/);
+  assert.match(headerHtml, /class="brand-mark"/);
+  assert.match(themeCss, /border-top:1px solid #fff/);
+  assert.match(themeCss, /grid-template-areas:"brand" "nav"/);
+  assert.match(themeCss, /body\.efhs-theme \.header-inner\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme \.brand\{[\s\S]*?gap:4px/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:center/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
+  assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
+  assert.match(themeCss, /body\.efhs-theme \.hero-card\{[\s\S]*?display:none!important/);
+  assert.doesNotMatch(themeCss, /#page-preview \.hero-card\{[\s\S]*?display:none/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:center/);
+  assert.match(themeCss, /body\.efhs-theme \.hero \.button-row\{[\s\S]*?justify-content:center/);
+  assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
+  assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
+});
+
 test('admin sessions stay fresh for 24 hours and public nav reflects login state', () => {
   assert.equal(SESSION_TTL_SECONDS, 24 * 60 * 60);
   const now = 1_700_000_000;
