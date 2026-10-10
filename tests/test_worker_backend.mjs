@@ -14,8 +14,11 @@ import {
   resetCaldevSchemaCache,
 } from '../worker/src/caldev.mjs';
 import {
+  APPROVED_FUNDRAISING_INTRO,
   APPROVED_HERO_SUBTITLE,
+  DEFAULT_FUNDRAISING_INTRO,
   PREVIOUS_HERO_SUBTITLE,
+  applyFundraisingHeroIntro,
   buildHomeRedesignDocument,
   comingSoonPageHtml,
   decorateFundraisingPage,
@@ -2420,7 +2423,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005k'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005l'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2792,8 +2795,11 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(html, />Silent Auction</);
   assert.doesNotMatch(html, />Fundraiser\/Mattress Sale</);
   assert.match(html, /fundraising-card no-flyer/);
-  assert.match(html, /Sat, Oct 24, 2026/);
-  assert.match(html, /820 S Main St, Kernersville, NC 27284/);
+  assert.match(html, /class="ff-thumb"/);
+  assert.match(html, /class="ff-thumb ff-media"/);
+  assert.match(html, /<b>NOV 7<\/b><span>Silent Auction<\/span>/);
+  assert.match(html, /<strong>When<\/strong><span>Sat, Oct 24, 2026<\/span>/);
+  assert.match(html, /<strong>Where<\/strong><span>820 S Main St, Kernersville, NC 27284<\/span>/);
   assert.match(html, /Fundraiser at Mattress Warehouse/);
   assert.match(html, /data-photo-open/);
   assert.match(html, /data-photo-caption="Mattress Sale"/);
@@ -2808,11 +2814,38 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.doesNotMatch(html, /<img(?![^>]*\bhidden\b)[^>]*cms-body-photo-left/);
   assert.doesNotMatch(html, /<img(?![^>]*\bhidden\b)[^>]*width: 280px/);
   assert.doesNotMatch(html, /<p><br><\/p>/);
+  assert.match(html, /fundraising-list-title/);
+  assert.match(html, /Upcoming fundraisers/);
+  assert.match(html, /Our fundraising efforts help provide students/);
+  assert.doesNotMatch(html, /Centralize active campaigns/);
   assert.match(html, /data-fundraising-help/);
+  assert.match(html, /fundraising-help-card is-donate/);
+  assert.match(html, /data-square-donate/);
   assert.match(html, /data-donate-open/);
   assert.match(html, /data-sponsor-choice-open/);
   assert.match(html, /data-email-list-open/);
   assert.doesNotMatch(html, /class="content email-list-signup"/);
+  const timed = decorateFundraisingPage(liveStyle, {
+    events: [{
+      title: 'Fundraiser/Mattress Sale',
+      description: 'Fundraiser at Mattress Warehouse',
+      location: '820 S Main St, Kernersville, NC 27284',
+      start_date: '2026-10-24',
+      track: 'deadline',
+      all_day: 0,
+      start_time: '10:00',
+      end_time: '17:00',
+    }],
+  });
+  assert.match(timed, /<strong>When<\/strong><span>Sat, Oct 24, 2026 · 10 AM–5 PM<\/span>/);
+  assert.equal(
+    applyFundraisingHeroIntro(`<h1>Fundraising</h1><p>${DEFAULT_FUNDRAISING_INTRO}</p>`),
+    `<h1>Fundraising</h1><p>${APPROVED_FUNDRAISING_INTRO}</p>`,
+  );
+  assert.match(
+    applyFundraisingHeroIntro('<p data-cms-field="intro">Our fundraising efforts help provide students with the equipment.</p>'),
+    /Our fundraising efforts help provide students/,
+  );
   const rebuilt = decorateFundraisingPage(html, { events: [] });
   assert.match(rebuilt, /data-fundraising-help/);
   assert.match(rebuilt, /data-fundraising-cards/);
@@ -2836,21 +2869,21 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(siteContent, /openPhotoLightbox/);
   assert.match(siteContent, /data-photo-caption/);
   assert.match(styles, /\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /grid-template-columns:200px minmax\(0,1fr\)/);
+  assert.match(styles, /aspect-ratio:3\/4/);
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
-  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?max-height:calc\(100dvh - var\(--efhs-sticky-header-height, 52px\)\) !important/);
-  assert.match(styles, /max-height:calc\(100dvh - var\(--efhs-sticky-header-height, 84px\)\)/);
-  assert.match(styles, /@media \(orientation:landscape\) and \(max-height:500px\)\{[\s\S]*?overflow:visible/);
-  assert.match(styles, /\.fundraising-card:not\(:has\(\.ff-media\)\)/);
   assert.match(styles, /object-fit:cover/);
   assert.match(styles, /object-position:top/);
+  assert.match(styles, /padding:11px 18px/);
+  assert.match(styles, /\.fundraising-help-card\.is-donate/);
   assert.match(styles, /\.fundraising-help-grid/);
   assert.match(styles, /\.btn-navy/);
+  assert.match(styles, /max-width:1120px/);
   assert.doesNotMatch(styles, /@media \(max-width:980px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card[\s\S]*?grid-template-columns:1fr/);
   assert.match(styles, /overflow-x:clip/);
   assert.match(styles, /html:has\(body\.fundraising-page\)/);
   assert.match(styles, /@media \(max-width:420px\)/);
-  assert.match(styles, /width:100% !important/);
   assert.match(styles, /p:has\(> br:only-child\)/);
   assert.doesNotMatch(workerSrc, /DEV_UPLOAD_ORIGIN/);
   assert.match(workerSrc, /VISUAL_EDITOR_PATH_PREFIX/);

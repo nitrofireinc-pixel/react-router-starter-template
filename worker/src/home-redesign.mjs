@@ -8,6 +8,10 @@ export const HOME_REDESIGN_MARKER = 'data-home-redesign';
 
 export const APPROVED_HERO_SUBTITLE = 'The East Forsyth Blue Regiment — marching band, concert bands, color guard and percussion — powered by students, families, alumni, sponsors, and the Kernersville community.';
 
+export const DEFAULT_FUNDRAISING_INTRO = 'Centralize active campaigns, passive giving links, payment information, and fundraiser deadlines.';
+
+export const APPROVED_FUNDRAISING_INTRO = 'Every fundraiser helps pay for instruments, travel, meals and uniforms for our students. Here\'s what\'s coming up and how you can help.';
+
 export const PREVIOUS_HERO_SUBTITLE = 'A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.';
 
 const DEFAULT_HERO_CARD = '<aside class="hero-card"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"><h2>Band information in one place</h2><ul><li>Ensembles and program overview</li><li>Upcoming events and rehearsal notes</li><li>Booster, fundraising, and sponsor information</li></ul></aside>';
@@ -106,11 +110,23 @@ export function formatHomeEventWhen(event = {}) {
 }
 
 function formatTimeRange(event = {}) {
-  if (Number(event.all_day)) return '';
-  const start = formatClock(event.start_time);
-  const end = formatClock(event.end_time);
-  if (start && end) return `${start} – ${end}`;
+  const source = event || {};
+  if (Number(source.all_day) && !source.start_time && !source.end_time) return '';
+  const start = formatClock(source.start_time);
+  const end = formatClock(source.end_time);
+  if (start && end) return `${start}–${end}`;
   return start || end || '';
+}
+
+function fundraiserWhenTime(event = {}) {
+  const source = event || {};
+  const ranged = formatTimeRange(source);
+  if (ranged) return ranged;
+  const blob = `${source.description || ''} ${source.location || ''}`;
+  const match = blob.match(/(\d{1,2}(?::\d{2})?\s*[ap]m)\s*[–\-to]+\s*(\d{1,2}(?::\d{2})?\s*[ap]m)/i);
+  if (!match) return '';
+  const clean = (value) => String(value || '').replace(/\s+/g, ' ').toUpperCase();
+  return `${clean(match[1])}–${clean(match[2])}`;
 }
 
 function formatClock(value) {
@@ -412,11 +428,22 @@ function fundraiserCalendarHref(event = {}) {
   return date ? `/calendar.html?date=${encodeURIComponent(date)}` : '/calendar.html';
 }
 
+export function applyFundraisingHeroIntro(html = '') {
+  const replaceIfDefault = (full, open, inner, close) => (
+    plainText(inner) === DEFAULT_FUNDRAISING_INTRO
+      ? `${open}${escapeHtml(APPROVED_FUNDRAISING_INTRO)}${close}`
+      : full
+  );
+  return String(html || '')
+    .replace(/(<p\b[^>]*data-cms-field=["']intro["'][^>]*>)([\s\S]*?)(<\/p>)/i, replaceIfDefault)
+    .replace(/(<h1\b[^>]*>\s*Fundraising\s*<\/h1>\s*<p\b(?![^>]*data-cms-field)[^>]*>)([\s\S]*?)(<\/p>)/i, replaceIfDefault);
+}
+
 function renderFundraiserPlaceholder(title, when = {}) {
   const month = String(when.month || '').slice(0, 3).toUpperCase();
   const day = String(when.day || '').replace(/^0/, '');
   const dateLabel = month && day ? `${month} ${day}` : 'SOON';
-  return `<div class="fx-ph" aria-hidden="true"><b>${escapeHtml(dateLabel)}</b><span>${escapeHtml(title)}</span></div>`;
+  return `<div class="ff-thumb" aria-hidden="true"><div class="fx-ph"><b>${escapeHtml(dateLabel)}</b><span>${escapeHtml(title)}</span></div></div>`;
 }
 
 export function renderFundraisingHelpRow() {
@@ -458,12 +485,13 @@ export function renderFundraisingCard(event, {
   const attend = mustAttend || /must\s+attend/i.test(`${event?.description || ''} ${description}`);
   const volunteers = !attend && fundraiserNeedsVolunteers(event, description);
   const whenLabel = when.long || when.short;
-  const timeBit = when.time ? ` · ${escapeHtml(when.time)}` : '';
-  const factsHtml = (whenLabel || facts.where)
-    ? `<div class="ff-facts">${whenLabel ? `<div><strong>When</strong>${escapeHtml(whenLabel)}${timeBit}</div>` : ''}${facts.where ? `<div><strong>Where</strong>${escapeHtml(facts.where)}</div>` : ''}</div>`
+  const timeBit = fundraiserWhenTime(event);
+  const whenValue = [whenLabel, timeBit].filter(Boolean).join(' · ');
+  const factsHtml = (whenValue || facts.where)
+    ? `<div class="ff-facts">${whenValue ? `<div><strong>When</strong><span>${escapeHtml(whenValue)}</span></div>` : ''}${facts.where ? `<div><strong>Where</strong><span>${escapeHtml(facts.where)}</span></div>` : ''}</div>`
     : '';
   const media = flyer
-    ? `<button type="button" class="ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
+    ? `<button type="button" class="ff-thumb ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
     : renderFundraiserPlaceholder(title, when);
   const calendarHref = fundraiserCalendarHref(event);
   const primary = flyer
@@ -486,7 +514,7 @@ export function renderFundraisingCard(event, {
 }
 
 export function decorateFundraisingPage(html, data = {}) {
-  const source = collapseEmptyFundraisingParagraphs(String(html || ''));
+  const source = applyFundraisingHeroIntro(collapseEmptyFundraisingParagraphs(String(html || '')));
   if (!source.trim()) return source;
   const media = extractFundraisingMedia(source);
   const events = selectHomeSchedule(data.events || []).fundraisers;
