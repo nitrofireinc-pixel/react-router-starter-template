@@ -7773,15 +7773,6 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
       statement: () => publicFundraiserCardsStatement(env),
       parse: (result) => (rowsOf(result) || []).map(mapFundraiserCardRow).filter((card) => isPublicFundraiserCard(card, today)),
     });
-    if (pageBlocksEnabled('fundraising')) {
-      jobs.push({
-        key: 'page-blocks:fundraising:v2',
-        optional: true,
-        fallback: [],
-        statement: () => publicPageBlocksStatement(env, 'fundraising'),
-        parse: (result) => (rowsOf(result) || []).map((row) => row),
-      });
-    }
   }
   if (isHome) {
     jobs.push({
@@ -7817,7 +7808,6 @@ async function loadPublicCmsReads(env, options = {}) {
     homeEvents: read(`home-events:${options.today}`, []),
     homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
     fundraiserCards: read('fundraiser-cards', []),
-    pageBlocks: read('page-blocks:fundraising:v2', []),
   };
 }
 
@@ -14273,8 +14263,16 @@ async function serveStaticOrCms(request, env, url, ctx) {
         instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
       } : null;
       const fundraiserCards = isFundraising ? (reads.fundraiserCards || []) : [];
+      let pageBlockRows = [];
+      if (isFundraising && pageBlocksEnabled('fundraising')) {
+        try {
+          pageBlockRows = rowsOf(await publicPageBlocksStatement(env, 'fundraising').all());
+        } catch {
+          pageBlockRows = [];
+        }
+      }
       const fundraiserBlocks = isFundraising
-        ? mergePublicPageBlocks(reads.pageBlocks || [], fundraiserCards)
+        ? mergePublicPageBlocks(pageBlockRows, fundraiserCards)
         : [];
       if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
         livePage.letterman_copy = await getLettermanFormCopy(env);

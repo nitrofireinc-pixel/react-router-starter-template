@@ -247,7 +247,7 @@ test('worker source follows the public D1 read policy', () => {
   assert.match(workerSrc, /id="efhs-public-read"|renderPublicReadBootstrap/);
   assert.match(workerSrc, /openD1Session\(request, env\)/);
   assert.match(workerSrc, /invalidatePublicReadCache\(\)/);
-  assert.match(workerSrc, /page-blocks:fundraising:v2/);
+  assert.match(workerSrc, /publicPageBlocksStatement\(env, 'fundraising'\)/);
   assert.doesNotMatch(workerSrc, /SELECT \* FROM cms_pages/);
   assert.match(workerSrc, /ORDER BY sort_order ASC, created_at DESC, id DESC/);
   assert.doesNotMatch(workerSrc, /datetime\(created_at\)/);
