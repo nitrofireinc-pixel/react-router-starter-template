@@ -8,6 +8,10 @@ export const HOME_REDESIGN_MARKER = 'data-home-redesign';
 
 export const APPROVED_HERO_SUBTITLE = 'The East Forsyth Blue Regiment — marching band, concert bands, color guard and percussion — powered by students, families, alumni, sponsors, and the Kernersville community.';
 
+export const DEFAULT_FUNDRAISING_INTRO = 'Centralize active campaigns, passive giving links, payment information, and fundraiser deadlines.';
+
+export const APPROVED_FUNDRAISING_INTRO = 'Every fundraiser helps pay for instruments, travel, meals and uniforms for our students. Here\'s what\'s coming up and how you can help.';
+
 export const PREVIOUS_HERO_SUBTITLE = 'A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.';
 
 const DEFAULT_HERO_CARD = '<aside class="hero-card"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment"><h2>Band information in one place</h2><ul><li>Ensembles and program overview</li><li>Upcoming events and rehearsal notes</li><li>Booster, fundraising, and sponsor information</li></ul></aside>';
@@ -24,8 +28,24 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/'/g, '&#39;');
 }
 
-function plainText(value) {
+function stripStyleAndEditorChrome(value) {
   return String(value || '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<link\b[^>]*>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
+}
+
+function looksLikeCssOrStyleDump(value) {
+  const text = String(value || '').trim();
+  if (!text) return true;
+  if (/[{};]|body\s*\{|html\s*\{|margin\s*:|padding\s*:|@media\b|@font-face\b/i.test(text) && !/\s/.test(text.replace(/[{}:;]/g, ''))) return true;
+  if (/^(?:body|html|html\s*,\s*body)\s*\{/i.test(text)) return true;
+  if (/^[a-z.#\[][\w\s,.#:[\]=()>"'-]*\{[^}]{0,200}\}$/i.test(text)) return true;
+  return /\{[^}]*margin\s*:[^}]*\}/i.test(text) && text.length < 80;
+}
+
+function plainText(value) {
+  return stripStyleAndEditorChrome(value)
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
@@ -34,6 +54,12 @@ function plainText(value) {
     .replace(/&quot;/g, '"')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function fundraiserDisplayTitle(title = '') {
+  const raw = plainText(title);
+  const stripped = raw.replace(/^fundraiser\s*[/:|–-]\s*/i, '').trim();
+  return stripped || raw;
 }
 
 export function isHomeFundraiserEvent(event = {}) {
@@ -84,11 +110,23 @@ export function formatHomeEventWhen(event = {}) {
 }
 
 function formatTimeRange(event = {}) {
-  if (Number(event.all_day)) return '';
-  const start = formatClock(event.start_time);
-  const end = formatClock(event.end_time);
-  if (start && end) return `${start} – ${end}`;
+  const source = event || {};
+  if (Number(source.all_day) && !source.start_time && !source.end_time) return '';
+  const start = formatClock(source.start_time);
+  const end = formatClock(source.end_time);
+  if (start && end) return `${start}–${end}`;
   return start || end || '';
+}
+
+function fundraiserWhenTime(event = {}) {
+  const source = event || {};
+  const ranged = formatTimeRange(source);
+  if (ranged) return ranged;
+  const blob = `${source.description || ''} ${source.location || ''}`;
+  const match = blob.match(/(\d{1,2}(?::\d{2})?\s*[ap]m)\s*[–\-to]+\s*(\d{1,2}(?::\d{2})?\s*[ap]m)/i);
+  if (!match) return '';
+  const clean = (value) => String(value || '').replace(/\s+/g, ' ').toUpperCase();
+  return `${clean(match[1])}–${clean(match[2])}`;
 }
 
 function formatClock(value) {
@@ -253,13 +291,27 @@ const SKIP_FUNDRAISING_IMAGE = /efhs-logo|blue-regiment-mark|sponsor-qr|donate-q
 const ADDRESS_IN_TEXT = /\b\d{2,6}\s+[A-Za-z0-9.#\s-]+?(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln)\.?(?:,\s*[A-Za-z .]+)?(?:,\s*[A-Z]{2}\s*\d{5})?/i;
 
 function fundraisingCopySource(html = '') {
-  const source = String(html || '');
+  const source = stripStyleAndEditorChrome(html);
   const field = source.match(/<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>([\s\S]*?)<\/\1>/i);
-  if (field?.[2]) return field[2];
+  if (field?.[2]) return stripStyleAndEditorChrome(field[2]);
   return source
     .replace(/<section\b[^>]*page-hero[^>]*>[\s\S]*?<\/section>/i, ' ')
     .replace(/<article\b[^>]*(?:data-square-donate|square-donate-card)[^>]*>[\s\S]*?<\/article>/gi, ' ')
-    .replace(/<(?:section|form|div)\b[^>]*(?:data-email-list-signup|email-list-signup)[^>]*>[\s\S]*?<\/(?:section|form|div)>/gi, ' ');
+    .replace(/<(?:section|form|div)\b[^>]*(?:data-email-list-signup|email-list-signup|data-fundraising-help)[^>]*>[\s\S]*?<\/(?:section|form|div)>/gi, ' ');
+}
+
+function collapseEmptyFundraisingParagraphs(html = '') {
+  return String(html || '')
+    .replace(/(?:<p>\s*(?:<br\s*\/?>)?\s*<\/p>\s*){2,}/gi, '')
+    .replace(/<p>\s*(?:<br\s*\/?>)?\s*<\/p>/gi, '');
+}
+
+function fundraisingInnerIsBlank(html = '') {
+  const text = plainText(String(html || '').replace(/<img\b[^>]*>/gi, ' '))
+    .replace(/\b(?:band\s+members|students)\s+must\s+attend!?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return !text || looksLikeCssOrStyleDump(text);
 }
 
 export function extractFundraisingMedia(html = '') {
@@ -278,11 +330,13 @@ export function extractFundraisingMedia(html = '') {
   }
   const text = plainText(source.replace(/<img\b[^>]*>/gi, ' '));
   const mustAttend = /must\s+attend/i.test(text);
-  const description = text
-    .replace(/\b(?:band\s+members|students)\s+must\s+attend!?/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return { images, description, mustAttend, text };
+  const description = looksLikeCssOrStyleDump(text)
+    ? ''
+    : text
+      .replace(/\b(?:band\s+members|students)\s+must\s+attend!?/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  return { images, description, mustAttend, text: description || '' };
 }
 
 function fundraiserPlace(event, leftoverDescription = '') {
@@ -314,22 +368,107 @@ function addHtmlClass(openTag, className) {
   return source.replace(/>$/, ` class="${className}">`);
 }
 
+function stripLegacyFundraisingExtras(html = '') {
+  return String(html || '')
+    .replace(/<div\b[^>]*data-fundraising-cards[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<article\b[^>]*(?:data-square-donate|square-donate-card)[^>]*>[\s\S]*?<\/article>/gi, '')
+    .replace(/<(section|div)\b[^>]*(?:data-fundraising-help)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(section|div|form)\b[^>]*(?:data-email-list-signup|email-list-signup)[^>]*>[\s\S]*?<\/\1>/gi, '');
+}
+
+function hideEmptyFundraisingBodyField(html = '') {
+  return String(html || '').replace(
+    /<([a-z0-9]+)\b([^>]*data-cms-field=["']body_text["'][^>]*)>([\s\S]*?)<\/\1>/i,
+    (full, tag, attrs, inner) => {
+      if (!fundraisingInnerIsBlank(inner)) {
+        return `<${tag}${attrs}>${collapseEmptyFundraisingParagraphs(inner)}</${tag}>`;
+      }
+      const images = [];
+      const imgRe = /<img\b[^>]*>/gi;
+      let match;
+      while ((match = imgRe.exec(inner))) images.push(match[0]);
+      const kept = images.length
+        ? images.map((img) => img.replace(/<img\b/i, '<img hidden')).join('')
+        : '';
+      const nextAttrs = /\bhidden\b/i.test(attrs) ? attrs : `${attrs} hidden`;
+      return `<${tag}${nextAttrs}>${kept}</${tag}>`;
+    },
+  );
+}
+
 function replaceFundraisingBody(html, cardsHtml) {
-  let next = String(html || '');
+  let next = stripLegacyFundraisingExtras(html);
+  next = hideEmptyFundraisingBodyField(next);
+  const list = `<h2 class="fundraising-list-title">Upcoming fundraisers</h2><div class="fundraising-card-list" data-fundraising-cards>${cardsHtml}</div>`;
   if (/data-cms-field=["']body_text["']/i.test(next)) {
-    next = next.replace(
-      /<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\1>/i,
-      `<div class="fundraising-card-list" data-fundraising-cards data-cms-field="body_text">${cardsHtml}</div>`,
-    );
+    if (!/data-fundraising-cards/i.test(next)) {
+      next = next.replace(
+        /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
+        `$1${list}`,
+      );
+    }
     next = next.replace(
       /<section\b[^>]*\bcontent\b[^>]*>/i,
       (open) => addHtmlClass(open, 'fundraising-cards'),
     );
     return next;
   }
-  const block = `<section class="content fundraising-cards"><div class="wrap"><div class="fundraising-card-list" data-fundraising-cards>${cardsHtml}</div></div></section>`;
+  const block = `<section class="content fundraising-cards"><div class="wrap">${list}</div></section>`;
   if (/<\/section>/i.test(next)) return next.replace(/<\/section>/i, `</section>${block}`);
   return `${block}${next}`;
+}
+
+function fundraiserNeedsVolunteers(event, description = '') {
+  const blob = `${event?.title || ''} ${event?.description || ''} ${description}`;
+  return /volunteer|help needed|parents help|we need your help/i.test(blob);
+}
+
+function fundraiserCalendarHref(event = {}) {
+  const date = String(event?.start_date || '').trim();
+  return date ? `/calendar.html?date=${encodeURIComponent(date)}` : '/calendar.html';
+}
+
+export function applyFundraisingHeroIntro(html = '') {
+  const replaceIfDefault = (full, open, inner, close) => (
+    plainText(inner) === DEFAULT_FUNDRAISING_INTRO
+      ? `${open}${escapeHtml(APPROVED_FUNDRAISING_INTRO)}${close}`
+      : full
+  );
+  return String(html || '')
+    .replace(/(<p\b[^>]*data-cms-field=["']intro["'][^>]*>)([\s\S]*?)(<\/p>)/i, replaceIfDefault)
+    .replace(/(<h1\b[^>]*>\s*Fundraising\s*<\/h1>\s*<p\b(?![^>]*data-cms-field)[^>]*>)([\s\S]*?)(<\/p>)/i, replaceIfDefault);
+}
+
+function renderFundraiserPlaceholder(title, when = {}) {
+  const month = String(when.month || '').slice(0, 3).toUpperCase();
+  const day = String(when.day || '').replace(/^0/, '');
+  const dateLabel = month && day ? `${month} ${day}` : 'SOON';
+  return `<div class="ff-thumb" aria-hidden="true"><div class="fx-ph"><b>${escapeHtml(dateLabel)}</b><span>${escapeHtml(title)}</span></div></div>`;
+}
+
+export function renderFundraisingHelpRow() {
+  return `<section class="content fundraising-help" data-fundraising-help>
+  <div class="wrap">
+    <h2 class="fundraising-help-title">Other ways to help</h2>
+    <div class="fundraising-help-grid">
+      <article class="fundraising-help-card is-donate" data-square-donate>
+        <h3>Donate online</h3>
+        <p>Give securely to support instruments, travel, meals, uniforms and student opportunities.</p>
+        <button type="button" class="btn btn-gold" data-donate-open>Donate</button>
+      </article>
+      <article class="fundraising-help-card">
+        <h3>Become a sponsor</h3>
+        <p>Businesses can sponsor the band or donate goods and services, with a spot in our sponsor list.</p>
+        <a class="btn btn-outline" href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor the band</a>
+      </article>
+      <article class="fundraising-help-card" data-email-list-signup data-email-list-topics="fundraising,calendar">
+        <h3>Get fundraising emails</h3>
+        <p>Hear about new fundraisers first. Reply STOP to any email to unsubscribe.</p>
+        <button type="button" class="btn btn-outline" data-email-list-open>Subscribe</button>
+      </article>
+    </div>
+  </div>
+</section>`;
 }
 
 export function renderFundraisingCard(event, {
@@ -338,41 +477,48 @@ export function renderFundraisingCard(event, {
   description = '',
   mustAttend = false,
 } = {}) {
-  const title = plainText(event?.title) || plainText(flyerAlt) || 'Current Fundraiser';
-  const when = event ? formatHomeEventWhen(event) : { long: '', short: '', time: '' };
+  const rawTitle = plainText(event?.title) || plainText(flyerAlt) || 'Current Fundraiser';
+  const title = fundraiserDisplayTitle(rawTitle) || rawTitle;
+  const when = event ? formatHomeEventWhen(event) : { long: '', short: '', time: '', month: '', day: '' };
   const facts = fundraiserPlace(event, description);
+  const sub = facts.description && !looksLikeCssOrStyleDump(facts.description) ? facts.description : '';
   const attend = mustAttend || /must\s+attend/i.test(`${event?.description || ''} ${description}`);
-  const sub = facts.description;
+  const volunteers = !attend && fundraiserNeedsVolunteers(event, description);
   const whenLabel = when.long || when.short;
-  const timeLine = when.time ? `<br>${escapeHtml(when.time)}` : '';
-  const factsHtml = (whenLabel || facts.where)
-    ? `<dl class="ff-facts">${whenLabel ? `<div><dt>When</dt><dd>${escapeHtml(whenLabel)}${timeLine}</dd></div>` : ''}${facts.where ? `<div><dt>Where</dt><dd>${escapeHtml(facts.where)}</dd></div>` : ''}</dl>`
+  const timeBit = fundraiserWhenTime(event);
+  const whenValue = [whenLabel, timeBit].filter(Boolean).join(' · ');
+  const factsHtml = (whenValue || facts.where)
+    ? `<div class="ff-facts">${whenValue ? `<div><strong>When</strong><span>${escapeHtml(whenValue)}</span></div>` : ''}${facts.where ? `<div><strong>Where</strong><span>${escapeHtml(facts.where)}</span></div>` : ''}</div>`
     : '';
   const media = flyer
-    ? `<button type="button" class="ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
-    : '';
+    ? `<button type="button" class="ff-thumb ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
+    : renderFundraiserPlaceholder(title, when);
+  const calendarHref = fundraiserCalendarHref(event);
+  const primary = flyer
+    ? `<button type="button" class="btn btn-navy" data-photo-open data-photo-caption="${escapeAttr(title)}">View flyer</button>`
+    : `<a class="btn btn-navy" href="${volunteers ? '/boosters.html' : calendarHref}">${volunteers ? 'Volunteer' : 'View details'}</a>`;
+  const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}</div>`;
   return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
     ${media}
     <div class="ff-body">
-      <div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}</div>
+      ${pills}
       <h3>${escapeHtml(title)}</h3>
       ${sub ? `<p class="ff-sub">${escapeHtml(sub)}</p>` : ''}
       ${factsHtml}
       <div class="btn-row">
-        <a class="btn btn-gold" href="/fundraising.html" data-donate-open>Support</a>
-        <a class="btn btn-blue" href="/calendar.html">Details</a>
+        ${primary}
+        <a class="btn btn-outline" href="${calendarHref}">Add to calendar</a>
       </div>
     </div>
   </article>`;
 }
 
 export function decorateFundraisingPage(html, data = {}) {
-  const source = String(html || '');
-  if (!source.trim() || /\bdata-fundraising-cards\b/.test(source)) return source;
+  const source = applyFundraisingHeroIntro(collapseEmptyFundraisingParagraphs(String(html || '')));
+  if (!source.trim()) return source;
   const media = extractFundraisingMedia(source);
   const events = selectHomeSchedule(data.events || []).fundraisers;
   const count = Math.max(events.length, media.images.length, (events.length || media.images.length || media.description) ? 1 : 0);
-  if (!count) return source;
   const cards = [];
   for (let index = 0; index < count; index += 1) {
     const event = events[index] || null;
@@ -387,8 +533,15 @@ export function decorateFundraisingPage(html, data = {}) {
       mustAttend: index === 0 && media.mustAttend,
     }));
   }
-  if (!cards.length) return source;
-  return replaceFundraisingBody(source, cards.join(''));
+  let next = source;
+  if (cards.length) next = replaceFundraisingBody(next, cards.join(''));
+  else next = hideEmptyFundraisingBodyField(stripLegacyFundraisingExtras(next));
+  if (!/\bdata-fundraising-help\b/.test(next)) {
+    next = /<\/section>/i.test(next)
+      ? next.replace(/<\/section>(?![\s\S]*<\/section>)/i, `</section>${renderFundraisingHelpRow()}`)
+      : `${next}${renderFundraisingHelpRow()}`;
+  }
+  return next;
 }
 
 function replaceSlot(html, name, inner) {

@@ -721,7 +721,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005j'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005l'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.6'/);
   assert.doesNotMatch(workerSrc, /value="minutes:view"/);
 });

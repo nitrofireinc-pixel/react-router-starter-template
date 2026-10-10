@@ -737,6 +737,17 @@ function sponsorTierFromLevel(level = '') {
   return 'bronze';
 }
 
+function sponsorFormLevelValue(sponsor = {}) {
+  const tierHint = String(sponsor.tier || sponsor.tier_label || '').trim();
+  if (sponsorTierFromLevel(tierHint) === 'honorable') return 'Honorable Mention';
+  const requested = String(sponsor.level || tierHint || '').trim();
+  return requested || 'Bronze Sponsor';
+}
+
+function sponsorEditorActiveChecked(sponsor = {}) {
+  return !(sponsor.active === false || sponsor.active === 0 || sponsor.active === '0');
+}
+
 function sponsorTierBenefitsText(level = '') {
   const tier = sponsorTierFromLevel(level);
   if (tier === 'honorable') return 'Thank-you mention on the site-wide marquee (white chip). Not offered as a public package.';
@@ -4978,16 +4989,21 @@ function renderSponsors() {
   list.querySelectorAll('[data-edit-sponsor]').forEach(button => button.addEventListener('click', () => {
     const sponsor = state.sponsors.find(item => item.id === Number(button.dataset.editSponsor));
     const form = document.querySelector('#sponsor-form');
+    const level = sponsorFormLevelValue(sponsor);
+    resetSponsorForm(form);
     fillForm(form, {
-      ...sponsor,
+      id: sponsor.id,
+      name: sponsor.name,
+      address: sponsor.address || '',
       city: sponsor.city || 'Kernersville',
       state: sponsor.state || 'NC',
+      logo_url: sponsor.logo_url || '',
+      mark_text: sponsor.mark_text || '',
+      level,
     });
     setSelectValue(formControl(form, 'state'), sponsor.state || 'NC');
     const levelSelect = formControl(form, 'level');
     if (levelSelect) {
-      const isHonorable = (sponsor.tier || sponsorTierFromLevel(sponsor.level)) === 'honorable';
-      const level = isHonorable ? 'Honorable Mention' : (String(sponsor.level || 'Bronze Sponsor').trim() || 'Bronze Sponsor');
       if (![...levelSelect.options].some((option) => option.value === level)) {
         const option = document.createElement('option');
         option.value = level;
@@ -4996,7 +5012,7 @@ function renderSponsors() {
       }
       setSelectValue(levelSelect, level);
     }
-    form.elements.active.checked = Boolean(Number(sponsor.active));
+    if (form.elements.active) form.elements.active.checked = sponsorEditorActiveChecked(sponsor);
     const file = formControl(form, 'logo_file');
     if (file) file.value = '';
     syncSponsorLogoPreview(form, sponsor.logo_url || '');
