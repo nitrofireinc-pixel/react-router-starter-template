@@ -431,7 +431,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005j';
+export const ASSET_VERSION = 'cms-p1-20261005k';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -5135,6 +5135,9 @@ export function ensureGalleryPageSlot(html) {
 
 export function ensureFundraisingDonateSlot(html) {
   let source = rewriteFundraisingDonateToPopup(html);
+  if (/\bdata-fundraising-help\b/i.test(source) && /data-donate-open/i.test(source)) {
+    return source;
+  }
   if (/data-donate-open/i.test(source) && /data-square-donate|Direct Support/i.test(source)) {
     return source;
   }
@@ -5581,6 +5584,25 @@ export function normalizeSponsorLevel(level = '', { homepageAd } = {}) {
   if (!tier) tier = 'bronze';
   if (tier === 'honorable') return 'Honorable Mention';
   return `${sponsorTierLabel(tier)} Sponsor`;
+}
+
+export function sponsorFormLevelValue(sponsor = {}) {
+  const tierHint = String(sponsor.tier || sponsor.tier_label || '').trim();
+  if (normalizeSponsorTier(tierHint) === 'honorable') return 'Honorable Mention';
+  return normalizeSponsorLevel(sponsor.level || tierHint, { homepageAd: sponsor.homepage_ad });
+}
+
+export function sponsorEditorActiveChecked(sponsor = {}) {
+  return !(sponsor.active === false || sponsor.active === 0 || sponsor.active === '0');
+}
+
+export function normalizeSponsorActiveFlag(value, existing) {
+  if (value === false || value === 0 || value === '0') return 0;
+  if (value === true || value === 1 || value === '1' || value === 'on') return 1;
+  if (existing !== undefined && existing !== null && existing !== '') {
+    return Number(existing) === 0 ? 0 : 1;
+  }
+  return 1;
 }
 
 export function sponsorBenefitsFromLevel(level = '') {
@@ -6468,7 +6490,8 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
   const city = titleCaseAddressPart(String(payload.city ?? legacy?.city ?? existing?.city ?? 'Kernersville').trim()) || 'Kernersville';
   const state = normalizeStateCode(payload.state ?? legacy?.state ?? existing?.state ?? 'NC');
   const hasSortOrder = payload.sort_order !== undefined && payload.sort_order !== null && payload.sort_order !== '';
-  const level = normalizeSponsorLevel(payload.level ?? existing?.level, {
+  const requestedLevel = String(payload.level ?? '').trim();
+  const level = normalizeSponsorLevel(requestedLevel || existing?.level, {
     homepageAd: payload.homepage_ad !== undefined ? payload.homepage_ad : existing?.homepage_ad,
   });
   const benefits = sponsorBenefitsFromLevel(level);
@@ -6481,7 +6504,7 @@ export function normalizeSponsorPayload(payload = {}, existing = null) {
     level,
     mark_text: String(payload.mark_text ?? existing?.mark_text ?? initials).trim() || initials,
     sort_order: hasSortOrder ? Number(payload.sort_order) : Number(existing?.sort_order ?? 0),
-    active: payload.active === false || payload.active === 0 ? 0 : 1,
+    active: normalizeSponsorActiveFlag(payload.active, existing?.active),
     homepage_ad: benefits.show_flyin ? 1 : 0,
     _assign_sort_order: !hasSortOrder && !existing,
   };
