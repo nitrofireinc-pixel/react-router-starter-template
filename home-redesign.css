@@ -1232,7 +1232,12 @@ body.efhs-theme .fundraising-help-card.is-donate .btn-gold{
   .fundraising-cards .ff-thumb,
   .fundraising-cards .ff-media,
   .fundraising-cards .ff-media img,
-  .fundraising-cards .fx-ph{
+  .fundraising-cards .fx-ph,
+  body.efhs-theme .fundraising-cards .ff-thumb,
+  body.efhs-theme .fundraising-cards .ff-media,
+  body.efhs-theme .fundraising-cards .ff-media img,
+  body.efhs-theme .fundraising-cards .fx-ph,
+  #page-preview .fundraising-cards .ff-media img{
     width:100%;
     max-width:100%;
     min-width:0;

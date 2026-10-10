@@ -2872,6 +2872,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(styles, /grid-template-columns:200px minmax\(0,1fr\)/);
   assert.match(styles, /aspect-ratio:3\/4/);
   assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?\.fundraising-cards \.fundraising-card/);
+  assert.match(styles, /@media \(max-width:767px\)\{[\s\S]*?body\.efhs-theme \.fundraising-cards \.ff-media img/);
   assert.match(styles, /@media \(min-width:1280px\)\{[\s\S]*?justify-content:center/);
   assert.match(styles, /object-fit:cover/);
   assert.match(styles, /object-position:top/);
