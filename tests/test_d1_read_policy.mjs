@@ -247,11 +247,14 @@ test('worker source follows the public D1 read policy', () => {
   assert.match(workerSrc, /id="efhs-public-read"|renderPublicReadBootstrap/);
   assert.match(workerSrc, /openD1Session\(request, env\)/);
   assert.match(workerSrc, /invalidatePublicReadCache\(\)/);
+  assert.match(workerSrc, /page-blocks:fundraising:v2/);
   assert.doesNotMatch(workerSrc, /SELECT \* FROM cms_pages/);
   assert.match(workerSrc, /ORDER BY sort_order ASC, created_at DESC, id DESC/);
   assert.doesNotMatch(workerSrc, /datetime\(created_at\)/);
   assert.match(workerSrc, /PUBLIC_READ_INDEX_SQL\.map/);
   const policySrc = readFileSync(join(root, 'worker/src/d1-read-policy.mjs'), 'utf8');
+  assert.match(policySrc, /PUBLIC_READ_PURGE_KEYS/);
+  assert.match(policySrc, /page-blocks:fundraising:v2/);
   assert.match(policySrc, /PUBLIC_READ_PENDING_TIMEOUT_MS/);
   assert.equal(PUBLIC_READ_PENDING_TIMEOUT_MS >= 1000, true);
   assert.match(policySrc, /public-read-timeout/);

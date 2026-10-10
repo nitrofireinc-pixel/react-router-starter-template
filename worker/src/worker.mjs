@@ -464,7 +464,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261010a';
+export const ASSET_VERSION = 'cms-p1-20261010b';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7775,7 +7775,7 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
     });
     if (pageBlocksEnabled('fundraising')) {
       jobs.push({
-        key: 'page-blocks:fundraising',
+        key: 'page-blocks:fundraising:v2',
         optional: true,
         fallback: [],
         statement: () => publicPageBlocksStatement(env, 'fundraising'),
@@ -7817,7 +7817,7 @@ async function loadPublicCmsReads(env, options = {}) {
     homeEvents: read(`home-events:${options.today}`, []),
     homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
     fundraiserCards: read('fundraiser-cards', []),
-    pageBlocks: read('page-blocks:fundraising', []),
+    pageBlocks: read('page-blocks:fundraising:v2', []),
   };
 }
 

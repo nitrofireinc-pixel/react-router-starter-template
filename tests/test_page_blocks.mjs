@@ -17,7 +17,7 @@ import {
   sanitizePageBlock,
   sanitizePageBlockList,
 } from '../worker/src/page-blocks.mjs';
-import { renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
+import { ensureFundraisingVisualSlot, renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
 import { renderAdminSidebarHtml } from '../worker/src/admin-chrome.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -91,6 +91,15 @@ test('public fundraising keeps hero and fundraiser cards in one order', () => {
   assert.match(html, /fundraising-hero-card/);
   assert.match(html, /Students and parents help needed/);
   assert.match(html, /data-donate-open/);
+});
+
+test('fundraising visual drafts get a cards slot when missing', () => {
+  const html = ensureFundraisingVisualSlot('<section class="content"><div class="wrap"><div data-cms-field="body_text"></div></div></section>');
+  assert.match(html, /data-fundraising-cards/);
+  assert.match(html, /data-visual-locked="fundraiser"/);
+  assert.equal(ensureFundraisingVisualSlot(html), html);
+  const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
+  assert.match(visualJs, /function ensureFundraisingSlotHtml/);
 });
 
 test('fundraising visual editor has add hero card and sidebar page settings', () => {

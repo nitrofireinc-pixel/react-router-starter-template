@@ -715,10 +715,33 @@
       return collectHeroFields(shell, block);
     });
   }
+  function ensureFundraisingSlotHtml(html) {
+    if (!isFundraising) return html;
+    const source = String(html || '');
+    if (/\bdata-fundraising-cards\b/i.test(source)) return source;
+    const slot = '<div class="fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>';
+    if (/data-cms-field=["']body_text["']/i.test(source)) {
+      return source.replace(
+        /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
+        `$1${slot}`,
+      );
+    }
+    if (/<\/section>/i.test(source)) {
+      return source.replace(/<\/section>(?![\s\S]*<\/section>)/i, `${slot}</section>`);
+    }
+    return `${source}${slot}`;
+  }
   function paintFundraisingBlocks() {
     if (!isFundraising || paintingBlocks) return;
     const doc = editor.Canvas.getDocument();
-    const slot = doc?.querySelector('[data-fundraising-cards]');
+    let slot = doc?.querySelector('[data-fundraising-cards]');
+    if (!slot && doc) {
+      const host = doc.querySelector('.wrap') || doc.querySelector('section.content') || doc.body;
+      if (host) {
+        host.insertAdjacentHTML('beforeend', '<div class="fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>');
+        slot = doc.querySelector('[data-fundraising-cards]');
+      }
+    }
     if (!slot) return;
     paintingBlocks = true;
     const hint = '<p class="page-block-hint">Drag any card by its handle to move it above or below another.</p>';
@@ -874,7 +897,7 @@
 
   async function loadCanvas(draftHtml) {
     editor.UndoManager?.stop?.();
-    const split = splitVisualCss(draftHtml);
+    const split = splitVisualCss(ensureFundraisingSlotHtml(draftHtml));
     const frame = await loadLiveCanvasHtml(split.html);
     editor.setComponents(frame.html);
     if (split.css) editor.setStyle(split.css);

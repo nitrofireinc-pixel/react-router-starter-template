@@ -205,7 +205,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010a'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010b'/);
   assert.match(workerSrc, /async scheduled\(/);
   assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(adminJs, /\/admin\/fundraiser-cards/);

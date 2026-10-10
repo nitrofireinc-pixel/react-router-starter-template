@@ -15,6 +15,7 @@ import {
   visualStructureSignature,
   visualStyleSignature,
 } from './page-permissions.mjs';
+import { pageBlocksEnabled } from './page-blocks.mjs';
 
 export { visualStructureSignature, visualStyleSignature };
 
@@ -202,6 +203,28 @@ export function canonicalLockedPlaceholder(kind = '') {
     default:
       return `<div class="visual-locked-slot"${lock}><p class="visual-locked-label">Live section (locked)</p></div>`;
   }
+}
+
+export function ensureFundraisingVisualSlot(html = '') {
+  const source = String(html || '');
+  if (/\bdata-fundraising-cards\b/i.test(source)) return source;
+  const slot = canonicalLockedPlaceholder('fundraiser');
+  if (/data-cms-field=["']body_text["']/i.test(source)) {
+    return source.replace(
+      /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
+      `$1${slot}`,
+    );
+  }
+  if (/<div\b[^>]*\bclass=["'][^"']*\bwrap\b[^>]*>/i.test(source)) {
+    return source.replace(
+      /(<div\b[^>]*\bclass=["'][^"']*\bwrap\b[^>]*>)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${slot}$3`,
+    );
+  }
+  if (/<\/section>/i.test(source)) {
+    return source.replace(/<\/section>(?![\s\S]*<\/section>)/i, `${slot}</section>`);
+  }
+  return `${source}${slot}`;
 }
 
 export function replaceLockedVisualBlocks(html = '') {
@@ -748,7 +771,8 @@ export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
   const starter = defaultVisualHtml(key);
   const rawDraft = String(page?.draft_html || '').trim();
   const imported = rawDraft ? '' : importCmsBodyToVisual(cms.body_html || '', key);
-  const draft = sanitizeVisualPageHtml(rawDraft || imported || starter) || starter;
+  let draft = sanitizeVisualPageHtml(rawDraft || imported || starter) || starter;
+  if (pageBlocksEnabled(key)) draft = ensureFundraisingVisualSlot(draft);
   const published = sanitizeVisualPageHtml(page?.published_html || '') || '';
   return {
     slug: key,
@@ -798,12 +822,14 @@ export async function saveVisualPage(env, {
     baseline = sanitizeVisualPageHtml(
       stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
     );
+    if (pageBlocksEnabled(key)) baseline = ensureFundraisingVisualSlot(baseline);
     const forbidden = contentOnlyForbiddenHtmlViolation(baseline, incoming);
     if (forbidden) throw layoutRequiredError(key, forbidden);
     const incomingViolation = contentOnlyHtmlViolation(baseline, incoming);
     if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
   }
-  const clean = sanitizeVisualPageHtml(incoming);
+  let clean = sanitizeVisualPageHtml(incoming);
+  if (pageBlocksEnabled(key)) clean = ensureFundraisingVisualSlot(clean);
   if (!clean || isNearEmptyVisualHtml(clean)) {
     const error = new Error('Add some page content before saving.');
     error.status = 422;
