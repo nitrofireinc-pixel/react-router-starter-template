@@ -841,7 +841,9 @@ body.efhs-theme .home-redesign .nf-date span,
 #page-preview .home-redesign .next-fund p,
 #page-preview .home-redesign .nf-where,
 #page-preview .home-redesign .nf-date span{color:#3A4F66;max-width:none;font-size:.92rem;line-height:1.4}
+body.efhs-theme .home-redesign .next-fund p.nf-deal,
 body.efhs-theme .home-redesign .nf-deal,
+#page-preview .home-redesign .next-fund p.nf-deal,
 #page-preview .home-redesign .nf-deal{color:#10233C;font-size:.95rem}
 body.efhs-theme .home-redesign .nf-deal b,
 #page-preview .home-redesign .nf-deal b{color:#E71321}

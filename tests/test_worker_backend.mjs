@@ -2606,7 +2606,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund p,[\s\S]*?color:#3A4F66/);
   assert.match(homeCss, /body\.efhs-theme \.home-redesign \.nf-kicker,[\s\S]*?color:#0B4FBE/);
   assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund h2,[\s\S]*?color:#002142/);
-  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.nf-deal,[\s\S]*?color:#10233C/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund p\.nf-deal,[\s\S]*?color:#10233C/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
 });
