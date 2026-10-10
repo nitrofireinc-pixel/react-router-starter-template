@@ -2363,7 +2363,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005i'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005j'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2600,6 +2600,13 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(themeCss, /body\.efhs-theme \.hero \.wrap\{[\s\S]*?text-align:left/);
   assert.match(themeCss, /body\.efhs-theme \.hero \.button-row,[\s\S]*?#page-preview \.hero \.button-row\{[\s\S]*?justify-content:flex-start/);
   assert.match(themeCss, /body\.efhs-theme \.hero h1::first-line/);
+  assert.match(themeCss, /body\.efhs-theme \.hero p\.lead/);
+  assert.doesNotMatch(themeCss, /body\.efhs-theme \.hero p,\s*#page-preview \.hero p\{[\s\S]*?color:#d5e4f7/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund,[\s\S]*?color:#10233C/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund p,[\s\S]*?color:#3A4F66/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.nf-kicker,[\s\S]*?color:#0B4FBE/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund h2,[\s\S]*?color:#002142/);
+  assert.match(homeCss, /body\.efhs-theme \.home-redesign \.nf-deal,[\s\S]*?color:#10233C/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
 });

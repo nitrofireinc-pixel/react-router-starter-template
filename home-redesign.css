@@ -204,31 +204,31 @@ body.home-page main.home-redesign,
 .home-redesign .hero-ctas{display:flex;flex-wrap:wrap;gap:14px}
 
 
-.home-redesign .next-fund{position:relative;background:rgba(255,255,255,.97);color:var(--ink);border-radius:18px;padding:30px 28px 26px;box-shadow:0 30px 60px rgba(0,10,24,.45);border-top:6px solid var(--gold)}
+.home-redesign .next-fund{position:relative;background:#fff;color:#10233C;border-radius:18px;padding:30px 28px 26px;box-shadow:0 30px 60px rgba(0,10,24,.45);border-top:6px solid var(--gold)}
 
 
 .home-redesign .nf-flag{position:absolute;top:-16px;right:22px;background:var(--red);color:#fff;font-weight:900;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;padding:6px 12px;border-radius:999px}
 
 
-.home-redesign .nf-kicker{color:var(--blue);font-weight:900;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase}
+.home-redesign .nf-kicker{color:#0B4FBE;font-weight:900;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase}
 
 
-.home-redesign .next-fund h2{font-family:var(--display);text-transform:uppercase;font-size:1.9rem;color:var(--navy);line-height:1.05;margin:6px 0 14px}
+.home-redesign .next-fund h2{font-family:var(--display);text-transform:uppercase;font-size:1.9rem;color:#002142;line-height:1.05;margin:6px 0 14px}
 
 
 .home-redesign .nf-date{display:flex;align-items:baseline;gap:12px;padding:10px 14px;border-radius:10px;background:var(--soft);margin-bottom:12px}
 
 
-.home-redesign .nf-date b{font-family:var(--display);font-size:1.3rem;color:var(--navy);text-transform:uppercase}
+.home-redesign .nf-date b{font-family:var(--display);font-size:1.3rem;color:#002142;text-transform:uppercase}
 
 
-.home-redesign .nf-date span{color:var(--muted);font-weight:700}
+.home-redesign .nf-date span{color:#3A4F66;font-weight:700}
 
 
-.home-redesign .nf-where{margin:0 0 10px;color:var(--muted);font-size:.92rem}
+.home-redesign .nf-where{margin:0 0 10px;color:#3A4F66;font-size:.92rem}
 
 
-.home-redesign .nf-deal{margin:0 0 18px;font-weight:700;color:var(--ink)}
+.home-redesign .nf-deal{margin:0 0 18px;font-weight:700;color:#10233C}
 
 
 .home-redesign .nf-deal b{color:var(--red);font-size:1.1rem}
@@ -826,6 +826,25 @@ body.efhs-theme .home-redesign .hero h1::first-line,
 body.efhs-theme .home-redesign .lead,
 body.efhs-theme .home-redesign .hero p.lead,
 #page-preview .home-redesign .lead{max-width:34rem;margin:0 0 26px;color:#e2ecf8;font-size:1.12rem;line-height:1.5}
+/* White next-fundraiser card sits inside the dark hero; keep ink readable. */
+body.efhs-theme .home-redesign .next-fund,
+#page-preview .home-redesign .next-fund{color:#10233C}
+body.efhs-theme .home-redesign .nf-kicker,
+#page-preview .home-redesign .nf-kicker{color:#0B4FBE}
+body.efhs-theme .home-redesign .next-fund h2,
+body.efhs-theme .home-redesign .nf-date b,
+#page-preview .home-redesign .next-fund h2,
+#page-preview .home-redesign .nf-date b{color:#002142}
+body.efhs-theme .home-redesign .next-fund p,
+body.efhs-theme .home-redesign .nf-where,
+body.efhs-theme .home-redesign .nf-date span,
+#page-preview .home-redesign .next-fund p,
+#page-preview .home-redesign .nf-where,
+#page-preview .home-redesign .nf-date span{color:#3A4F66;max-width:none;font-size:.92rem;line-height:1.4}
+body.efhs-theme .home-redesign .nf-deal,
+#page-preview .home-redesign .nf-deal{color:#10233C;font-size:.95rem}
+body.efhs-theme .home-redesign .nf-deal b,
+#page-preview .home-redesign .nf-deal b{color:#E71321}
 body.efhs-theme .home-redesign .btn,
 #page-preview .home-redesign .btn{border-radius:6px;letter-spacing:.09em;text-transform:uppercase;font-size:.8rem;font-weight:800;min-height:46px;padding:12px 22px;gap:9px}
 body.efhs-theme .home-redesign .btn-lg,
