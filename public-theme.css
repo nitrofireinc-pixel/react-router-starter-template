@@ -363,8 +363,10 @@ body.efhs-theme .hero h1,
 #page-preview .hero h1{
   text-align:left;
 }
-body.efhs-theme .hero p,
-#page-preview .hero p{
+body.efhs-theme .hero > .wrap > div p,
+body.efhs-theme .hero p.lead,
+#page-preview .hero > .wrap > div p,
+#page-preview .hero p.lead{
   margin-left:0;
   margin-right:0;
 }
@@ -411,8 +413,10 @@ body.efhs-theme .hero h1::first-line,
 #page-preview .hero h1::first-line{
   color:#fff;
 }
-body.efhs-theme .hero p,
-#page-preview .hero p{
+body.efhs-theme .hero > .wrap > div p,
+body.efhs-theme .hero p.lead,
+#page-preview .hero > .wrap > div p,
+#page-preview .hero p.lead{
   max-width:28rem;
   margin-left:0;
   margin-right:0;
