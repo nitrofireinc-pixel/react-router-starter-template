@@ -8,6 +8,7 @@ import { ADMIN_AUDIT_KNOWN_ACTIONS } from '../worker/src/admin-audit-log.mjs';
 import {
   canEditFundraiserCards,
   canPublishFundraiserCards,
+  calendarEventChanged,
   createFundraiserCard,
   fundraiserCardFieldDiff,
   fundraiserCardSchemaStatements,
@@ -163,7 +164,7 @@ function createCardStore(seed = {}) {
             if (q.includes('UPDATE fundraiser_cards SET calendar_changed')) {
               const id = this.binds[1];
               const row = cards.find((card) => Number(card.id) === Number(id));
-              if (row) row.calendar_changed = 1;
+              if (row) row.calendar_changed = /calendar_changed = 0/.test(q) ? 0 : 1;
               return { success: true };
             }
             if (q.includes('UPDATE fundraiser_cards SET')) {
@@ -205,7 +206,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010b'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010c'/);
   assert.match(workerSrc, /async scheduled\(/);
   assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(adminJs, /\/admin\/fundraiser-cards/);
@@ -299,6 +300,21 @@ test('approved past cards hide unless auto_hide_after_date is off', () => {
   assert.equal(isPublicFundraiserCard({ status: 'approved', event_date: '2026-10-24', auto_hide_after_date: 1 }, '2026-10-10'), true);
 });
 
+test('calendar changed ignores imported address when the event has no location', () => {
+  assert.equal(calendarEventChanged(
+    { start_date: '2026-10-24', start_time: '', end_time: '', location: '' },
+    { event_date: '2026-10-24', start_time: '', end_time: '', location: '820 S Main St, Kernersville, NC 27284' },
+  ), false);
+  assert.equal(calendarEventChanged(
+    { start_date: '2026-10-25', start_time: '', end_time: '', location: '' },
+    { event_date: '2026-10-24', start_time: '', end_time: '', location: '820 S Main St, Kernersville, NC 27284' },
+  ), true);
+  assert.equal(calendarEventChanged(
+    { start_date: '2026-10-24', start_time: '10:00', end_time: '17:00', location: 'Gym' },
+    { event_date: '2026-10-24', start_time: '10:00', end_time: '17:00', location: 'Cafeteria' },
+  ), true);
+});
+
 test('public page uses CMS cards and does not guess leftover body flyers', () => {
   const html = decorateFundraisingPage(
     '<section class="page-hero"><h1>Fundraising</h1><p data-cms-field="intro">Our fundraising efforts help provide students.</p></section><section class="content"><div class="wrap"><div class="card" data-cms-field="body_text"><p><img src="/uploads/old.jpg" alt="x"></p></div><article class="card leftover-card"><p>Gap</p></article></div></section>',
@@ -321,6 +337,12 @@ test('public page uses CMS cards and does not guess leftover body flyers', () =>
   assert.match(html, /Band members must attend/);
   assert.doesNotMatch(html, /leftover-card/);
   assert.doesNotMatch(html, /<img(?![^>]*\bhidden\b)[^>]*\/uploads\/old\.jpg/);
+  const leftoverBody = decorateFundraisingPage(
+    '<section class="content fundraising-cards"><div class="wrap"><div data-fundraising-cards></div></div></section><section class="content"><div class="wrap"><div class="card"><p><img src="/uploads/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6.jpg" alt="14599"><br></p><p>Band members <u>MUST</u> attend!</p></div></div></section>',
+    { cards: [{ title: 'Mattress Sale', event_date: '2026-10-24', picture_mode: 'date_tile', status: 'approved' }] },
+  );
+  assert.doesNotMatch(leftoverBody, /Band members <u>MUST<\/u> attend/);
+  assert.doesNotMatch(leftoverBody, /alt="14599"/);
 });
 
 test('cron is idempotent: two runs create one draft and one email', async () => {

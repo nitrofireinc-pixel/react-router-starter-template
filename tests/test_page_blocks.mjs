@@ -104,6 +104,9 @@ test('fundraising visual drafts get a cards slot when missing', () => {
   assert.equal(ensureFundraisingVisualSlot(html), html);
   const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
   assert.match(visualJs, /function ensureFundraisingSlotHtml/);
+  assert.match(visualJs, /fundraising-cards fundraising-card-list/);
+  assert.match(visualJs, /ff-facts/);
+  assert.match(html, /fundraising-cards fundraising-card-list/);
 });
 
 test('fundraising visual editor has add hero card and sidebar page settings', () => {

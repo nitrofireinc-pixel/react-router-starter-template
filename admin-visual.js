@@ -647,6 +647,18 @@
   function cardById(id) {
     return fundraisingCards.find((card) => Number(card.id) === Number(id)) || null;
   }
+  function formatCardWhen(card) {
+    const match = String(card?.event_date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    const label = `${days[date.getUTCDay()] || ''}, ${months[Number(match[2]) - 1] || ''} ${Number(match[3])}, ${match[1]}`;
+    const start = String(card?.start_time || '').trim();
+    const end = String(card?.end_time || '').trim();
+    const time = start && end ? `${start}–${end}` : (start || end);
+    return time ? `${label} · ${time}` : label;
+  }
   function dateTile(value) {
     const match = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
     const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -661,12 +673,17 @@
     const attend = Number(card.must_attend);
     const volunteers = Number(card.volunteers_needed) && !attend;
     const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}</div>`;
+    const when = formatCardWhen(card);
+    const facts = (when || card.location)
+      ? `<div class="ff-facts">${when ? `<div><strong>When</strong><span>${escapeHtml(when)}</span></div>` : ''}${card.location ? `<div><strong>Where</strong><span>${escapeHtml(card.location)}</span></div>` : ''}</div>`
+      : '';
     return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
       ${media}
       <div class="ff-body">
         ${pills}
         <h3>${escapeHtml(card.title || 'Fundraiser')}</h3>
         ${card.description ? `<p class="ff-sub">${escapeHtml(card.description)}</p>` : ''}
+        ${facts}
         <div class="btn-row"><span class="btn btn-navy">View details</span><span class="btn btn-outline">Add to calendar</span></div>
       </div>
     </article>`;
@@ -719,7 +736,7 @@
     if (!isFundraising) return html;
     const source = String(html || '');
     if (/\bdata-fundraising-cards\b/i.test(source)) return source;
-    const slot = '<div class="fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>';
+    const slot = '<div class="fundraising-cards fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>';
     if (/data-cms-field=["']body_text["']/i.test(source)) {
       return source.replace(
         /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
@@ -738,11 +755,12 @@
     if (!slot && doc) {
       const host = doc.querySelector('.wrap') || doc.querySelector('section.content') || doc.body;
       if (host) {
-        host.insertAdjacentHTML('beforeend', '<div class="fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>');
+        host.insertAdjacentHTML('beforeend', '<div class="fundraising-cards fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>');
         slot = doc.querySelector('[data-fundraising-cards]');
       }
     }
     if (!slot) return;
+    slot.classList.add('fundraising-cards', 'fundraising-card-list');
     paintingBlocks = true;
     const hint = '<p class="page-block-hint">Drag any card by its handle to move it above or below another.</p>';
     slot.innerHTML = hint + fundraisingBlocks.map((block, index) => {

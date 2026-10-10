@@ -195,7 +195,7 @@ export function canonicalLockedPlaceholder(kind = '') {
     case 'sponsor-tiers':
       return `<section class="sponsor-tiers visual-locked-slot"${lock} data-sponsor-tiers><p class="visual-locked-label">Sponsor packages (locked)</p></section>`;
     case 'fundraiser':
-      return `<div class="visual-locked-slot"${lock} data-fundraising-cards><p class="visual-locked-label">Fundraiser cards (locked)</p></div>`;
+      return `<div class="fundraising-cards fundraising-card-list visual-locked-slot"${lock} data-fundraising-cards><p class="visual-locked-label">Fundraiser cards (locked)</p></div>`;
     case 'donate':
       return `<span class="btn outline visual-locked-slot"${lock} data-donate-open>Donate</span>`;
     case 'sponsor-form':
@@ -485,6 +485,7 @@ const VISUAL_DATA_ATTRS = Object.freeze([
   'data-email-list-signup',
   'data-sponsor-tiers',
   'data-fundraising-cards',
+  'data-cms-field',
   'data-donate-open',
   'data-dues-open',
   'data-sponsor-choice-open',
@@ -506,7 +507,7 @@ function appendVisualDataAttrs(open, rawAttrs) {
       next += ` ${name}`;
       continue;
     }
-    if (!/^[a-z0-9,-]{1,64}$/i.test(value)) continue;
+    if (!/^[a-z0-9,_-]{1,64}$/i.test(value)) continue;
     next += attr(name, value.toLowerCase() === value || name === 'data-visual-locked' || name === 'data-visual-block' || name === 'data-cms-form'
       ? value
       : value);

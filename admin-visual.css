@@ -505,6 +505,7 @@ body.visual-page-join main *{
   left:4px;
   top:50%;
   transform:translateY(-50%);
+  z-index:4;
   width:28px;
   min-height:64px;
   border:0;

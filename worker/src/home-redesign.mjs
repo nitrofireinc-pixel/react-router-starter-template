@@ -487,15 +487,27 @@ function sanitizePublicUrl(value) {
 }
 
 function stripLeftoverFundraisingBodyCards(html = '') {
-  return String(html || '').replace(
-    /<article\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/article>/gi,
-    (full) => {
-      if (/data-square-donate|square-donate-card|fundraising-card|fundraising-hero-card|feature-fund|fundraising-help/i.test(full)) {
-        return full;
-      }
-      return '';
-    },
-  );
+  const keepLive = /data-square-donate|square-donate-card|fundraising-card|fundraising-hero-card|feature-fund|fundraising-help/i;
+  return String(html || '')
+    .replace(
+      /<article\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/article>/gi,
+      (full) => (keepLive.test(full) ? full : ''),
+    )
+    .replace(
+      /<div\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+      (full) => {
+        if (keepLive.test(full)) return full;
+        if (/data-cms-field=["']body_text["']/i.test(full)) {
+          return fundraisingInnerIsBlank(full) ? '' : full;
+        }
+        if (/data-visual-block/i.test(full)) return full;
+        return fundraisingInnerIsBlank(full) ? '' : full;
+      },
+    )
+    .replace(
+      /<section\b[^>]*\bcontent\b(?![^>]*fundraising)[^>]*>\s*<div\b[^>]*\bwrap\b[^>]*>\s*<\/div>\s*<\/section>/gi,
+      '',
+    );
 }
 
 function renderFundraiserPrimaryButton({
@@ -652,7 +664,7 @@ export function decorateFundraisingPage(html, data = {}) {
   let next = source;
   if (cards.length) next = replaceFundraisingBody(next, cards.join(''));
   else next = hideEmptyFundraisingBodyField(stripLegacyFundraisingExtras(next));
-  if (Array.isArray(data.cards)) next = stripLeftoverFundraisingBodyCards(next);
+  if (Array.isArray(data.cards) || Array.isArray(data.blocks)) next = stripLeftoverFundraisingBodyCards(next);
   if (!/\bdata-fundraising-help\b/.test(next)) {
     next = /<\/section>/i.test(next)
       ? next.replace(/<\/section>(?![\s\S]*<\/section>)/i, `</section>${renderFundraisingHelpRow()}`)

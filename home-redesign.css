@@ -1334,8 +1334,8 @@ body.efhs-theme .fundraising-hero-card,
 .fundraising-hero-aside .btn-navy,
 .fundraising-hero-button .btn-navy{
   min-width:210px;
-  background:#0b5cad;
-  border-color:#0b5cad;
+  background:var(--navy);
+  border-color:var(--navy);
   color:#fff;
 }
 @media (max-width:767px){

@@ -289,22 +289,28 @@ export function isCalendarFundraiserEvent(event = {}) {
   return String(event.track || '').toLowerCase() === 'fundraiser' || isHomeFundraiserEvent(event);
 }
 
-function eventFingerprint(event = {}) {
-  return [
-    String(event.start_date || event.event_date || ''),
-    normalizeClock(event.start_time),
-    normalizeClock(event.end_time),
-    plainText(event.location),
-  ].join('|');
+function normalizeLocation(value) {
+  return plainText(value)
+    .toLowerCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\bstreet\b/g, 'st')
+    .replace(/\bavenue\b/g, 'ave')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function cardFingerprint(card = {}) {
-  return [
-    String(card.event_date || ''),
-    normalizeClock(card.start_time),
-    normalizeClock(card.end_time),
-    plainText(card.location),
-  ].join('|');
+export function calendarEventChanged(event = {}, card = {}) {
+  const eventDate = String(event.start_date || event.event_date || '');
+  const cardDate = String(card.event_date || '');
+  if (eventDate && cardDate && eventDate !== cardDate) return true;
+  const eventStart = normalizeClock(event.start_time);
+  const eventEnd = normalizeClock(event.end_time);
+  if (eventStart && eventStart !== normalizeClock(card.start_time)) return true;
+  if (eventEnd && eventEnd !== normalizeClock(card.end_time)) return true;
+  const eventWhere = normalizeLocation(event.location);
+  const cardWhere = normalizeLocation(card.location);
+  if (eventWhere && eventWhere !== cardWhere) return true;
+  return false;
 }
 
 function draftFromEvent(event = {}, sortOrder = 0) {
@@ -721,14 +727,24 @@ export async function runFundraiserCardCalendarSync(env, options = {}) {
     const rejected = existing.filter((card) => card.status === 'rejected');
     if (active.length) {
       const approved = active.find((card) => card.status === 'approved');
-      if (approved && !approved.calendar_changed && eventFingerprint(event) !== cardFingerprint(approved)) {
-        if (writes >= FUNDRAISER_SYNC_WRITE_CAP) continue;
-        await env.DB.prepare('UPDATE fundraiser_cards SET calendar_changed = 1, updated_at = ? WHERE id = ?')
-          .bind(new Date().toISOString(), approved.id)
-          .run();
-        writes += 1;
-        flagged.push(approved.id);
-        emails.push({ kind: 'changed', card: { ...approved, calendar_changed: 1 }, event });
+      if (approved) {
+        const changed = calendarEventChanged(event, approved);
+        if (changed && !approved.calendar_changed) {
+          if (writes >= FUNDRAISER_SYNC_WRITE_CAP) continue;
+          await env.DB.prepare('UPDATE fundraiser_cards SET calendar_changed = 1, updated_at = ? WHERE id = ?')
+            .bind(new Date().toISOString(), approved.id)
+            .run();
+          writes += 1;
+          flagged.push(approved.id);
+          emails.push({ kind: 'changed', card: { ...approved, calendar_changed: 1 }, event });
+        } else if (!changed && approved.calendar_changed) {
+          if (writes >= FUNDRAISER_SYNC_WRITE_CAP) continue;
+          await env.DB.prepare('UPDATE fundraiser_cards SET calendar_changed = 0, updated_at = ? WHERE id = ?')
+            .bind(new Date().toISOString(), approved.id)
+            .run();
+          writes += 1;
+          approved.calendar_changed = 0;
+        }
       }
       continue;
     }
