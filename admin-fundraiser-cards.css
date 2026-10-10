@@ -1,0 +1,180 @@
+.fc-admin-body{
+  margin:0;
+  min-height:100dvh;
+  background:#e8edf4;
+  color:#10233C;
+}
+.fc-phone-gate{display:none}
+.fc-main{
+  padding:18px 20px 40px;
+  max-width:1280px;
+  margin:0 auto;
+}
+.fc-head{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  align-items:flex-start;
+  margin:0 0 18px;
+}
+.fc-head h1{margin:.1em 0 .2em;font-size:1.8rem}
+.fc-head p{margin:0;color:#5b6472}
+.fc-head-actions{display:flex;gap:8px;flex-wrap:wrap}
+.fc-layout{
+  display:grid;
+  grid-template-columns:minmax(280px,360px) minmax(0,1fr);
+  gap:20px;
+  align-items:start;
+}
+.fc-list-col,
+.fc-editor-col{
+  background:#fff;
+  border:1px solid #d9dee8;
+  border-radius:16px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,33,66,.06);
+}
+.fc-list-toolbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+  margin-bottom:12px;
+}
+.fc-list-toolbar h2,
+.fc-editor-col h2,
+.fc-preview-wrap h2{margin:0 0 10px;font-size:1.05rem}
+.fc-card-row{
+  display:grid;
+  grid-template-columns:18px 56px minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  padding:8px;
+  border:1px solid #d9dee8;
+  border-radius:12px;
+  margin:0 0 8px;
+  background:#f8fafc;
+  cursor:pointer;
+}
+.fc-card-row.is-active{outline:2px solid #014990;background:#eef4fb}
+.fc-drag{
+  cursor:grab;
+  color:#7b8798;
+  font-size:1.1rem;
+  line-height:1;
+  user-select:none;
+}
+.fc-thumb,
+.fc-tile{
+  width:56px;
+  height:56px;
+  border-radius:8px;
+  overflow:hidden;
+  background:#002142;
+  color:#fff;
+  display:grid;
+  place-items:center;
+  font-weight:800;
+  font-size:.72rem;
+  text-align:center;
+  line-height:1.1;
+}
+.fc-thumb img{width:100%;height:100%;object-fit:cover;object-position:top}
+.fc-card-copy strong{display:block}
+.fc-card-copy small{color:#5b6472}
+.fc-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.fc-pill{
+  display:inline-block;
+  padding:2px 7px;
+  border-radius:999px;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+}
+.fc-pill-show{background:#dcfce7;color:#166534}
+.fc-pill-hide{background:#e5e7eb;color:#374151}
+.fc-pill-draft{background:#fef3c7;color:#92400e}
+.fc-pill-changed{background:#dbeafe;color:#1e3a8a}
+.fc-pill-rej{background:#fee2e2;color:#991b1b}
+.fc-row-actions{display:flex;flex-direction:column;gap:4px}
+.fc-row-actions button{
+  border:0;
+  background:transparent;
+  color:#014990;
+  font-weight:700;
+  cursor:pointer;
+  padding:0;
+}
+.fc-rejected{margin-top:12px;border-top:1px solid #d9dee8;padding-top:10px}
+.fc-rejected summary{cursor:pointer;font-weight:800}
+.fc-alert-form{margin-top:16px;display:grid;gap:8px}
+.fc-editor{display:grid;gap:12px}
+.fc-editor-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.fc-status-line{margin:0;color:#5b6472;font-size:.9rem}
+.fc-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fc-editor label,
+.fc-alert-form label{display:grid;gap:4px;font-weight:750}
+.fc-editor input,
+.fc-editor textarea,
+.fc-editor select,
+.fc-alert-form input{
+  width:100%;
+  border:1px solid #d9dee8;
+  border-radius:10px;
+  padding:8px 10px;
+  font:inherit;
+}
+.fc-picture,
+.fc-labels{border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px}
+.fc-radio,
+.fc-check{display:flex;align-items:center;gap:8px;font-weight:650}
+.fc-radio input,
+.fc-check input{width:auto}
+.fc-image-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.fc-editor-actions{display:flex;flex-wrap:wrap;gap:8px}
+.fc-editor-note{margin:0;color:#5b6472}
+.btn.danger{background:#E71321;color:#fff;border:0}
+.fc-preview-wrap{margin-top:18px}
+.fc-preview{padding:8px 0}
+.fc-preview-empty{color:#5b6472}
+.fc-gallery{border:none;border-radius:16px;padding:18px;max-width:min(720px,92vw)}
+.fc-gallery-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+  gap:8px;
+  margin:12px 0;
+  max-height:50vh;
+  overflow:auto;
+}
+.fc-gallery-grid button{
+  border:1px solid #d9dee8;
+  background:#fff;
+  padding:0;
+  border-radius:8px;
+  overflow:hidden;
+  cursor:pointer;
+}
+.fc-gallery-grid img{width:100%;height:90px;object-fit:cover}
+@media (max-width:980px){
+  .fc-layout{grid-template-columns:1fr}
+  .fc-grid-2{grid-template-columns:1fr}
+}
+@media (max-width:767px){
+  .fc-phone-gate{
+    display:grid;
+    place-items:center;
+    min-height:70vh;
+    padding:24px;
+  }
+  .fc-phone-gate-card{
+    max-width:28rem;
+    background:#fff;
+    border-radius:16px;
+    padding:24px;
+    box-shadow:0 16px 40px rgba(0,33,66,.12);
+  }
+  .fc-main,
+  .admin-sidebar,
+  .admin-sidebar-backdrop{display:none!important}
+}

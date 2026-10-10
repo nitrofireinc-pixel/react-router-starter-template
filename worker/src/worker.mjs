@@ -127,6 +127,28 @@ import {
   upgradeHomeBody,
 } from './home-redesign.mjs';
 import {
+  canEditFundraiserCards,
+  canPublishFundraiserCards,
+  createFundraiserCard,
+  deleteFundraiserCard,
+  fundraiserCardFieldDiff,
+  fundraiserCardSchemaStatements,
+  getFundraiserAlertEmails,
+  getFundraiserCard,
+  importLiveFundraiserCards,
+  isPublicFundraiserCard,
+  listFundraiserCards,
+  mapFundraiserCardRow,
+  publicFundraiserCardsStatement,
+  renderFundraiserCardsAdminHtml,
+  renderFundraisingCardFromCms,
+  reorderFundraiserCards,
+  runFundraiserCardCalendarSync,
+  setFundraiserAlertEmails,
+  setFundraiserCardStatus,
+  updateFundraiserCard,
+} from './fundraiser-cards.mjs';
+import {
   CMS_PAGE_READ_COLUMNS,
   PUBLIC_READ_INDEX_SQL,
   attachD1Bookmark,
@@ -431,7 +453,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005l';
+export const ASSET_VERSION = 'cms-p1-20261005m';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2133,7 +2155,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.6';
+export const DB_SCHEMA_VERSION = '2026-10-04.7';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -2260,8 +2282,10 @@ async function migrateAndSeedDb(env) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    ...fundraiserCardSchemaStatements().map((sql) => env.DB.prepare(sql)),
   ]);
   await ensureCaldevSchema(env);
+  await importLiveFundraiserCards(env);
   try {
     await env.DB.prepare("ALTER TABLE admin_audit_log ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''").run();
   } catch {
@@ -7074,6 +7098,83 @@ async function sendViaResend(env, { to, replyTo, subject, text, html, fromEmail,
   return { provider: 'resend' };
 }
 
+function isDevWorkerEnv(env) {
+  return String(env?.DEV_ERROR_HOOK || '') === '1';
+}
+
+function fundraiserCmsOrigin(env, request) {
+  try {
+    if (request?.url) return new URL(request.url).origin;
+  } catch {
+    // ignore
+  }
+  return isDevWorkerEnv(env) ? 'https://efhsband-dev.workers.dev' : 'https://efhsband.org';
+}
+
+async function sendFundraiserAlert(env, payload) {
+  const fromEmail = String(env.CONTACT_FROM_EMAIL || 'no-reply@efhsband.org').trim();
+  const fromName = String(env.CONTACT_FROM_NAME || 'East Forsyth Band Boosters').trim();
+  return sendViaResend(env, { ...payload, fromEmail, fromName });
+}
+
+function fundraiserPerms() {
+  return {
+    canEditPageContent,
+    canEditPageLayout,
+    isSuperAdmin,
+    hasPermission,
+  };
+}
+
+async function logFundraiserCardAudit(env, ctx, request, {
+  user,
+  action,
+  card = null,
+  before = null,
+  status = 200,
+  extra = {},
+} = {}) {
+  const diff = before && card ? fundraiserCardFieldDiff(before, card) : undefined;
+  await enqueueAdminAudit(env, ctx, {
+    request,
+    action,
+    category: 'fundraising',
+    method: request.method,
+    path: new URL(request.url).pathname,
+    status,
+    actor_user_id: user?.id,
+    actor_username: user?.username,
+    ip: requestClientIp(request),
+    country: requestCountry(request),
+    user_agent: request.headers.get('user-agent') || '',
+    summary: buildAuditSummary({
+      action,
+      method: request.method,
+      path: new URL(request.url).pathname,
+      status,
+      actorUsername: user?.username,
+      detail: card?.title || extra.detail || '',
+    }),
+    meta: {
+      card_id: card?.id || extra.card_id || null,
+      title: card?.title || '',
+      diff,
+      ...extra,
+    },
+  });
+}
+
+async function syncFundraiserCardsFromCalendar(env, request, options = {}) {
+  return runFundraiserCardCalendarSync(env, {
+    sendEmail: (payload) => sendFundraiserAlert(env, payload),
+    isDev: isDevWorkerEnv(env),
+    origin: fundraiserCmsOrigin(env, request),
+    today: easternTodayIso(),
+    logAudit: options.logAudit,
+    actor: options.actor || null,
+  });
+}
+
 export function htmlToPlainText(html) {
   return decodeBasicHtmlEntities(
     String(html || '')
@@ -7404,9 +7505,9 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
     });
   }
   if (page.slug === 'fundraising') {
-    const decorated = decorateFundraisingPage(page.body_html, {
-      events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [],
-    });
+    const decorated = decorateFundraisingPage(page.body_html, Array.isArray(extras.fundraiserCards)
+      ? { cards: extras.fundraiserCards }
+      : { events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [] });
     return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(decorated), {
       topics: ['fundraising', 'calendar'],
       heading: 'Email fundraising updates',
@@ -7571,7 +7672,7 @@ function rowsOf(result) {
   return result?.results || [];
 }
 
-export function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false, needsPhotos = false } = {}) {
+export function publicReadJobs(env, { path = '/', today = '', isHome = false, needsBoosters = false, needsStaff = false, needsEvents = false, needsPhotos = false, needsFundraiserCards = false } = {}) {
   const jobs = [
     {
       key: 'site',
@@ -7638,6 +7739,15 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
       parse: (result) => mapCaldevRows(result),
     });
   }
+  if (needsFundraiserCards) {
+    jobs.push({
+      key: 'fundraiser-cards',
+      optional: true,
+      fallback: [],
+      statement: () => publicFundraiserCardsStatement(env),
+      parse: (result) => (rowsOf(result) || []).map(mapFundraiserCardRow).filter((card) => isPublicFundraiserCard(card, today)),
+    });
+  }
   if (isHome) {
     jobs.push({
       key: 'home-source-pages',
@@ -7671,6 +7781,7 @@ async function loadPublicCmsReads(env, options = {}) {
     staff: read('staff-active', []),
     homeEvents: read(`home-events:${options.today}`, []),
     homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
+    fundraiserCards: read('fundraiser-cards', []),
   };
 }
 
@@ -9122,8 +9233,160 @@ async function handleApi(request, env, url, ctx = null) {
   return response;
 }
 
+async function routeFundraiserCardsApi(request, env, url, ctx = null) {
+  const perms = fundraiserPerms();
+  const listMatch = url.pathname === '/api/admin/fundraiser-cards';
+  const previewMatch = url.pathname === '/api/admin/fundraiser-cards/preview';
+  const reorderMatch = url.pathname === '/api/admin/fundraiser-cards/reorder';
+  const syncMatch = url.pathname === '/api/admin/fundraiser-cards/sync';
+  const settingsMatch = url.pathname === '/api/admin/fundraiser-cards/settings';
+  const itemMatch = url.pathname.match(/^\/api\/admin\/fundraiser-cards\/(\d+)$/);
+  const actionMatch = url.pathname.match(/^\/api\/admin\/fundraiser-cards\/(\d+)\/(approve|reject|restore|hide)$/);
+  if (!listMatch && !previewMatch && !reorderMatch && !syncMatch && !settingsMatch && !itemMatch && !actionMatch) {
+    return null;
+  }
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth.response;
+  if (!canEditFundraiserCards(auth.user, perms)) {
+    return jsonResponse({ detail: 'Permission required: page:fundraising' }, 403);
+  }
+  const canPublish = canPublishFundraiserCards(auth.user, perms);
+
+  if (listMatch && request.method === 'GET') {
+    const cards = await listFundraiserCards(env);
+    return jsonResponse({
+      cards,
+      can_publish: canPublish,
+      alert_emails: await getFundraiserAlertEmails(env),
+    });
+  }
+  if (previewMatch && (request.method === 'POST' || request.method === 'PUT')) {
+    const payload = await request.json().catch(() => ({}));
+    return jsonResponse({ html: renderFundraisingCardFromCms(payload) });
+  }
+  if (listMatch && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    try {
+      const card = await createFundraiserCard(env, payload, { user: auth.user });
+      await logFundraiserCardAudit(env, ctx, request, {
+        user: auth.user,
+        action: 'fundraiser.card.create',
+        card,
+      });
+      return jsonResponse(card, 201);
+    } catch (error) {
+      return jsonResponse({ detail: error.message }, error.status || 400);
+    }
+  }
+  if (reorderMatch && request.method === 'POST') {
+    const payload = await request.json().catch(() => ({}));
+    const cards = await reorderFundraiserCards(env, payload.ids || payload, { user: auth.user });
+    await logFundraiserCardAudit(env, ctx, request, {
+      user: auth.user,
+      action: 'fundraiser.card.reorder',
+      extra: { ids: payload.ids || payload },
+    });
+    return jsonResponse({ cards });
+  }
+  if (syncMatch && request.method === 'POST') {
+    if (!canPublish) return jsonResponse({ detail: 'Permission required to check the calendar' }, 403);
+    const result = await syncFundraiserCardsFromCalendar(env, request, {
+      actor: auth.user,
+      logAudit: ({ action, card, meta }) => logFundraiserCardAudit(env, ctx, request, {
+        user: auth.user,
+        action,
+        card,
+        extra: meta,
+      }),
+    });
+    return jsonResponse(result);
+  }
+  if (settingsMatch && request.method === 'PUT') {
+    if (!canPublish) return jsonResponse({ detail: 'Permission required to change alert emails' }, 403);
+    const payload = await request.json().catch(() => ({}));
+    const alert_emails = await setFundraiserAlertEmails(env, payload.alert_emails || payload.value || '');
+    await logFundraiserCardAudit(env, ctx, request, {
+      user: auth.user,
+      action: 'fundraiser.card.edit',
+      extra: { alert_emails },
+    });
+    return jsonResponse({ alert_emails });
+  }
+  if (itemMatch && request.method === 'GET') {
+    const card = await getFundraiserCard(env, itemMatch[1]);
+    if (!card) return jsonResponse({ detail: 'Fundraiser card not found' }, 404);
+    return jsonResponse(card);
+  }
+  if (itemMatch && request.method === 'PUT') {
+    const before = await getFundraiserCard(env, itemMatch[1]);
+    if (!before) return jsonResponse({ detail: 'Fundraiser card not found' }, 404);
+    const payload = await request.json().catch(() => ({}));
+    const card = await updateFundraiserCard(env, itemMatch[1], payload, { user: auth.user });
+    await logFundraiserCardAudit(env, ctx, request, {
+      user: auth.user,
+      action: 'fundraiser.card.edit',
+      card,
+      before,
+    });
+    return jsonResponse(card);
+  }
+  if (itemMatch && request.method === 'DELETE') {
+    if (!canPublish) return jsonResponse({ detail: 'Permission required to delete fundraiser cards' }, 403);
+    const before = await deleteFundraiserCard(env, itemMatch[1]);
+    await logFundraiserCardAudit(env, ctx, request, {
+      user: auth.user,
+      action: 'fundraiser.card.delete',
+      card: before,
+      before,
+    });
+    return jsonResponse({ ok: true });
+  }
+  if (actionMatch && request.method === 'POST') {
+    const id = actionMatch[1];
+    const verb = actionMatch[2];
+    const before = await getFundraiserCard(env, id);
+    if (!before) return jsonResponse({ detail: 'Fundraiser card not found' }, 404);
+    const statusMap = { approve: 'approved', reject: 'rejected', restore: 'draft', hide: 'hidden' };
+    const actionMap = {
+      approve: 'fundraiser.card.approve',
+      reject: 'fundraiser.card.reject',
+      restore: 'fundraiser.card.restore',
+      hide: 'fundraiser.card.hide',
+    };
+    if (verb === 'hide' && before.status === 'hidden') {
+      if (!canPublish) return jsonResponse({ detail: 'Permission required to publish fundraiser cards' }, 403);
+      const card = await setFundraiserCardStatus(env, id, 'approved', { user: auth.user });
+      await logFundraiserCardAudit(env, ctx, request, {
+        user: auth.user,
+        action: 'fundraiser.card.approve',
+        card,
+        before,
+      });
+      return jsonResponse(card);
+    }
+    if (verb !== 'restore' && !canPublish) {
+      return jsonResponse({ detail: 'Permission required to publish fundraiser cards' }, 403);
+    }
+    try {
+      const card = await setFundraiserCardStatus(env, id, statusMap[verb], { user: auth.user });
+      await logFundraiserCardAudit(env, ctx, request, {
+        user: auth.user,
+        action: actionMap[verb],
+        card,
+        before,
+      });
+      return jsonResponse(card);
+    } catch (error) {
+      return jsonResponse({ detail: error.message }, error.status || 400);
+    }
+  }
+  return jsonResponse({ detail: 'Method not allowed' }, 405);
+}
+
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
+  const fundraiserCardsResponse = await routeFundraiserCardsApi(request, env, url, ctx);
+  if (fundraiserCardsResponse) return fundraiserCardsResponse;
   // Security log rows are immutable. POST is allowed only for genesis and
   // export session start/complete (those write additional sealed rows).
   if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
@@ -13209,6 +13472,56 @@ async function handleAdmin(request, env, ctx = null) {
   return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
 }
 
+async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {}) {
+  await initDb(env);
+  const session = preloaded.session || await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/fundraiser-cards');
+  if (session.expired) {
+    await logSessionExpired(env, request, session, {
+      path: '/admin/fundraiser-cards',
+      method: request.method,
+      ctx,
+    });
+  }
+  const user = preloaded.user || session.user;
+  if (!user) {
+    const loginRedirect = redirect('/admin/login?next=/admin/fundraiser-cards');
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: loginRedirect,
+      session,
+      ctx,
+    });
+    return loginRedirect;
+  }
+  if (!canEditFundraiserCards(user, fundraiserPerms())) {
+    const denied = await renderErrorPage(403, {
+      request,
+      env,
+      url: new URL(request.url),
+      loggedIn: true,
+      detail: 'Permission required: page:fundraising',
+    });
+    await maybeLogAccessDenial(env, {
+      request,
+      url: new URL(request.url),
+      response: denied,
+      actor: user,
+      session,
+      ctx,
+      forcedDetail: 'Permission required: page:fundraising',
+    });
+    return denied;
+  }
+  return attachLoginHintIfNeeded(request, htmlResponse(renderFundraiserCardsAdminHtml(ASSET_VERSION, {
+    user,
+    canPublish: canPublishFundraiserCards(user, fundraiserPerms()),
+    alertEmails: await getFundraiserAlertEmails(env),
+    allow: (tab) => adminSidebarAllows(user, tab),
+  })), user);
+}
+
 async function handleVisualEditorPage(request, env, slug, ctx = null) {
   await initDb(env);
   const session = await inspectSessionCookie(request, env);
@@ -13477,7 +13790,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
   return merged;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], fundraiserCards = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = isDeliberateComingSoonPage(page)
@@ -13487,6 +13800,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
     home,
     deadlineEvents,
     fundraiserEvents,
+    fundraiserCards,
   });
   const showMarquee = showSponsorMarquee == null
     ? publicPageShowsSponsorMarquee(page)
@@ -13860,7 +14174,8 @@ async function serveStaticOrCms(request, env, url, ctx) {
         path,
         today,
         isHome,
-        needsEvents: isHome || isFundraising,
+        needsEvents: isHome,
+        needsFundraiserCards: isFundraising,
         needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
         needsStaff: pageIsLive && page.slug === 'directors',
         needsPhotos: pageIsLive && (isHome || page.slug === 'gallery'),
@@ -13882,9 +14197,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         sponsors: allSponsors.filter((sponsor) => sponsorShowsMarquee(sponsor) || sponsorShowsOnPage(sponsor)),
         instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
       } : null;
-      const fundraiserEvents = isFundraising
-        ? mergePublicFundraiserEvents(reads.homeEvents, reads.deadlineEvents)
-        : [];
+      const fundraiserCards = isFundraising ? (reads.fundraiserCards || []) : [];
       if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
         livePage.letterman_copy = await getLettermanFormCopy(env);
       }
@@ -13896,7 +14209,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         calendarHighlights: null,
         home,
         deadlineEvents: reads.deadlineEvents,
-        fundraiserEvents,
+        fundraiserCards,
         publicRead: {
           site: reads.site,
           sponsors: allSponsors,
@@ -14052,6 +14365,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/zernio/instagram/connect') return handleZernioInstagramConnect(request, env);
     if (url.pathname === '/admin/zernio/instagram/callback') return handleZernioInstagramCallback(request, env);
     if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
+    if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
+      return handleFundraiserCardsPage(request, env, ctx);
+    }
     const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
     if (visualEditorMatch) {
       return handleVisualEditorPage(request, env, visualEditorMatch[1], ctx);
@@ -14062,6 +14378,34 @@ async function dispatchWorker(request, env, ctx) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    try {
+      const request = new Request('https://efhsband.org/api/admin/fundraiser-cards/sync', { method: 'POST' });
+      const opened = openD1Session(request, env);
+      attachD1QueryCounter(opened.env, createD1QueryBudget());
+      await initDb(opened.env);
+      const result = await syncFundraiserCardsFromCalendar(opened.env, request, {
+        logAudit: ({ action, card, meta }) => enqueueAdminAudit(opened.env, ctx, {
+          action,
+          category: 'fundraising',
+          method: 'CRON',
+          path: '/api/admin/fundraiser-cards/sync',
+          status: 200,
+          summary: buildAuditSummary({
+            action,
+            method: 'CRON',
+            path: '/api/admin/fundraiser-cards/sync',
+            status: 200,
+            detail: card?.title || meta?.reason || 'calendar sync',
+          }),
+          meta: { card_id: card?.id || null, title: card?.title || '', ...meta },
+        }),
+      });
+      console.log('fundraiser_cards_cron', result);
+    } catch (error) {
+      console.error('fundraiser_cards_cron_failed', String(error?.stack || error?.message || error));
+    }
+  },
   async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);

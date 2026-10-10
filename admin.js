@@ -3185,7 +3185,10 @@ function renderPageShortcuts() {
       ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg></a>`
       : '';
     if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
-      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>`;
+      const cards = page.slug === 'fundraising'
+        ? `<div class="admin-page-row admin-page-row-sub"><a class="admin-page-edit" href="/admin/fundraiser-cards">Fundraiser cards</a></div>`
+        : '';
+      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>${cards}`;
     }
     return `<div class="admin-page-row"><button type="button" data-edit-shortcut="${slug}">${name}</button>${settings}</div>`;
   }).join('');

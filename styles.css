@@ -1152,6 +1152,11 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
   width:100%;
   max-width:100%;
 }
+.admin-page-row-sub .admin-page-edit{
+  padding-left:22px;
+  font-weight:700;
+  font-size:.92em;
+}
 .admin-page-shortcuts a.admin-page-edit,
 .admin-page-shortcuts button{
   flex:1 1 auto;

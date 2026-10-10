@@ -2423,7 +2423,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005l'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005m'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2859,7 +2859,8 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   const siteContent = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'site-content.js'), 'utf8');
   const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'home-redesign.css'), 'utf8');
   assert.match(workerSrc, /decorateFundraisingPage\(page\.body_html/);
-  assert.match(workerSrc, /needsEvents: isHome \|\| isFundraising/);
+  assert.match(workerSrc, /needsEvents: isHome/);
+  assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(workerSrc, /if \(isHome \|\| needsEvents\)/);
   assert.match(workerSrc, /key: `home-events:\${today}`/);
   assert.doesNotMatch(workerSrc, /fundraising-events/);
@@ -3628,7 +3629,7 @@ test('initDb applies the incremental upgrade on 2026-10-02.1 without the full se
   const batches = calls.filter((call) => call.type === 'batch');
   assert.equal(batches.length, 1);
   assert.ok(batches[0].count <= 40);
-  assert.ok(batches[0].count <= 30, 'incremental upgrade must not recreate every table');
+  assert.ok(batches[0].count <= 35, 'incremental upgrade must not recreate every table');
   assert.equal(calls.some((call) => call.type === 'run' && /schema_version|site_content/.test(call.sql)), true);
   await initDb(env);
   assert.equal(calls.filter((call) => call.type === 'batch').length, 1);

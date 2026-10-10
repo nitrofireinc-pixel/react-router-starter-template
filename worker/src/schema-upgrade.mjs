@@ -7,6 +7,7 @@ import {
   writeAuditCutoverRow,
 } from './admin-audit-log.mjs';
 import { PUBLIC_READ_INDEX_SQL } from './d1-read-policy.mjs';
+import { fundraiserCardSchemaStatements } from './fundraiser-cards.mjs';
 import { migrateStoredUserPermissionGrants } from './page-permissions.mjs';
 
 export const PREVIOUS_DB_SCHEMA_VERSION = '2026-10-03.1';
@@ -258,6 +259,7 @@ export function incrementalSchemaStatements() {
     VISUAL_PAGE_VERSIONS_INDEX_SQL,
     ...PUBLIC_READ_INDEX_SQL,
     ...auditLogSchemaStatements(),
+    ...fundraiserCardSchemaStatements(),
   ];
 }
 
@@ -265,7 +267,7 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.6',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.7',
     '-- Safe deploy: maintenance on, deploy the new Worker, let initDb self-migrate',
     '-- on the first request. Do NOT run these SQL files by hand on D1.',
     '-- Column ALTERs are Worker-only (pragma_table_info). SQL files have no bare ALTERs.',
