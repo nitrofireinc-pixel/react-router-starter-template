@@ -1,5 +1,7 @@
 /** Approved home-page redesign. Markup follows the mockup; copy stays in the CMS or live data. */
 
+import { renderHeroCardHtml, SILENT_AUCTION_HELP_LINE } from './page-blocks.mjs';
+
 const HEART = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.1 5.4 3 1.8-1.9 3.3-3 5.4-3 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>';
 const ARROW = '<svg class="ic arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z"/></svg>';
 const CHEV = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z"/></svg>';
@@ -540,10 +542,13 @@ export function cardToFundraisingEvent(card = {}) {
 
 export function renderFundraisingCardFromCms(card = {}) {
   const flyer = String(card.picture_mode || '') === 'image' ? sanitizePublicUrl(card.image_url) : '';
+  const title = String(card.title || '');
+  const description = String(card.description || '').trim()
+    || (/silent auction/i.test(title) ? SILENT_AUCTION_HELP_LINE : '');
   return renderFundraisingCard(cardToFundraisingEvent(card), {
     flyer,
     flyerAlt: card.title,
-    description: card.description,
+    description,
     mustAttend: Boolean(Number(card.must_attend)),
     volunteersNeeded: Boolean(Number(card.volunteers_needed)),
     customLabel: card.custom_label,
@@ -616,7 +621,15 @@ export function decorateFundraisingPage(html, data = {}) {
   const source = applyFundraisingHeroIntro(collapseEmptyFundraisingParagraphs(String(html || '')));
   if (!source.trim()) return source;
   let cards = [];
-  if (Array.isArray(data.cards)) {
+  if (Array.isArray(data.blocks) && data.blocks.length) {
+    cards = data.blocks.map((item) => {
+      if (item?.type === 'hero' || item?.kind === 'hero' || item?.block?.kind === 'hero') {
+        return renderHeroCardHtml(item.block || item);
+      }
+      const card = item?.card || item;
+      return card ? renderFundraisingCardFromCms(card) : '';
+    }).filter(Boolean);
+  } else if (Array.isArray(data.cards)) {
     cards = data.cards.map((card) => renderFundraisingCardFromCms(card)).filter(Boolean);
   } else {
     const media = extractFundraisingMedia(source);

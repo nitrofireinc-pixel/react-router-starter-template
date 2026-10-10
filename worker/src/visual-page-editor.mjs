@@ -909,7 +909,11 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
     ? ''
     : '<p class="visual-inactive-banner">Coming Soon (inactive) — visitors don\'t see this content until the page is turned on in Settings</p>';
   const layoutTools = canLayout
-    ? `<button type="button" class="visual-banner-btn" data-visual-add>Add section</button>`
+    ? `<button type="button" class="visual-banner-btn" data-visual-add>Add section</button>${
+      slug === 'fundraising'
+        ? `<button type="button" class="visual-banner-btn" data-visual-add-callout>+ Add callout</button><button type="button" class="visual-banner-btn" data-visual-add-hero>+ Add hero card</button>`
+        : ''
+    }`
     : '';
   const historyTool = canLayout
     ? `<button type="button" class="visual-banner-btn" data-visual-history>History</button>`

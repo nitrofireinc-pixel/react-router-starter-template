@@ -6,6 +6,7 @@ import {
   renderFundraisingCardFromCms,
 } from './home-redesign.mjs';
 import { renderAdminChromeBar, renderAdminSidebarBackdrop, renderAdminSidebarHtml } from './admin-chrome.mjs';
+import { repairSilentAuctionDescription } from './page-blocks.mjs';
 
 export const FUNDRAISER_ALERT_EMAILS_KEY = 'fundraiser_alert_emails';
 export const FUNDRAISER_CARD_STATUSES = Object.freeze(['draft', 'approved', 'hidden', 'rejected']);
@@ -63,7 +64,7 @@ SELECT 'Mattress Sale', 'Fundraiser at Mattress Warehouse', '2026-10-24',
        1, 0, 'view_flyer', 'approved', 0, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM fundraiser_cards LIMIT 1)
 UNION ALL
-SELECT 'Silent Auction', '', '2026-11-07', '', 'date_tile', '',
+SELECT 'Silent Auction', 'Students and parents help needed', '2026-11-07', '', 'date_tile', '',
        0, 1, 'volunteer', 'approved', 1, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM fundraiser_cards LIMIT 1)
 `.trim();
@@ -353,7 +354,7 @@ const LIVE_IMPORTS = [
     volunteers_needed: 1,
     primary_button: 'volunteer',
     location: '',
-    description: '',
+    description: 'Students and parents help needed',
   },
 ];
 
@@ -415,6 +416,7 @@ export async function importLiveFundraiserCards(env) {
 
 export async function listFundraiserCards(env) {
   await importLiveFundraiserCards(env);
+  await repairSilentAuctionDescription(env);
   const result = await env.DB.prepare(`
     SELECT id, title, description, event_date, start_time, end_time, location,
            picture_mode, image_url, must_attend, volunteers_needed, custom_label,

@@ -3160,6 +3160,32 @@ function bindSponsorsMenu() {
   });
 }
 
+function setPageSettingsMenuOpen(open) {
+  document.querySelectorAll('[data-page-settings-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-page-settings-toggle]');
+    const sub = menu.querySelector('[data-page-settings-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindPageSettingsMenu() {
+  const menu = document.querySelector('[data-page-settings-menu]');
+  const toggle = menu?.querySelector('[data-page-settings-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setPageSettingsMenuOpen(open);
+  });
+  menu.querySelectorAll('[data-page-settings-link]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setPageSettingsMenuOpen(true);
+      editPage(button.dataset.pageSettingsLink);
+    });
+  });
+}
+
 function bindBoostersMenu() {
   const menu = document.querySelector('[data-boosters-menu]');
   const toggle = menu?.querySelector('[data-boosters-toggle]');
@@ -3181,7 +3207,7 @@ function renderPageShortcuts() {
   mount.innerHTML = pages.map((page) => {
     const name = escapeHtml(pageShortcutLabel(page));
     const slug = escapeAttr(page.slug);
-    const settings = siteAdmin
+    const settings = siteAdmin && page.slug !== 'fundraising'
       ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg></a>`
       : '';
     if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
@@ -3272,6 +3298,13 @@ function showAllowedPanels() {
     if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
   }
   bindSponsorsMenu();
+  const pageSettingsMenu = document.querySelector('[data-page-settings-menu]');
+  if (pageSettingsMenu) {
+    const showSettings = canManageSitePages();
+    pageSettingsMenu.hidden = !showSettings;
+    if (showSettings) manageVisible = true;
+  }
+  bindPageSettingsMenu();
   const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
   if (manageLabel) manageLabel.hidden = !manageVisible;
   renderPageShortcuts();
@@ -3337,6 +3370,8 @@ function showAllowedPanels() {
     ? 'caldev'
     : (requestedTab && canOpenAdminTab(requestedTab) ? requestedTab : 'dashboard');
   activateTab(startTab);
+  const settingsPage = new URLSearchParams(window.location.search).get('page');
+  if (startTab === 'pages' && settingsPage) editPage(settingsPage);
 }
 
 function bindAdminNavToggle() {

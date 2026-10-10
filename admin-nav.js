@@ -119,7 +119,7 @@
   function revealOverlaySubmenus() {
     if (!isOverlay()) return;
     document.querySelectorAll('.admin-menu-group:not([hidden])').forEach((group) => {
-      const toggle = group.querySelector('.admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle]');
+      const toggle = group.querySelector('.admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle]');
       const sub = group.querySelector('.admin-menu-sub');
       if (toggle) toggle.setAttribute('aria-expanded', 'true');
       if (sub) sub.hidden = false;
@@ -186,10 +186,13 @@
         window.location.href = `/admin?tab=${encodeURIComponent(tabBtn.dataset.tab)}`;
         return;
       }
-      const pageBtn = event.target.closest('[data-edit-shortcut], [data-page-nav], [data-sponsor-nav], [data-page-settings]');
+      const pageBtn = event.target.closest('[data-edit-shortcut], [data-page-nav], [data-sponsor-nav], [data-page-settings], [data-page-settings-link]');
       if (pageBtn) {
         event.preventDefault();
-        window.location.href = '/admin';
+        const settingsSlug = pageBtn.dataset.pageSettingsLink || pageBtn.dataset.pageSettings;
+        window.location.href = settingsSlug
+          ? `/admin?tab=pages&page=${encodeURIComponent(settingsSlug)}`
+          : '/admin';
       }
     });
     sidebar.querySelector('[data-open-password]')?.addEventListener('click', () => {
@@ -226,13 +229,26 @@
     sidebar.addEventListener('click', (event) => {
       if (!isOverlay()) return;
       const target = event.target.closest('a, button');
-      if (!target || target.matches('[data-admin-nav-close], .admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle]')) return;
+      if (!target || target.matches('[data-admin-nav-close], .admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle]')) return;
       if (target.closest('.admin-menu, .admin-page-shortcuts, .admin-sidebar-footer')) {
         window.setTimeout(() => setOpen(false, { fromUser: true }), 0);
       }
     });
 
     wireVisualEditorLinks(sidebar);
+    if (document.body.classList.contains('visual-editor-body')) {
+      sidebar.querySelectorAll('[data-page-settings-toggle]').forEach((toggle) => {
+        if (toggle.dataset.navBound === '1') return;
+        toggle.dataset.navBound = '1';
+        toggle.addEventListener('click', () => {
+          const group = toggle.closest('.admin-menu-group');
+          const sub = group?.querySelector('.admin-menu-sub');
+          const open = toggle.getAttribute('aria-expanded') !== 'true';
+          toggle.setAttribute('aria-expanded', String(open));
+          if (sub) sub.hidden = !open;
+        });
+      });
+    }
 
     const onBreakpoint = () => {
       setOpen(desiredOpen(), { persist: false });

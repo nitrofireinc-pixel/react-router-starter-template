@@ -267,7 +267,7 @@ export function renderIncrementalSchemaSql(targetVersion) {
   const statements = incrementalSchemaStatements();
   const version = String(targetVersion || '').trim();
   return [
-    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.7',
+    '-- Incremental, idempotent go-live migration: 2026-10-03.1 → 2026-10-04.8',
     '-- Safe deploy: maintenance on, deploy the new Worker, let initDb self-migrate',
     '-- on the first request. Do NOT run these SQL files by hand on D1.',
     '-- Column ALTERs are Worker-only (pragma_table_info). SQL files have no bare ALTERs.',

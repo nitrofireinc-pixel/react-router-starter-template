@@ -484,3 +484,77 @@ body.visual-page-join main *{
 .visual-content-only .gjs-clm-tags{
   display:none !important;
 }
+.page-block-hint{
+  margin:0 0 10px;
+  color:#4a5d78;
+  font-size:.92rem;
+}
+.page-block-shell{
+  position:relative;
+  padding:10px 10px 10px 46px;
+  border-radius:16px;
+}
+.page-block-shell.is-selected,
+.page-block-shell.is-drop{
+  outline:2px dashed #2f6feb;
+  outline-offset:2px;
+}
+.page-block-shell.is-hidden{opacity:.55}
+.page-block-handle{
+  position:absolute;
+  left:4px;
+  top:50%;
+  transform:translateY(-50%);
+  width:28px;
+  min-height:64px;
+  border:0;
+  border-radius:10px;
+  background:#10233c;
+  color:#fff;
+  cursor:grab;
+  letter-spacing:-.12em;
+}
+.page-block-actions{
+  position:absolute;
+  top:8px;
+  right:8px;
+  z-index:3;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.page-block-actions button{
+  border:0;
+  border-radius:999px;
+  padding:5px 10px;
+  background:#10233c;
+  color:#fff;
+  font-size:.78rem;
+  font-weight:700;
+}
+.page-block-drop{
+  position:absolute;
+  left:50%;
+  top:-12px;
+  transform:translateX(-50%);
+  background:#2f6feb;
+  color:#fff;
+  border-radius:999px;
+  padding:3px 10px;
+  font-size:.75rem;
+  font-weight:800;
+}
+.fundraising-hero-link{
+  display:grid;
+  gap:4px;
+  margin-top:8px;
+  font-size:.75rem;
+  color:#4a5d78;
+}
+.fundraising-hero-link input{
+  width:100%;
+  min-height:34px;
+  border:1px solid #d5deea;
+  border-radius:8px;
+  padding:4px 8px;
+}

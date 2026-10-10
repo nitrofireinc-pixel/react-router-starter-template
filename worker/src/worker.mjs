@@ -149,6 +149,17 @@ import {
   updateFundraiserCard,
 } from './fundraiser-cards.mjs';
 import {
+  loadPageBlocksState,
+  mergePublicPageBlocks,
+  pageBlockFieldDiffs,
+  pageBlockLayoutChanged,
+  pageBlocksEnabled,
+  publicPageBlocksStatement,
+  resetPageBlocksSchemaCache,
+  savePageBlocks,
+  sanitizePageBlockList,
+} from './page-blocks.mjs';
+import {
   CMS_PAGE_READ_COLUMNS,
   PUBLIC_READ_INDEX_SQL,
   attachD1Bookmark,
@@ -453,7 +464,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261005m';
+export const ASSET_VERSION = 'cms-p1-20261010a';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2065,9 +2076,21 @@ async function snapshotAdminMutationBefore(env, pathname = '', method = '') {
     if (visual && (verb === 'PUT' || verb === 'POST')) {
       const row = await env.DB.prepare(AUDIT_BEFORE_VISUAL_SQL).bind(visual[1]).first();
       if (!row) return null;
+      let blocksBefore = '';
+      if (pageBlocksEnabled(visual[1])) {
+        try {
+          const listed = await env.DB.prepare(
+            "SELECT kind, ref_id, hidden, corner_tag, label, title, body, highlight, button_text, button_link, sort_order FROM page_blocks WHERE page_slug = ? AND rev = 'draft' ORDER BY sort_order ASC, id ASC",
+          ).bind(visual[1]).all();
+          blocksBefore = JSON.stringify(listed?.results || []);
+        } catch {
+          blocksBefore = '[]';
+        }
+      }
       return {
         target: row.slug,
         content_before: String(row.draft_html || row.published_html || ''),
+        extra: { page_blocks: blocksBefore },
       };
     }
     if (path === '/api/admin/ensembles/body' && verb === 'PUT') {
@@ -2155,7 +2178,7 @@ async function verifyPassword(password, stored) {
 }
 
 /** Bump when migrations/seed/content rewrites in migrateAndSeedDb change. */
-export const DB_SCHEMA_VERSION = '2026-10-04.7';
+export const DB_SCHEMA_VERSION = '2026-10-04.8';
 const DB_SCHEMA_VERSION_KEY = 'schema_version';
 
 let dbInitVersion = null;
@@ -2166,6 +2189,7 @@ export function resetDbInitCache() {
   dbInitVersion = null;
   dbInitPromise = null;
   resetPublicReadCache();
+  resetPageBlocksSchemaCache();
 }
 
 function isMissingSchemaTableError(error) {
@@ -7505,9 +7529,11 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
     });
   }
   if (page.slug === 'fundraising') {
-    const decorated = decorateFundraisingPage(page.body_html, Array.isArray(extras.fundraiserCards)
-      ? { cards: extras.fundraiserCards }
-      : { events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [] });
+    const decorated = decorateFundraisingPage(page.body_html, Array.isArray(extras.fundraiserBlocks) && extras.fundraiserBlocks.length
+      ? { blocks: extras.fundraiserBlocks, cards: extras.fundraiserCards || [] }
+      : Array.isArray(extras.fundraiserCards)
+        ? { cards: extras.fundraiserCards }
+        : { events: extras.fundraiserEvents || extras.home?.events || extras.deadlineEvents || [] });
     return ensureEmailListSignupSlot(ensureFundraisingDonateSlot(decorated), {
       topics: ['fundraising', 'calendar'],
       heading: 'Email fundraising updates',
@@ -7747,6 +7773,15 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
       statement: () => publicFundraiserCardsStatement(env),
       parse: (result) => (rowsOf(result) || []).map(mapFundraiserCardRow).filter((card) => isPublicFundraiserCard(card, today)),
     });
+    if (pageBlocksEnabled('fundraising')) {
+      jobs.push({
+        key: 'page-blocks:fundraising',
+        optional: true,
+        fallback: [],
+        statement: () => publicPageBlocksStatement(env, 'fundraising'),
+        parse: (result) => (rowsOf(result) || []).map((row) => row),
+      });
+    }
   }
   if (isHome) {
     jobs.push({
@@ -7782,6 +7817,7 @@ async function loadPublicCmsReads(env, options = {}) {
     homeEvents: read(`home-events:${options.today}`, []),
     homeSources: read('home-source-pages', { fundraising: null, sponsor: null }),
     fundraiserCards: read('fundraiser-cards', []),
+    pageBlocks: read('page-blocks:fundraising', []),
   };
 }
 
@@ -7925,6 +7961,8 @@ export function adminSidebarAllows(user, tab) {
       return hasPermission(user, 'site');
     case 'photos':
       return hasPermission(user, 'photos');
+    case 'page-settings':
+      return hasPermission(user, 'pages');
     case 'pages':
       return hasPermission(user, 'pages')
         || parsePermissions(user.permissions).some((item) => /^(page|layout):/.test(String(item)));
@@ -11540,8 +11578,13 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const state = await loadVisualPageState(env, slug);
     if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
+    const cards = pageBlocksEnabled(slug) ? await listFundraiserCards(env) : [];
+    const pageBlocks = pageBlocksEnabled(slug)
+      ? await loadPageBlocksState(env, slug, cards.filter((card) => card.status === 'approved' || card.status === 'hidden'))
+      : { enabled: false, draft: [], live: [], cards: [] };
     return jsonResponse({
       ...state,
+      page_blocks: pageBlocks,
       can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
       can_settings: canManagePageSettings(auth.user),
     });
@@ -11571,8 +11614,39 @@ async function routeApi(request, env, url, ctx = null) {
         user: auth.user,
         allowStructure,
       });
+      let pageBlocks = { enabled: pageBlocksEnabled(slug), draft: [], live: [], cards: [] };
+      if (pageBlocksEnabled(slug) && raw.page_blocks) {
+        const incoming = sanitizePageBlockList(raw.page_blocks.items || raw.page_blocks.draft || raw.page_blocks);
+        const cards = await listFundraiserCards(env);
+        const existing = await loadPageBlocksState(env, slug, cards.filter((card) => card.status === 'approved' || card.status === 'hidden'));
+        const layoutChanged = pageBlockLayoutChanged(existing.draft, incoming);
+        if (layoutChanged && !allowStructure) {
+          return jsonResponse({
+            detail: `Permission required: layout:${slug}`,
+            code: 'layout_required',
+          }, 403);
+        }
+        const saved = await savePageBlocks(env, {
+          slug,
+          items: incoming,
+          publish: (parsed.action || 'draft') === 'publish',
+          user: auth.user,
+          seedCards: cards.filter((card) => card.status === 'approved'),
+        });
+        pageBlocks = {
+          enabled: true,
+          draft: saved,
+          live: (parsed.action || 'draft') === 'publish' ? saved : existing.live,
+          cards,
+          diffs: pageBlockFieldDiffs(existing.draft, incoming),
+        };
+      } else if (pageBlocksEnabled(slug)) {
+        const cards = await listFundraiserCards(env);
+        pageBlocks = await loadPageBlocksState(env, slug, cards);
+      }
       return jsonResponse({
         ...state,
+        page_blocks: pageBlocks,
         can_layout: canEditVisualLayout(auth.user, slug, canEditPageLayout),
         can_settings: canManagePageSettings(auth.user),
       });
@@ -13790,7 +13864,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
   return merged;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], fundraiserCards = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], fundraiserCards = [], fundraiserBlocks = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
   const title = page.is_home ? `Home | ${site.title}` : `${page.title} | ${site.title}`;
   const isHomePage = page.slug === 'home' || Boolean(page.is_home);
   const isComingSoonPage = isDeliberateComingSoonPage(page)
@@ -13801,6 +13875,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
     deadlineEvents,
     fundraiserEvents,
     fundraiserCards,
+    fundraiserBlocks,
   });
   const showMarquee = showSponsorMarquee == null
     ? publicPageShowsSponsorMarquee(page)
@@ -14198,6 +14273,9 @@ async function serveStaticOrCms(request, env, url, ctx) {
         instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',
       } : null;
       const fundraiserCards = isFundraising ? (reads.fundraiserCards || []) : [];
+      const fundraiserBlocks = isFundraising
+        ? mergePublicPageBlocks(reads.pageBlocks || [], fundraiserCards)
+        : [];
       if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
         livePage.letterman_copy = await getLettermanFormCopy(env);
       }
@@ -14210,6 +14288,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         home,
         deadlineEvents: reads.deadlineEvents,
         fundraiserCards,
+        fundraiserBlocks,
         publicRead: {
           site: reads.site,
           sponsors: allSponsors,

@@ -33,6 +33,7 @@ export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
   const showSponsors = filtered
     ? (allow('sponsors') || allow('sponsors-page') || allow('become-a-sponsor'))
     : false;
+  const showPageSettings = filtered ? allow('page-settings') : false;
   return `<aside id="admin-sidebar" class="admin-sidebar" aria-label="CMS sidebar">
 ${renderAdminSidebarClose()}
 <div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${v}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div>
@@ -43,6 +44,12 @@ ${renderAdminSidebarClose()}
 <p class="admin-menu-label" data-page-shortcuts-label hidden>Pages</p>
 <div id="admin-page-shortcuts" class="admin-page-shortcuts"></div>
 <p class="admin-menu-label">Manage</p>
+<div class="admin-menu-group" data-page-settings-menu${showPageSettings ? '' : ' hidden'}>
+<button type="button" class="admin-menu-parent" data-page-settings-toggle aria-expanded="false">⚙ Page settings</button>
+<div class="admin-menu-sub" data-page-settings-sub hidden>
+<button type="button" data-page-settings-link="fundraising">Fundraising</button>
+</div>
+</div>
 <button type="button" data-tab="staff"${hide('staff')}>Directors & Staff</button>
 <button type="button" data-tab="ensembles"${hide('ensembles')}>Ensemble</button>
 <div class="admin-menu-group" data-boosters-menu${showBoosters ? '' : ' hidden'}>

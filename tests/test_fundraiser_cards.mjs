@@ -204,8 +204,8 @@ function createCardStore(seed = {}) {
 }
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
-  assert.equal(DB_SCHEMA_VERSION, '2026-10-04.7');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261005m'/);
+  assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010a'/);
   assert.match(workerSrc, /async scheduled\(/);
   assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(adminJs, /\/admin\/fundraiser-cards/);
@@ -286,6 +286,7 @@ test('first migrate imports Mattress Sale and Silent Auction as approved', async
   assert.equal(store.cards[0].source_event_id, 51);
   assert.equal(store.cards[0].image_url, MATTRESS_FLYER_URL);
   assert.equal(store.cards[1].title, 'Silent Auction');
+  assert.equal(store.cards[1].description, 'Students and parents help needed');
   assert.equal(store.cards[1].volunteers_needed, 1);
   assert.equal(store.cards[1].picture_mode, 'date_tile');
 });

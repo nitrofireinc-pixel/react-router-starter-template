@@ -1258,6 +1258,95 @@ body.efhs-theme .fundraising-help-card.is-donate .btn-gold{
   .fundraising-help .wrap{padding:0 14px}
   .fundraising-cards .ff-body h3{font-size:1.35rem}
 }
+.fundraising-hero-card,
+body.efhs-theme .fundraising-hero-card,
+#page-preview .fundraising-hero-card{
+  position:relative;
+  display:block;
+  margin:0;
+  padding:28px 28px 24px;
+  border-radius:16px;
+  background:#fff;
+  border:1px solid var(--line);
+  border-top:6px solid var(--gold);
+  box-shadow:0 2px 14px rgba(0,33,66,.08);
+}
+.fundraising-hero-pill{
+  position:absolute;
+  top:-12px;
+  left:18px;
+  background:#c81e1e;
+  color:#fff;
+  border-radius:999px;
+  padding:4px 10px;
+  font-size:.72rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.fundraising-hero-pill.is-empty{display:none}
+.fundraising-hero-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(220px,280px);
+  gap:24px;
+  align-items:center;
+}
+.fundraising-hero-label{
+  display:block;
+  color:#0b5cad;
+  font-size:.72rem;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.fundraising-hero-copy h3{
+  margin:8px 0 10px;
+  font-family:var(--display);
+  text-transform:uppercase;
+  letter-spacing:.02em;
+  font-size:2rem;
+  color:var(--navy);
+  line-height:1;
+}
+.fundraising-hero-text{
+  margin:0;
+  color:#334155;
+  font-size:1rem;
+  line-height:1.5;
+}
+.fundraising-hero-aside{
+  display:grid;
+  gap:14px;
+  justify-items:end;
+}
+.fundraising-hero-highlight{
+  width:100%;
+  padding:16px 18px;
+  border-radius:12px;
+  background:#f4f7fb;
+  color:var(--navy);
+  font-weight:800;
+  text-align:center;
+}
+.fundraising-hero-highlight.is-empty,
+.fundraising-hero-label.is-empty,
+.fundraising-hero-text.is-empty{opacity:.45}
+.fundraising-hero-aside .btn-navy,
+.fundraising-hero-button .btn-navy{
+  min-width:210px;
+  background:#0b5cad;
+  border-color:#0b5cad;
+  color:#fff;
+}
+@media (max-width:767px){
+  .fundraising-hero-grid{
+    grid-template-columns:1fr;
+  }
+  .fundraising-hero-aside{justify-items:stretch}
+  .fundraising-hero-aside .btn-navy,
+  .fundraising-hero-button .btn-navy{width:100%;min-width:0}
+  .fundraising-hero-copy h3{font-size:1.5rem}
+}
 
 
 
