@@ -490,7 +490,7 @@ function stripLeftoverFundraisingBodyCards(html = '') {
   return String(html || '').replace(
     /<article\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/article>/gi,
     (full) => {
-      if (/data-square-donate|square-donate-card|fundraising-card|feature-fund|fundraising-help/i.test(full)) {
+      if (/data-square-donate|square-donate-card|fundraising-card|fundraising-hero-card|feature-fund|fundraising-help/i.test(full)) {
         return full;
       }
       return '';

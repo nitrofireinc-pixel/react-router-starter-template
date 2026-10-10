@@ -82,6 +82,10 @@ test('public fundraising keeps hero and fundraiser cards in one order', () => {
           { id: 2, title: 'Silent Auction', description: '', event_date: '2026-11-07', picture_mode: 'date_tile', volunteers_needed: 1, status: 'approved' },
         ],
       ),
+      cards: [
+        { id: 1, title: 'Mattress Sale', description: 'Fundraiser at Mattress Warehouse', event_date: '2026-10-24', picture_mode: 'date_tile', status: 'approved' },
+        { id: 2, title: 'Silent Auction', description: '', event_date: '2026-11-07', picture_mode: 'date_tile', volunteers_needed: 1, status: 'approved' },
+      ],
     },
   );
   const mattress = html.indexOf('Mattress Sale');
