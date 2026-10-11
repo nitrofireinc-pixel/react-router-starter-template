@@ -216,7 +216,8 @@ test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.match(workerSrc, /async scheduled\(/);
   assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(adminJs, /\/admin\/fundraiser-cards/);
-  assert.doesNotMatch(liveToml, /\[triggers\]/);
+  assert.match(liveToml, /\[triggers\]/);
+  assert.match(liveToml, /20 11 \* \* \*/);
   assert.match(devToml, /\[triggers\]/);
   assert.match(devToml, /20 11 \* \* \*/);
   for (const action of [

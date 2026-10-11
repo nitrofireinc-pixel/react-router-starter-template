@@ -47,3 +47,6 @@ CONTACT_EMAIL_PROVIDER = "none"
 binding = "DB"
 database_name = "efhsband-db"
 database_id = "73681cba-4863-4abb-86d4-b140694bcde2"
+
+[triggers]
+crons = ["20 11 * * *"]
