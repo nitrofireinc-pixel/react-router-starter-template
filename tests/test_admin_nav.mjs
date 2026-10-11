@@ -71,7 +71,8 @@ test('admin nav script stores desktop preference and traps overlay focus', () =>
   assert.match(adminJs, /get\('tab'\)/);
   assert.match(navJs, /function isStandaloneAdminPage/);
   assert.match(navJs, /function wireAdminNavLinks/);
-  assert.match(navJs, /efhsAdminNavGroups/);
+  assert.doesNotMatch(navJs, /localStorage\.setItem\(\s*['"]efhsAdminNavGroups['"]/);
+  assert.match(navJs, /removeItem\(\s*['"]efhsAdminNavGroups['"]/);
   assert.match(navJs, /data-admin-nav-search/);
   assert.match(navJs, /function revealOverlaySubmenus/);
   assert.match(navJs, /revealOverlaySubmenus/);
@@ -126,7 +127,7 @@ test('mobile admin menu copies collapsed children and labels Sponsors page layou
   assert.match(renderFn, /node\.hidden && !isCollapsedMenuSub\(node\)/);
   assert.match(adminJs, /page layout/i);
   assert.match(adminJs, /page\?\.slug \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'sponsors'/);
-  assert.match(adminJs, /revealOverlaySubmenus\?\.\(\)/);
+  assert.doesNotMatch(adminJs, /revealOverlaySubmenus\?\.\(\)/);
 
   const chrome = renderAdminSidebarHtml('test');
   assert.match(chrome, /data-tab="sponsors">Manage sponsors</);

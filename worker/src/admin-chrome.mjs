@@ -77,7 +77,11 @@ export function buildAdminNavModel(options = {}) {
   const hide = (tab) => hideFlag(tab, allow, filtered);
   const pages = Array.isArray(options.pages) ? options.pages : [];
   const draftCount = Number(options.fundraiserDraftCount || 0) || 0;
-  const current = options.current || {};
+  const current = options.current?.route
+    ? options.current
+    : (options.slug
+      ? { route: 'visual', slug: options.slug, ...options.current }
+      : (options.current || {}));
   const showPageSettings = filtered ? allow('page-settings') : false;
 
   const pageItems = pages.map((page) => {
@@ -310,13 +314,15 @@ function renderGroup(group, currentKey) {
   const items = group.children.map((child) => renderNavItem(child, currentKey)).join('');
   const extra = group.key === 'pages'
     ? `<p class="admin-menu-label" data-page-shortcuts-label${group.children.some((child) => child.kind === 'page') ? '' : ' hidden'}>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts">${
-      group.children.filter((child) => child.kind === 'page').map((child) => (
-        `<div class="admin-page-row"><a class="admin-page-edit" href="${escapeAdminHtml(child.href)}" data-page-slug="${escapeAdminHtml(child.slug)}" data-page-nav="${escapeAdminHtml(child.slug)}" data-nav-href="${escapeAdminHtml(child.href)}">${escapeAdminHtml(child.label)}</a></div>`
-      )).join('')
+      group.children.filter((child) => child.kind === 'page').map((child) => {
+        const current = child.key === currentKey;
+        return `<div class="admin-page-row"><a class="admin-page-edit${current ? ' active' : ''}" href="${escapeAdminHtml(child.href)}" data-page-slug="${escapeAdminHtml(child.slug)}" data-page-nav="${escapeAdminHtml(child.slug)}" data-nav-href="${escapeAdminHtml(child.href)}"${current ? ' data-nav-current="1"' : ''}>${escapeAdminHtml(child.label)}</a></div>`;
+      }).join('')
     }</div>${
-      group.children.filter((child) => child.kind === 'page-settings').map((child) => (
-        `<div class="admin-menu-group" data-page-settings-menu><button type="button" class="admin-menu-parent admin-nav-item${child.key === currentKey ? ' active' : ''}" data-page-settings-toggle aria-expanded="false">⚙ Page settings</button><div class="admin-menu-sub" data-page-settings-sub hidden><a class="admin-nav-item${child.key === currentKey ? ' active' : ''}" href="${escapeAdminHtml(child.href)}" data-page-settings-link="fundraising" data-page-settings="fundraising" data-nav-href="${escapeAdminHtml(child.href)}" data-nav-item="page-settings-fundraising">Fundraising</a></div></div>`
-      )).join('')
+      group.children.filter((child) => child.kind === 'page-settings').map((child) => {
+        const current = child.key === currentKey;
+        return `<div class="admin-menu-group" data-page-settings-menu><button type="button" class="admin-menu-parent admin-nav-item${current ? ' active' : ''}" data-page-settings-toggle aria-expanded="${current ? 'true' : 'false'}">⚙ Page settings</button><div class="admin-menu-sub" data-page-settings-sub${current ? '' : ' hidden'}><a class="admin-nav-item${current ? ' active' : ''}" href="${escapeAdminHtml(child.href)}" data-page-settings-link="fundraising" data-page-settings="fundraising" data-nav-href="${escapeAdminHtml(child.href)}" data-nav-item="page-settings-fundraising"${current ? ' data-nav-current="1"' : ''}>Fundraising</a></div></div>`;
+      }).join('')
     }`
     : items;
   return `<div class="admin-menu-group" data-nav-group="${group.key}" ${group.attrs || ''}${hidden}>

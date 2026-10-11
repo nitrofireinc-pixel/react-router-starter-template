@@ -173,7 +173,6 @@
       lastFocus = null;
     }
 
-    if (open && overlay) revealOverlaySubmenus();
     notifyLayout();
   }
 
@@ -181,52 +180,31 @@
     return !document.getElementById('tab-dashboard');
   }
 
-  const GROUP_STORE = 'efhsAdminNavGroups';
-
-  function readGroups() {
-    try {
-      return JSON.parse(localStorage.getItem(GROUP_STORE) || '{}') || {};
-    } catch {
-      return {};
-    }
-  }
-
-  function writeGroups(map) {
-    try {
-      localStorage.setItem(GROUP_STORE, JSON.stringify(map));
-    } catch {
-      /* private mode */
-    }
-  }
-
-  function setGroupOpen(group, open, persist) {
+  function setGroupOpen(group, open) {
     if (!group) return;
     const toggle = group.querySelector('[data-nav-group-toggle], [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle], :scope > .admin-menu-parent');
     const sub = group.querySelector(':scope > .admin-menu-sub') || group.querySelector('.admin-menu-sub');
     if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
     if (sub) sub.hidden = !open;
-    const key = group.getAttribute('data-nav-group');
-    if (persist && key) {
-      const map = readGroups();
-      map[key] = Boolean(open);
-      writeGroups(map);
-    }
+  }
+
+  function groupHasCurrent(group) {
+    return Boolean(group?.querySelector('[data-nav-current], .admin-nav-item.active, .admin-page-edit.active'));
   }
 
   function initNavGroups(sidebar) {
-    const stored = readGroups();
+    try { localStorage.removeItem('efhsAdminNavGroups'); } catch { /* private mode */ }
+    sidebar.querySelectorAll('[data-page-settings-menu]').forEach((group) => {
+      setGroupOpen(group, groupHasCurrent(group));
+    });
     sidebar.querySelectorAll('[data-nav-group]').forEach((group) => {
-      const key = group.getAttribute('data-nav-group');
-      const hasCurrent = Boolean(group.querySelector('[data-nav-current], .admin-nav-item.active, .admin-page-edit.active'));
-      const storedOpen = stored[key];
-      setGroupOpen(group, hasCurrent || storedOpen === true, false);
+      setGroupOpen(group, groupHasCurrent(group));
       const toggle = group.querySelector('[data-nav-group-toggle], [data-boosters-toggle], [data-sponsors-toggle], :scope > .admin-menu-parent');
       if (!toggle || toggle.dataset.navGroupBound === '1') return;
       toggle.dataset.navGroupBound = '1';
       toggle.addEventListener('click', (event) => {
         event.preventDefault();
-        const open = toggle.getAttribute('aria-expanded') !== 'true';
-        setGroupOpen(group, open, true);
+        setGroupOpen(group, toggle.getAttribute('aria-expanded') !== 'true');
       });
     });
     sidebar.querySelectorAll('[data-page-settings-toggle]').forEach((toggle) => {
@@ -259,7 +237,8 @@
         const kids = [...group.querySelectorAll('[data-nav-item], .admin-page-edit, [data-page-settings-link]')];
         const any = !query || kids.some((kid) => !kid.classList.contains('admin-nav-search-miss') && !kid.hidden);
         group.classList.toggle('admin-nav-search-empty', Boolean(query) && !any);
-        if (query && any) setGroupOpen(group, true, false);
+        if (query && any) setGroupOpen(group, true);
+        else if (!query) setGroupOpen(group, groupHasCurrent(group));
       });
     };
     input.addEventListener('input', apply);
@@ -301,7 +280,6 @@
     const closeBtn = document.querySelector('[data-admin-nav-close]');
 
     setOpen(desiredOpen(), { persist: false });
-    if (isOverlay()) revealOverlaySubmenus();
 
     toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -335,7 +313,6 @@
     window.matchMedia(MOBILE_MQ).addEventListener('change', onBreakpoint);
     window.matchMedia(OVERLAY_MQ).addEventListener('change', () => {
       setOpen(isMobile() ? false : document.body.classList.contains('admin-nav-open'), { persist: false });
-      if (isOverlay()) revealOverlaySubmenus();
     });
   }
 

@@ -88,6 +88,10 @@ function createEnv() {
   };
 }
 
+function openGroupKeys(html) {
+  return [...html.matchAll(/data-nav-group-toggle="([^"]+)"[^>]*aria-expanded="true"/g)].map((match) => match[1]);
+}
+
 test('reorganized sidebar is identical on /admin, visual, and fundraiser-cards', () => {
   const opts = navOptions();
   const admin = renderAdminSidebarHtml(ASSET_VERSION, { ...opts, current: { route: 'admin' } });
@@ -100,6 +104,23 @@ test('reorganized sidebar is identical on /admin, visual, and fundraiser-cards',
   assert.match(admin, /admin-nav-badge/);
   assert.equal(navCore(admin), navCore(visual));
   assert.equal(navCore(admin), navCore(cards));
+});
+
+test('only the current screen group starts open', () => {
+  const cards = renderFundraiserCardsAdminHtml(ASSET_VERSION, navOptions({ route: 'fundraiser-cards' }));
+  const visual = renderVisualEditorHtml(ASSET_VERSION, {
+    ...navOptions({ route: 'visual', slug: 'fundraising' }),
+    slug: 'fundraising',
+    title: 'Fundraising',
+    path: '/fundraising.html',
+    active: 1,
+  });
+  const admin = renderAdminSidebarHtml(ASSET_VERSION, navOptions({ route: 'admin' }));
+  assert.deepEqual(openGroupKeys(cards), ['fundraising']);
+  assert.deepEqual(openGroupKeys(visual), ['pages']);
+  assert.deepEqual(openGroupKeys(admin), []);
+  assert.match(visual, /admin-page-edit active[^>]*>Fundraising</);
+  assert.match(cards, /class="admin-nav-item active"[^>]*data-nav-item="fundraiser-cards"/);
 });
 
 test('every Super Admin sidebar item has a working tab or admin URL', async () => {

@@ -3392,7 +3392,6 @@ function showAllowedPanels() {
   syncMinutesPanelMode();
   renderMobileAdminMenu();
   bindAdminNavToggle();
-  window.efhsAdminNav?.revealOverlaySubmenus?.();
   renderDashboard();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   const startTab = scheduleOnly
