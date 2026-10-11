@@ -431,3 +431,153 @@ body.visual-editor-body .admin-change-password{
     margin-left:auto;
   }
 }
+
+/* Reorganized CMS sidebar (identical on /admin, visual, fundraiser-cards) */
+.admin-sidebar[data-admin-nav-v2]{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  max-width:100%;
+  min-width:0;
+  overflow-x:hidden;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-user{
+  margin:0;
+  padding:0 6px;
+  box-sizing:border-box;
+  max-width:100%;
+  min-width:0;
+}
+.admin-user-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-width:0;
+}
+.admin-role-pill{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#f5c518;
+  color:#071b34;
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  line-height:1.2;
+}
+.admin-nav-search{
+  display:block;
+  margin:0;
+  padding:0 6px;
+  box-sizing:border-box;
+  max-width:100%;
+  min-width:0;
+}
+.admin-nav-search input{
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:12px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  padding:10px 12px;
+  font:inherit;
+}
+.admin-nav-search input::placeholder{color:#9fb4ce}
+.admin-sidebar[data-admin-nav-v2] .admin-nav-item,
+.admin-sidebar[data-admin-nav-v2] .admin-page-edit{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  white-space:normal;
+  overflow-wrap:break-word;
+  word-break:normal;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:#c7d7eb;
+  text-align:left;
+  text-decoration:none;
+  font:inherit;
+  font-weight:850;
+  padding:9px 12px;
+  cursor:pointer;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-nav-item:hover,
+.admin-sidebar[data-admin-nav-v2] .admin-nav-item.active,
+.admin-sidebar[data-admin-nav-v2] .admin-page-edit:hover,
+.admin-sidebar[data-admin-nav-v2] .admin-page-edit.active{
+  background:#3b82f6;
+  color:#fff;
+}
+.admin-nav-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:1.35rem;
+  height:1.35rem;
+  padding:0 6px;
+  border-radius:999px;
+  background:#e71321;
+  color:#fff;
+  font-size:.68rem;
+  font-weight:900;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-menu-parent{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-menu-parent:after{
+  content:"";
+  width:.45rem;
+  height:.45rem;
+  border-right:2px solid #9fb4ce;
+  border-bottom:2px solid #9fb4ce;
+  transform:rotate(-45deg);
+  margin-left:8px;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-menu-parent[aria-expanded="true"]:after{
+  transform:rotate(45deg);
+  margin-top:-4px;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-menu-sub,
+.admin-sidebar[data-admin-nav-v2] .admin-page-shortcuts{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:2px;
+  padding:0 0 6px 10px;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-menu-sub[hidden]{display:none!important}
+.admin-sidebar[data-admin-nav-v2] .admin-sidebar-footer{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  max-width:100%;
+  min-width:0;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-change-password,
+.admin-sidebar[data-admin-nav-v2] .admin-logout{
+  width:auto;
+  min-width:0;
+  flex:1 1 8rem;
+}
+.admin-sidebar[data-admin-nav-v2] .admin-nav-search-empty,
+.admin-sidebar[data-admin-nav-v2] .admin-nav-search-miss{display:none!important}
+.image-admin-shell .admin-nav-item,
+body.visual-editor-body .admin-nav-item{
+  color:#c7d7eb;
+}

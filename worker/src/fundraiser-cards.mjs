@@ -839,7 +839,7 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
 <main class="admin-shell cms-shell image-admin-shell">
   ${renderAdminChromeBar()}
   ${renderAdminSidebarBackdrop()}
-  ${renderAdminSidebarHtml(v, { user: options.user, allow: options.allow })}
+  ${renderAdminSidebarHtml(v, options)}
   <section class="admin-workspace">
   <div class="fc-phone-gate" data-fc-phone-gate>
     <div class="fc-phone-gate-card">

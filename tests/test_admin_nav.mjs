@@ -70,7 +70,9 @@ test('admin nav script stores desktop preference and traps overlay focus', () =>
   assert.match(adminJs, /requestedTab/);
   assert.match(adminJs, /get\('tab'\)/);
   assert.match(navJs, /function isStandaloneAdminPage/);
-  assert.match(navJs, /function wireStandaloneAdminLinks/);
+  assert.match(navJs, /function wireAdminNavLinks/);
+  assert.match(navJs, /efhsAdminNavGroups/);
+  assert.match(navJs, /data-admin-nav-search/);
   assert.match(navJs, /function revealOverlaySubmenus/);
   assert.match(navJs, /revealOverlaySubmenus/);
   assert.match(navJs, /admin-menu-group:not\(\[hidden\]\)/);

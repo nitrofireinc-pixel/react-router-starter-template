@@ -971,7 +971,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
 <body class="visual-editor-body${canLayout ? '' : ' visual-content-only'}" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}" data-can-layout="${canLayout ? '1' : '0'}" data-can-settings="${canSettings ? '1' : '0'}">
   ${renderAdminChromeBar()}
   ${renderAdminSidebarBackdrop()}
-  ${renderAdminSidebarHtml(v, { user: options.user, allow: options.allow })}
+  ${renderAdminSidebarHtml(v, options)}
   <div class="visual-phone-gate" data-visual-phone-gate>
     <div class="visual-phone-gate-card">
       <h1>Please edit pages on a computer or tablet.</h1>

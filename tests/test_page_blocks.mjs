@@ -116,7 +116,8 @@ test('fundraising visual editor has add hero card and sidebar page settings', ()
   assert.doesNotMatch(renderVisualEditorHtml('test', { slug: 'join', canLayout: true }), /data-visual-add-hero/);
   const sidebar = renderAdminSidebarHtml('test', { allow: (tab) => tab === 'page-settings' || tab === 'pages' });
   assert.match(sidebar, /data-page-settings-menu/);
-  assert.match(sidebar, /data-page-settings-link="fundraising">Fundraising/);
+  assert.match(sidebar, /data-page-settings-link="fundraising"/);
+  assert.match(sidebar, /data-page-settings-link="fundraising"[\s\S]*?>Fundraising</);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /page\.slug !== 'fundraising'/);
   assert.match(adminJs, /bindPageSettingsMenu/);

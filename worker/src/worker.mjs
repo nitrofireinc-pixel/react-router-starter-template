@@ -464,7 +464,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261011a';
+export const ASSET_VERSION = 'cms-p1-20261011b';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7953,6 +7953,8 @@ export function adminSidebarAllows(user, tab) {
       return hasPermission(user, 'photos');
     case 'page-settings':
       return hasPermission(user, 'pages');
+    case 'fundraiser-cards':
+      return canEditFundraiserCards(user, fundraiserPerms());
     case 'pages':
       return hasPermission(user, 'pages')
         || parsePermissions(user.permissions).some((item) => /^(page|layout):/.test(String(item)));
@@ -13487,10 +13489,47 @@ async function handleLogin(request, env, ctx = null) {
   });
 }
 
-function renderAdminAppHtml(user) {
+async function loadAdminNavContext(env, user, current = {}) {
+  let pages = [];
+  let fundraiserDraftCount = 0;
+  try {
+    const rows = await env.DB.prepare(
+      'SELECT slug, path, title, nav_order, active FROM cms_pages ORDER BY nav_order, id',
+    ).all();
+    pages = (rows.results || []).filter((page) => {
+      if (page.slug === 'boosters') {
+        return canEditPageContent(user, 'boosters') || hasPermission(user, 'boosters') || hasPermission(user, 'pages');
+      }
+      return canEditPageContent(user, page.slug);
+    });
+  } catch {
+    pages = [];
+  }
+  try {
+    if (adminSidebarAllows(user, 'fundraiser-cards')) {
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM fundraiser_cards WHERE status = 'draft'",
+      ).first();
+      fundraiserDraftCount = Number(row?.n || 0) || 0;
+    }
+  } catch {
+    fundraiserDraftCount = 0;
+  }
+  return {
+    user,
+    allow: (tab) => adminSidebarAllows(user, tab),
+    pages,
+    fundraiserDraftCount,
+    current,
+    roleLabel: isSuperAdmin(user) ? 'Super Admin' : 'Editor',
+  };
+}
+
+function renderAdminAppHtml(user, nav = {}) {
   return ADMIN_HTML.replace('__ADMIN_SIDEBAR__', renderAdminSidebarHtml(ASSET_VERSION, {
     user,
     allow: (tab) => adminSidebarAllows(user, tab),
+    ...nav,
   }));
 }
 
@@ -13533,7 +13572,8 @@ async function handleAdmin(request, env, ctx = null) {
     });
     return denied;
   }
-  return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user)), user);
+  const nav = await loadAdminNavContext(env, user, { route: 'admin' });
+  return attachLoginHintIfNeeded(request, htmlResponse(renderAdminAppHtml(user, nav)), user);
 }
 
 async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {}) {
@@ -13578,11 +13618,12 @@ async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {
     });
     return denied;
   }
+  const nav = await loadAdminNavContext(env, user, { route: 'fundraiser-cards' });
   return attachLoginHintIfNeeded(request, htmlResponse(renderFundraiserCardsAdminHtml(ASSET_VERSION, {
     user,
     canPublish: canPublishFundraiserCards(user, fundraiserPerms()),
     alertEmails: await getFundraiserAlertEmails(env),
-    allow: (tab) => adminSidebarAllows(user, tab),
+    ...nav,
   })), user);
 }
 
@@ -13670,6 +13711,7 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     }),
     meta: { slug: key, kind: 'open' },
   });
+  const nav = await loadAdminNavContext(env, user, { route: 'visual', slug: key });
   return attachLoginHintIfNeeded(request, htmlResponse(renderVisualEditorHtml(ASSET_VERSION, {
     title: cms.title,
     slug: key,
@@ -13678,7 +13720,7 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     user,
     canLayout: canEditVisualLayout(user, key, canEditPageLayout),
     canSettings: canManagePageSettings(user),
-    allow: (tab) => adminSidebarAllows(user, tab),
+    ...nav,
   })), user);
 }
 
