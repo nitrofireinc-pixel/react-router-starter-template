@@ -87,6 +87,15 @@ export const ADMIN_AUDIT_KNOWN_ACTIONS = Object.freeze([
   'log.cutover',
   'access.denied',
   'access.unauthenticated',
+  'fundraiser.card.create',
+  'fundraiser.card.edit',
+  'fundraiser.card.reorder',
+  'fundraiser.card.approve',
+  'fundraiser.card.reject',
+  'fundraiser.card.restore',
+  'fundraiser.card.hide',
+  'fundraiser.card.delete',
+  'fundraiser.draft.auto',
 ]);
 export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
   { method: 'POST', path: '/api/admin/forms', logger: 'generic', action: 'change.forms' },
@@ -158,6 +167,16 @@ export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
   { method: 'POST', path: '/api/admin/photos/reorder', logger: 'generic', action: 'change.photos' },
   { method: 'PUT', path: '/api/admin/photos/5', logger: 'generic', action: 'change.photos' },
   { method: 'DELETE', path: '/api/admin/photos/5', logger: 'generic', action: 'change.photos' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards', logger: 'explicit', action: 'fundraiser.card.create' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/reorder', logger: 'explicit', action: 'fundraiser.card.reorder' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/sync', logger: 'explicit', action: 'fundraiser.draft.auto' },
+  { method: 'PUT', path: '/api/admin/fundraiser-cards/settings', logger: 'explicit', action: 'fundraiser.card.edit' },
+  { method: 'PUT', path: '/api/admin/fundraiser-cards/9', logger: 'explicit', action: 'fundraiser.card.edit' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/9/approve', logger: 'explicit', action: 'fundraiser.card.approve' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/9/reject', logger: 'explicit', action: 'fundraiser.card.reject' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/9/restore', logger: 'explicit', action: 'fundraiser.card.restore' },
+  { method: 'POST', path: '/api/admin/fundraiser-cards/9/hide', logger: 'explicit', action: 'fundraiser.card.hide' },
+  { method: 'DELETE', path: '/api/admin/fundraiser-cards/9', logger: 'explicit', action: 'fundraiser.card.delete' },
 ]);
 export const SECURITY_LOG_FORBIDDEN_PERMISSIONS = Object.freeze([
   'security-log',
@@ -461,6 +480,7 @@ export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   if (path === '/api/admin/password') return false;
   if (path === '/api/admin/users' || path.startsWith('/api/admin/users/')) return false;
   if (path === '/api/admin/maintenance') return false;
+  if (path === '/api/admin/fundraiser-cards' || path.startsWith('/api/admin/fundraiser-cards/')) return false;
   return isMutatingHttpMethod(method);
 }
 

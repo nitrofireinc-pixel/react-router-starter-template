@@ -40,6 +40,8 @@ for (const name of [
   'admin-nav.css',
   'admin-visual.js',
   'admin-visual.css',
+  'admin-fundraiser-cards.js',
+  'admin-fundraiser-cards.css',
   'badge-creator.js',
   'badge-creator-admin.js',
   'push-sw.js',

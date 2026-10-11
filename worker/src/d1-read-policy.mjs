@@ -33,6 +33,14 @@ const publicReadMemory = new Map();
 const publicReadKeys = new Set();
 let publicReadGeneration = 0;
 
+// Always purge these on admin writes. Isolates that never fetched a key
+// otherwise leave a stale Cache API entry (empty page-blocks hid the hero).
+export const PUBLIC_READ_PURGE_KEYS = Object.freeze([
+  'fundraiser-cards',
+  'page-blocks:fundraising',
+  'page-blocks:fundraising:v2',
+]);
+
 export function resetPublicReadCache() {
   publicReadGeneration += 1;
   publicReadMemory.clear();
@@ -241,11 +249,11 @@ export async function cachedPublicRead(key, loader, { timeoutMs = PUBLIC_READ_PE
 
 export async function invalidatePublicReadCache() {
   publicReadGeneration += 1;
-  const keys = [...publicReadKeys];
+  const keys = new Set([...publicReadKeys, ...PUBLIC_READ_PURGE_KEYS]);
   publicReadMemory.clear();
   publicReadKeys.clear();
-  if (typeof caches === 'undefined' || !caches?.default || !keys.length) return;
-  await Promise.all(keys.map(async (key) => {
+  if (typeof caches === 'undefined' || !caches?.default) return;
+  await Promise.all([...keys].map(async (key) => {
     try {
       await caches.default.delete(cacheRequestFor(key));
     } catch {

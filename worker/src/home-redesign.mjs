@@ -1,5 +1,7 @@
 /** Approved home-page redesign. Markup follows the mockup; copy stays in the CMS or live data. */
 
+import { renderHeroCardHtml, SILENT_AUCTION_HELP_LINE } from './page-blocks.mjs';
+
 const HEART = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.1 5.4 3 1.8-1.9 3.3-3 5.4-3 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>';
 const ARROW = '<svg class="ic arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z"/></svg>';
 const CHEV = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z"/></svg>';
@@ -471,11 +473,113 @@ export function renderFundraisingHelpRow() {
 </section>`;
 }
 
+function sanitizePublicUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw.slice(0, 500);
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'https:') return url.toString().slice(0, 500);
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
+function stripLeftoverFundraisingBodyCards(html = '') {
+  const keepLive = /data-square-donate|square-donate-card|fundraising-card|fundraising-hero-card|feature-fund|fundraising-help/i;
+  return String(html || '')
+    .replace(
+      /<article\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/article>/gi,
+      (full) => (keepLive.test(full) ? full : ''),
+    )
+    .replace(
+      /<div\b[^>]*\bclass="[^"]*\bcard\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+      (full) => {
+        if (keepLive.test(full)) return full;
+        if (/data-cms-field=["']body_text["']/i.test(full)) {
+          return fundraisingInnerIsBlank(full) ? '' : full;
+        }
+        if (/data-visual-block/i.test(full)) return full;
+        return fundraisingInnerIsBlank(full) ? '' : full;
+      },
+    )
+    .replace(
+      /<section\b[^>]*\bcontent\b(?![^>]*fundraising)[^>]*>\s*<div\b[^>]*\bwrap\b[^>]*>\s*<\/div>\s*<\/section>/gi,
+      '',
+    );
+}
+
+function renderFundraiserPrimaryButton({
+  primaryButton,
+  flyer,
+  title,
+  volunteers,
+  calendarHref,
+  primaryUrl = '',
+} = {}) {
+  const safeUrl = sanitizePublicUrl(primaryUrl);
+  if (primaryButton === 'none') return '';
+  if (primaryButton === 'view_flyer') {
+    return flyer
+      ? `<button type="button" class="btn btn-navy" data-photo-open data-photo-caption="${escapeAttr(title)}">View flyer</button>`
+      : '';
+  }
+  if (primaryButton === 'volunteer') {
+    return `<a class="btn btn-navy" href="${escapeAttr(safeUrl || '/boosters.html')}">Volunteer</a>`;
+  }
+  if (primaryButton === 'link') {
+    return safeUrl ? `<a class="btn btn-navy" href="${escapeAttr(safeUrl)}">Learn more</a>` : '';
+  }
+  if (primaryButton === 'details') {
+    return `<a class="btn btn-navy" href="${escapeAttr(safeUrl || calendarHref)}">View details</a>`;
+  }
+  if (flyer) {
+    return `<button type="button" class="btn btn-navy" data-photo-open data-photo-caption="${escapeAttr(title)}">View flyer</button>`;
+  }
+  return `<a class="btn btn-navy" href="${escapeAttr(volunteers ? '/boosters.html' : calendarHref)}">${volunteers ? 'Volunteer' : 'View details'}</a>`;
+}
+
+export function cardToFundraisingEvent(card = {}) {
+  return {
+    title: card.title,
+    description: card.description,
+    location: card.location,
+    start_date: card.event_date || card.start_date,
+    start_time: card.start_time,
+    end_time: card.end_time,
+    all_day: card.start_time || card.end_time ? 0 : 1,
+  };
+}
+
+export function renderFundraisingCardFromCms(card = {}) {
+  const flyer = String(card.picture_mode || '') === 'image' ? sanitizePublicUrl(card.image_url) : '';
+  const title = String(card.title || '');
+  const description = String(card.description || '').trim()
+    || (/silent auction/i.test(title) ? SILENT_AUCTION_HELP_LINE : '');
+  return renderFundraisingCard(cardToFundraisingEvent(card), {
+    flyer,
+    flyerAlt: card.title,
+    description,
+    mustAttend: Boolean(Number(card.must_attend)),
+    volunteersNeeded: Boolean(Number(card.volunteers_needed)),
+    customLabel: card.custom_label,
+    primaryButton: card.primary_button,
+    primaryUrl: card.primary_url,
+    showAddToCalendar: card.show_add_to_calendar == null ? true : Boolean(Number(card.show_add_to_calendar)),
+  });
+}
+
 export function renderFundraisingCard(event, {
   flyer = '',
   flyerAlt = '',
   description = '',
   mustAttend = false,
+  volunteersNeeded,
+  customLabel = '',
+  primaryButton,
+  primaryUrl = '',
+  showAddToCalendar = true,
 } = {}) {
   const rawTitle = plainText(event?.title) || plainText(flyerAlt) || 'Current Fundraiser';
   const title = fundraiserDisplayTitle(rawTitle) || rawTitle;
@@ -483,22 +587,34 @@ export function renderFundraisingCard(event, {
   const facts = fundraiserPlace(event, description);
   const sub = facts.description && !looksLikeCssOrStyleDump(facts.description) ? facts.description : '';
   const attend = mustAttend || /must\s+attend/i.test(`${event?.description || ''} ${description}`);
-  const volunteers = !attend && fundraiserNeedsVolunteers(event, description);
+  const volunteers = volunteersNeeded != null
+    ? Boolean(volunteersNeeded) && !attend
+    : (!attend && fundraiserNeedsVolunteers(event, description));
   const whenLabel = when.long || when.short;
   const timeBit = fundraiserWhenTime(event);
   const whenValue = [whenLabel, timeBit].filter(Boolean).join(' · ');
   const factsHtml = (whenValue || facts.where)
     ? `<div class="ff-facts">${whenValue ? `<div><strong>When</strong><span>${escapeHtml(whenValue)}</span></div>` : ''}${facts.where ? `<div><strong>Where</strong><span>${escapeHtml(facts.where)}</span></div>` : ''}</div>`
     : '';
-  const media = flyer
-    ? `<button type="button" class="ff-thumb ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
+  const safeFlyer = sanitizePublicUrl(flyer);
+  const media = safeFlyer
+    ? `<button type="button" class="ff-thumb ff-media" data-photo-open aria-label="${escapeAttr(title)}" data-photo-caption="${escapeAttr(title)}"><img src="${escapeAttr(safeFlyer)}" alt="${escapeAttr(flyerAlt || `${title} flyer`)}"></button>`
     : renderFundraiserPlaceholder(title, when);
   const calendarHref = fundraiserCalendarHref(event);
-  const primary = flyer
-    ? `<button type="button" class="btn btn-navy" data-photo-open data-photo-caption="${escapeAttr(title)}">View flyer</button>`
-    : `<a class="btn btn-navy" href="${volunteers ? '/boosters.html' : calendarHref}">${volunteers ? 'Volunteer' : 'View details'}</a>`;
-  const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}</div>`;
-  return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
+  const primary = renderFundraiserPrimaryButton({
+    primaryButton,
+    flyer: safeFlyer,
+    title,
+    volunteers,
+    calendarHref,
+    primaryUrl,
+  });
+  const extra = plainText(customLabel);
+  const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}${extra ? `<span class="pill">${escapeHtml(extra)}</span>` : ''}</div>`;
+  const calendar = showAddToCalendar
+    ? `<a class="btn btn-outline" href="${escapeAttr(calendarHref)}">Add to calendar</a>`
+    : '';
+  return `<article class="feature-fund fundraising-card${safeFlyer ? '' : ' no-flyer'}">
     ${media}
     <div class="ff-body">
       ${pills}
@@ -507,7 +623,7 @@ export function renderFundraisingCard(event, {
       ${factsHtml}
       <div class="btn-row">
         ${primary}
-        <a class="btn btn-outline" href="${calendarHref}">Add to calendar</a>
+        ${calendar}
       </div>
     </div>
   </article>`;
@@ -516,26 +632,39 @@ export function renderFundraisingCard(event, {
 export function decorateFundraisingPage(html, data = {}) {
   const source = applyFundraisingHeroIntro(collapseEmptyFundraisingParagraphs(String(html || '')));
   if (!source.trim()) return source;
-  const media = extractFundraisingMedia(source);
-  const events = selectHomeSchedule(data.events || []).fundraisers;
-  const count = Math.max(events.length, media.images.length, (events.length || media.images.length || media.description) ? 1 : 0);
-  const cards = [];
-  for (let index = 0; index < count; index += 1) {
-    const event = events[index] || null;
-    const flyer = media.images[index] || (index === 0 ? media.images[0] : null);
-    const leftover = index === 0 ? media.description : '';
-    if (!event && !flyer?.src && !leftover) continue;
-    const rawAlt = flyer?.alt || '';
-    cards.push(renderFundraisingCard(event, {
-      flyer: flyer?.src || '',
-      flyerAlt: /^\d+$/.test(rawAlt) ? '' : rawAlt,
-      description: leftover,
-      mustAttend: index === 0 && media.mustAttend,
-    }));
+  let cards = [];
+  if (Array.isArray(data.blocks) && data.blocks.length) {
+    cards = data.blocks.map((item) => {
+      if (item?.type === 'hero' || item?.kind === 'hero' || item?.block?.kind === 'hero') {
+        return renderHeroCardHtml(item.block || item);
+      }
+      const card = item?.card || item;
+      return card ? renderFundraisingCardFromCms(card) : '';
+    }).filter(Boolean);
+  } else if (Array.isArray(data.cards)) {
+    cards = data.cards.map((card) => renderFundraisingCardFromCms(card)).filter(Boolean);
+  } else {
+    const media = extractFundraisingMedia(source);
+    const events = selectHomeSchedule(data.events || []).fundraisers;
+    const count = Math.max(events.length, media.images.length, (events.length || media.images.length || media.description) ? 1 : 0);
+    for (let index = 0; index < count; index += 1) {
+      const event = events[index] || null;
+      const flyer = media.images[index] || (index === 0 ? media.images[0] : null);
+      const leftover = index === 0 ? media.description : '';
+      if (!event && !flyer?.src && !leftover) continue;
+      const rawAlt = flyer?.alt || '';
+      cards.push(renderFundraisingCard(event, {
+        flyer: flyer?.src || '',
+        flyerAlt: /^\d+$/.test(rawAlt) ? '' : rawAlt,
+        description: leftover,
+        mustAttend: index === 0 && media.mustAttend,
+      }));
+    }
   }
   let next = source;
   if (cards.length) next = replaceFundraisingBody(next, cards.join(''));
   else next = hideEmptyFundraisingBodyField(stripLegacyFundraisingExtras(next));
+  if (Array.isArray(data.cards) || Array.isArray(data.blocks)) next = stripLeftoverFundraisingBodyCards(next);
   if (!/\bdata-fundraising-help\b/.test(next)) {
     next = /<\/section>/i.test(next)
       ? next.replace(/<\/section>(?![\s\S]*<\/section>)/i, `</section>${renderFundraisingHelpRow()}`)

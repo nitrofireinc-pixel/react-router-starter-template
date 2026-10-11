@@ -50,3 +50,6 @@ AUDIT_ALLOW_LEGACY_V3_UNTIL_ID = "1576"
 binding = "DB"
 database_name = "efhsband-dev-db"
 database_id = "e71387af-9198-48e6-b6e9-72729866bdae"
+
+[triggers]
+crons = ["20 11 * * *"]

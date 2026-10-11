@@ -15,6 +15,7 @@ import {
   visualStructureSignature,
   visualStyleSignature,
 } from './page-permissions.mjs';
+import { pageBlocksEnabled } from './page-blocks.mjs';
 
 export { visualStructureSignature, visualStyleSignature };
 
@@ -194,7 +195,7 @@ export function canonicalLockedPlaceholder(kind = '') {
     case 'sponsor-tiers':
       return `<section class="sponsor-tiers visual-locked-slot"${lock} data-sponsor-tiers><p class="visual-locked-label">Sponsor packages (locked)</p></section>`;
     case 'fundraiser':
-      return `<div class="visual-locked-slot"${lock} data-fundraising-cards><p class="visual-locked-label">Fundraiser cards (locked)</p></div>`;
+      return `<div class="fundraising-cards fundraising-card-list visual-locked-slot"${lock} data-fundraising-cards><p class="visual-locked-label">Fundraiser cards (locked)</p></div>`;
     case 'donate':
       return `<span class="btn outline visual-locked-slot"${lock} data-donate-open>Donate</span>`;
     case 'sponsor-form':
@@ -202,6 +203,28 @@ export function canonicalLockedPlaceholder(kind = '') {
     default:
       return `<div class="visual-locked-slot"${lock}><p class="visual-locked-label">Live section (locked)</p></div>`;
   }
+}
+
+export function ensureFundraisingVisualSlot(html = '') {
+  const source = String(html || '');
+  if (/\bdata-fundraising-cards\b/i.test(source)) return source;
+  const slot = canonicalLockedPlaceholder('fundraiser');
+  if (/data-cms-field=["']body_text["']/i.test(source)) {
+    return source.replace(
+      /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
+      `$1${slot}`,
+    );
+  }
+  if (/<div\b[^>]*\bclass=["'][^"']*\bwrap\b[^>]*>/i.test(source)) {
+    return source.replace(
+      /(<div\b[^>]*\bclass=["'][^"']*\bwrap\b[^>]*>)([\s\S]*?)(<\/div>\s*<\/section>)/i,
+      `$1$2${slot}$3`,
+    );
+  }
+  if (/<\/section>/i.test(source)) {
+    return source.replace(/<\/section>(?![\s\S]*<\/section>)/i, `${slot}</section>`);
+  }
+  return `${source}${slot}`;
 }
 
 export function replaceLockedVisualBlocks(html = '') {
@@ -462,6 +485,7 @@ const VISUAL_DATA_ATTRS = Object.freeze([
   'data-email-list-signup',
   'data-sponsor-tiers',
   'data-fundraising-cards',
+  'data-cms-field',
   'data-donate-open',
   'data-dues-open',
   'data-sponsor-choice-open',
@@ -483,7 +507,7 @@ function appendVisualDataAttrs(open, rawAttrs) {
       next += ` ${name}`;
       continue;
     }
-    if (!/^[a-z0-9,-]{1,64}$/i.test(value)) continue;
+    if (!/^[a-z0-9,_-]{1,64}$/i.test(value)) continue;
     next += attr(name, value.toLowerCase() === value || name === 'data-visual-locked' || name === 'data-visual-block' || name === 'data-cms-form'
       ? value
       : value);
@@ -748,7 +772,8 @@ export async function loadVisualPageState(env, slug = VISUAL_PILOT_SLUG) {
   const starter = defaultVisualHtml(key);
   const rawDraft = String(page?.draft_html || '').trim();
   const imported = rawDraft ? '' : importCmsBodyToVisual(cms.body_html || '', key);
-  const draft = sanitizeVisualPageHtml(rawDraft || imported || starter) || starter;
+  let draft = sanitizeVisualPageHtml(rawDraft || imported || starter) || starter;
+  if (pageBlocksEnabled(key)) draft = ensureFundraisingVisualSlot(draft);
   const published = sanitizeVisualPageHtml(page?.published_html || '') || '';
   return {
     slug: key,
@@ -798,12 +823,14 @@ export async function saveVisualPage(env, {
     baseline = sanitizeVisualPageHtml(
       stored?.draft_html || stored?.published_html || importCmsBodyToVisual(cms.body_html || '', key),
     );
+    if (pageBlocksEnabled(key)) baseline = ensureFundraisingVisualSlot(baseline);
     const forbidden = contentOnlyForbiddenHtmlViolation(baseline, incoming);
     if (forbidden) throw layoutRequiredError(key, forbidden);
     const incomingViolation = contentOnlyHtmlViolation(baseline, incoming);
     if (incomingViolation) throw layoutRequiredError(key, incomingViolation);
   }
-  const clean = sanitizeVisualPageHtml(incoming);
+  let clean = sanitizeVisualPageHtml(incoming);
+  if (pageBlocksEnabled(key)) clean = ensureFundraisingVisualSlot(clean);
   if (!clean || isNearEmptyVisualHtml(clean)) {
     const error = new Error('Add some page content before saving.');
     error.status = 422;
@@ -909,7 +936,11 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
     ? ''
     : '<p class="visual-inactive-banner">Coming Soon (inactive) — visitors don\'t see this content until the page is turned on in Settings</p>';
   const layoutTools = canLayout
-    ? `<button type="button" class="visual-banner-btn" data-visual-add>Add section</button>`
+    ? `<button type="button" class="visual-banner-btn" data-visual-add>Add section</button>${
+      slug === 'fundraising'
+        ? `<button type="button" class="visual-banner-btn" data-visual-add-callout>+ Add callout</button><button type="button" class="visual-banner-btn" data-visual-add-hero>+ Add hero card</button>`
+        : ''
+    }`
     : '';
   const historyTool = canLayout
     ? `<button type="button" class="visual-banner-btn" data-visual-history>History</button>`
@@ -940,7 +971,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
 <body class="visual-editor-body${canLayout ? '' : ' visual-content-only'}" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}" data-can-layout="${canLayout ? '1' : '0'}" data-can-settings="${canSettings ? '1' : '0'}">
   ${renderAdminChromeBar()}
   ${renderAdminSidebarBackdrop()}
-  ${renderAdminSidebarHtml(v, { user: options.user, allow: options.allow })}
+  ${renderAdminSidebarHtml(v, options)}
   <div class="visual-phone-gate" data-visual-phone-gate>
     <div class="visual-phone-gate-card">
       <h1>Please edit pages on a computer or tablet.</h1>

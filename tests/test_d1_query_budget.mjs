@@ -27,7 +27,7 @@ const PUBLIC_GET_BUDGET = 12;
 
 const PUBLIC_ROUTES = [
   { path: '/', slug: 'home', title: 'Home', is_home: 1, needsPhotos: true, isHome: true },
-  { path: '/fundraising.html', slug: 'fundraising', title: 'Fundraising', is_home: 0, needsEvents: true },
+  { path: '/fundraising.html', slug: 'fundraising', title: 'Fundraising', is_home: 0, needsFundraiserCards: true },
   { path: '/calendar.html', slug: 'calendar', title: 'Calendar', is_home: 0 },
   { path: '/gallery.html', slug: 'gallery', title: 'Gallery', is_home: 0, needsPhotos: true },
   { path: '/sponsors.html', slug: 'sponsors', title: 'Sponsors', is_home: 0 },
@@ -64,6 +64,10 @@ function createCountingEnv(pages, { schemaVersion = DB_SCHEMA_VERSION } = {}) {
       result = type === 'first' ? { id: 1 } : { results: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `S${i}` })) };
     } else if (text.includes('FROM caldev_events') || text.includes('FROM events')) {
       result = type === 'first' ? { id: 1 } : { results: Array.from({ length: 5 }, (_, i) => ({ id: i + 1 })) };
+    } else if (text.includes('FROM page_blocks')) {
+      result = type === 'first' ? null : { results: [] };
+    } else if (text.includes('FROM fundraiser_cards')) {
+      result = type === 'first' ? null : { results: [] };
     } else {
       result = type === 'first' ? null : { results: [] };
     }
@@ -208,6 +212,8 @@ test('go-live SQL matches the incremental statements and stays under 40 queries 
     readFileSync(join(root, 'migrations/2026-10-04.4.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.5.sql'), 'utf8'),
     readFileSync(join(root, 'migrations/2026-10-04.6.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.7.sql'), 'utf8'),
+    readFileSync(join(root, 'migrations/2026-10-04.8.sql'), 'utf8'),
   ].join('\n');
   const rendered = renderIncrementalSchemaSql(DB_SCHEMA_VERSION);
   const normalize = (value) => value.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
