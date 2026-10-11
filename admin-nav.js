@@ -177,8 +177,12 @@
     notifyLayout();
   }
 
-  function wireVisualEditorLinks(sidebar) {
-    if (!document.body.classList.contains('visual-editor-body')) return;
+  function isStandaloneAdminPage() {
+    return !document.getElementById('tab-dashboard');
+  }
+
+  function wireStandaloneAdminLinks(sidebar) {
+    if (!isStandaloneAdminPage()) return;
     sidebar.addEventListener('click', (event) => {
       const tabBtn = event.target.closest('[data-tab]');
       if (tabBtn?.dataset.tab) {
@@ -235,8 +239,8 @@
       }
     });
 
-    wireVisualEditorLinks(sidebar);
-    if (document.body.classList.contains('visual-editor-body')) {
+    wireStandaloneAdminLinks(sidebar);
+    if (isStandaloneAdminPage()) {
       sidebar.querySelectorAll('[data-page-settings-toggle]').forEach((toggle) => {
         if (toggle.dataset.navBound === '1') return;
         toggle.dataset.navBound = '1';

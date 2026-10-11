@@ -15,6 +15,7 @@ import {
   importLiveFundraiserCards,
   isPublicFundraiserCard,
   MATTRESS_FLYER_URL,
+  renderFundraiserCardsAdminHtml,
   renderFundraisingCardFromCms,
   runFundraiserCardCalendarSync,
   setFundraiserCardStatus,
@@ -206,7 +207,12 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261010c'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p1-20261011a'/);
+  const cardsAdmin = renderFundraiserCardsAdminHtml('test');
+  assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
+  assert.match(cardsAdmin, /class="admin-workspace"/);
+  assert.match(cardsAdmin, /admin-nav\.css\?v=/);
+  assert.match(cardsAdmin, /admin-nav\.js\?v=/);
   assert.match(workerSrc, /async scheduled\(/);
   assert.match(workerSrc, /needsFundraiserCards: isFundraising/);
   assert.match(adminJs, /\/admin\/fundraiser-cards/);

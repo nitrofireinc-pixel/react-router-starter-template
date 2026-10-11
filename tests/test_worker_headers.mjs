@@ -146,7 +146,7 @@ test('every Worker-rendered CSS/JS reference carries the asset version param', (
       assert.match(match[0], /[?&]v=/, `unversioned Worker HTML ref ${match[0]}`);
     }
   }
-  assert.equal(ASSET_VERSION, 'cms-p1-20261010c');
+  assert.equal(ASSET_VERSION, 'cms-p1-20261011a');
 });
 
 test('admin-visual canvas stylesheets append the public asset version', () => {

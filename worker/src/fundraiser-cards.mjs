@@ -836,9 +836,11 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
   <link rel="stylesheet" href="/admin-fundraiser-cards.css?v=${v}">
 </head>
 <body class="admin-body fc-admin-body" data-can-publish="${canPublish}">
+<main class="admin-shell cms-shell image-admin-shell">
   ${renderAdminChromeBar()}
   ${renderAdminSidebarBackdrop()}
   ${renderAdminSidebarHtml(v, { user: options.user, allow: options.allow })}
+  <section class="admin-workspace">
   <div class="fc-phone-gate" data-fc-phone-gate>
     <div class="fc-phone-gate-card">
       <h1>Please edit fundraiser cards on a computer or tablet.</h1>
@@ -849,7 +851,7 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
       </div>
     </div>
   </div>
-  <main class="fc-main">
+  <div class="fc-main">
     <header class="fc-head">
       <div>
         <p class="kicker">Pages · Fundraising</p>
@@ -952,7 +954,9 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
         <button type="submit" class="btn outline">Close</button>
       </form>
     </dialog>
-  </main>
+  </div>
+  </section>
+</main>
   <script src="/admin-nav.js?v=${v}"></script>
   <script src="/admin-fundraiser-cards.js?v=${v}"></script>
 </body>

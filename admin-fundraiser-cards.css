@@ -174,7 +174,5 @@
     padding:24px;
     box-shadow:0 16px 40px rgba(0,33,66,.12);
   }
-  .fc-main,
-  .admin-sidebar,
-  .admin-sidebar-backdrop{display:none!important}
+  .fc-main{display:none!important}
 }
