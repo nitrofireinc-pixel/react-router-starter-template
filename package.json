@@ -6,7 +6,7 @@
   },
   "scripts": {
     "build": "npm run build:pages",
-    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs tests/test_d1_read_policy.mjs tests/test_site_marquee_chrome.mjs tests/test_public_square_sponsor_logout.mjs tests/test_visual_page_editor.mjs tests/test_phase0_cms.mjs tests/test_d1_query_budget.mjs tests/test_worker_headers.mjs tests/test_admin_audit_log.mjs tests/test_admin_nav.mjs tests/test_admin_nav_behavior.mjs tests/test_error_pages.mjs tests/test_page_permissions.mjs",
+    "test:worker": "node --test tests/test_worker_backend.mjs tests/test_caldev.mjs tests/test_d1_read_policy.mjs tests/test_site_marquee_chrome.mjs tests/test_public_square_sponsor_logout.mjs tests/test_visual_page_editor.mjs tests/test_phase0_cms.mjs tests/test_d1_query_budget.mjs tests/test_worker_headers.mjs tests/test_admin_audit_log.mjs tests/test_admin_nav.mjs tests/test_admin_nav_behavior.mjs tests/test_admin_nav_links.mjs tests/test_error_pages.mjs tests/test_page_permissions.mjs tests/test_fundraiser_cards.mjs tests/test_page_blocks.mjs",
     "test:pages-build": "node --test tests/test_pages_build.mjs",
     "test:cms-guide-pdf": "node --test tests/test_cms_guide_pdf.mjs",
     "test:visual-mobile": "node tests/visual-editor-playwright.mjs",

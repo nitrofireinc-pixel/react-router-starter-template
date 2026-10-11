@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
+import { renderFundraiserCardsAdminHtml } from '../worker/src/fundraiser-cards.mjs';
 import { renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
 import {
   renderAdminChromeBar,
@@ -39,6 +40,14 @@ test('collapsible admin nav chrome is shared by CMS and visual editor', () => {
   assert.match(editor, /admin-nav\.css\?v=/);
   assert.match(editor, /admin-nav\.js\?v=/);
   assert.match(editor, /data-visual-banner/);
+  assert.match(editor, /class="visual-editor-body/);
+
+  const cardsAdmin = renderFundraiserCardsAdminHtml(ASSET_VERSION);
+  assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
+  assert.match(cardsAdmin, /class="admin-workspace"/);
+  assert.match(cardsAdmin, /id="admin-sidebar"/);
+  assert.match(cardsAdmin, /admin-nav\.css\?v=/);
+  assert.match(cardsAdmin, /admin-nav\.js\?v=/);
 });
 
 test('admin nav script stores desktop preference and traps overlay focus', () => {
@@ -60,6 +69,10 @@ test('admin nav script stores desktop preference and traps overlay focus', () =>
   assert.match(adminJs, /efhsAdminNav\?\.isOverlay/);
   assert.match(adminJs, /requestedTab/);
   assert.match(adminJs, /get\('tab'\)/);
+  assert.match(navJs, /function isStandaloneAdminPage/);
+  assert.match(navJs, /function wireAdminNavLinks/);
+  assert.match(navJs, /efhsAdminNavGroups/);
+  assert.match(navJs, /data-admin-nav-search/);
   assert.match(navJs, /function revealOverlaySubmenus/);
   assert.match(navJs, /revealOverlaySubmenus/);
   assert.match(navJs, /admin-menu-group:not\(\[hidden\]\)/);

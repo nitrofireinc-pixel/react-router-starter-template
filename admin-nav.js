@@ -119,7 +119,7 @@
   function revealOverlaySubmenus() {
     if (!isOverlay()) return;
     document.querySelectorAll('.admin-menu-group:not([hidden])').forEach((group) => {
-      const toggle = group.querySelector('.admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle]');
+      const toggle = group.querySelector('.admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle]');
       const sub = group.querySelector('.admin-menu-sub');
       if (toggle) toggle.setAttribute('aria-expanded', 'true');
       if (sub) sub.hidden = false;
@@ -177,24 +177,117 @@
     notifyLayout();
   }
 
-  function wireVisualEditorLinks(sidebar) {
-    if (!document.body.classList.contains('visual-editor-body')) return;
-    sidebar.addEventListener('click', (event) => {
-      const tabBtn = event.target.closest('[data-tab]');
-      if (tabBtn?.dataset.tab) {
+  function isStandaloneAdminPage() {
+    return !document.getElementById('tab-dashboard');
+  }
+
+  const GROUP_STORE = 'efhsAdminNavGroups';
+
+  function readGroups() {
+    try {
+      return JSON.parse(localStorage.getItem(GROUP_STORE) || '{}') || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function writeGroups(map) {
+    try {
+      localStorage.setItem(GROUP_STORE, JSON.stringify(map));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function setGroupOpen(group, open, persist) {
+    if (!group) return;
+    const toggle = group.querySelector('[data-nav-group-toggle], [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle], :scope > .admin-menu-parent');
+    const sub = group.querySelector(':scope > .admin-menu-sub') || group.querySelector('.admin-menu-sub');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+    const key = group.getAttribute('data-nav-group');
+    if (persist && key) {
+      const map = readGroups();
+      map[key] = Boolean(open);
+      writeGroups(map);
+    }
+  }
+
+  function initNavGroups(sidebar) {
+    const stored = readGroups();
+    sidebar.querySelectorAll('[data-nav-group]').forEach((group) => {
+      const key = group.getAttribute('data-nav-group');
+      const hasCurrent = Boolean(group.querySelector('[data-nav-current], .admin-nav-item.active, .admin-page-edit.active'));
+      const storedOpen = stored[key];
+      setGroupOpen(group, hasCurrent || storedOpen === true, false);
+      const toggle = group.querySelector('[data-nav-group-toggle], [data-boosters-toggle], [data-sponsors-toggle], :scope > .admin-menu-parent');
+      if (!toggle || toggle.dataset.navGroupBound === '1') return;
+      toggle.dataset.navGroupBound = '1';
+      toggle.addEventListener('click', (event) => {
         event.preventDefault();
-        window.location.href = `/admin?tab=${encodeURIComponent(tabBtn.dataset.tab)}`;
+        const open = toggle.getAttribute('aria-expanded') !== 'true';
+        setGroupOpen(group, open, true);
+      });
+    });
+    sidebar.querySelectorAll('[data-page-settings-toggle]').forEach((toggle) => {
+      if (toggle.dataset.navBound === '1') return;
+      toggle.dataset.navBound = '1';
+      toggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        const group = toggle.closest('.admin-menu-group');
+        const sub = group?.querySelector('.admin-menu-sub');
+        const open = toggle.getAttribute('aria-expanded') !== 'true';
+        toggle.setAttribute('aria-expanded', String(open));
+        if (sub) sub.hidden = !open;
+      });
+    });
+  }
+
+  function initNavSearch(sidebar) {
+    const input = sidebar.querySelector('[data-admin-nav-search]');
+    if (!input || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    const apply = () => {
+      const query = String(input.value || '').trim().toLowerCase();
+      sidebar.querySelectorAll('[data-nav-item], .admin-page-edit, [data-page-settings-link]').forEach((item) => {
+        const label = item.textContent.toLowerCase();
+        const match = !query || label.includes(query);
+        item.classList.toggle('admin-nav-search-miss', Boolean(query) && !match);
+      });
+      sidebar.querySelectorAll('[data-nav-group]').forEach((group) => {
+        if (group.hasAttribute('hidden') && !query) return;
+        const kids = [...group.querySelectorAll('[data-nav-item], .admin-page-edit, [data-page-settings-link]')];
+        const any = !query || kids.some((kid) => !kid.classList.contains('admin-nav-search-miss') && !kid.hidden);
+        group.classList.toggle('admin-nav-search-empty', Boolean(query) && !any);
+        if (query && any) setGroupOpen(group, true, false);
+      });
+    };
+    input.addEventListener('input', apply);
+  }
+
+  function wireAdminNavLinks(sidebar) {
+    sidebar.addEventListener('click', (event) => {
+      if (event.target.closest('.admin-menu-parent, [data-nav-group-toggle], [data-page-settings-toggle], [data-boosters-toggle], [data-sponsors-toggle]')) {
         return;
       }
-      const pageBtn = event.target.closest('[data-edit-shortcut], [data-page-nav], [data-sponsor-nav], [data-page-settings]');
-      if (pageBtn) {
+      const item = event.target.closest('[data-tab], [data-nav-item], [data-page-nav], [data-sponsor-nav], [data-page-settings-link], [data-page-settings], .admin-page-edit');
+      if (!item) return;
+      const href = item.getAttribute('href') || item.dataset.navHref;
+      const tab = item.dataset.tab;
+      if (tab && document.getElementById(`tab-${tab}`)) {
         event.preventDefault();
-        window.location.href = '/admin';
+        return;
+      }
+      if (isStandaloneAdminPage() && href && href !== '#') {
+        event.preventDefault();
+        window.location.href = href;
       }
     });
-    sidebar.querySelector('[data-open-password]')?.addEventListener('click', () => {
-      window.location.href = '/admin?tab=dashboard';
-    });
+    if (isStandaloneAdminPage()) {
+      sidebar.querySelector('[data-open-password]')?.addEventListener('click', () => {
+        window.location.href = '/admin?tab=dashboard';
+      });
+    }
   }
 
   function init() {
@@ -226,13 +319,15 @@
     sidebar.addEventListener('click', (event) => {
       if (!isOverlay()) return;
       const target = event.target.closest('a, button');
-      if (!target || target.matches('[data-admin-nav-close], .admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle]')) return;
+      if (!target || target.matches('[data-admin-nav-close], .admin-menu-parent, [data-boosters-toggle], [data-sponsors-toggle], [data-page-settings-toggle]')) return;
       if (target.closest('.admin-menu, .admin-page-shortcuts, .admin-sidebar-footer')) {
         window.setTimeout(() => setOpen(false, { fromUser: true }), 0);
       }
     });
 
-    wireVisualEditorLinks(sidebar);
+    initNavGroups(sidebar);
+    initNavSearch(sidebar);
+    wireAdminNavLinks(sidebar);
 
     const onBreakpoint = () => {
       setOpen(desiredOpen(), { persist: false });

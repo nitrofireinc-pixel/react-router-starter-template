@@ -2918,12 +2918,17 @@ function renderMobileAdminMenu() {
 }
 
 function markAdminNavActive({ tab = '', pageSlug = '', sponsorNav = '' } = {}) {
-  document.querySelectorAll('.admin-menu button').forEach((button) => {
+  document.querySelectorAll('.admin-menu button, .admin-menu .admin-nav-item, .admin-menu .admin-page-edit').forEach((button) => {
     const isTab = Boolean(tab) && button.dataset.tab === tab
       && !button.dataset.editShortcut
       && !button.dataset.sponsorNav
-      && !button.dataset.pageNav;
-    const isPage = Boolean(pageSlug) && button.dataset.editShortcut === pageSlug;
+      && !button.dataset.pageNav
+      && !button.dataset.pageSlug;
+    const isPage = Boolean(pageSlug) && (
+      button.dataset.editShortcut === pageSlug
+      || button.dataset.pageSlug === pageSlug
+      || button.dataset.pageNav === pageSlug
+    );
     const isSponsorNav = Boolean(sponsorNav) && button.dataset.sponsorNav === sponsorNav;
     const isPageNav = Boolean(pageSlug) && button.dataset.pageNav === pageSlug;
     button.classList.toggle('active', Boolean(isTab || isPage || isSponsorNav || isPageNav));
@@ -3160,6 +3165,32 @@ function bindSponsorsMenu() {
   });
 }
 
+function setPageSettingsMenuOpen(open) {
+  document.querySelectorAll('[data-page-settings-menu]').forEach((menu) => {
+    const toggle = menu.querySelector('[data-page-settings-toggle]');
+    const sub = menu.querySelector('[data-page-settings-sub]');
+    if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    if (sub) sub.hidden = !open;
+  });
+}
+
+function bindPageSettingsMenu() {
+  const menu = document.querySelector('[data-page-settings-menu]');
+  const toggle = menu?.querySelector('[data-page-settings-toggle]');
+  if (!menu || !toggle || toggle.dataset.bound === '1') return;
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    setPageSettingsMenuOpen(open);
+  });
+  menu.querySelectorAll('[data-page-settings-link]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setPageSettingsMenuOpen(true);
+      editPage(button.dataset.pageSettingsLink);
+    });
+  });
+}
+
 function bindBoostersMenu() {
   const menu = document.querySelector('[data-boosters-menu]');
   const toggle = menu?.querySelector('[data-boosters-toggle]');
@@ -3181,11 +3212,14 @@ function renderPageShortcuts() {
   mount.innerHTML = pages.map((page) => {
     const name = escapeHtml(pageShortcutLabel(page));
     const slug = escapeAttr(page.slug);
-    const settings = siteAdmin
+    const settings = siteAdmin && page.slug !== 'fundraising'
       ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg></a>`
       : '';
     if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
-      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>`;
+      const cards = page.slug === 'fundraising'
+        ? `<div class="admin-page-row admin-page-row-sub"><a class="admin-page-edit" href="/admin/fundraiser-cards">Fundraiser cards</a></div>`
+        : '';
+      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>${cards}`;
     }
     return `<div class="admin-page-row"><button type="button" data-edit-shortcut="${slug}">${name}</button>${settings}</div>`;
   }).join('');
@@ -3202,8 +3236,14 @@ function renderPageShortcuts() {
 
 function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;
-  document.querySelector('#current-user').innerHTML = `<b>${escapeHtml(displayName)}</b><span>${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span>`;
+  const userMount = document.querySelector('#current-user');
+  if (userMount && !userMount.querySelector('.admin-role-pill') && !userMount.querySelector('b')) {
+    userMount.innerHTML = `<div class="admin-user-row"><b>${escapeHtml(displayName)}</b><span class="admin-role-pill">${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span></div>`;
+  } else if (userMount && !userMount.innerHTML.trim()) {
+    userMount.innerHTML = `<div class="admin-user-row"><b>${escapeHtml(displayName)}</b><span class="admin-role-pill">${isSuperAdmin() ? 'Super Admin' : 'Editor'}</span></div>`;
+  }
 
+  const navV2 = Boolean(document.querySelector('[data-admin-nav-v2]'));
   const scheduleOnly = isScheduleBoardOnlyUser();
   const panels = {
     dashboard: !scheduleOnly,
@@ -3230,48 +3270,73 @@ function showAllowedPanels() {
   };
   let manageVisible = false;
   document.querySelectorAll('.admin-menu [data-tab]').forEach(button => {
-    let allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab];
-    // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu.
-    if (button.dataset.tab === 'events') allowed = false;
+    if (button.classList.contains('admin-menu-parent')) return;
+    let allowed = button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail' || panels[button.dataset.tab] || button.dataset.tab === 'fundraiser-cards';
+    // Public calendar editing lives on Schedule Board; keep legacy Events tab out of the menu
+    // unless the reorganized sidebar explicitly lists it.
+    if (button.dataset.tab === 'events' && !navV2) allowed = false;
     if (button.dataset.tab === 'caldev') allowed = canAccessScheduleBoard();
     if (scheduleOnly && (button.dataset.tab === 'dashboard' || button.dataset.tab === 'mail')) allowed = false;
-    button.hidden = !allowed;
-    button.onclick = () => activateTab(button.dataset.tab);
+    if (!navV2) button.hidden = !allowed;
+    if (document.getElementById(`tab-${button.dataset.tab}`)) {
+      button.onclick = (event) => {
+        event?.preventDefault?.();
+        activateTab(button.dataset.tab);
+      };
+    }
     if (allowed && button.dataset.tab !== 'dashboard' && button.dataset.tab !== 'mail') manageVisible = true;
   });
-  const boostersMenu = document.querySelector('[data-boosters-menu]');
-  const boostersAccess = !scheduleOnly && canAccessBoostersMenu();
-  if (boostersMenu) {
-    boostersMenu.hidden = !boostersAccess;
-    if (boostersAccess) manageVisible = true;
-    const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
-    if (boostersToggle) boostersToggle.hidden = !boostersAccess;
-    const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
-    if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
-    const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
-    if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
-    const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
-    if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
+  if (!navV2) {
+    const boostersMenu = document.querySelector('[data-boosters-menu]');
+    const boostersAccess = !scheduleOnly && canAccessBoostersMenu();
+    if (boostersMenu) {
+      boostersMenu.hidden = !boostersAccess;
+      if (boostersAccess) manageVisible = true;
+      const boostersToggle = boostersMenu.querySelector('[data-boosters-toggle]');
+      if (boostersToggle) boostersToggle.hidden = !boostersAccess;
+      const boosterMembersBtn = boostersMenu.querySelector('[data-tab="booster-members"]');
+      if (boosterMembersBtn) boosterMembersBtn.hidden = !canEditBoosterMembers();
+      const minutesBtn = boostersMenu.querySelector('[data-tab="minutes"]');
+      if (minutesBtn) minutesBtn.hidden = !canViewMinutes();
+      const badgeCreatorBtn = boostersMenu.querySelector('[data-tab="badge-creator"]');
+      if (badgeCreatorBtn) badgeCreatorBtn.hidden = !canAccessBadgeCreator();
+    }
+    bindBoostersMenu();
+    const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
+    const sponsorsAccess = canAccessSponsorsMenu();
+    if (sponsorsMenu) {
+      sponsorsMenu.hidden = !sponsorsAccess;
+      if (sponsorsAccess) manageVisible = true;
+      const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
+      if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
+      const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
+      if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
+      const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
+      if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
+      const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
+      if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
+    }
+    bindSponsorsMenu();
+    const pageSettingsMenu = document.querySelector('[data-page-settings-menu]');
+    if (pageSettingsMenu) {
+      const showSettings = canManageSitePages();
+      pageSettingsMenu.hidden = !showSettings;
+      if (showSettings) manageVisible = true;
+    }
+    bindPageSettingsMenu();
+    const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
+    if (manageLabel) manageLabel.hidden = !manageVisible;
+    renderPageShortcuts();
+  } else {
+    document.querySelectorAll('[data-page-settings-link]').forEach((button) => {
+      if (button.dataset.editBound === '1') return;
+      button.dataset.editBound = '1';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        editPage(button.dataset.pageSettingsLink);
+      });
+    });
   }
-  bindBoostersMenu();
-  const sponsorsMenu = document.querySelector('[data-sponsors-menu]');
-  const sponsorsAccess = canAccessSponsorsMenu();
-  if (sponsorsMenu) {
-    sponsorsMenu.hidden = !sponsorsAccess;
-    if (sponsorsAccess) manageVisible = true;
-    const sponsorsToggle = sponsorsMenu.querySelector('[data-sponsors-toggle]');
-    if (sponsorsToggle) sponsorsToggle.hidden = !sponsorsAccess;
-    const manageSponsorsBtn = sponsorsMenu.querySelector('[data-tab="sponsors"]');
-    if (manageSponsorsBtn) manageSponsorsBtn.hidden = !canEditSponsors();
-    const sponsorsPageBtn = sponsorsMenu.querySelector('[data-sponsor-nav="sponsors-page"]');
-    if (sponsorsPageBtn) sponsorsPageBtn.hidden = !canEditPage('sponsors');
-    const becomeBtn = sponsorsMenu.querySelector('[data-sponsor-nav="become-a-sponsor"]');
-    if (becomeBtn) becomeBtn.hidden = !canEditPage('become-a-sponsor');
-  }
-  bindSponsorsMenu();
-  const manageLabel = [...document.querySelectorAll('.admin-menu-label')].find((node) => !node.hasAttribute('data-page-shortcuts-label'));
-  if (manageLabel) manageLabel.hidden = !manageVisible;
-  renderPageShortcuts();
   const visualPilotLink = document.querySelector('[data-visual-pilot-link]');
   if (visualPilotLink) visualPilotLink.remove();
   const newPageButton = document.querySelector('#new-page');
@@ -3334,6 +3399,8 @@ function showAllowedPanels() {
     ? 'caldev'
     : (requestedTab && canOpenAdminTab(requestedTab) ? requestedTab : 'dashboard');
   activateTab(startTab);
+  const settingsPage = new URLSearchParams(window.location.search).get('page');
+  if (startTab === 'pages' && settingsPage) editPage(settingsPage);
 }
 
 function bindAdminNavToggle() {

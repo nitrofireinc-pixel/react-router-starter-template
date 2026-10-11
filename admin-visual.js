@@ -621,9 +621,301 @@
     });
   }
 
+  const isFundraising = pageSlug === 'fundraising';
+  let fundraisingBlocks = [];
+  let fundraisingCards = [];
+  let fundraisingSelectedKey = '';
+  let fundraisingDropKey = '';
+  let paintingBlocks = false;
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/'/g, '&#39;');
+  }
+  function blockKey(block, index) {
+    if (block?.kind === 'fundraiser' && block.ref_id) return `fundraiser:${block.ref_id}`;
+    if (block?.id) return `hero:${block.id}`;
+    if (block?.client_key) return block.client_key;
+    return `hero:tmp:${index}`;
+  }
+  function cardById(id) {
+    return fundraisingCards.find((card) => Number(card.id) === Number(id)) || null;
+  }
+  function formatCardWhen(card) {
+    const match = String(card?.event_date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    const label = `${days[date.getUTCDay()] || ''}, ${months[Number(match[2]) - 1] || ''} ${Number(match[3])}, ${match[1]}`;
+    const start = String(card?.start_time || '').trim();
+    const end = String(card?.end_time || '').trim();
+    const time = start && end ? `${start}–${end}` : (start || end);
+    return time ? `${label} · ${time}` : label;
+  }
+  function dateTile(value) {
+    const match = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    return match ? `${months[Number(match[1]) - 1] || ''} ${Number(match[2])}` : 'SOON';
+  }
+  function fundraiserCardHtml(card) {
+    if (!card) return '<article class="fundraising-card"><div class="ff-body"><h3>Missing card</h3></div></article>';
+    const flyer = card.picture_mode === 'image' && card.image_url;
+    const media = flyer
+      ? `<div class="ff-thumb ff-media"><img src="${escapeAttr(card.image_url)}" alt=""></div>`
+      : `<div class="ff-thumb" aria-hidden="true"><div class="fx-ph"><b>${escapeHtml(dateTile(card.event_date))}</b><span>${escapeHtml(card.title || 'Fundraiser')}</span></div></div>`;
+    const attend = Number(card.must_attend);
+    const volunteers = Number(card.volunteers_needed) && !attend;
+    const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}</div>`;
+    const when = formatCardWhen(card);
+    const facts = (when || card.location)
+      ? `<div class="ff-facts">${when ? `<div><strong>When</strong><span>${escapeHtml(when)}</span></div>` : ''}${card.location ? `<div><strong>Where</strong><span>${escapeHtml(card.location)}</span></div>` : ''}</div>`
+      : '';
+    return `<article class="feature-fund fundraising-card${flyer ? '' : ' no-flyer'}">
+      ${media}
+      <div class="ff-body">
+        ${pills}
+        <h3>${escapeHtml(card.title || 'Fundraiser')}</h3>
+        ${card.description ? `<p class="ff-sub">${escapeHtml(card.description)}</p>` : ''}
+        ${facts}
+        <div class="btn-row"><span class="btn btn-navy">View details</span><span class="btn btn-outline">Add to calendar</span></div>
+      </div>
+    </article>`;
+  }
+  function heroCardHtml(block) {
+    const pill = block.corner_tag || '';
+    const label = block.label || '';
+    const title = block.title || 'Hero card';
+    const body = block.body || '';
+    const highlight = block.highlight || '';
+    const button = block.button_text || 'Learn more';
+    return `<article class="fundraising-hero-card${Number(block.hidden) ? ' is-hidden' : ''}" data-page-block="hero">
+      <span class="fundraising-hero-pill${pill ? '' : ' is-empty'}" data-hero-field="corner_tag" contenteditable="true" data-placeholder="Corner tag">${escapeHtml(pill)}</span>
+      <div class="fundraising-hero-grid">
+        <div class="fundraising-hero-copy">
+          <span class="fundraising-hero-label${label ? '' : ' is-empty'}" data-hero-field="label" contenteditable="true" data-placeholder="Label">${escapeHtml(label)}</span>
+          <h3 data-hero-field="title" contenteditable="true" data-placeholder="Title">${escapeHtml(title)}</h3>
+          <p class="fundraising-hero-text${body ? '' : ' is-empty'}" data-hero-field="body" contenteditable="true" data-placeholder="Text">${escapeHtml(body)}</p>
+        </div>
+        <div class="fundraising-hero-aside">
+          <div class="fundraising-hero-highlight${highlight ? '' : ' is-empty'}" data-hero-field="highlight" contenteditable="true" data-placeholder="Highlight">${escapeHtml(highlight)}</div>
+          <div class="fundraising-hero-button">
+            <span class="btn btn-navy" data-hero-field="button_text" contenteditable="true" data-placeholder="Button text">${escapeHtml(button)}</span>
+            <label class="fundraising-hero-link">Button link
+              <input type="text" data-hero-field="button_link" value="${escapeAttr(block.button_link || '')}" placeholder="donate, /page.html, or https://">
+            </label>
+          </div>
+        </div>
+      </div>
+    </article>`;
+  }
+  function collectHeroFields(shell, block) {
+    const next = { ...block };
+    shell.querySelectorAll('[data-hero-field]').forEach((node) => {
+      const name = node.getAttribute('data-hero-field');
+      next[name] = node.tagName === 'INPUT' ? node.value : String(node.textContent || '').replace(/\s+/g, ' ').trim();
+    });
+    return next;
+  }
+  function syncFundraisingFromDom(doc) {
+    if (!doc) return;
+    fundraisingBlocks = fundraisingBlocks.map((block, index) => {
+      const key = blockKey(block, index);
+      const shell = doc.querySelector(`[data-page-block-shell="${CSS.escape(key)}"]`);
+      if (!shell || block.kind !== 'hero') return block;
+      return collectHeroFields(shell, block);
+    });
+  }
+  function ensureFundraisingSlotHtml(html) {
+    if (!isFundraising) return html;
+    const source = String(html || '');
+    if (/\bdata-fundraising-cards\b/i.test(source)) return source;
+    const slot = '<div class="fundraising-cards fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>';
+    if (/data-cms-field=["']body_text["']/i.test(source)) {
+      return source.replace(
+        /(<([a-z0-9]+)\b[^>]*data-cms-field=["']body_text["'][^>]*>[\s\S]*?<\/\2>)/i,
+        `$1${slot}`,
+      );
+    }
+    if (/<\/section>/i.test(source)) {
+      return source.replace(/<\/section>(?![\s\S]*<\/section>)/i, `${slot}</section>`);
+    }
+    return `${source}${slot}`;
+  }
+  function paintFundraisingBlocks() {
+    if (!isFundraising || paintingBlocks) return;
+    const doc = editor.Canvas.getDocument();
+    let slot = doc?.querySelector('[data-fundraising-cards]');
+    if (!slot && doc) {
+      const host = doc.querySelector('.wrap') || doc.querySelector('section.content') || doc.body;
+      if (host) {
+        host.insertAdjacentHTML('beforeend', '<div class="fundraising-cards fundraising-card-list visual-locked-slot" data-visual-locked="fundraiser" data-fundraising-cards></div>');
+        slot = doc.querySelector('[data-fundraising-cards]');
+      }
+    }
+    if (!slot) return;
+    slot.classList.add('fundraising-cards', 'fundraising-card-list');
+    paintingBlocks = true;
+    const hint = '<p class="page-block-hint">Drag any card by its handle to move it above or below another.</p>';
+    slot.innerHTML = hint + fundraisingBlocks.map((block, index) => {
+      const key = blockKey(block, index);
+      const selected = key === fundraisingSelectedKey ? ' is-selected' : '';
+      const hidden = Number(block.hidden) ? ' is-hidden' : '';
+      const dropping = key === fundraisingDropKey ? ' is-drop' : '';
+      const inner = block.kind === 'hero' ? heroCardHtml(block) : fundraiserCardHtml(cardById(block.ref_id));
+      const del = block.kind === 'hero' && canLayout
+        ? '<button type="button" data-block-delete>Delete</button>'
+        : '';
+      const move = canLayout
+        ? `<button type="button" data-block-up>Move up</button><button type="button" data-block-down>Move down</button>`
+        : '';
+      const handle = canLayout
+        ? `<button type="button" class="page-block-handle" data-block-handle draggable="true" aria-label="Drag to reorder">⋮⋮</button>`
+        : '';
+      return `<div class="page-block-shell${selected}${hidden}${dropping}" data-page-block-shell="${escapeAttr(key)}" data-kind="${escapeAttr(block.kind)}" data-index="${index}">
+        ${handle}
+        <div class="page-block-actions">
+          <button type="button" data-block-edit>Edit</button>
+          <button type="button" data-block-hide>${Number(block.hidden) ? 'Show' : 'Hide'}</button>
+          ${del}
+          ${move}
+        </div>
+        <div class="page-block-drop" ${key === fundraisingDropKey ? '' : 'hidden'}>Drop here</div>
+        ${inner}
+      </div>`;
+    }).join('');
+    bindFundraisingUi(slot);
+    paintingBlocks = false;
+  }
+  function moveFundraisingBlock(from, to) {
+    if (!canLayout) return;
+    const next = [...fundraisingBlocks];
+    const [item] = next.splice(from, 1);
+    if (!item) return;
+    next.splice(Math.max(0, Math.min(to, next.length)), 0, item);
+    fundraisingBlocks = next;
+    markDirty();
+    paintFundraisingBlocks();
+  }
+  function bindFundraisingUi(slot) {
+    slot.querySelectorAll('[data-page-block-shell]').forEach((shell) => {
+      const index = Number(shell.dataset.index);
+      const block = fundraisingBlocks[index];
+      const key = blockKey(block, index);
+      shell.addEventListener('mousedown', (event) => {
+        if (event.target.closest('[contenteditable], .page-block-actions, .page-block-handle, .fundraising-hero-link')) {
+          event.stopPropagation();
+        }
+      }, true);
+      shell.addEventListener('click', () => {
+        fundraisingSelectedKey = key;
+        slot.querySelectorAll('.page-block-shell').forEach((node) => node.classList.toggle('is-selected', node === shell));
+      });
+      shell.querySelector('[data-block-edit]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (block.kind === 'fundraiser') {
+          window.location.href = `/admin/fundraiser-cards?id=${encodeURIComponent(block.ref_id || '')}`;
+          return;
+        }
+        fundraisingSelectedKey = key;
+        const title = shell.querySelector('[data-hero-field="title"]');
+        title?.focus();
+      });
+      shell.querySelector('[data-block-hide]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        fundraisingBlocks[index] = { ...block, hidden: Number(block.hidden) ? 0 : 1 };
+        markDirty();
+        paintFundraisingBlocks();
+      });
+      shell.querySelector('[data-block-delete]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (!canLayout || block.kind !== 'hero') return;
+        if (!window.confirm('Delete this hero card?')) return;
+        fundraisingBlocks.splice(index, 1);
+        markDirty();
+        paintFundraisingBlocks();
+      });
+      shell.querySelector('[data-block-up]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        moveFundraisingBlock(index, index - 1);
+      });
+      shell.querySelector('[data-block-down]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        moveFundraisingBlock(index, index + 1);
+      });
+      const handle = shell.querySelector('[data-block-handle]');
+      if (handle && canLayout) {
+        handle.addEventListener('dragstart', (event) => {
+          event.dataTransfer?.setData('text/plain', String(index));
+          event.dataTransfer.effectAllowed = 'move';
+          shell.classList.add('is-dragging');
+        });
+        handle.addEventListener('dragend', () => {
+          fundraisingDropKey = '';
+          shell.classList.remove('is-dragging');
+          paintFundraisingBlocks();
+        });
+      }
+      shell.addEventListener('dragover', (event) => {
+        if (!canLayout) return;
+        event.preventDefault();
+        fundraisingDropKey = key;
+        slot.querySelectorAll('.page-block-shell').forEach((node) => {
+          const on = node === shell;
+          node.classList.toggle('is-drop', on);
+          const line = node.querySelector('.page-block-drop');
+          if (line) line.hidden = !on;
+        });
+      });
+      shell.addEventListener('drop', (event) => {
+        if (!canLayout) return;
+        event.preventDefault();
+        const from = Number(event.dataTransfer?.getData('text/plain'));
+        fundraisingDropKey = '';
+        moveFundraisingBlock(from, index);
+      });
+      shell.querySelectorAll('[data-hero-field]').forEach((node) => {
+        const apply = () => {
+          fundraisingBlocks[index] = collectHeroFields(shell, fundraisingBlocks[index]);
+          markDirty();
+        };
+        node.addEventListener('input', apply);
+        node.addEventListener('change', apply);
+      });
+    });
+  }
+  function addHeroCard() {
+    if (!canLayout) return;
+    const selected = fundraisingBlocks.findIndex((block, index) => blockKey(block, index) === fundraisingSelectedKey);
+    const at = selected >= 0 ? selected + 1 : fundraisingBlocks.length;
+    const hero = {
+      kind: 'hero',
+      client_key: `hero:tmp:${Date.now()}`,
+      hidden: 0,
+      corner_tag: 'New card',
+      label: 'Fundraising goal',
+      title: 'New marching uniforms',
+      body: 'Every donation and fundraiser this fall goes toward new uniforms for the Blue Regiment.',
+      highlight: '$4,200 of $10,000 raised',
+      button_text: 'Give toward uniforms',
+      button_link: 'donate',
+    };
+    fundraisingBlocks.splice(at, 0, hero);
+    fundraisingSelectedKey = hero.client_key;
+    markDirty();
+    paintFundraisingBlocks();
+    setStatus('Hero card added. Nothing goes live until you save.');
+  }
+
   async function loadCanvas(draftHtml) {
     editor.UndoManager?.stop?.();
-    const split = splitVisualCss(draftHtml);
+    const split = splitVisualCss(ensureFundraisingSlotHtml(draftHtml));
     const frame = await loadLiveCanvasHtml(split.html);
     editor.setComponents(frame.html);
     if (split.css) editor.setStyle(split.css);
@@ -634,6 +926,7 @@
     enableCanvasScroll();
     editor.UndoManager?.start?.();
     clearLoadHistory();
+    paintFundraisingBlocks();
   }
 
     editor.on('load', () => {
@@ -650,7 +943,12 @@
   });
 
   editor.on('component:remove', () => markDirty());
-  editor.on('component:update', () => markDirty());
+  editor.on('component:update', () => {
+    markDirty();
+    if (!isFundraising) return;
+    const slot = editor.Canvas.getDocument()?.querySelector('[data-fundraising-cards]');
+    if (slot && !slot.querySelector('[data-page-block-shell]')) paintFundraisingBlocks();
+  });
   editor.on('component:styleUpdate', (comp) => {
     if (resizeSession) return;
     makeWidthResponsive(comp);
@@ -978,10 +1276,21 @@
     }
     try {
       setStatus(action === 'publish' ? 'Publishing…' : 'Saving draft…');
+      const doc = editor.Canvas.getDocument();
+      if (isFundraising) syncFundraisingFromDom(doc);
       const state = await jsonFetch(`/api/admin/visual-pages/${encodeURIComponent(pageSlug)}`, {
         method: 'PUT',
-        body: JSON.stringify({ action, html: exportEditableHtml() }),
+        body: JSON.stringify({
+          action,
+          html: exportEditableHtml(),
+          page_blocks: isFundraising ? { items: fundraisingBlocks } : undefined,
+        }),
       });
+      if (state.page_blocks?.draft) {
+        fundraisingBlocks = state.page_blocks.draft;
+        fundraisingCards = state.page_blocks.cards || fundraisingCards;
+        paintFundraisingBlocks();
+      }
       renderVersions(state.versions);
       clearDirty();
       setStatus(action === 'publish' ? 'Published to the live page.' : 'Draft saved.');
@@ -1072,8 +1381,22 @@
   (async function boot() {
     try {
       const state = await jsonFetch(`/api/admin/visual-pages/${encodeURIComponent(pageSlug)}`);
+      if (state.page_blocks?.enabled) {
+        fundraisingBlocks = state.page_blocks.draft || [];
+        fundraisingCards = state.page_blocks.cards || [];
+      }
       await loadCanvas(state.draft_html || '');
       renderVersions(state.versions);
+      document.querySelector('[data-visual-add-hero]')?.addEventListener('click', addHeroCard);
+      document.querySelector('[data-visual-add-callout]')?.addEventListener('click', () => {
+        insertBlock({
+          id: 'callout',
+          label: 'Callout',
+          html: '<aside class="notice" data-visual-block="callout"><h3>Note</h3><p>Add an important note for families here.</p></aside>',
+        });
+        markDirty();
+        setStatus('Callout added. Publish when you want it on the public page.');
+      });
       await renderPhotos().catch(() => {});
       clearDirty();
       clearLoadHistory();

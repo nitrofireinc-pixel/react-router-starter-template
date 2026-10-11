@@ -163,7 +163,7 @@ test('overlay open focuses the drawer after the transition and matches visual 76
     await dashboard.locator('.admin-nav-toggle').click();
     await waitForFocusInSidebar(dashboard);
     const overlayChildren = await dashboard.evaluate(() => {
-      const labels = [...document.querySelectorAll('.admin-menu button')]
+      const labels = [...document.querySelectorAll('.admin-menu button, .admin-menu .admin-nav-item')]
         .filter((button) => {
           if (button.hidden) return false;
           const style = getComputedStyle(button);
@@ -261,6 +261,8 @@ test('overlay open focuses the drawer after the transition and matches visual 76
 function prepareOverlayMenu() {
   const pages = document.querySelector('#admin-page-shortcuts');
   const pagesLabel = document.querySelector('[data-page-shortcuts-label]');
+  const pagesGroup = document.querySelector('[data-nav-group="pages"], [data-pages-group]');
+  if (pagesGroup) pagesGroup.hidden = false;
   if (pagesLabel) pagesLabel.hidden = false;
   if (pages) {
     pages.innerHTML = `
@@ -284,9 +286,9 @@ function measureOverlayStack() {
   const sidebar = document.getElementById('admin-sidebar');
   const menu = document.querySelector('.admin-menu');
   const menuStyle = getComputedStyle(menu);
-  const items = [...menu.querySelectorAll(':scope > button, :scope > .admin-menu-label, :scope .admin-page-edit, :scope .admin-menu-sub button, :scope .admin-menu-parent')]
+  const items = [...menu.querySelectorAll(':scope > a, :scope > button, :scope > .admin-menu-label, :scope .admin-page-edit, :scope .admin-menu-sub a, :scope .admin-menu-sub button, :scope .admin-menu-parent, :scope .admin-nav-item')]
     .filter((el) => {
-      if (el.hidden || el.closest('[hidden]')) return false;
+      if (el.hidden || el.closest('[hidden]') || el.classList.contains('admin-page-settings')) return false;
       const style = getComputedStyle(el);
       return style.display !== 'none' && style.visibility !== 'hidden' && el.getBoundingClientRect().height > 0;
     });
