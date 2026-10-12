@@ -1469,22 +1469,29 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
 .image-admin-shell #tab-sponsors .sponsors-list-head .muted{margin:0}
 .image-admin-shell #tab-sponsors .sponsor-list{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
   gap:8px;
   margin-top:0;
 }
 .image-admin-shell #tab-sponsors .sponsor-admin-row{
-  grid-template-columns:16px 40px minmax(0,1fr) auto;
-  gap:6px 8px;
-  padding:8px 10px;
+  grid-template-columns:18px 44px minmax(0,1fr);
+  grid-template-areas:
+    "drag logo copy"
+    "drag logo actions";
+  gap:4px 10px;
+  padding:10px 12px;
   border-radius:12px;
   align-items:center;
 }
+.image-admin-shell #tab-sponsors .sponsor-admin-row .drag-handle{grid-area:drag}
+.image-admin-shell #tab-sponsors .sponsor-admin-row .mini-logo{grid-area:logo}
+.image-admin-shell #tab-sponsors .sponsor-admin-copy{grid-area:copy;min-width:0}
 .image-admin-shell #tab-sponsors .sponsor-admin-row .row-actions{
+  grid-area:actions;
   grid-column:auto;
   display:flex;
   gap:6px;
-  justify-content:flex-end;
+  justify-content:flex-start;
 }
 .image-admin-shell #tab-sponsors .sponsor-admin-row .row-actions .btn,
 .image-admin-shell #tab-sponsors .sponsor-admin-row .row-actions button{
@@ -1493,12 +1500,12 @@ html.nav-use-hamburger body.nav-drawer-open{overflow:hidden}
   padding:5px 10px;
   font-size:.8rem;
 }
-.image-admin-shell #tab-sponsors .sponsor-admin-copy{min-width:0}
 .image-admin-shell #tab-sponsors .sponsor-admin-copy b{
   display:block;
   font-size:.92rem;
   line-height:1.25;
-  overflow-wrap:anywhere;
+  overflow-wrap:break-word;
+  word-break:normal;
 }
 .image-admin-shell #tab-sponsors .sponsor-admin-meta{
   display:flex;
