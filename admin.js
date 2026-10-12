@@ -5034,18 +5034,17 @@ function renderSponsors() {
   list.innerHTML = ordered.map((sponsor) => {
     const tier = sponsor.tier || sponsorTierFromLevel(sponsor.level);
     const tierLabel = sponsor.tier_label || (tier === 'gold' ? 'Gold' : tier === 'silver' ? 'Silver' : tier === 'honorable' ? 'Honorable Mention' : 'Bronze');
-    const benefits = [];
-    if (sponsor.show_marquee !== false) benefits.push('Marquee');
-    if (sponsor.show_flyin || tier === 'silver' || tier === 'gold') benefits.push('Fly-in');
-    if (sponsor.show_game_announcement || tier === 'gold') benefits.push('Public advert');
+    const isActive = Number(sponsor.active) !== 0;
     return `
     <article class="admin-row sponsor-admin-row" data-sponsor-id="${sponsor.id}" draggable="true">
       <button type="button" class="drag-handle" aria-label="Drag to reorder ${escapeHtml(sponsor.name || 'sponsor')}" title="Drag to reorder">⋮⋮</button>
       <div class="mini-logo">${sponsor.logo_url ? `<img src="${escapeHtml(sponsor.logo_url)}" alt="">` : escapeHtml(sponsor.mark_text || '★')}</div>
-      <div>
+      <div class="sponsor-admin-copy">
         <b>${escapeHtml(sponsor.name)}</b>
-        <span>${escapeHtml(formatAdminSponsorAddress(sponsor) || 'No address')}</span>
-        <small><span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span> · ${Number(sponsor.active) !== 0 ? 'On Sponsors page' : 'Hidden from Sponsors page'} · ${escapeHtml(benefits.join(' · '))}</small>
+        <span class="sponsor-admin-meta">
+          <span class="sponsor-tier-badge tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span>
+          <span class="sponsor-active-badge ${isActive ? 'is-on' : 'is-off'}">${isActive ? 'Active' : 'Hidden'}</span>
+        </span>
       </div>
       <div class="row-actions"><button type="button" data-edit-sponsor="${sponsor.id}">Edit</button><button type="button" data-delete-sponsor="${sponsor.id}">Delete</button></div>
     </article>
