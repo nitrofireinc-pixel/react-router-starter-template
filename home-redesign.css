@@ -488,7 +488,7 @@ body.home-page main.home-redesign,
 .home-redesign .sp{margin:0;display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:#fff}
 
 
-.home-redesign .sp img{width:84px;height:56px;object-fit:cover;border-radius:8px}
+.home-redesign .sp img{flex:0 0 84px;width:84px;height:56px;object-fit:contain;object-position:center;padding:4px;box-sizing:border-box;background:#fff;border:1px solid var(--line);border-radius:8px}
 
 
 .home-redesign .sp img.contain{object-fit:contain;background:#fff;width:110px}
