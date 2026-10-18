@@ -307,6 +307,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
 }
 
 function sponsorShowsFlyin(sponsor = {}) {
+  if (Number(sponsor.active) === 0) return false;
   if (sponsor.show_flyin === true || sponsor.show_flyin === 1) return true;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
   return /\b(silver|gold)\b/.test(tier) || Number(sponsor.homepage_ad) === 1;
