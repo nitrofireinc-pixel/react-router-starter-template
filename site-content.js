@@ -1124,6 +1124,7 @@ async function loadPublicContent() {
         .catch(() => [])
       : Promise.resolve([]),
   ]);
+  try { mountHolidayThemes(site); } catch { /* decorative only */ }
 
   if (site) {
     document.querySelectorAll('[data-site-field]').forEach(element => {
@@ -3138,6 +3139,97 @@ function bootPublicSiteContent() {
   bindLettermanForm();
   bindCmsForms();
   loadPublicContent();
+}
+
+// Holiday theme overlays (public pages only). Turned on/off per holiday in CMS → Site settings →
+// Holiday themes (site.holiday_theme = 'halloween' | ''; one at a time). Kill switch: set
+// HOLIDAY_THEMES_ENABLED = false, or add class "no-holiday-theme" to <html>/<body>.
+const HOLIDAY_THEMES_ENABLED = true;
+
+function activeHolidayTheme(site) {
+  return String(site?.holiday_theme || '').trim().toLowerCase();
+}
+
+function mountHolidayThemes(site) {
+  if (!HOLIDAY_THEMES_ENABLED) return;
+  const root = document.documentElement;
+  const body = document.body;
+  if (!body || root.classList.contains('no-holiday-theme') || body.classList.contains('no-holiday-theme')) return;
+  if (/^\/(admin|cms)(\/|$)/i.test(location.pathname || '') || !isPublicSiteDeadlineContext()) return;
+  const mounts = { halloween: mountHalloweenOverlay };
+  mounts[activeHolidayTheme(site)]?.();
+}
+
+function halloweenWebPath(size = 160) {
+  const spokes = 7;
+  const rings = [0.2, 0.38, 0.58, 0.8, 1];
+  const angle = (i) => (Math.PI / 2) * (i / (spokes - 1));
+  const pt = (r, a) => [r * Math.cos(a), r * Math.sin(a)];
+  const f = (n) => n.toFixed(1);
+  let d = '';
+  for (let i = 0; i < spokes; i += 1) {
+    const [x, y] = pt(size, angle(i));
+    d += `M0 0L${f(x)} ${f(y)}`;
+  }
+  rings.slice(0, -1).forEach((ring) => {
+    const r = ring * size;
+    for (let i = 0; i < spokes - 1; i += 1) {
+      const [x1, y1] = pt(r, angle(i));
+      const [x2, y2] = pt(r, angle(i + 1));
+      const [cx, cy] = pt(r * 0.86, (angle(i) + angle(i + 1)) / 2);
+      d += `${i === 0 ? `M${f(x1)} ${f(y1)}` : ''}Q${f(cx)} ${f(cy)} ${f(x2)} ${f(y2)}`;
+    }
+  });
+  return d;
+}
+
+function mountHalloweenOverlay() {
+  if (document.getElementById('efhs-halloween')) return;
+  const body = document.body;
+  const web = halloweenWebPath(160);
+  const style = document.createElement('style');
+  style.textContent = `
+#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:60;pointer-events:none}
+#efhs-halloween svg{position:absolute;display:block;overflow:visible;background:none}
+#efhs-halloween .hw-web{top:0;width:var(--hw-web,160px);height:var(--hw-web,160px);opacity:.32}
+#efhs-halloween .hw-web path{fill:none;stroke:#dfe6ee;stroke-width:1;vector-effect:non-scaling-stroke}
+#efhs-halloween .hw-web.l{left:0}
+#efhs-halloween .hw-web.r{right:0;transform:scaleX(-1)}
+#efhs-halloween .hw-spider{right:20px;top:0;width:16px;height:92px;opacity:.55;transform-origin:50% 0;animation:hw-bob 5s ease-in-out infinite}
+#efhs-halloween .hw-bat{left:var(--hw-bat-left,50%);top:var(--hw-bat-top,40px);width:46px;height:24px;margin-left:-23px;opacity:.55;animation:hw-drift 9s ease-in-out infinite}
+#efhs-halloween .hw-bat path{stroke:rgba(255,255,255,.55);stroke-width:.6;transform-origin:50% 50%;animation:hw-flap .6s ease-in-out infinite alternate}
+@keyframes hw-bob{0%,100%{transform:scaleY(.86)}50%{transform:scaleY(1)}}
+@keyframes hw-drift{0%,100%{transform:translate(-18px,0) rotate(-4deg)}50%{transform:translate(18px,-6px) rotate(4deg)}}
+@keyframes hw-flap{from{transform:scaleY(1)}to{transform:scaleY(.72)}}
+@media (max-width:640px){#efhs-halloween{--hw-web:90px}#efhs-halloween .hw-spider{right:4px;height:50px;width:12px}#efhs-halloween .hw-bat{width:36px;height:19px;margin-left:-18px}}
+@media (max-width:340px){#efhs-halloween{display:none}}
+@media (prefers-reduced-motion:reduce){#efhs-halloween *{animation:none!important}}
+@media print{#efhs-halloween{display:none}}`;
+  const wrap = document.createElement('div');
+  wrap.id = 'efhs-halloween';
+  wrap.setAttribute('aria-hidden', 'true');
+  const webSvg = (side) => `<svg class="hw-web ${side}" viewBox="0 0 160 160" focusable="false"><path d="${web}"/></svg>`;
+  wrap.innerHTML = `${webSvg('l')}${webSvg('r')}`
+    + '<svg class="hw-spider" viewBox="0 0 16 118" preserveAspectRatio="xMidYMin meet" focusable="false"><line x1="8" y1="0" x2="8" y2="104" stroke="#c9d2dc" stroke-width=".8" vector-effect="non-scaling-stroke"/><g fill="#1f2630" stroke="rgba(255,255,255,.7)" stroke-width=".6"><ellipse cx="8" cy="106" rx="3.2" ry="3.6"/><circle cx="8" cy="101.5" r="2.2"/></g><path d="M5 104l-4-3M5 106l-4 0M5 108l-4 3M11 104l4-3M11 106l4 0M11 108l4 3" stroke="#c9d2dc" stroke-width=".8" fill="none"/></svg>'
+    + '<svg class="hw-bat" viewBox="0 0 46 24" focusable="false"><path fill="#1f2630" d="M23 7c-1.2 0-2 .8-2.4 1.6L19.5 6l-.3 3.2C16 6.5 11 4 4 6c3 1.5 4.5 4 4.3 7 2.4-1.4 5.2-.8 6.7 1.4 1.4-1 3.6-.9 5 .6.8 1.6 1.8 3.4 3 4.8 1.2-1.4 2.2-3.2 3-4.8 1.4-1.5 3.6-1.6 5-.6 1.5-2.2 4.3-2.8 6.7-1.4-.2-3 1.3-5.5 4.3-7-7-2-12 .5-15.2 3.2L26.5 6l-1.1 2.6C25 7.8 24.2 7 23 7z"/></svg>';
+  // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
+  // floats just under the header/marquee/notice strip instead of on the logo or icons.
+  const placeBat = () => {
+    if (window.innerWidth > 900) {
+      wrap.style.setProperty('--hw-bat-top', '40px');
+      wrap.style.setProperty('--hw-bat-left', '36%');
+      return;
+    }
+    const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
+      .map((sel) => document.querySelector(sel)?.getBoundingClientRect().bottom || 0);
+    const bottom = Math.max(...chrome);
+    wrap.style.setProperty('--hw-bat-top', `${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px`);
+    wrap.style.setProperty('--hw-bat-left', '50%');
+  };
+  placeBat();
+  window.setTimeout(placeBat, 1500);
+  document.head.appendChild(style);
+  body.appendChild(wrap);
 }
 
 if (!globalThis.__EFHS_SKIP_SITE_CONTENT_BOOT) {

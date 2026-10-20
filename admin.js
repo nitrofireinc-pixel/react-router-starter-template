@@ -595,6 +595,23 @@ function fillForm(form, data) {
   }
 }
 
+function fillHolidayThemesForm(form, activeTheme) {
+  if (!form) return;
+  const active = String(activeTheme || '');
+  form.querySelectorAll('[data-holiday-theme]').forEach((box) => {
+    box.checked = box.dataset.holidayTheme === active;
+    if (box.dataset.holidayBound) return;
+    box.dataset.holidayBound = '1';
+    // Checkboxes, but only one theme at a time: checking one unchecks the others.
+    box.addEventListener('change', () => {
+      if (!box.checked) return;
+      form.querySelectorAll('[data-holiday-theme]').forEach((other) => {
+        if (other !== box) other.checked = false;
+      });
+    });
+  });
+}
+
 function formPayload(form) {
   syncFormRichEditors(form);
   const payload = Object.fromEntries(new FormData(form).entries());
@@ -3875,6 +3892,7 @@ async function loadSite() {
   const form = document.querySelector('#site-form');
   fillForm(form, state.site);
   fillErrorPagesForm(form, state.site?.error_pages);
+  fillHolidayThemesForm(form, state.site?.holiday_theme);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
   await loadZernioFacebookStatus();
@@ -7895,10 +7913,16 @@ function bindForms() {
       delete payload.boosters_dues_enabled;
     }
     payload.error_pages = collectErrorPages(form);
+    const holidayBoxes = [...form.querySelectorAll('[data-holiday-theme]')];
+    holidayBoxes.forEach((box) => { delete payload[box.name]; });
+    if (holidayBoxes.length) {
+      payload.holiday_theme = holidayBoxes.find((box) => box.checked)?.dataset.holidayTheme || '';
+    }
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);
     fillErrorPagesForm(form, saved.error_pages);
+    fillHolidayThemesForm(form, saved.holiday_theme);
     if (status) {
       const duesNote = form.elements.boosters_dues_enabled
         ? (saved.boosters_dues_enabled

@@ -306,7 +306,24 @@ export const DEFAULT_SITE = {
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
   error_pages: JSON.stringify(DEFAULT_ERROR_PAGES),
+  holiday_theme: '',
 };
+
+/** Holiday overlays toggled in CMS → Site settings → Holiday themes. Add entries here for more holidays. */
+export const HOLIDAY_THEMES = Object.freeze([
+  Object.freeze({ key: 'halloween', label: 'Halloween', hint: 'Spiderwebs in the top corners, a hanging spider, and a small bat on every public page.' }),
+]);
+
+export function renderHolidayThemesFieldset() {
+  const rows = HOLIDAY_THEMES.map((theme) => `<label class="toggle-line"><span><b>${escapeHtml(theme.label)}</b><small>${escapeHtml(theme.hint)}</small></span><input name="holiday_theme_${escapeHtml(theme.key)}" data-holiday-theme="${escapeHtml(theme.key)}" type="checkbox" role="switch" aria-label="Show ${escapeHtml(theme.label)} theme on public pages"></label>`).join('');
+  return `<fieldset class="holiday-themes-setting" data-holiday-themes><legend><b>Holiday themes</b></legend><p class="muted">Light decorations on every public page (never on admin screens). Check one theme (checking another switches to it; uncheck to turn themes off), then Save site settings.</p><div class="site-settings-switches">${rows}</div></fieldset>`;
+}
+
+/** One active holiday theme at most: a HOLIDAY_THEMES key, or '' for none. */
+export function normalizeHolidayTheme(value) {
+  const key = String(value ?? '').trim().toLowerCase();
+  return HOLIDAY_THEMES.some((theme) => theme.key === key) ? key : '';
+}
 
 /** Public `/api/site` and SSR chrome may only use these CMS fields. Secrets stay in site_content, not JSON. */
 export const PUBLIC_SITE_KEYS = Object.freeze(Object.keys(DEFAULT_SITE));
@@ -464,7 +481,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261018b';
+export const ASSET_VERSION = 'cms-p1-20261020b';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -3505,6 +3522,7 @@ export function publicSitePayload(site = {}) {
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   payload.error_pages = normalizeErrorPages(payload.error_pages);
+  payload.holiday_theme = normalizeHolidayTheme(payload.holiday_theme);
   return payload;
 }
 
@@ -11116,6 +11134,11 @@ async function routeApi(request, env, url, ctx = null) {
         .bind('error_pages', JSON.stringify(packed))
         .run();
     }
+    if (payload.holiday_theme !== undefined) {
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .bind('holiday_theme', normalizeHolidayTheme(payload.holiday_theme))
+        .run();
+    }
     if (payload.boosters_dues_enabled !== undefined) {
       if (!isSuperAdmin(auth.user)) {
         return jsonResponse({ detail: 'Only Super Admins can change the Band dues Boosters setting.' }, 403);
@@ -14688,7 +14711,7 @@ __ADMIN_SIDEBAR__
     <label class="full">429 copy<input name="error_429_copy" maxlength="280"></label>
   </div>
 </div>
-<div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div>${renderHolidayThemesFieldset()}<button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">
