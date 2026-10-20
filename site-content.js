@@ -3296,7 +3296,7 @@ function mountHolidayTheme(key) {
 @keyframes ht-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
 @keyframes ht-fall{from{transform:translate3d(0,0,0) rotate(0)}to{transform:translate3d(var(--dx,20px),110vh,0) rotate(300deg)}}
 @keyframes ht-twinkle{from{opacity:1}to{opacity:.35}}
-@media (max-width:640px){#${id}{--ht-badge:68px}#${id} .ht-p:nth-of-type(n+6){display:none}#${id} .ht-garland{height:9px}#${id} .ht-badge{bottom:calc(84px + env(safe-area-inset-bottom));opacity:.92}}
+@media (max-width:640px){#${id}{--ht-badge:52px}#${id} .ht-p:nth-of-type(n+6){display:none}#${id} .ht-garland{height:9px}#${id} .ht-badge{bottom:calc(84px + env(safe-area-inset-bottom));opacity:.6}}
 @media (max-width:340px){#${id}{display:none}}
 @media (prefers-reduced-motion:reduce){#${id} *{animation:none!important}#${id} .ht-p{display:none}}
 @media print{#${id}{display:none}}`;
