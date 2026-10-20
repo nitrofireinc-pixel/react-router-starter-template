@@ -3203,7 +3203,6 @@ function mountHalloweenOverlay() {
 @keyframes hw-flap{from{transform:scaleY(1)}to{transform:scaleY(.72)}}
 @media (max-width:640px){#efhs-halloween{--hw-web:90px}#efhs-halloween .hw-spider{right:4px;height:50px;width:12px}#efhs-halloween .hw-bat{width:36px;height:19px;margin-left:-18px}}
 @media (min-width:768px){#efhs-halloween{--hw-web:200px}#efhs-halloween .hw-web{opacity:.6}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{width:22px;height:120px;opacity:.85}#efhs-halloween .hw-spider line,#efhs-halloween .hw-spider>path{stroke-width:1.6}#efhs-halloween .hw-bat{width:76px;height:40px;margin-left:-38px;opacity:.85}#efhs-halloween .hw-bat path{stroke:rgba(255,255,255,.8);stroke-width:.8}}
-@media (max-width:640px){#efhs-halloween .hw-web{opacity:.42}#efhs-halloween .hw-web path{stroke-width:1.3}#efhs-halloween .hw-spider{opacity:.7}#efhs-halloween .hw-bat{opacity:.7}}
 @media (max-width:340px){#efhs-halloween{display:none}}
 @media (prefers-reduced-motion:reduce){#efhs-halloween *{animation:none!important}}
 @media print{#efhs-halloween{display:none}}`;
