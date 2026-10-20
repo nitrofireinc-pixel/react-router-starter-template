@@ -323,7 +323,6 @@ export const HOLIDAY_THEMES = Object.freeze([
   Object.freeze({ key: "july4", label: "Independence Day", hint: "Suggested: Jul 1 \u2013 Jul 5. Top garland and a sax badge in the bottom-left corner." }),
   Object.freeze({ key: "labor", label: "Labor Day", hint: "Suggested: 1st Mon of Sep (Fri\u2013Mon). Top garland and a sousaphone badge in the bottom-left corner." }),
   Object.freeze({ key: "indigenous", label: "Columbus Day / Indigenous Peoples' Day", hint: "Suggested: 2nd Mon of Oct (Sat\u2013Mon). Top garland and a horn badge in the bottom-left corner." }),
-  Object.freeze({ key: "halloweendrum", label: "Halloween (band add-on)", hint: "Suggested: Oct 24 \u2013 Oct 31. Top garland and a bassdrum badge in the bottom-left corner." }),
   Object.freeze({ key: "veterans", label: "Veterans Day", hint: "Suggested: Nov 9 \u2013 Nov 11. Top garland and a snare badge in the bottom-left corner." }),
   Object.freeze({ key: "thanksgiving", label: "Thanksgiving", hint: "Suggested: Mon \u2013 Sun of Thanksgiving week. Top garland and a sousaphone badge in the bottom-left corner." }),
   Object.freeze({ key: "hanukkah", label: "Hanukkah", hint: "Suggested: 8 nights (2026: Dec 4\u201312 \u00b7 2027: Dec 24\u2013Jan 1 \u00b7 2028: Dec 12\u201320). Top garland and a bells badge in the bottom-left corner." }),
@@ -498,7 +497,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261020h';
+export const ASSET_VERSION = 'cms-p1-20261020i';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';

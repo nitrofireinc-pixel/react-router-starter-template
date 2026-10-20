@@ -3237,9 +3237,6 @@ const HT_THEMES = {
     motif: () => `<g stroke="${HT_INK}" stroke-width="1.6"><path d="M84 4c0-8 10-12 18-12s18 4 18 12z" fill="#ffd400" transform="translate(0 4)"/><rect x="80" y="6" width="44" height="4" rx="2" fill="#f2c200"/><path d="M102-6v12" stroke="#c99a00"/></g>` },
   indigenous: { label: "Columbus Day / Indigenous Peoples' Day", instrument: 'horn', window: '2nd Mon of Oct (Sat–Mon)', garland: 'leaves', colors: ['#c4511c', '#e0a030', '#7a3b12'], particle: 'leaf',
     motif: () => htLeaf(98, 20, 1.2, '#c4511c', 20) + htLeaf(84, 10, .9, '#e0a030', -30) + `<g transform="translate(22 22)" stroke="${HT_INK}" stroke-width="1.4"><circle r="12" fill="#f3e6c8"/><path d="M0-11L3 0 0 11-3 0z" fill="#c8102e"/></g>` },
-  halloweendrum: { label: 'Halloween (band add-on)', instrument: 'bassdrum', window: 'Oct 24 – Oct 31', garland: 'none', colors: ['#ff7a1a', '#1f2630'], particle: null,
-    motif: () => `<g transform="translate(60 62)"><circle r="34" fill="#ff7a1a" stroke="${HT_INK}" stroke-width="2"/><path d="M-18-8l8-8 6 8zM18-8l-8-8-6 8zM-20 10q20 16 40 0l-6 4-4-4-5 5-5-5-5 5-5-5z" fill="#1f2630"/><path d="M0-34q2-8 8-10" stroke="#2e7d32" stroke-width="4" fill="none"/></g>`,
-    note: 'Pairs with (does not replace) the existing halloween webs/bat.' },
   veterans: { label: 'Veterans Day', instrument: 'snare', window: 'Nov 9 – Nov 11', garland: 'bunting', colors: ['#c8102e', '#ffffff', '#002868'], particle: null, solemn: true,
     motif: () => `<path d="M22 70q38 16 76 0v8q-38 16-76 0z" fill="#002868" stroke="${HT_INK}" stroke-width="1.4"/>` + htStar(42, 76, 4, '#fff') + htStar(60, 79, 4, '#fff') + htStar(78, 76, 4, '#fff') },
   thanksgiving: { label: 'Thanksgiving', instrument: 'sousaphone', window: 'Mon – Sun of Thanksgiving week', garland: 'leaves', colors: ['#c4511c', '#e0a030', '#7a3b12'], particle: 'leaf',
@@ -3298,7 +3295,6 @@ const HT_CORNER_PIECE = {
   july4: (x, y, s, i) => htBurst(x, y, 12 * s, ['#c8102e', '#ffffff', '#3a8dde', '#ffd400'][i % 4]),
   labor: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffd400', '#ffffff', '#c8102e'][i % 3]),
   indigenous: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#c4511c', '#e0a030', '#7a3b12'][i % 3], i * 50),
-  halloweendrum: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#ff7a1a', '#e0a030'][i % 2], i * 50),
   veterans: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffffff', '#c8102e'][i % 2]),
   thanksgiving: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#c4511c', '#e0a030', '#7a3b12'][i % 3], i * 50),
   hanukkah: (x, y, s) => htHexStar(x, y, 9 * s, '#8fc1ff'),
@@ -3375,7 +3371,7 @@ function mountHolidayTheme(key) {
   document.body.appendChild(wrap);
 }
 
-// Keys used in site.holiday_theme. Halloween keeps its existing mount; 'halloweendrum' is an extra.
+// Keys used in site.holiday_theme. Halloween keeps its existing mount.
 const EFHS_HOLIDAY_MOUNTS = Object.fromEntries(Object.keys(HT_THEMES).map((k) => [k, () => mountHolidayTheme(k)]));
 
 // Holiday themes (site.holiday_theme = 'halloween' | ''; one at a time). Kill switch: set

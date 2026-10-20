@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HOLIDAY_THEMES, normalizeHolidayTheme, renderHolidayThemesFieldset } from '../worker/src/worker.mjs';
 
-const KEYS = ['halloween', 'newyear', 'mlk', 'presidents', 'valentines', 'stpatricks', 'easter', 'memorial', 'juneteenth', 'july4', 'labor', 'indigenous', 'halloweendrum', 'veterans', 'thanksgiving', 'hanukkah', 'winter', 'christmas'];
+const KEYS = ['halloween', 'newyear', 'mlk', 'presidents', 'valentines', 'stpatricks', 'easter', 'memorial', 'juneteenth', 'july4', 'labor', 'indigenous', 'veterans', 'thanksgiving', 'hanukkah', 'winter', 'christmas'];
 
 test('every holiday theme key is accepted and listed in the CMS box', () => {
   assert.deepEqual(HOLIDAY_THEMES.map((t) => t.key).sort(), [...KEYS].sort());
