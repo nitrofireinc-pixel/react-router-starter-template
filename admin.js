@@ -597,19 +597,25 @@ function fillForm(form, data) {
 
 function fillHolidayThemesForm(form, activeTheme) {
   if (!form) return;
+  const select = form.querySelector('[data-holiday-select]');
+  if (!select) return;
   const active = String(activeTheme || '');
-  form.querySelectorAll('[data-holiday-theme]').forEach((box) => {
-    box.checked = box.dataset.holidayTheme === active;
-    if (box.dataset.holidayBound) return;
-    box.dataset.holidayBound = '1';
-    // Checkboxes, but only one theme at a time: checking one unchecks the others.
-    box.addEventListener('change', () => {
-      if (!box.checked) return;
-      form.querySelectorAll('[data-holiday-theme]').forEach((other) => {
-        if (other !== box) other.checked = false;
-      });
-    });
-  });
+  select.value = [...select.options].some((o) => o.value === active) ? active : '';
+  const hint = form.querySelector('[data-holiday-hint]');
+  const showHint = () => { if (hint) hint.textContent = select.selectedOptions[0]?.dataset.hint || ''; };
+  showHint();
+  if (select.dataset.holidayBound) return;
+  select.dataset.holidayBound = '1';
+  select.addEventListener('change', showHint);
+}
+
+function bindSiteTextPicker(form) {
+  const select = form?.querySelector('[data-site-text-select]');
+  if (!select || select.dataset.bound) return;
+  select.dataset.bound = '1';
+  const show = () => form.querySelectorAll('[data-site-text-pane]').forEach((pane) => { pane.hidden = pane.dataset.siteTextPane !== select.value; });
+  select.addEventListener('change', show);
+  show();
 }
 
 function formPayload(form) {
@@ -3893,6 +3899,7 @@ async function loadSite() {
   fillForm(form, state.site);
   fillErrorPagesForm(form, state.site?.error_pages);
   fillHolidayThemesForm(form, state.site?.holiday_theme);
+  bindSiteTextPicker(form);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
   await loadZernioFacebookStatus();
@@ -7913,11 +7920,6 @@ function bindForms() {
       delete payload.boosters_dues_enabled;
     }
     payload.error_pages = collectErrorPages(form);
-    const holidayBoxes = [...form.querySelectorAll('[data-holiday-theme]')];
-    holidayBoxes.forEach((box) => { delete payload[box.name]; });
-    if (holidayBoxes.length) {
-      payload.holiday_theme = holidayBoxes.find((box) => box.checked)?.dataset.holidayTheme || '';
-    }
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);

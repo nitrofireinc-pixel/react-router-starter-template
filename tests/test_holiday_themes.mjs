@@ -11,8 +11,13 @@ test('every holiday theme key is accepted and listed in the CMS box', () => {
   for (const key of KEYS) {
     assert.equal(normalizeHolidayTheme(key), key);
     assert.equal(normalizeHolidayTheme(` ${key.toUpperCase()} `), key);
-    assert.match(html, new RegExp(`data-holiday-theme="${key}"`));
+    assert.match(html, new RegExp(`<option value="${key}"`));
   }
+  assert.match(html, /<select id="holiday-theme-select" name="holiday_theme"/);
+  assert.match(html, /<option value="" [^>]*>None \(off\)<\/option>/);
+  assert.equal((html.match(/<option /g) || []).length, KEYS.length + 1);
+  assert.match(html, /data-holiday-apply/);
+  assert.doesNotMatch(html, /type="checkbox"|bottom-left/);
 });
 
 test('unknown holiday theme keys are rejected', () => {

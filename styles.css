@@ -6598,17 +6598,21 @@ body.cms-caldev-editor-open .admin-workspace{
 .image-admin-shell #tab-site .site-settings-form{grid-column:1/-1;grid-row:2;gap:18px}
 .image-admin-shell #tab-site .site-settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:22px;align-items:start}
 .image-admin-shell #tab-site .site-text-card{grid-column:1;grid-row:1}
-.image-admin-shell #tab-site .error-pages-card{grid-column:1;grid-row:2}
-.image-admin-shell #tab-site .site-switches-card{grid-column:2;grid-row:1/span 2}
-.image-admin-shell #tab-site .site-switches-card .holiday-themes-setting .site-settings-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
-.image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.image-admin-shell #tab-site .error-pages-card{grid-column:1/-1;grid-row:2}
+.image-admin-shell #tab-site .site-switches-card{grid-column:2;grid-row:1}
+.image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+#tab-site [data-site-text-pane][hidden]{display:none!important}
+#tab-site .site-text-picker,#tab-site .holiday-theme-picker select{display:grid;gap:6px}
+#tab-site .holiday-theme-picker{display:flex;gap:10px;align-items:center}
+#tab-site .holiday-theme-picker select{flex:1;min-width:0}
+#tab-site .holiday-theme-picker .btn{width:auto}
+#tab-site .holiday-theme-hint,#tab-site #holiday-status{margin:6px 0 0}
 .image-admin-shell #tab-site .site-settings-savebar{display:flex;align-items:center;gap:16px}
 .image-admin-shell #tab-site .site-settings-savebar .btn{width:auto}
 .image-admin-shell #tab-site .site-settings-savebar .status{margin:0}
 @media(max-width:1023px){
   .image-admin-shell #tab-site .site-settings-layout,
   .image-admin-shell #tab-site .site-settings-grid,
-  .image-admin-shell #tab-site .site-switches-card .holiday-themes-setting .site-settings-switches,
   .image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:minmax(0,1fr)}
   .image-admin-shell #tab-site .site-settings-layout > *,
   .image-admin-shell #tab-site .site-settings-grid > *{grid-column:auto;grid-row:auto}
