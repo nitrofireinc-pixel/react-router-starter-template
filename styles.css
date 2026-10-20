@@ -6596,11 +6596,15 @@ body.cms-caldev-editor-open .admin-workspace{
 .image-admin-shell #tab-site .site-settings-layout{grid-template-columns:repeat(3,minmax(0,1fr));align-items:start}
 .image-admin-shell #tab-site .site-settings-layout > #logo-form{grid-row:1;grid-column:3}
 .image-admin-shell #tab-site .site-settings-form{grid-column:1/-1;grid-row:2;gap:18px}
-.image-admin-shell #tab-site .site-settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:22px;align-items:start}
-.image-admin-shell #tab-site .site-text-card{grid-column:1;grid-row:1}
-.image-admin-shell #tab-site .error-pages-card{grid-column:1/-1;grid-row:2}
+.image-admin-shell #tab-site .site-settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start}
+.image-admin-shell #tab-site .site-text-card{grid-column:1;grid-row:1/span 2}
 .image-admin-shell #tab-site .site-switches-card{grid-column:2;grid-row:1}
-.image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.image-admin-shell #tab-site .holiday-themes-card{grid-column:3;grid-row:1}
+.image-admin-shell #tab-site .error-pages-card{grid-column:2/span 2;grid-row:2}
+.image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+#tab-site [data-error-pane][hidden]{display:none!important}
+#tab-site .error-page-picker{display:grid;gap:6px}
+#tab-site .holiday-themes-card .holiday-themes-setting{border:0;padding:0;margin:0}
 #tab-site [data-site-text-pane][hidden]{display:none!important}
 #tab-site .site-text-picker,#tab-site .holiday-theme-picker select{display:grid;gap:6px}
 #tab-site .holiday-theme-picker{display:flex;gap:10px;align-items:center}

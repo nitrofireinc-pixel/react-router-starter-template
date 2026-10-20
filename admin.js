@@ -609,6 +609,15 @@ function fillHolidayThemesForm(form, activeTheme) {
   select.addEventListener('change', showHint);
 }
 
+function bindErrorPagePicker(form) {
+  const select = form?.querySelector('[data-error-page-select]');
+  if (!select || select.dataset.bound) return;
+  select.dataset.bound = '1';
+  const show = () => form.querySelectorAll('[data-error-pane]').forEach((pane) => { pane.hidden = pane.dataset.errorPane !== select.value; });
+  select.addEventListener('change', show);
+  show();
+}
+
 function bindSiteTextPicker(form) {
   const select = form?.querySelector('[data-site-text-select]');
   if (!select || select.dataset.bound) return;
@@ -3900,6 +3909,7 @@ async function loadSite() {
   fillErrorPagesForm(form, state.site?.error_pages);
   fillHolidayThemesForm(form, state.site?.holiday_theme);
   bindSiteTextPicker(form);
+  bindErrorPagePicker(form);
   await loadUtilityLinksEditor();
   await loadSocialLinksEditor();
   await loadZernioFacebookStatus();

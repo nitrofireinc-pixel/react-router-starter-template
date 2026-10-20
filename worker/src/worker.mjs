@@ -332,7 +332,7 @@ export const HOLIDAY_THEMES = Object.freeze([
 
 export function renderHolidayThemesFieldset() {
   const opts = HOLIDAY_THEMES.map((theme) => `<option value="${escapeHtml(theme.key)}" data-hint="${escapeHtml(theme.hint)}">${escapeHtml(theme.label)}</option>`).join('');
-  return `<fieldset class="holiday-themes-setting" data-holiday-themes><legend><b>Holiday themes</b></legend><p class="muted">Light decorations on every public page (never on admin screens). Pick one theme or None, then Apply.</p><div class="holiday-theme-picker"><select id="holiday-theme-select" name="holiday_theme" data-holiday-select aria-label="Holiday theme"><option value="" data-hint="No holiday decorations on public pages.">None (off)</option>${opts}</select><button type="submit" class="btn" data-holiday-apply>Apply</button></div><p class="muted holiday-theme-hint" data-holiday-hint></p></fieldset>`;
+  return `<fieldset class="holiday-themes-setting" data-holiday-themes><p class="muted">Light decorations on every public page (never on admin screens). Pick one theme or None, then Apply.</p><div class="holiday-theme-picker"><select id="holiday-theme-select" name="holiday_theme" data-holiday-select aria-label="Holiday theme"><option value="" data-hint="No holiday decorations on public pages.">None (off)</option>${opts}</select><button type="submit" class="btn" data-holiday-apply>Apply</button></div><p class="muted holiday-theme-hint" data-holiday-hint></p></fieldset>`;
 }
 
 /** One active holiday theme at most: a HOLIDAY_THEMES key, or '' for none. */
@@ -497,7 +497,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261020j';
+export const ASSET_VERSION = 'cms-p1-20261020k';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -14702,32 +14702,33 @@ __ADMIN_SIDEBAR__
 <div class="admin-card stack error-pages-card" data-error-pages-card>
   <h2>Error pages</h2>
   <p class="muted">Copy for 404, 403, 401, 500, 503, and 429. Empty fields fall back to the built-in band defaults. 500/503/429 stay on the lite page so they never query the database.</p>
+  <label class="error-page-picker"><span>Error page to edit</span><select id="error-page-select" data-error-page-select aria-label="Error page to edit"><option value="404">404 Page Not Found</option><option value="403">403 Access Denied</option><option value="401">401 Sign-In Needed</option><option value="500">500 Server Error</option><option value="503">503 Back Shortly</option><option value="429">429 Too Many Requests</option></select></label>
   <div class="form-grid error-pages-grid">
-    <label>404 title<input name="error_404_title" maxlength="80" placeholder="Page Not Found"></label>
-    <label>404 link label<input name="error_404_link_label" maxlength="80" placeholder="View Calendar"></label>
-    <label class="full">404 copy<input name="error_404_copy" maxlength="280" placeholder="Looks like this page marched off the field."></label>
-    <label class="full">404 link URL<input name="error_404_link_href" placeholder="/calendar.html"></label>
-    <label>403 title<input name="error_403_title" maxlength="80" placeholder="Access Denied"></label>
-    <label>403 link label<input name="error_403_link_label" maxlength="80" placeholder="Contact the Band"></label>
-    <label class="full">403 copy<input name="error_403_copy" maxlength="280"></label>
-    <label class="full">403 link URL<input name="error_403_link_href" placeholder="/contact.html"></label>
-    <label>401 title<input name="error_401_title" maxlength="80" placeholder="Sign-In Needed"></label>
-    <label>401 link label<input name="error_401_link_label" maxlength="80" placeholder="Staff Login"></label>
-    <label class="full">401 copy<input name="error_401_copy" maxlength="280"></label>
-    <label class="full">401 link URL<input name="error_401_link_href" placeholder="/admin/login"></label>
-    <label>500 title<input name="error_500_title" maxlength="80" placeholder="Server Error"></label>
-    <label>500 link label<input name="error_500_link_label" maxlength="80" placeholder="Try Again"></label>
-    <label class="full">500 copy<input name="error_500_copy" maxlength="280"></label>
-    <label>503 title<input name="error_503_title" maxlength="80" placeholder="Back Shortly"></label>
-    <label>503 link label<input name="error_503_link_label" maxlength="80" placeholder="Follow on Instagram"></label>
-    <label class="full">503 copy<input name="error_503_copy" maxlength="280"></label>
-    <label class="full">503 Instagram URL<input name="error_503_link_href" placeholder="https://www.instagram.com/efblueregiment"></label>
-    <label>429 title<input name="error_429_title" maxlength="80" placeholder="Too Many Requests"></label>
-    <label>429 link label<input name="error_429_link_label" maxlength="80" placeholder="Try Again"></label>
-    <label class="full">429 copy<input name="error_429_copy" maxlength="280"></label>
+    <label data-error-pane="404">404 title<input name="error_404_title" maxlength="80" placeholder="Page Not Found"></label>
+    <label data-error-pane="404">404 link label<input name="error_404_link_label" maxlength="80" placeholder="View Calendar"></label>
+    <label class="full" data-error-pane="404">404 copy<input name="error_404_copy" maxlength="280" placeholder="Looks like this page marched off the field."></label>
+    <label class="full" data-error-pane="404">404 link URL<input name="error_404_link_href" placeholder="/calendar.html"></label>
+    <label data-error-pane="403">403 title<input name="error_403_title" maxlength="80" placeholder="Access Denied"></label>
+    <label data-error-pane="403">403 link label<input name="error_403_link_label" maxlength="80" placeholder="Contact the Band"></label>
+    <label class="full" data-error-pane="403">403 copy<input name="error_403_copy" maxlength="280"></label>
+    <label class="full" data-error-pane="403">403 link URL<input name="error_403_link_href" placeholder="/contact.html"></label>
+    <label data-error-pane="401">401 title<input name="error_401_title" maxlength="80" placeholder="Sign-In Needed"></label>
+    <label data-error-pane="401">401 link label<input name="error_401_link_label" maxlength="80" placeholder="Staff Login"></label>
+    <label class="full" data-error-pane="401">401 copy<input name="error_401_copy" maxlength="280"></label>
+    <label class="full" data-error-pane="401">401 link URL<input name="error_401_link_href" placeholder="/admin/login"></label>
+    <label data-error-pane="500">500 title<input name="error_500_title" maxlength="80" placeholder="Server Error"></label>
+    <label data-error-pane="500">500 link label<input name="error_500_link_label" maxlength="80" placeholder="Try Again"></label>
+    <label class="full" data-error-pane="500">500 copy<input name="error_500_copy" maxlength="280"></label>
+    <label data-error-pane="503">503 title<input name="error_503_title" maxlength="80" placeholder="Back Shortly"></label>
+    <label data-error-pane="503">503 link label<input name="error_503_link_label" maxlength="80" placeholder="Follow on Instagram"></label>
+    <label class="full" data-error-pane="503">503 copy<input name="error_503_copy" maxlength="280"></label>
+    <label class="full" data-error-pane="503">503 Instagram URL<input name="error_503_link_href" placeholder="https://www.instagram.com/efblueregiment"></label>
+    <label data-error-pane="429">429 title<input name="error_429_title" maxlength="80" placeholder="Too Many Requests"></label>
+    <label data-error-pane="429">429 link label<input name="error_429_link_label" maxlength="80" placeholder="Try Again"></label>
+    <label class="full" data-error-pane="429">429 copy<input name="error_429_copy" maxlength="280"></label>
   </div>
 </div>
-<div class="admin-card stack site-switches-card"><h2>Site switches &amp; holiday themes</h2><div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div>${renderHolidayThemesFieldset()}</div></div><div class="admin-card site-settings-savebar"><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></div></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<div class="admin-card stack site-switches-card"><h2>Site switches</h2><div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div></div><div class="admin-card stack holiday-themes-card"><h2>Holiday themes</h2>${renderHolidayThemesFieldset()}</div></div><div class="admin-card site-settings-savebar"><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></div></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">
