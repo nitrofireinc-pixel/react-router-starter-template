@@ -312,6 +312,23 @@ export const DEFAULT_SITE = {
 /** Holiday overlays toggled in CMS → Site settings → Holiday themes. Add entries here for more holidays. */
 export const HOLIDAY_THEMES = Object.freeze([
   Object.freeze({ key: 'halloween', label: 'Halloween', hint: 'Spiderwebs in the top corners, a hanging spider, and a small bat on every public page.' }),
+  Object.freeze({ key: "newyear", label: "New Year's", hint: "Suggested: Dec 31 \u2013 Jan 2. Top garland and a trumpet badge in the bottom-left corner." }),
+  Object.freeze({ key: "mlk", label: "Martin Luther King Jr. Day", hint: "Suggested: 3rd Mon of Jan (Fri\u2013Mon). Top garland and a horn badge in the bottom-left corner." }),
+  Object.freeze({ key: "presidents", label: "Presidents' Day", hint: "Suggested: 3rd Mon of Feb (Fri\u2013Mon). Top garland and a snare badge in the bottom-left corner." }),
+  Object.freeze({ key: "valentines", label: "Valentine's Day", hint: "Suggested: Feb 10 \u2013 Feb 14. Top garland and a trombone badge in the bottom-left corner." }),
+  Object.freeze({ key: "stpatricks", label: "St. Patrick's Day", hint: "Suggested: Mar 14 \u2013 Mar 17. Top garland and a trumpet badge in the bottom-left corner." }),
+  Object.freeze({ key: "easter", label: "Easter / Spring", hint: "Suggested: Good Friday \u2013 Easter Monday. Top garland and a clarinet badge in the bottom-left corner." }),
+  Object.freeze({ key: "memorial", label: "Memorial Day", hint: "Suggested: Last Mon of May (Sat\u2013Mon). Top garland and a trumpet badge in the bottom-left corner." }),
+  Object.freeze({ key: "juneteenth", label: "Juneteenth", hint: "Suggested: Jun 17 \u2013 Jun 19. Top garland and a bassdrum badge in the bottom-left corner." }),
+  Object.freeze({ key: "july4", label: "Independence Day", hint: "Suggested: Jul 1 \u2013 Jul 5. Top garland and a sax badge in the bottom-left corner." }),
+  Object.freeze({ key: "labor", label: "Labor Day", hint: "Suggested: 1st Mon of Sep (Fri\u2013Mon). Top garland and a sousaphone badge in the bottom-left corner." }),
+  Object.freeze({ key: "indigenous", label: "Columbus Day / Indigenous Peoples' Day", hint: "Suggested: 2nd Mon of Oct (Sat\u2013Mon). Top garland and a horn badge in the bottom-left corner." }),
+  Object.freeze({ key: "halloweendrum", label: "Halloween (band add-on)", hint: "Suggested: Oct 24 \u2013 Oct 31. Top garland and a bassdrum badge in the bottom-left corner." }),
+  Object.freeze({ key: "veterans", label: "Veterans Day", hint: "Suggested: Nov 9 \u2013 Nov 11. Top garland and a snare badge in the bottom-left corner." }),
+  Object.freeze({ key: "thanksgiving", label: "Thanksgiving", hint: "Suggested: Mon \u2013 Sun of Thanksgiving week. Top garland and a sousaphone badge in the bottom-left corner." }),
+  Object.freeze({ key: "hanukkah", label: "Hanukkah", hint: "Suggested: 8 nights (2026: Dec 4\u201312 \u00b7 2027: Dec 24\u2013Jan 1 \u00b7 2028: Dec 12\u201320). Top garland and a bells badge in the bottom-left corner." }),
+  Object.freeze({ key: "winter", label: "Winter (December, non-denominational)", hint: "Suggested: Dec 1 \u2013 Dec 20 (and Jan 3 \u2013 Jan 15 if wanted). Top garland and a bells badge in the bottom-left corner." }),
+  Object.freeze({ key: "christmas", label: "Christmas", hint: "Suggested: Dec 21 \u2013 Dec 26. Top garland and a snare badge in the bottom-left corner." }),
 ]);
 
 export function renderHolidayThemesFieldset() {
@@ -481,7 +498,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261020c';
+export const ASSET_VERSION = 'cms-p1-20261020d';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
