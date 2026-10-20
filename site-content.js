@@ -3281,24 +3281,58 @@ const HT_PARTICLE = {
   flake: () => htFlake(10, 10, 8, '#ffffff'),
 };
 
+// ---------- top corner clusters (viewBox 0 0 200 200, drawn from the top-left corner; mirrored on the right) ----------
+const htHexStar = (x, y, r, c) => `<g fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round"><path d="M${x} ${y - r}L${(x + r * .866).toFixed(1)} ${(y + r / 2).toFixed(1)}H${(x - r * .866).toFixed(1)}Z"/><path d="M${x} ${y + r}L${(x + r * .866).toFixed(1)} ${(y - r / 2).toFixed(1)}H${(x - r * .866).toFixed(1)}Z"/></g>`;
+const htHolly = (x, y, s) => htLeaf(x - 6 * s, y, s, '#2e9e4f', -60) + htLeaf(x + 6 * s, y, s, '#2e9e4f', 60) + `<g fill="#e3342f" stroke="${HT_INK}" stroke-width=".6"><circle cx="${x}" cy="${y + 2 * s}" r="${3 * s}"/><circle cx="${x - 3 * s}" cy="${y + 6 * s}" r="${2.6 * s}"/><circle cx="${x + 3 * s}" cy="${y + 6 * s}" r="${2.6 * s}"/></g>`;
+const htOrnament = (x, y, s, c) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M0-22V-10" stroke="#eef3f8" stroke-width="1"/><rect x="-3" y="-12" width="6" height="4" fill="${HT_SILVER}"/><circle r="8" fill="${c}" stroke="${HT_INK}" stroke-width=".8"/><path d="M-6-3q6 3 12 0" stroke="#fff" stroke-width="1.2" fill="none" opacity=".7"/></g>`;
+// Each piece is drawn at (x, y) with scale s; i is the piece index (for colour cycling).
+const HT_CORNER_PIECE = {
+  newyear: (x, y, s, i) => htBurst(x, y, 12 * s, ['#ffd400', '#3a8dde', '#e3342f', '#ffffff'][i % 4]),
+  mlk: (x, y, s) => htStar(x, y, 7 * s, '#f2b544'),
+  presidents: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffffff', '#c8102e', '#ffffff'][i % 3]),
+  valentines: (x, y, s, i) => htHeart(x, y - 6 * s, s, ['#e0245e', '#ff7aa2'][i % 2]),
+  stpatricks: (x, y, s, i) => htShamrock(x, y, s, ['#2e9e4f', '#7bc96f'][i % 2]),
+  easter: (x, y, s, i) => htEgg(x, y, s * .9, ['#f7b2d0', '#b8e1ff', '#fff3a6', '#c9f2c7'][i % 4], ['#7a4fb8', '#2fb34a', '#e0245e', '#3a8dde'][i % 4]),
+  memorial: (x, y, s) => htPoppy(x, y, s * .9),
+  juneteenth: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffffff', '#c8102e'][i % 2]),
+  july4: (x, y, s, i) => htBurst(x, y, 12 * s, ['#c8102e', '#ffffff', '#3a8dde', '#ffd400'][i % 4]),
+  labor: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffd400', '#ffffff', '#c8102e'][i % 3]),
+  indigenous: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#c4511c', '#e0a030', '#7a3b12'][i % 3], i * 50),
+  halloweendrum: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#ff7a1a', '#e0a030'][i % 2], i * 50),
+  veterans: (x, y, s, i) => htStar(x, y, 8 * s, ['#ffffff', '#c8102e'][i % 2]),
+  thanksgiving: (x, y, s, i) => htLeaf(x, y, s * 1.1, ['#c4511c', '#e0a030', '#7a3b12'][i % 3], i * 50),
+  hanukkah: (x, y, s) => htHexStar(x, y, 9 * s, '#8fc1ff'),
+  winter: (x, y, s, i) => htFlake(x, y, 9 * s, ['#ffffff', '#b8e1ff'][i % 2]),
+  christmas: (x, y, s, i) => (i % 2 ? htOrnament(x, y, s, ['#e3342f', '#ffd400', '#3a8dde'][i % 3]) : htHolly(x, y, s * .8)),
+};
+// Strands along the top edge, down the side and one diagonal, like the Halloween web spokes.
+// Kept in the page gutter so pieces never sit on the logo, utility links, nav or phone header icons.
+const HT_CORNER_SPOTS = [[18, 18, .95], [14, 64, .9], [13, 126, .85], [12, 178, .75]];
+function htCornerSvg(key) {
+  const piece = HT_CORNER_PIECE[key];
+  const strands = '<path d="M0 4Q60 16 120 6M4 0Q22 100 10 196" fill="none" stroke="#eef3f8" stroke-width="1.4" stroke-linecap="round" opacity=".55" vector-effect="non-scaling-stroke"/>';
+  return strands + HT_CORNER_SPOTS.map(([x, y, s], i) => `<g class="ht-s${i}">${piece(x, y, s, i)}</g>`).join('');
+}
+
 function mountHolidayTheme(key) {
   const t = HT_THEMES[key];
   const id = `efhs-holiday-${key}`;
-  if (!t || document.getElementById(id)) return;
+  if (!t || !HT_CORNER_PIECE[key] || document.getElementById(id)) return;
   const style = document.createElement('style');
   style.textContent = `
 #${id}{position:fixed;inset:0;z-index:60;pointer-events:none;overflow:hidden;contain:strict}
 #${id} svg{position:absolute;display:block;overflow:visible}
 #${id} .ht-garland{left:0;top:0;width:100%;height:12px;opacity:.85}
-#${id} .ht-badge{left:max(8px,env(safe-area-inset-left));bottom:max(8px,env(safe-area-inset-bottom));width:var(--ht-badge,112px);height:var(--ht-badge,112px);filter:drop-shadow(0 3px 6px rgba(0,0,0,.35));animation:ht-sway 6s ease-in-out infinite;transform-origin:50% 100%}
+#${id} .ht-corner{top:0;width:var(--ht-corner,200px);height:var(--ht-corner,200px);opacity:.8}
+#${id} .ht-corner.l{left:0}
+#${id} .ht-corner.r{right:0;transform:scaleX(-1)}
+#${id} .ht-center{left:var(--ht-cl,36%);top:var(--ht-ct,12px);width:var(--ht-cw,90px);height:var(--ht-cw,90px);margin-left:calc(var(--ht-cw,90px) / -2);opacity:.97;filter:drop-shadow(0 0 8px rgba(255,255,255,.7)) drop-shadow(0 0 20px rgba(255,255,255,.35));animation:ht-sway 6s ease-in-out infinite;transform-origin:50% 0}
 #${id} .ht-p{top:-24px;width:20px;height:20px;opacity:.8;animation:ht-fall var(--d,14s) linear infinite;animation-delay:var(--dl,0s);will-change:transform}
 #${id} .ht-bulb{animation:ht-twinkle 1.6s ease-in-out infinite alternate}
 @keyframes ht-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
 @keyframes ht-fall{from{transform:translate3d(0,0,0) rotate(0)}to{transform:translate3d(var(--dx,20px),110vh,0) rotate(300deg)}}
 @keyframes ht-twinkle{from{opacity:1}to{opacity:.35}}
-@media (min-width:901px){#${id} .ht-badge{left:36%;bottom:auto;top:16px;width:80px;height:80px;margin-left:-40px;opacity:.95}}
-@media (min-width:641px) and (max-width:900px){#${id}{--ht-badge:60px}#${id} .ht-badge{bottom:calc(84px + env(safe-area-inset-bottom));opacity:.6}}
-@media (max-width:640px){#${id}{--ht-badge:52px}#${id} .ht-p:nth-of-type(n+6){display:none}#${id} .ht-garland{height:9px}#${id} .ht-badge{bottom:calc(84px + env(safe-area-inset-bottom));opacity:.6}}
+@media (max-width:640px){#${id}{--ht-corner:90px;--ht-cw:46px}#${id} .ht-p:nth-of-type(n+6){display:none}#${id} .ht-garland{height:9px}#${id} .ht-corner .ht-s0,#${id} .ht-corner .ht-s1{display:none}#${id} .ht-center{filter:drop-shadow(0 0 4px rgba(255,255,255,.7)) drop-shadow(0 0 10px rgba(255,255,255,.35))}}
 @media (max-width:340px){#${id}{display:none}}
 @media (prefers-reduced-motion:reduce){#${id} *{animation:none!important}#${id} .ht-p{display:none}}
 @media print{#${id}{display:none}}`;
@@ -3307,9 +3341,11 @@ function mountHolidayTheme(key) {
   wrap.className = 'efhs-holiday-theme';
   wrap.setAttribute('aria-hidden', 'true');
   const W = 1600;
+  const corner = htCornerSvg(key);
   let html = t.garland && t.garland !== 'none'
     ? `<svg class="ht-garland" viewBox="0 0 ${W} 20" preserveAspectRatio="xMinYMin slice" focusable="false">${htGarland(t.garland, t.colors, W)}</svg>` : '';
-  html += `<svg class="ht-badge" viewBox="-4 -12 128 132" focusable="false">${HT_INSTR[t.instrument]()}${t.motif()}</svg>`;
+  html += `<svg class="ht-corner l" viewBox="0 0 200 200" focusable="false">${corner}</svg><svg class="ht-corner r" viewBox="0 0 200 200" focusable="false">${corner}</svg>`;
+  html += `<svg class="ht-center" viewBox="-4 -12 128 132" focusable="false">${HT_INSTR[t.instrument]()}${t.motif()}</svg>`;
   if (t.particle && !t.solemn) {
     for (let i = 0; i < 10; i += 1) {
       const c = t.colors[i % t.colors.length];
@@ -3317,6 +3353,24 @@ function mountHolidayTheme(key) {
     }
   }
   wrap.innerHTML = html;
+  // Same placement as the Halloween bat: desktop in the header gap between logo and nav,
+  // phone just under the header / marquee / notice strip so it never sits on the logo or icons.
+  const placeCenter = () => {
+    if (window.innerWidth > 900) {
+      wrap.style.setProperty('--ht-ct', '10px');
+      wrap.style.setProperty('--ht-cl', '36%');
+      return;
+    }
+    // Phone: in the header gap between the menu button and the logo.
+    const menu = document.querySelector('header.site-header button, header.site-header [aria-controls]')?.getBoundingClientRect();
+    const logo = document.querySelector('header.site-header img')?.getBoundingClientRect();
+    const head = document.querySelector('header.site-header')?.getBoundingClientRect();
+    const mid = menu && logo && logo.left > menu.right ? (menu.right + logo.left) / 2 : window.innerWidth * 0.21;
+    wrap.style.setProperty('--ht-cl', `${Math.round(mid)}px`);
+    wrap.style.setProperty('--ht-ct', `${head && head.height > 50 ? Math.max(4, Math.round((head.height - 46) / 2)) : 6}px`);
+  };
+  placeCenter();
+  window.setTimeout(placeCenter, 1500);
   document.head.appendChild(style);
   document.body.appendChild(wrap);
 }

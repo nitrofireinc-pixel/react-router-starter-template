@@ -29,6 +29,8 @@ test('public site-content mounts every non-halloween key and makes no external r
   assert.ok(start > 0);
   assert.doesNotMatch(block, /fetch\(|https?:\/\/|url\(|<image|<script|import\(/);
   assert.match(block, /pointer-events:none/);
+  assert.doesNotMatch(block, /ht-badge/);
+  assert.match(block, /ht-corner l[\s\S]*ht-corner r[\s\S]*ht-center/);
   assert.match(block, /prefers-reduced-motion/);
   assert.match(block, /max-width:340px\)\{#\$\{id\}\{display:none/);
   assert.match(block, /@media print/);
