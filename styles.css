@@ -6615,5 +6615,8 @@ body.cms-caldev-editor-open .admin-workspace{
   .image-admin-shell #tab-site .site-settings-grid,
   .image-admin-shell #tab-site .error-pages-card .error-pages-grid{grid-template-columns:minmax(0,1fr)}
   .image-admin-shell #tab-site .site-settings-layout > *,
-  .image-admin-shell #tab-site .site-settings-grid > *{grid-column:auto;grid-row:auto}
+  .image-admin-shell #tab-site .site-settings-grid > *,
+  .image-admin-shell #tab-site .site-settings-layout > #logo-form,
+  .image-admin-shell #tab-site .site-settings-layout > .site-settings-form,
+  .image-admin-shell #tab-site .site-settings-grid > .admin-card{grid-column:auto;grid-row:auto}
 }
