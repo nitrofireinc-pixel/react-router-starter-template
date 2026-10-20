@@ -3378,13 +3378,13 @@ function mountHalloweenOverlay() {
 #efhs-halloween .hw-web.l{left:0}
 #efhs-halloween .hw-web.r{right:0;transform:scaleX(-1)}
 #efhs-halloween .hw-spider{right:20px;top:0;width:16px;height:92px;opacity:.55;transform-origin:50% 0;animation:hw-bob 5s ease-in-out infinite}
-#efhs-halloween .hw-bat{left:var(--hw-bat-left,50%);top:var(--hw-bat-top,40px);width:46px;height:24px;margin-left:-23px;opacity:.55;animation:hw-drift 9s ease-in-out infinite}
-#efhs-halloween .hw-bat path{stroke:rgba(255,255,255,.55);stroke-width:.6;transform-origin:50% 50%;animation:hw-flap .6s ease-in-out infinite alternate}
+#efhs-halloween .hw-bat{left:var(--hw-bat-left,50%);top:var(--hw-bat-top,40px);width:46px;height:24px;margin-left:-23px;color:#000;opacity:.97;filter:drop-shadow(0 0 4px rgba(255,255,255,.7)) drop-shadow(0 0 10px rgba(255,255,255,.35));animation:hw-drift 9s ease-in-out infinite}
+#efhs-halloween .hw-bat path{stroke:none;transform-origin:50% 50%;animation:hw-flap .6s ease-in-out infinite alternate}
 @keyframes hw-bob{0%,100%{transform:scaleY(.86)}50%{transform:scaleY(1)}}
 @keyframes hw-drift{0%,100%{transform:translate(-18px,0) rotate(-4deg)}50%{transform:translate(18px,-6px) rotate(4deg)}}
 @keyframes hw-flap{from{transform:scaleY(1)}to{transform:scaleY(.72)}}
-@media (max-width:640px){#efhs-halloween{--hw-web:90px}#efhs-halloween .hw-spider{right:4px;height:50px;width:12px}#efhs-halloween .hw-bat{width:36px;height:19px;margin-left:-18px}}
-@media (min-width:768px){#efhs-halloween{--hw-web:200px}#efhs-halloween .hw-web{opacity:.6}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{width:22px;height:120px;opacity:.85}#efhs-halloween .hw-spider line,#efhs-halloween .hw-spider>path{stroke-width:1.6}#efhs-halloween .hw-bat{width:76px;height:40px;margin-left:-38px;opacity:.85}#efhs-halloween .hw-bat path{stroke:rgba(255,255,255,.8);stroke-width:.8}}
+@media (max-width:640px){#efhs-halloween{--hw-web:90px}#efhs-halloween .hw-web{opacity:.58}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{right:4px;height:50px;width:12px}#efhs-halloween .hw-bat{width:36px;height:19px;margin-left:-18px}}
+@media (min-width:768px){#efhs-halloween{--hw-web:200px}#efhs-halloween .hw-web{opacity:.6}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{width:22px;height:120px;opacity:.85}#efhs-halloween .hw-spider line,#efhs-halloween .hw-spider>path{stroke-width:1.6}#efhs-halloween .hw-bat{width:100px;height:52px;margin-left:-50px;opacity:.97;filter:drop-shadow(0 0 10px rgba(255,255,255,.75)) drop-shadow(0 0 24px rgba(255,255,255,.4))}}
 @media (max-width:340px){#efhs-halloween{display:none}}
 @media (prefers-reduced-motion:reduce){#efhs-halloween *{animation:none!important}}
 @media print{#efhs-halloween{display:none}}`;
@@ -3394,7 +3394,7 @@ function mountHalloweenOverlay() {
   const webSvg = (side) => `<svg class="hw-web ${side}" viewBox="0 0 160 160" focusable="false"><path d="${web}"/></svg>`;
   wrap.innerHTML = `${webSvg('l')}${webSvg('r')}`
     + '<svg class="hw-spider" viewBox="0 0 16 118" preserveAspectRatio="xMidYMin meet" focusable="false"><line x1="8" y1="0" x2="8" y2="104" stroke="#c9d2dc" stroke-width=".8" vector-effect="non-scaling-stroke"/><g fill="#1f2630" stroke="rgba(255,255,255,.7)" stroke-width=".6"><ellipse cx="8" cy="106" rx="3.2" ry="3.6"/><circle cx="8" cy="101.5" r="2.2"/></g><path d="M5 104l-4-3M5 106l-4 0M5 108l-4 3M11 104l4-3M11 106l4 0M11 108l4 3" stroke="#c9d2dc" stroke-width=".8" fill="none"/></svg>'
-    + '<svg class="hw-bat" viewBox="0 0 46 24" focusable="false"><path fill="#1f2630" d="M23 7c-1.2 0-2 .8-2.4 1.6L19.5 6l-.3 3.2C16 6.5 11 4 4 6c3 1.5 4.5 4 4.3 7 2.4-1.4 5.2-.8 6.7 1.4 1.4-1 3.6-.9 5 .6.8 1.6 1.8 3.4 3 4.8 1.2-1.4 2.2-3.2 3-4.8 1.4-1.5 3.6-1.6 5-.6 1.5-2.2 4.3-2.8 6.7-1.4-.2-3 1.3-5.5 4.3-7-7-2-12 .5-15.2 3.2L26.5 6l-1.1 2.6C25 7.8 24.2 7 23 7z"/></svg>';
+    + '<svg class="hw-bat" viewBox="0 0 46 24" focusable="false"><path fill="currentColor" d="M23 7c-1.2 0-2 .8-2.4 1.6L19.5 6l-.3 3.2C16 6.5 11 4 4 6c3 1.5 4.5 4 4.3 7 2.4-1.4 5.2-.8 6.7 1.4 1.4-1 3.6-.9 5 .6.8 1.6 1.8 3.4 3 4.8 1.2-1.4 2.2-3.2 3-4.8 1.4-1.5 3.6-1.6 5-.6 1.5-2.2 4.3-2.8 6.7-1.4-.2-3 1.3-5.5 4.3-7-7-2-12 .5-15.2 3.2L26.5 6l-1.1 2.6C25 7.8 24.2 7 23 7z"/></svg>';
   // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
   // floats just under the header/marquee/notice strip instead of on the logo or icons.
   const placeBat = () => {
