@@ -3329,6 +3329,7 @@ function mountHolidayTheme(key) {
 @keyframes ht-fall{from{transform:translate3d(0,0,0) rotate(0)}to{transform:translate3d(var(--dx,20px),110vh,0) rotate(300deg)}}
 @keyframes ht-twinkle{from{opacity:1}to{opacity:.35}}
 @media (max-width:640px){#${id}{--ht-corner:90px;--ht-cw:46px}#${id} .ht-p:nth-of-type(n+6){display:none}#${id} .ht-garland{height:9px}#${id} .ht-corner .ht-s0,#${id} .ht-corner .ht-s1{display:none}#${id} .ht-center{filter:drop-shadow(0 0 4px rgba(255,255,255,.7)) drop-shadow(0 0 10px rgba(255,255,255,.35))}}
+@media (max-width:767px){#${id}{position:absolute;top:0;left:0;right:0;bottom:auto;width:auto;height:100vh;height:100svh}}
 @media (max-width:340px){#${id}{display:none}}
 @media (prefers-reduced-motion:reduce){#${id} *{animation:none!important}#${id} .ht-p{display:none}}
 @media print{#${id}{display:none}}`;
@@ -3435,6 +3436,7 @@ function mountHalloweenOverlay() {
 @keyframes hw-flap{from{transform:scaleY(1)}to{transform:scaleY(.72)}}
 @media (max-width:640px){#efhs-halloween{--hw-web:90px}#efhs-halloween .hw-web{opacity:.58}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{right:4px;height:50px;width:12px}#efhs-halloween .hw-bat{width:36px;height:19px;margin-left:-18px}}
 @media (min-width:768px){#efhs-halloween{--hw-web:200px}#efhs-halloween .hw-web{opacity:.6}#efhs-halloween .hw-web path{stroke:#eef3f8;stroke-width:2}#efhs-halloween .hw-spider{width:22px;height:120px;opacity:.85}#efhs-halloween .hw-spider line,#efhs-halloween .hw-spider>path{stroke-width:1.6}#efhs-halloween .hw-bat{width:100px;height:52px;margin-left:-50px;opacity:.97;filter:drop-shadow(0 0 10px rgba(255,255,255,.75)) drop-shadow(0 0 24px rgba(255,255,255,.4))}}
+@media (max-width:767px){#efhs-halloween{position:absolute;top:0;left:0;right:0;bottom:auto;width:auto;overflow:visible}}
 @media (max-width:340px){#efhs-halloween{display:none}}
 @media (prefers-reduced-motion:reduce){#efhs-halloween *{animation:none!important}}
 @media print{#efhs-halloween{display:none}}`;
