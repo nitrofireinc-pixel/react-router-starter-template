@@ -1340,7 +1340,7 @@ function renderPhotoGallery(container, photos = []) {
   container.innerHTML = list.map((photo) => `
     <figure class="gallery-item" data-photo-open>
       <button type="button" class="gallery-item-trigger" aria-label="View ${escapeHtml(photo.alt_text || photo.caption || 'photo')}">
-        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" draggable="false">
+        <img src="${escapeHtml(photo.thumb_url || photo.url)}"${photo.thumb_url && photo.width && photo.height ? ` width="${Number(photo.width)}" height="${Number(photo.height)}"` : ''} data-photo-full="${escapeHtml(photo.full_url || photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" decoding="async" draggable="false">
       </button>
       <figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>
     </figure>
@@ -1438,7 +1438,7 @@ function bindPhotoGalleries(root = document) {
       event.preventDefault();
       const caption = item.querySelector('figcaption')?.textContent?.trim() || '';
       openPhotoLightbox({
-        src: img.currentSrc || img.src,
+        src: img.getAttribute('data-photo-full') || img.currentSrc || img.src,
         alt: img.alt || '',
         caption,
       });

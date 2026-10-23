@@ -497,7 +497,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261021a';
+export const ASSET_VERSION = 'cms-p1-20261022a';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7596,6 +7596,16 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
   return page.body_html;
 }
 
+export const PHOTO_VARIANTS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS photo_variants (filename TEXT NOT NULL, variant TEXT NOT NULL, content_type TEXT NOT NULL DEFAULT 'image/webp', width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, data_base64 NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (filename, variant))";
+export const PHOTO_VARIANT_NAMES = ['thumb', 'full'];
+const PHOTO_VARIANT_MAX_BYTES = 1_500_000;
+
+function photoListWithVariantsStatement(env) {
+  return env.DB.prepare(
+    "SELECT p.id, p.filename, p.original_name, p.alt_text, p.caption, p.sort_order, p.created_at, t.width AS thumb_width, t.height AS thumb_height, (SELECT 1 FROM photo_variants f WHERE f.filename = p.filename AND f.variant = 'full') AS has_full FROM photos p LEFT JOIN photo_variants t ON t.filename = p.filename AND t.variant = 'thumb' WHERE p.sort_order >= 0 ORDER BY p.sort_order ASC, p.created_at DESC, p.id DESC",
+  );
+}
+
 function photoListStatement(env) {
   // Gallery listing only: staff/logo utility uploads use negative sort_order and stay hidden here.
   // sort_order, created_at, id matches idx_photos_gallery_sort. created_at is stored as
@@ -7613,13 +7623,70 @@ export function publicPhotoUrl(photo = {}) {
   return `/uploads/${filename}?v=${id || 'x'}-${stamp}`;
 }
 
+export function publicPhotoVariantUrl(photo = {}, variant = 'thumb') {
+  const base = publicPhotoUrl(photo);
+  if (!base || !PHOTO_VARIANT_NAMES.includes(variant)) return '';
+  return base.replace(/^\/uploads\/([^?]+)/, (_, name) => `/uploads/${variant}/${name}.webp`);
+}
+
 function mapPhotoRows(rows = []) {
-  return (rows || []).map((photo) => ({ ...photo, url: publicPhotoUrl(photo) }));
+  return (rows || []).map((row) => {
+    const { thumb_width: tw, thumb_height: th, has_full: hasFull, ...photo } = row || {};
+    const out = { ...photo, url: publicPhotoUrl(photo) };
+    if (Number(tw) > 0 && Number(th) > 0) {
+      out.thumb_url = publicPhotoVariantUrl(photo, 'thumb');
+      out.width = Number(tw);
+      out.height = Number(th);
+    }
+    if (hasFull) out.full_url = publicPhotoVariantUrl(photo, 'full');
+    return out;
+  });
 }
 
 async function getPhotos(env) {
-  const rows = await photoListStatement(env).all();
+  let rows;
+  try {
+    rows = await photoListWithVariantsStatement(env).all();
+  } catch (error) {
+    if (!isMissingSchemaTableError(error)) throw error;
+    rows = await photoListStatement(env).all();
+  }
   return mapPhotoRows(rows.results);
+}
+
+export function parsePhotoVariantPath(pathname = '') {
+  const m = String(pathname).match(/^\/uploads\/(thumb|full)\/([^/]+)\.webp$/);
+  if (!m) return null;
+  try {
+    return { variant: m[1], filename: decodeURIComponent(m[2]) };
+  } catch {
+    return null;
+  }
+}
+
+async function storePhotoVariants(env, filename, variants = []) {
+  const list = (variants || []).filter((v) => v && PHOTO_VARIANT_NAMES.includes(v.variant) && v.bytes?.byteLength
+    && v.bytes.byteLength <= PHOTO_VARIANT_MAX_BYTES && Number(v.width) > 0 && Number(v.height) > 0);
+  if (!list.length) return [];
+  await env.DB.prepare(PHOTO_VARIANTS_TABLE_SQL).run();
+  await env.DB.batch(list.map((v) => env.DB.prepare(
+    'INSERT OR REPLACE INTO photo_variants (filename, variant, content_type, width, height, data_base64) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(filename, v.variant, 'image/webp', Math.round(Number(v.width)), Math.round(Number(v.height)), v.bytes)));
+  return list.map((v) => v.variant);
+}
+
+async function readVariantUploads(form) {
+  const out = [];
+  for (const variant of PHOTO_VARIANT_NAMES) {
+    const file = form?.get?.(`${variant}_webp`);
+    if (!file || typeof file.arrayBuffer !== 'function') continue;
+    if (String(file.type || '').toLowerCase() !== 'image/webp') continue;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // RIFF....WEBP magic check only; no decoding on the Worker (Free plan CPU).
+    if (bytes.byteLength < 12 || bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[8] !== 0x57 || bytes[9] !== 0x45) continue;
+    out.push({ variant, bytes, width: Number(form.get(`${variant}_width`)), height: Number(form.get(`${variant}_height`)) });
+  }
+  return out;
 }
 
 async function nextGalleryPhotoSortOrder(env) {
@@ -13216,6 +13283,13 @@ async function routeApi(request, env, url, ctx = null) {
         String(form.get('caption') || ''),
         sortOrder,
       );
+      try {
+        const variants = await readVariantUploads(form);
+        const saved = await storePhotoVariants(env, stored.filename, variants);
+        if (saved.length) stored.variants = saved;
+      } catch (error) {
+        console.warn('photo_variants_store_failed', String(error?.message || error));
+      }
       // Return the saved photo immediately. Instagram autopost can take many seconds and
       // made gallery uploads look like they did nothing while the request hung.
       const publishTask = maybePublishGalleryPhotoToInstagram(env, request, stored).catch((error) => ({
@@ -13317,6 +13391,9 @@ export function uploadCacheKeysForPhoto(photo = {}) {
     legacyUploadCacheRequest(plain),
   ];
   if (canonical) keys.push(legacyUploadCacheRequest(`https://efhsband.internal${canonical}`));
+  for (const variant of PHOTO_VARIANT_NAMES) {
+    keys.push(new Request(`https://efhsband.internal/uploads/${variant}/${encodeURIComponent(filename)}.webp?pcv=${PHOTO_BYTE_CACHE_VERSION}`));
+  }
   return keys;
 }
 
@@ -13359,7 +13436,36 @@ export function shouldInvalidatePublicReadCache(pathname = '', method = 'GET') {
   return String(pathname || '').startsWith('/api/admin');
 }
 
+async function handlePhotoVariantGet(env, url, ctx, parsed) {
+  const notFound = () => new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  const cacheKey = new Request(`https://efhsband.internal/uploads/${parsed.variant}/${encodeURIComponent(parsed.filename)}.webp?pcv=${PHOTO_BYTE_CACHE_VERSION}`);
+  if (typeof caches !== 'undefined' && caches?.default) {
+    try {
+      const hit = clientUploadResponse(await caches.default.match(cacheKey));
+      if (hit) return hit;
+    } catch {}
+  }
+  let row;
+  try {
+    row = await env.DB.prepare(
+      'SELECT v.data_base64, p.sort_order FROM photo_variants v JOIN photos p ON p.filename = v.filename WHERE v.filename = ? AND v.variant = ?',
+    ).bind(parsed.filename, parsed.variant).first();
+  } catch {
+    return notFound();
+  }
+  if (!row || Number(row.sort_order) <= PHOTO_QUARANTINE_SORT) return notFound();
+  const bytes = photoBytesFromStored(row.data_base64);
+  if (!bytes || !bytes.byteLength) return notFound();
+  if (typeof caches !== 'undefined' && caches?.default) {
+    const stored = caches.default.put(cacheKey, new Response(bytes, { headers: uploadResponseHeaders(PHOTO_CACHE_API_TTL, 'image/webp') })).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(stored);
+  }
+  return new Response(bytes, { headers: uploadResponseHeaders(PHOTO_BROWSER_CACHE, 'image/webp') });
+}
+
 async function handleUploadGet(request, env, url, ctx = null) {
+  const variantPath = parsePhotoVariantPath(url.pathname);
+  if (variantPath) return handlePhotoVariantGet(env, url, ctx, variantPath);
   const cacheKey = uploadCacheRequest(url);
   const hit = await matchUploadCache(url);
   if (hit) return hit;

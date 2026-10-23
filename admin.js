@@ -6161,9 +6161,50 @@ async function prepareImageFileForUpload(file, label = 'photo') {
   }
 }
 
+const PHOTO_WEBP_VARIANTS = [['thumb', 480], ['full', 1600]];
+
+// Browser-side WebP variants so the Worker never decodes images (Workers Free CPU limit).
+// Original upload stays the fallback; any failure here just skips variants.
+async function buildWebpVariants(file) {
+  const out = [];
+  try {
+    const type = String(file?.type || '').toLowerCase();
+    if (!type.startsWith('image/') || type.includes('svg') || type.includes('gif')) return out;
+    const image = await loadImageElementFromFile(file);
+    const srcW = image.naturalWidth || image.width;
+    const srcH = image.naturalHeight || image.height;
+    if (!srcW || !srcH) return out;
+    for (const [variant, maxW] of PHOTO_WEBP_VARIANTS) {
+      const scale = Math.min(1, maxW / srcW);
+      const width = Math.max(1, Math.round(srcW * scale));
+      const height = Math.max(1, Math.round(srcH * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return out;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(image, 0, 0, width, height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8));
+      if (!blob || blob.type !== 'image/webp') return out; // browser without WebP encode
+      out.push({ variant, blob, width, height });
+    }
+  } catch {
+    return [];
+  }
+  return out;
+}
+
 async function uploadPreparedGalleryPhoto({ file, altText, caption, sortOrder = null }) {
   const body = new FormData();
   body.append('file', file, file.name);
+  if (!(sortOrder != null && sortOrder !== '' && Number(sortOrder) < 0)) {
+    for (const v of await buildWebpVariants(file)) {
+      body.append(`${v.variant}_webp`, v.blob, `${v.variant}.webp`);
+      body.append(`${v.variant}_width`, String(v.width));
+      body.append(`${v.variant}_height`, String(v.height));
+    }
+  }
   body.append('alt_text', altText);
   body.append('caption', caption || '');
   if (sortOrder != null && sortOrder !== '') body.append('sort_order', String(sortOrder));
