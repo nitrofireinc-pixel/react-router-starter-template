@@ -74,7 +74,7 @@ export const SEO_PAGE_DEFAULTS = Object.freeze({
 });
 
 /** Slugs never listed in the sitemap (utility, error and private pages). */
-const SITEMAP_EXCLUDED_SLUGS = new Set(['not-found', 'maintenance', 'dues-dev', 'sponsor-payment-complete', 'qr', 'caldev']);
+const SITEMAP_EXCLUDED_SLUGS = new Set(['not-found', 'maintenance', 'dues-dev', 'sponsor-payment-complete', 'qr', 'caldev', 'coming-soon']);
 
 const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
