@@ -1795,6 +1795,7 @@ async function discardPageEdits() {
       state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
       fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
       form.elements.active.checked = Boolean(page.active);
+      await fillPageSeoFields(form, page);
       syncPreviewFromForm();
       capturePageBaseline();
       return;
@@ -1850,6 +1851,7 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
         }).catch(() => null);
       }
     }
+    await savePageSeoFields(form, payload.slug || original);
     if (status) status.textContent = 'Page saved. Public site updated.';
     if (form.elements.original_slug) form.elements.original_slug.value = payload.slug || original || '';
     capturePageBaseline();
@@ -3998,6 +4000,7 @@ function editPage(slug, { skipGuard = false } = {}) {
     const isHomePage = Boolean(page.is_home) || page.slug === 'home';
     state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
     fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+    fillPageSeoFields(form, page).catch(() => null);
     document.querySelector('[data-page-editor-title]').textContent = `Edit ${page.title}`;
     form.querySelector('[data-calendar-hint]').hidden = page.slug !== 'calendar';
     const sponsorsHint = form.querySelector('[data-sponsors-hint]');
@@ -9204,3 +9207,55 @@ refreshAll()
 });
 
 /* hero-rich-formatting: 20260802-49 */
+
+
+// Per-page search title/description (stored in site_content page_seo).
+async function loadPageSeo(force = false) {
+  if (!force && state.pageSeo) return state.pageSeo;
+  try {
+    state.pageSeo = await jsonFetch('/api/admin/page-seo');
+  } catch {
+    state.pageSeo = { page_seo: {}, defaults: {}, unavailable: true };
+  }
+  return state.pageSeo;
+}
+
+function pageSeoSlug(page) {
+  return (page && (page.is_home || page.slug === 'home')) ? 'home' : String(page?.slug || '').toLowerCase();
+}
+
+async function fillPageSeoFields(form, page) {
+  const box = form?.querySelector('[data-page-seo]');
+  if (!box) return;
+  if (typeof hasPermission === 'function' && !hasPermission('site')) { box.hidden = true; return; }
+  const data = await loadPageSeo();
+  const slug = pageSeoSlug(page);
+  const custom = data.page_seo?.[slug] || {};
+  const defaults = data.defaults?.[slug] || {};
+  const titleInput = box.querySelector('[data-page-seo-title]');
+  const descInput = box.querySelector('[data-page-seo-description]');
+  if (titleInput) { titleInput.value = custom.title || ''; titleInput.placeholder = defaults.title || ''; }
+  if (descInput) { descInput.value = custom.description || ''; descInput.placeholder = defaults.description || ''; }
+  box.dataset.slug = slug;
+  box.dataset.initial = JSON.stringify([custom.title || '', custom.description || '']);
+  const hint = box.querySelector('[data-page-seo-hint]');
+  if (hint) hint.textContent = 'Leave blank to use the built-in local search text shown in grey.';
+}
+
+async function savePageSeoFields(form, fallbackSlug) {
+  const box = form?.querySelector('[data-page-seo]');
+  if (!box || box.hidden) return;
+  const slug = box.dataset.slug || String(fallbackSlug || '').toLowerCase();
+  if (!slug) return;
+  const title = String(box.querySelector('[data-page-seo-title]')?.value || '').trim();
+  const description = String(box.querySelector('[data-page-seo-description]')?.value || '').trim();
+  if (box.dataset.initial === JSON.stringify([title, description])) return;
+  try {
+    const saved = await jsonFetch('/api/admin/page-seo', { method: 'PUT', body: JSON.stringify({ slug, title, description }) });
+    state.pageSeo = { ...(state.pageSeo || {}), page_seo: saved.page_seo || {} };
+    box.dataset.initial = JSON.stringify([title, description]);
+  } catch (error) {
+    const status = document.querySelector('#page-status');
+    if (status) status.textContent = `Page saved, but search text did not save: ${error.message}`;
+  }
+}
