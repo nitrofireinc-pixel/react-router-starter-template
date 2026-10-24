@@ -568,7 +568,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261024a';
+export const ASSET_VERSION = 'cms-p2-20261024c';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -14024,7 +14024,31 @@ async function handleStudioEditorPage(request, env, slug) {
   if (!canEditPageContent(user, slug)) return htmlResponse('<!doctype html><title>Not allowed</title><p>You do not have access to this page.</p>', 403);
   await ensureStudioSchema(env);
   const starter = slug === 'coming-soon' ? comingSoonLayout({ mark: PUBLIC_BRAND_MARK }) : null;
-  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Studio: ${escapeHtml(slug)}</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head><body class="studio-app" data-slug="${escapeAttr(slug)}"><script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script><header class="studio-top"><a href="/admin">&larr; Staff menu</a><h1>Site Studio <span data-slug-label></span></h1><div class="sc-toggle" role="group" aria-label="Editor mode"><button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button></div><span class="studio-status" data-status></span></header><main class="studio-main"><section class="studio-panel"><div class="studio-actions"><button type="button" data-act="draft">Save draft</button><button type="button" data-act="publish" class="primary">Publish</button><label class="studio-flag" hidden>Live editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div><h2>Add a block</h2><div class="sc-palette" data-palette></div><h2>Edit</h2><div data-inspector></div><h2>History (last 3)</h2><ol data-history></ol><details class="sc-advanced" data-json-wrap><summary>Layout JSON (Super Admin)</summary><textarea data-json rows="18"></textarea><button type="button" data-act="apply-json">Apply JSON</button> <button type="button" data-act="migrate">Rebuild from current page</button></details><ul class="studio-errors" data-errors></ul></section><section class="studio-canvas-wrap"><div data-canvas></div></section><section class="studio-preview" data-preview-wrap data-device="desktop"><div class="sc-toggle" role="group" aria-label="Preview size"><button type="button" data-device="desktop" aria-pressed="true">Desktop</button><button type="button" data-device="phone">Phone</button></div><iframe title="Preview" data-preview sandbox=""></iframe></section></main><script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`);
+  const shell = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Studio: ${escapeHtml(slug)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head>
+<body class="studio-app" data-slug="${escapeAttr(slug)}" data-mode="simple">
+<script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script>
+<header class="st-top"><a class="st-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Page Editor</span></a>
+<div class="st-top-right"><span class="st-pill" data-pill>Loading…</span><img class="st-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
+<div class="st-toolbar" role="toolbar" aria-label="Editor tools">
+<div class="st-tb-left"><label class="st-page-pick"><span class="st-ico" aria-hidden="true">📄</span><select data-page-pick aria-label="Page"><option value="${escapeAttr(slug)}">${escapeHtml(slug)}</option></select></label>
+<button type="button" class="st-ib" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button><button type="button" class="st-ib" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+<span class="st-sep"></span><button type="button" class="st-ib" data-device="desktop" aria-pressed="true" title="Desktop view" aria-label="Desktop view">🖥️</button><button type="button" class="st-ib" data-device="phone" aria-pressed="false" title="Phone view" aria-label="Phone view">📱</button><button type="button" class="st-ib" data-act="grid" aria-pressed="true" title="Show grid" aria-label="Show grid">▦</button>
+<span class="st-gridnote" data-gridnote>Grid: 12 columns · snap on</span></div>
+<div class="st-tb-right"><div class="st-more"><button type="button" class="st-btn" data-act="more" aria-haspopup="true" aria-expanded="false">⋯ More</button>
+<div class="st-menu" data-menu hidden><div class="st-menu-h">Editor mode</div><button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button>
+<div data-admin-only hidden><div class="st-menu-h">Super Admin</div><button type="button" data-act="json">Layout JSON…</button><button type="button" data-act="migrate">Rebuild from current page</button><label class="st-flag">Live editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div>
+<div class="st-menu-h">Page</div><button type="button" data-act="discard">Discard unpublished changes</button><a href="/admin">← Staff menu</a></div></div>
+<button type="button" class="st-btn" data-act="preview">👁️ Preview</button><button type="button" class="st-btn" data-act="history" aria-pressed="false">🕘 History</button><button type="button" class="st-btn st-publish" data-act="publish">🚀 Publish</button></div></div>
+<main class="st-main"><aside class="st-left" aria-label="Add elements"><h2>Add elements</h2><p class="st-sub" data-left-sub>Drag onto the page</p><div data-palette></div></aside>
+<section class="st-center" data-center><div class="st-stage" data-stage data-device="desktop"><iframe title="Page canvas" data-canvas></iframe></div></section>
+<aside class="st-right" aria-label="Settings"><div data-inspector></div></aside>
+<aside class="st-history" data-history-panel hidden aria-label="History"><div class="st-hist-head"><h2>History</h2><button type="button" class="st-ib" data-act="history" aria-label="Close history">✕</button></div><p class="st-sub">Last 3 published versions. Every version is kept.</p><ol data-history></ol></aside></main>
+<dialog class="st-dialog" data-json-dialog><form method="dialog"><h2>Layout JSON</h2><textarea data-json rows="24" spellcheck="false"></textarea><div class="st-row"><button type="button" class="st-btn" data-act="apply-json">Apply JSON</button><button class="st-btn">Close</button></div></form></dialog>
+<div class="st-toast" data-toast role="status" aria-live="polite"></div>
+<script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+  return htmlResponse(shell);
 }
 
 async function handleVisualEditorPage(request, env, slug, ctx = null) {
@@ -14051,6 +14075,11 @@ async function handleVisualEditorPage(request, env, slug, ctx = null) {
     return loginRedirect;
   }
   const key = String(slug || '').trim().toLowerCase();
+  // Pages on the v2 (Site Studio) editor open in Studio instead.
+  try {
+    const row = /^[a-z0-9-]+$/.test(key) ? await env.DB.prepare('SELECT editor FROM cms_pages WHERE slug = ?').bind(key).first() : null;
+    if (row?.editor === 'v2') return redirect(`/admin/studio/${key}`);
+  } catch { /* studio schema not applied yet */ }
   if (!isVisualEditorSlug(key)) {
     return renderErrorPage(404, {
       request,

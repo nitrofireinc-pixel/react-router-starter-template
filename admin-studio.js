@@ -1,208 +1,804 @@
+/* Site Studio page editor: WYSIWYG canvas, palette drag, move/resize with
+ * snap + no-overlap hints, inline text editing, undo/redo, draft autosave.
+ * Autosave writes the DRAFT only. Nothing goes live until Publish is pressed. */
 (() => {
   const slug = document.body.dataset.slug;
   const api = `/api/admin/studio/pages/${slug}`;
-  const $ = (s) => document.querySelector(s);
-  const COLS = 12;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const COLS = 12; const GAP = 16; const ROW = 40; const DESK = 1180; const PHONE = 390;
+  const uid = (p = 'b') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const rich = (t) => ({ paragraphs: [[{ text: t }]] });
+  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML' };
+  // [key, icon, label, make(), {w,h}, flags]
   const PALETTE = [
-    ['heading', 'Heading', () => ({ text: 'New heading', level: 2 })],
-    ['text', 'Paragraph', () => ({ rich: { paragraphs: [[{ text: 'New text' }]] } })],
-    ['button', 'Button', () => ({ label: 'Learn more', href: '/contact.html' })],
-    ['image', 'Image', () => ({ src: '/assets/efhs-logo.png', alt: '' })],
-    ['card', 'Card', () => ({ children: [{ id: uid('c'), type: 'text', props: { rich: { paragraphs: [[{ text: 'Card text' }]] } } }] })],
-    ['logos', 'School logos', () => ({ auto: true })],
-    ['divider', 'Divider', () => ({})],
-    ['spacer', 'Spacer', () => ({})],
-    ['html', 'Raw HTML (admin)', () => ({ html: '<p>HTML</p>' })],
+    ['Big blocks', [
+      ['hero', '🦸', 'Hero card', () => ({ type: 'card', props: { className: 'card', children: [
+        { id: uid('c'), type: 'heading', props: { level: 2, text: 'Big news' } },
+        { id: uid('c'), type: 'text', props: { rich: rich('Tell families what is happening.') } },
+        { id: uid('c'), type: 'button', props: { label: 'Learn more', href: '/contact.html' } }] } }), { w: 12, h: 4 }],
+      ['card', '🃏', 'Card', () => ({ type: 'card', props: { className: 'card', children: [
+        { id: uid('c'), type: 'heading', props: { level: 3, text: 'Card title' } },
+        { id: uid('c'), type: 'text', props: { rich: rich('Card text') } }] } }), { w: 4, h: 3 }],
+      ['image', '🖼️', 'Image', () => ({ type: 'image', props: { src: '/assets/efhs-photo-1.png', alt: 'Band photo' } }), { w: 4, h: 4 }],
+      ['gallery', '🎞️', 'Gallery', () => ({ type: 'card', props: { className: 'card studio-gallery', children: [
+        { id: uid('c'), type: 'image', props: { src: '/assets/efhs-photo-1.png', alt: 'Band photo' } },
+        { id: uid('c'), type: 'image', props: { src: '/assets/efhs-photo-2.png', alt: 'Band photo' } }] } }), { w: 12, h: 5 }],
+    ]],
+    ['Text & links', [
+      ['heading', '🔤', 'Heading', () => ({ type: 'heading', props: { level: 2, text: 'New heading' } }), { w: 12, h: 1 }],
+      ['text', '📝', 'Text box', () => ({ type: 'text', props: { rich: rich('New text. Click to type.') } }), { w: 6, h: 2 }],
+      ['button', '🔘', 'Button', () => ({ type: 'button', props: { label: 'Learn more', href: '/contact.html' } }), { w: 3, h: 1 }],
+      ['menulink', '🧭', 'Menu link', () => ({ type: 'button', props: { label: 'Calendar', href: '/calendar.html', style: 'secondary' } }), { w: 3, h: 1 }],
+    ]],
+    ['Form bits', [
+      ['dropdown', '⬇️', 'Dropdown', null, null, 'soon'],
+      ['radio', '⚪', 'Radio', null, null, 'soon'],
+      ['checkbox', '☑️', 'Checkbox', null, null, 'soon'],
+      ['html', '</>', 'HTML', () => ({ type: 'html', props: { html: '<p>HTML</p>' } }), { w: 12, h: 1 }, 'admin'],
+    ]],
+    ['Live data', [
+      ['events', '📅', 'Events', null, null, 'soon'],
+      ['sponsors', '🤝', 'Sponsors', null, null, 'soon'],
+    ]],
   ];
-  let layout = null; let state = null; let previewTimer = 0; let selected = null; let mode = localStorage.getItem('studio-mode') || 'simple';
-  function uid(p = 'b') { return `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
-  const status = (t) => { $('[data-status]').textContent = t; };
-  const showErrors = (list = []) => { const ul = $('[data-errors]'); ul.innerHTML = ''; list.forEach((e) => { const li = document.createElement('li'); li.textContent = e; ul.append(li); }); };
+
+  let state = null; let layout = null; let liveJson = 'null';
+  let selected = null; let editingKid = null;
+  let mode = localStorage.getItem('studio-mode');
+  let device = 'desktop'; let showGrid = true; let scale = 1;
+  let undoStack = []; let redoStack = []; let lastSnap = ''; let coalesceUntil = 0;
+  let saveTimer = 0; let renderTimer = 0; let lastSaved = null; let saving = false; let saveError = '';
+  let template = null; let canvasDoc = null; let index = { blocks: new Map(), sections: new Map(), kids: new Map() };
+
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? '' : v);
+    }
+    kids.flat().forEach((k) => k != null && n.append(k));
+    return n;
+  };
+  let toastTimer = 0;
+  const toast = (t, err) => { const n = $('[data-toast]'); n.textContent = t; n.classList.toggle('is-error', !!err); n.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => n.classList.remove('show'), err ? 6000 : 2200); };
   const call = async (path, method, body, raw) => {
     const init = { method, credentials: 'same-origin' };
     if (raw) init.body = raw; else if (body) { init.headers = { 'content-type': 'application/json' }; init.body = JSON.stringify(body); }
     const r = await fetch(path, init);
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) { showErrors(data.errors || [data.detail || `Error ${r.status}`]); throw new Error(data.detail || r.status); }
-    showErrors([]); return data;
+    if (!r.ok) { const msg = (data.errors || []).slice(0, 2).join(' · ') || data.detail || `Error ${r.status}`; const e = new Error(msg); e.status = r.status; throw e; }
+    return data;
   };
-  const textOf = (rich) => (rich?.paragraphs || []).map((p) => p.map((r) => r.text).join('')).join('\n\n');
-  const richFrom = (text) => ({ paragraphs: String(text).split(/\n\s*\n/).filter(Boolean).map((t) => [{ text: t.trim() }]) });
-  const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag); Object.entries(attrs).forEach(([k, v]) => { if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v); }); kids.forEach((k) => k && n.append(k)); return n; };
-  const input = (label, value, onInput, multi) => {
-    const i = el(multi ? 'textarea' : 'input'); i.value = value ?? '';
-    i.addEventListener('input', () => { onInput(i.value); changed(false); });
-    return el('label', {}, document.createTextNode(label), i);
-  };
+  const textOf = (r) => (r?.paragraphs || []).map((p) => p.map((x) => x.text).join('')).join('\n\n');
+  const richFrom = (t) => ({ paragraphs: String(t).split(/\n\s*\n/).filter((x) => x.trim()).map((x) => [{ text: x.trim() }]) });
   const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  const fits = (section, b, r) => r.x >= 0 && r.y >= 0 && r.w >= 1 && r.h >= 1 && r.x + r.w <= COLS && !section.blocks.some((o) => o !== b && overlaps(r, o));
   const findBlock = (id) => { for (const s of layout.sections) for (const b of s.blocks) if (b.id === id) return { section: s, block: b }; return null; };
-  const label = (b) => {
+  const isGrid = (s) => !s.flow && !s.raw;
+  const canLayout = () => !!state?.can_layout;
+  const isAdmin = () => !!state?.can_html;
+  const sorted = (s) => [...s.blocks].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const labelOf = (b) => {
     const p = b.props || {};
     if (b.type === 'heading') return p.text;
-    if (b.type === 'text') return textOf(p.rich).slice(0, 80);
-    if (b.type === 'button') return `[${p.label}]`;
-    if (b.type === 'html') return `${p.locked ? '🔒 ' : ''}HTML ${String(p.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 60)}`;
-    if (b.type === 'card') return `Card (${(p.children || []).length} items)`;
-    return b.type;
+    if (b.type === 'text') return textOf(p.rich);
+    if (b.type === 'button') return p.label;
+    if (b.type === 'image') return p.alt || 'Image';
+    if (b.type === 'card') { const h = (p.children || []).find((k) => k.type === 'heading'); return h ? h.props.text : 'Card'; }
+    if (b.type === 'html') return String(p.html || '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || 'HTML';
+    return TYPE_NAMES[b.type] || b.type;
   };
+  const short = (t, n = 28) => { const s = String(t || '').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 
-  // ---------- canvas: drag + resize on the 12-col grid ----------
-  const renderCanvas = () => {
-    const host = $('[data-canvas]'); host.innerHTML = '';
-    const canLayout = !!state?.can_layout;
-    layout.sections.forEach((section) => {
-      const rows = Math.max(2, ...section.blocks.map((b) => b.y + b.h)) + (canLayout ? 1 : 0);
-      const head = el('div', { class: 'sc-section-head' }, el('strong', { text: `Section ${section.id}` }), el('span', { text: section.flow ? ' · matches legacy layout' : ' · grid' }));
-      const grid = el('div', { class: 'sc-grid', style: `grid-template-rows:repeat(${rows},40px)` });
-      grid.dataset.section = section.id;
-      section.blocks.forEach((b) => {
-        const box = el('div', { class: `sc-block${selected === b.id ? ' is-selected' : ''}`, style: `grid-column:${b.x + 1}/span ${b.w};grid-row:${b.y + 1}/span ${b.h}`, tabindex: '0' });
-        box.dataset.id = b.id;
-        box.append(el('span', { class: 'sc-type', text: b.type }), el('span', { class: 'sc-label', text: label(b) || '' }));
-        if (canLayout) box.append(el('span', { class: 'sc-resize', title: 'Drag to resize' }));
-        box.addEventListener('click', () => { selected = b.id; renderCanvas(); renderInspector(); });
-        if (canLayout) box.addEventListener('pointerdown', (e) => startDrag(e, section, b, grid, e.target.classList.contains('sc-resize')));
-        grid.append(box);
-      });
-      host.append(head, grid);
-    });
+  // ---------- change tracking, undo/redo, autosave ----------
+  const snapshot = () => JSON.stringify(layout);
+  const isDirty = () => snapshot() !== liveJson;
+  function pushUndo(coalesce) {
+    const now = Date.now();
+    if (coalesce && now < coalesceUntil) { coalesceUntil = now + 900; return; }
+    coalesceUntil = coalesce ? now + 900 : 0;
+    if (lastSnap) undoStack.push(lastSnap);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+  }
+  /** Call after every edit. opts: { canvas: re-render canvas, panel: re-render inspector, coalesce: typing } */
+  function changed(opts = {}) {
+    const { canvas = true, panel = true, coalesce = false } = opts;
+    const snap = snapshot();
+    if (snap === lastSnap) return;
+    pushUndo(coalesce);
+    lastSnap = snap;
+    if (canvas) scheduleRender();
+    if (panel) renderInspector();
+    renderJson();
+    scheduleSave();
+    updateChrome();
+  }
+  function undo() { if (!undoStack.length) return; redoStack.push(lastSnap); lastSnap = undoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Undone'); }
+  function redo() { if (!redoStack.length) return; undoStack.push(lastSnap); lastSnap = redoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Redone'); }
+  function afterJump(msg) { if (selected && !findBlock(selected)) selected = null; scheduleRender(0); renderInspector(); renderJson(); scheduleSave(); updateChrome(); toast(msg); }
+  function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 1200); updateChrome(); }
+  async function saveDraft() {
+    clearTimeout(saveTimer); saving = true; updateChrome();
+    const snap = snapshot();
+    try {
+      // Draft only. This endpoint never publishes.
+      await call(`${api}/draft`, 'PUT', { layout: JSON.parse(snap) });
+      lastSaved = Date.now(); saveError = '';
+    } catch (e) { saveError = e.message; toast(`Draft not saved: ${e.message}`, true); }
+    saving = false; updateChrome();
+  }
+  const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s} s ago` : `${Math.round(s / 60)} min ago`; };
+  function updateChrome() {
+    const pill = $('[data-pill]'); const dirty = layout ? isDirty() : false;
+    pill.classList.toggle('is-dirty', dirty && !saveError); pill.classList.toggle('is-error', !!saveError);
+    let t;
+    if (saveError) t = 'Draft not saved · fix the error';
+    else if (saving || saveTimer && !lastSaved) t = 'Saving draft…';
+    else if (dirty) t = `Unpublished changes · autosaved ${lastSaved ? ago(lastSaved) : 'earlier'}`;
+    else t = 'Published · no unpublished changes';
+    pill.textContent = t;
+    pill.title = dirty ? 'Your changes are saved as a draft. Visitors see them only after you press Publish.' : 'The live page matches this draft.';
+    const pub = $('[data-act="publish"]');
+    pub.classList.toggle('has-changes', dirty);
+    pub.disabled = !dirty;
+    pub.textContent = dirty ? '🚀 Publish' : '✓ Published';
+    pub.title = dirty ? 'Unpublished changes: press to make this draft live' : 'Nothing new to publish';
+    $('[data-act="undo"]').disabled = !undoStack.length;
+    $('[data-act="redo"]').disabled = !redoStack.length;
+  }
+  setInterval(updateChrome, 5000);
+
+  // ---------- canvas ----------
+  async function loadTemplate() {
+    const tryFetch = async (p) => { try { const r = await fetch(p, { credentials: 'same-origin' }); return r.ok ? await r.text() : null; } catch { return null; } };
+    const src = (await tryFetch(state.page.path || '/')) || (await tryFetch('/contact.html')) || '<!doctype html><html><head><link rel="stylesheet" href="/styles.css"></head><body><main id="main"></main></body></html>';
+    const doc = new DOMParser().parseFromString(src, 'text/html');
+    $$('script,noscript', doc).forEach((n) => n.remove());
+    $$('[data-site-marquee],[data-sponsor-flyin],.sponsor-flyin', doc).forEach((n) => n.remove());
+    if (!$('main', doc)) doc.body.append(doc.createElement('main'));
+    const style = doc.createElement('style'); style.id = 'sc-editor-style'; style.textContent = CANVAS_CSS; doc.head.append(style);
+    template = doc;
+  }
+  const docHtml = (doc, mainHtml) => { const d = doc.cloneNode(true); $('main', d).innerHTML = mainHtml; return `<!doctype html>${d.documentElement.outerHTML}`; };
+  async function renderHtml(annotate) { return (await call(`${api}/render`, 'POST', { layout, annotate })).html; }
+  function scheduleRender(ms = 220) { clearTimeout(renderTimer); renderTimer = setTimeout(renderCanvas, ms); }
+  let firstRender = true; let scrollToSel = false;
+  async function renderCanvas() {
+    let html;
+    try { html = await renderHtml(true); } catch (e) { toast(e.message, true); return; }
+    const frame = $('[data-canvas]');
+    if (firstRender || !canvasDoc || !$('main', canvasDoc)) {
+      firstRender = false;
+      await new Promise((resolve) => { frame.onload = resolve; frame.srcdoc = docHtml(template, html); });
+      canvasDoc = frame.contentDocument;
+      wireCanvas();
+    } else {
+      const y = canvasDoc.defaultView.scrollY;
+      $('main', canvasDoc).innerHTML = html;
+      canvasDoc.defaultView.scrollTo(0, y);
+    }
+    buildIndex(); sizeStage(); drawOverlay(); makeEditable();
+    if (scrollToSel && selected) { scrollToSel = false; const r = docRect(index.blocks.get(selected) || []); const w = canvasDoc.defaultView; if (r && (r.top < w.scrollY || r.top + Math.min(r.height, 200) > w.scrollY + w.innerHeight)) { w.scrollTo(0, Math.max(0, r.top - 120)); drawOverlay(); } }
+  }
+  function buildIndex() {
+    index = { blocks: new Map(), sections: new Map(), kids: new Map() };
+    const main = $('main', canvasDoc);
+    const walker = canvasDoc.createTreeWalker(main, NodeFilter.SHOW_COMMENT);
+    const starts = [];
+    for (let c = walker.nextNode(); c; c = walker.nextNode()) starts.push(c);
+    for (const c of starts) {
+      const m = /^(sb|ss|sk):(.+)$/.exec(c.data); if (!m) continue;
+      const [, kind, id] = m; const els = [];
+      for (let n = c.nextSibling; n && !(n.nodeType === 8 && n.data === `/${kind}`); n = n.nextSibling) if (n.nodeType === 1 && n.tagName !== 'STYLE') els.push(n);
+      const map = kind === 'sb' ? index.blocks : kind === 'ss' ? index.sections : index.kids;
+      map.set(id, els);
+      els.forEach((e) => { if (kind === 'sb') e.dataset.scBlock = id; if (kind === 'sk') e.dataset.scKid = id; if (kind === 'ss') e.dataset.scSection = id; });
+    }
+  }
+  const docRect = (els) => {
+    let r = null; const w = canvasDoc.defaultView;
+    for (const e of els) {
+      const b = e.getBoundingClientRect(); if (!b.width && !b.height) continue;
+      const x = { l: b.left + w.scrollX, t: b.top + w.scrollY, r: b.right + w.scrollX, b: b.bottom + w.scrollY };
+      r = r ? { l: Math.min(r.l, x.l), t: Math.min(r.t, x.t), r: Math.max(r.r, x.r), b: Math.max(r.b, x.b) } : x;
+    }
+    return r && { left: r.l, top: r.t, width: r.r - r.l, height: r.b - r.t };
   };
-  const startDrag = (e, section, b, grid, resize) => {
+  const sectionOf = (id) => layout.sections.find((s) => s.id === id);
+  /** Column geometry for a section: { left, top, width, height, cols:[{l,r}], rows:[{t,b}] } in document coords. */
+  function geometry(section) {
+    const els = index.sections.get(section.id) || [];
+    const w = canvasDoc.defaultView;
+    let box = null; let cols = null; let rows = null;
+    if (isGrid(section)) {
+      const g = els[0] && $('.studio-grid', els[0]);
+      if (g) {
+        const b = g.getBoundingClientRect(); const cs = w.getComputedStyle(g);
+        box = { left: b.left + w.scrollX, top: b.top + w.scrollY, width: b.width, height: b.height };
+        const gap = parseFloat(cs.columnGap) || GAP; const rgap = parseFloat(cs.rowGap) || GAP;
+        let x = box.left; cols = cs.gridTemplateColumns.split(' ').map((v) => { const c = { l: x, r: x + parseFloat(v) }; x = c.r + gap; return c; });
+        let y = box.top; rows = cs.gridTemplateRows.split(' ').filter((v) => v.endsWith('px')).map((v) => { const r = { t: y, b: y + parseFloat(v) }; y = r.b + rgap; return r; });
+        for (let i = 0; i < 12; i += 1) { rows.push({ t: y, b: y + ROW }); y += ROW + rgap; }
+      }
+    }
+    if (!box) {
+      const inner = els[0] && (els.length === 1 ? (els[0].querySelector(':scope > .wrap, :scope > .page-title, :scope > div') || els[0]) : null);
+      const r = inner ? docRect([inner]) : docRect(els);
+      const sr = docRect(els) || r;
+      if (!r) return null;
+      box = { left: r.left, top: sr.top, width: r.width, height: sr.height };
+      const cw = (box.width - GAP * (COLS - 1)) / COLS;
+      cols = Array.from({ length: COLS }, (_, i) => ({ l: box.left + i * (cw + GAP), r: box.left + i * (cw + GAP) + cw }));
+      rows = [];
+    }
+    return { ...box, cols, rows };
+  }
+
+  // ---------- overlay (selection, grid, hints) ----------
+  let hover = null; let drag = null;
+  function layer() {
+    let L = canvasDoc.getElementById('sc-layer');
+    if (!L) { L = canvasDoc.createElement('div'); L.id = 'sc-layer'; canvasDoc.body.append(L); }
+    return L;
+  }
+  const box = (cls, r, text) => { const d = canvasDoc.createElement('div'); d.className = cls; Object.assign(d.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` }); if (text) d.textContent = text; return d; };
+  const tag = (cls, x, y, text) => { const d = canvasDoc.createElement('div'); d.className = cls; d.style.left = `${x}px`; d.style.top = `${y}px`; d.textContent = text; return d; };
+  function drawOverlay() {
+    if (!canvasDoc) return;
+    const L = layer(); L.innerHTML = '';
+    const editingLayout = canLayout();
+    if (showGrid && editingLayout) {
+      for (const s of layout.sections) {
+        const g = geometry(s); if (!g) continue;
+        const grid = box('sc-grid', g);
+        g.cols.forEach((c) => { const col = canvasDoc.createElement('div'); col.className = 'sc-col'; col.style.left = `${c.l - g.left}px`; col.style.width = `${c.r - c.l}px`; grid.append(col); });
+        L.append(grid);
+      }
+    }
+    if (hover && hover !== selected && !drag) { const r = docRect(index.blocks.get(hover) || []); if (r) L.append(box('sc-hover', r)); }
+    if (selected) {
+      const found = findBlock(selected); const r = found && docRect(index.blocks.get(selected) || []);
+      if (r) {
+        const sel = box(`sc-sel${drag ? ' is-dragging' : ''}`, r);
+        const name = canvasDoc.createElement('div'); name.className = 'sc-name';
+        if (editingLayout) { const h = canvasDoc.createElement('span'); h.className = 'sc-move'; h.dataset.scHandle = 'move'; h.title = 'Drag to move'; h.textContent = '⠿ Move'; name.append(h); }
+        const lab = canvasDoc.createElement('span'); lab.textContent = `${TYPE_NAMES[found.block.type] || found.block.type}${found.block.props?.locked ? ' 🔒' : ''}`; name.append(lab);
+        sel.append(name);
+        if (editingLayout && isGrid(found.section)) { const h = canvasDoc.createElement('span'); h.className = 'sc-resize'; h.dataset.scHandle = 'resize'; h.title = 'Drag to resize'; sel.append(h); }
+        L.append(sel);
+      }
+    }
+    if (drag?.hint) drawHint(L, drag.hint);
+  }
+  function drawHint(L, h) {
+    if (h.ghost) L.append(box(`sc-ghost${h.bad ? ' is-bad' : ''}`, h.ghost));
+    if (h.line) L.append(box('sc-line', h.line));
+    (h.neighbours || []).forEach((r) => L.append(box('sc-nb', r)));
+    if (h.text) L.append(tag(`sc-hint${h.bad ? ' is-bad' : ''}`, h.x, h.y, h.text));
+    if (h.text2) L.append(tag('sc-hint2', h.x2, h.y2, h.text2));
+  }
+
+  // ---------- drag engine (move, resize, palette drop) ----------
+  function sectionAt(x, y) {
+    // x,y in iframe client coords.
+    const e = canvasDoc.elementFromPoint(x, y);
+    const sEl = e && e.closest('[data-sc-section]');
+    const bEl = e && e.closest('[data-sc-block]');
+    let section = sEl ? sectionOf(sEl.dataset.scSection) : null;
+    if (!section && bEl) section = findBlock(bEl.dataset.scBlock)?.section || null;
+    if (!section) {
+      // nearest section vertically
+      const py = y + canvasDoc.defaultView.scrollY; let best = null; let bd = Infinity;
+      for (const s of layout.sections) { const r = docRect(index.sections.get(s.id) || []); if (!r) continue; const d = py < r.top ? r.top - py : py > r.top + r.height ? py - r.top - r.height : 0; if (d < bd) { bd = d; best = s; } }
+      section = best;
+    }
+    return section;
+  }
+  const colAt = (g, px) => { let i = g.cols.findIndex((c) => px < c.r + GAP / 2); if (i < 0) i = COLS - 1; return i; };
+  const rowAt = (g, py) => { let i = g.rows.findIndex((r) => py < r.b + GAP / 2); if (i < 0) i = g.rows.length - 1; return Math.max(0, i); };
+  const rectOf = (g, r) => { const c0 = g.cols[r.x]; const c1 = g.cols[Math.min(COLS - 1, r.x + r.w - 1)]; const r0 = g.rows[r.y] || { t: g.top + g.height }; const r1 = g.rows[r.y + r.h - 1] || { b: r0.t + ROW * r.h }; return { left: c0.l, top: r0.t, width: c1.r - c0.l, height: Math.max(ROW, r1.b - r0.t) }; };
+  /** Compute a drop/move target. item: {block?, w, h, label} ; returns plan */
+  function planAt(item, cx, cy, grab = { dx: 0, dy: 0 }) {
+    const section = sectionAt(cx, cy); if (!section) return null;
+    const w = canvasDoc.defaultView; const px = cx + w.scrollX; const py = cy + w.scrollY;
+    const g = geometry(section); if (!g) return null;
+    if (isGrid(section)) {
+      const wCols = Math.min(COLS, item.w); const x = Math.max(0, Math.min(COLS - wCols, colAt(g, px) - grab.dx));
+      const y = Math.max(0, rowAt(g, py) - grab.dy);
+      const r = { x, y, w: wCols, h: item.h };
+      const hits = section.blocks.filter((o) => o.id !== item.block?.id && overlaps(r, o));
+      const ghost = rectOf(g, r);
+      const hint = { ghost, bad: hits.length > 0, x: ghost.left + ghost.width - 8, y: ghost.top - 12,
+        text: hits.length ? `✕ overlaps ${short(labelOf(hits[0]), 18)}, pick an empty spot` : `→ snaps to columns ${x + 1}–${x + wCols}`,
+        neighbours: hits.map((o) => docRect(index.blocks.get(o.id) || [])).filter(Boolean) };
+      const near = section.blocks.find((o) => o.id !== item.block?.id && !hits.includes(o) && o.y < y + item.h && y < o.y + o.h);
+      if (!hits.length && near) { const nr = docRect(index.blocks.get(near.id) || []); if (nr) { hint.text2 = 'no overlap: neighbours stay put'; hint.x2 = nr.left + 10; hint.y2 = nr.top - 12; } }
+      return { kind: 'grid', section, rect: r, ok: !hits.length, hint };
+    }
+    if (!item.block && (section.raw || item.w < COLS)) {
+      // Locked original markup: a new block goes in its own grid section just after it.
+      const sr = docRect(index.sections.get(section.id) || []) || g;
+      const line = { left: g.left, top: sr.top + sr.height - 2, width: g.width, height: 4 };
+      const wCols = Math.min(COLS, item.w || COLS); const nx = Math.max(0, Math.min(COLS - wCols, colAt(g, px)));
+      const ghost = { left: g.cols[nx].l, top: line.top + 8, width: g.cols[nx + wCols - 1].r - g.cols[nx].l, height: ROW * (item.h || 2) };
+      return { kind: 'newsection', section, x: nx, ok: true, hint: { line, ghost, x: ghost.left + 6, y: line.top - 14, text: `↓ new 12-column grid row below · columns ${nx + 1}–${nx + wCols}` } };
+    }
+    // Flow section: reorder / insert by position.
+    const list = sorted(section).filter((b) => b.id !== item.block?.id);
+    let before = null;
+    for (const b of list) { const r = docRect(index.blocks.get(b.id) || []); if (r && py < r.top + r.height / 2) { before = b; break; } }
+    if (item.block && item.block && findBlock(item.block.id).section !== section) return { kind: 'none', ok: false, hint: { x: px, y: py - 14, text: '✕ move it within its own section', bad: true } };
+    const ref = before ? docRect(index.blocks.get(before.id) || []) : docRect(list.length ? index.blocks.get(list[list.length - 1].id) || [] : []);
+    const lineY = before ? (ref ? ref.top - 3 : g.top) : (ref ? ref.top + ref.height + 1 : g.top + 4);
+    const line = { left: g.left, top: lineY, width: g.width, height: 4 };
+    const text = before ? `↕ goes above “${short(labelOf(before), 22)}”` : '↕ goes at the end of this section';
+    return { kind: 'flow', section, before, ok: true, hint: { line, x: g.left + 12, y: lineY - 13, text } };
+  }
+  function renumberFlow(section, order) { let y = 0; order.forEach((b) => { b.x = 0; b.w = 12; b.y = y; y += b.h || 1; }); section.blocks = order; }
+  function applyPlan(plan, block, isNew) {
+    if (!plan || !plan.ok) return false;
+    if (plan.kind === 'grid') {
+      Object.assign(block, plan.rect);
+      if (isNew) plan.section.blocks.push(block);
+    } else if (plan.kind === 'flow') {
+      const order = sorted(plan.section).filter((b) => b !== block);
+      const at = plan.before ? order.indexOf(plan.before) : order.length;
+      block.h = block.h || 1; order.splice(at, 0, block); renumberFlow(plan.section, order);
+    } else if (plan.kind === 'newsection') {
+      const i = layout.sections.indexOf(plan.section);
+      Object.assign(block, { x: plan.x || 0, y: 0, w: Math.min(12, block.w || 12) });
+      layout.sections.splice(i + 1, 0, { id: uid('s'), variant: 'content', blocks: [block] });
+    } else return false;
+    return true;
+  }
+  const toFrame = (cx, cy) => { const r = $('[data-canvas]').getBoundingClientRect(); return { x: (cx - r.left) / scale, y: (cy - r.top) / scale, inside: cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom }; };
+  function autoScroll(fy) {
+    const w = canvasDoc.defaultView; const h = w.innerHeight;
+    if (fy < 40) w.scrollBy(0, -18); else if (fy > h - 40) w.scrollBy(0, 18);
+  }
+
+  function startPaletteDrag(e, def) {
+    if (!canLayout()) return;
     e.preventDefault();
-    const rect = grid.getBoundingClientRect(); const colW = rect.width / COLS;
-    const start = { x: e.clientX, y: e.clientY, b: { ...b } };
+    const [, icon, name, make, size] = def;
+    const ghost = el('div', { class: 'st-ghost', text: `${icon} ${name}` }); document.body.append(ghost);
+    document.body.classList.add('st-dragging');
+    const tile = e.currentTarget; tile.setPointerCapture?.(e.pointerId);
+    const item = { w: size.w, h: size.h, label: name };
+    drag = { kind: 'palette', hint: null, plan: null };
     const move = (ev) => {
-      const dx = Math.round((ev.clientX - start.x) / colW); const dy = Math.round((ev.clientY - start.y) / 40);
-      const r = resize ? { x: b.x, y: b.y, w: start.b.w + dx, h: start.b.h + dy } : { x: start.b.x + dx, y: start.b.y + dy, w: b.w, h: b.h };
-      if (fits(section, b, r) && (r.x !== b.x || r.y !== b.y || r.w !== b.w || r.h !== b.h)) { Object.assign(b, r); renderCanvas(); changed(false); }
+      ghost.style.left = `${ev.clientX}px`; ghost.style.top = `${ev.clientY}px`;
+      const f = toFrame(ev.clientX, ev.clientY);
+      if (f.inside) { autoScroll(f.y); drag.plan = planAt(item, f.x, f.y); drag.hint = drag.plan?.hint || null; } else { drag.plan = null; drag.hint = null; }
+      drawOverlay();
     };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); selected = b.id; renderInspector(); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-  };
+    const up = () => {
+      tile.removeEventListener('pointermove', move); tile.removeEventListener('pointerup', up); tile.removeEventListener('pointercancel', up);
+      ghost.remove(); document.body.classList.remove('st-dragging');
+      const plan = drag.plan; drag = null;
+      if (plan?.ok) {
+        const made = make(); const block = { id: uid(), ...made, x: 0, y: 0, w: size.w, h: size.h };
+        if (applyPlan(plan, block, true)) { selected = block.id; scrollToSel = true; changed(); toast(`${name} added`); return; }
+      } else if (plan) toast('That spot is taken. Drop it on an empty part of the grid.', true);
+      drawOverlay();
+    };
+    tile.addEventListener('pointermove', move); tile.addEventListener('pointerup', up); tile.addEventListener('pointercancel', up);
+    move(e);
+  }
+  function addAtEnd(def) {
+    if (!canLayout()) return;
+    const [, , name, make, size] = def;
+    const found = selected && findBlock(selected);
+    let section = found?.section || [...layout.sections].reverse().find((s) => !s.raw) || layout.sections[layout.sections.length - 1];
+    const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
+    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    else if (isGrid(section)) { block.y = Math.max(0, ...section.blocks.map((b) => b.y + b.h)); block.w = Math.min(12, size.w); section.blocks.push(block); }
+    else applyPlan({ kind: 'flow', section, before: null, ok: true }, block, true);
+    selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
+  }
 
-  // ---------- inspector ----------
-  const propEditors = (host, b) => {
+  function startBlockDrag(ev, resize) {
+    const found = findBlock(selected); if (!found || !canLayout()) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const { section, block } = found; const g = geometry(section); const w = canvasDoc.defaultView;
+    const start = { ...block }; const px0 = ev.clientX + w.scrollX; const py0 = ev.clientY + w.scrollY;
+    const grab = isGrid(section) && g ? { dx: colAt(g, px0) - block.x, dy: rowAt(g, py0) - block.y } : { dx: 0, dy: 0 };
+    drag = { kind: resize ? 'resize' : 'move', hint: null, plan: null };
+    canvasDoc.body.classList.add('sc-dragging');
+    const move = (e) => {
+      autoScroll(e.clientY);
+      if (resize) {
+        const px = e.clientX + w.scrollX; const py = e.clientY + w.scrollY;
+        const r = { x: start.x, y: start.y, w: Math.max(1, Math.min(COLS - start.x, colAt(g, px) - start.x + 1)), h: Math.max(1, rowAt(g, py) - start.y + 1) };
+        const hits = section.blocks.filter((o) => o !== block && overlaps(r, o));
+        const ghost = rectOf(g, r);
+        drag.plan = { kind: 'grid', section, rect: r, ok: !hits.length };
+        drag.hint = { ghost, bad: !!hits.length, x: ghost.left + ghost.width - 8, y: ghost.top + ghost.height + 4,
+          text: hits.length ? `✕ would overlap ${short(labelOf(hits[0]), 18)}` : `columns ${r.x + 1}–${r.x + r.w} · ${r.h} tall`,
+          neighbours: hits.map((o) => docRect(index.blocks.get(o.id) || [])).filter(Boolean) };
+      } else {
+        drag.plan = planAt({ block, w: block.w, h: block.h }, e.clientX, e.clientY, grab);
+        drag.hint = drag.plan?.hint || null;
+      }
+      drawOverlay();
+    };
+    const up = () => {
+      canvasDoc.removeEventListener('pointermove', move); canvasDoc.removeEventListener('pointerup', up);
+      canvasDoc.body.classList.remove('sc-dragging');
+      const plan = drag.plan; drag = null;
+      if (plan?.ok) {
+        const same = plan.kind === 'grid' && ['x', 'y', 'w', 'h'].every((k) => plan.rect[k] === start[k]);
+        if (!same && applyPlan(plan, block, false)) { changed(); return; }
+      } else if (plan) toast(resize ? 'Blocks cannot overlap. Make room first.' : 'That spot is taken. Neighbours stay put.', true);
+      drawOverlay();
+    };
+    canvasDoc.addEventListener('pointermove', move); canvasDoc.addEventListener('pointerup', up);
+  }
+
+  // ---------- inline editing on the canvas ----------
+  function makeEditable() {
+    $$('[contenteditable]', canvasDoc).forEach((n) => { n.removeAttribute('contenteditable'); n.classList.remove('sc-editable'); });
+    const found = selected && findBlock(selected); if (!found) return;
+    const targets = [];
+    const collect = (b, els) => {
+      const p = b.props || {};
+      if (b.type === 'heading' || b.type === 'button') {
+        const t = b.type === 'button' ? els.map((x) => x.querySelector('a') || x)[0] : els[0];
+        if (t) targets.push([t, (v) => { if (b.type === 'heading') p.text = v; else p.label = v; }]);
+      }
+      if (b.type === 'text') {
+        const ps = els.flatMap((x) => (x.tagName === 'P' ? [x] : $$(':scope > p', x)));
+        ps.forEach((pe, i) => { const para = p.rich?.paragraphs?.[i]; if (para && para.length === 1 && !para[0].href) targets.push([pe, (v) => { para[0].text = v; }]); });
+      }
+    };
+    const els = index.blocks.get(found.block.id) || [];
+    if (found.block.type === 'card') (found.block.props.children || []).forEach((k) => collect(k, index.kids.get(k.id) || []));
+    else collect(found.block, els);
+    targets.forEach(([node, set]) => {
+      node.setAttribute('contenteditable', 'plaintext-only'); node.classList.add('sc-editable'); node.spellcheck = true;
+      node.oninput = () => { set(node.textContent.replace(/\s+/g, ' ').trim()); changed({ canvas: false, panel: false, coalesce: true }); syncPanelText(); };
+      node.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); node.blur(); } if (e.key === 'Escape') node.blur(); };
+    });
+  }
+  function wireCanvas() {
+    const d = canvasDoc;
+    d.addEventListener('click', (e) => {
+      const a = e.target.closest('a'); if (a) e.preventDefault();
+      const f = e.target.closest('form'); if (f) e.preventDefault();
+    }, true);
+    d.addEventListener('submit', (e) => e.preventDefault(), true);
+    d.addEventListener('pointerdown', (e) => {
+      const h = e.target.closest('[data-sc-handle]');
+      if (h) { startBlockDrag(e, h.dataset.scHandle === 'resize'); return; }
+      const b = e.target.closest('[data-sc-block]');
+      if (!b) { if (!e.target.closest('#sc-layer')) { selected = null; afterSelect(); } return; }
+      const id = b.dataset.scBlock;
+      if (id !== selected) { selected = id; afterSelect(); }
+    });
+    d.addEventListener('pointermove', (e) => {
+      if (drag) return;
+      const b = e.target.closest?.('[data-sc-block]'); const id = b?.dataset.scBlock || null;
+      if (id !== hover) { hover = id; drawOverlay(); }
+    });
+    d.addEventListener('keydown', keys);
+    d.defaultView.addEventListener('scroll', () => { if (!drag) drawOverlay(); });
+  }
+  function afterSelect() { renderInspector(); drawOverlay(); makeEditable(); }
+
+  // ---------- stage sizing (device toggle) ----------
+  function sizeStage() {
+    const center = $('[data-center]'); const stage = $('[data-stage]'); const frame = $('[data-canvas]');
+    const availW = center.clientWidth - 28; const availH = center.clientHeight - 28;
+    const W = device === 'phone' ? PHONE : DESK;
+    scale = device === 'phone' ? Math.min(1, availW / (PHONE + 16)) : Math.min(1, availW / DESK);
+    const H = Math.max(400, Math.floor(availH / scale));
+    frame.style.width = `${W}px`; frame.style.height = `${H}px`; frame.style.transform = `scale(${scale})`;
+    stage.style.width = `${(W + (device === 'phone' ? 16 : 0)) * scale}px`; stage.style.height = `${(H + (device === 'phone' ? 16 : 0)) * scale}px`;
+    stage.dataset.device = device;
+    requestAnimationFrame(() => drawOverlay());
+  }
+  window.addEventListener('resize', () => sizeStage());
+
+  // ---------- palette ----------
+  function renderPalette() {
+    const host = $('[data-palette]'); host.innerHTML = '';
+    const lay = canLayout();
+    $('[data-left-sub]').textContent = lay ? 'Drag onto the page' : 'You can change words, links and pictures. Adding blocks needs the “can also change layout” permission.';
+    for (const [group, items] of PALETTE) {
+      host.append(el('div', { class: 'st-group', text: group }));
+      const tiles = el('div', { class: 'st-tiles' });
+      for (const def of items) {
+        const [key, icon, name, make, , flag] = def;
+        const soon = flag === 'soon'; const adminOnly = flag === 'admin';
+        if (adminOnly && !isAdmin()) { tiles.append(el('button', { type: 'button', class: 'st-tile', disabled: true, title: 'HTML is for Super Admins only' }, el('span', { class: 'st-soon', text: 'admin' }), el('span', { class: 'st-ti', text: icon }), name)); continue; }
+        const t = el('button', { type: 'button', class: 'st-tile', 'data-tile': key, disabled: soon || !lay || !make, title: soon ? `${name}: coming soon` : `Drag ${name} onto the page (or click to add it at the end)` },
+          soon ? el('span', { class: 'st-soon', text: 'soon' }) : null, el('span', { class: 'st-ti', text: icon }), name);
+        if (!soon && make) {
+          let moved = false; let downAt = null;
+          t.addEventListener('pointerdown', (e) => { moved = false; downAt = [e.clientX, e.clientY];
+            const onMove = (ev) => { if (!moved && Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) { moved = true; t.removeEventListener('pointermove', onMove); startPaletteDrag(ev, def); } };
+            t.addEventListener('pointermove', onMove);
+            t.setPointerCapture?.(e.pointerId);
+            t.addEventListener('pointerup', () => { t.removeEventListener('pointermove', onMove); if (!moved) addAtEnd(def); }, { once: true });
+          });
+          Object.defineProperty(t, '_def', { value: def });
+        }
+        tiles.append(t);
+      }
+      host.append(tiles);
+    }
+  }
+
+  // ---------- inspector (CARD SETTINGS) ----------
+  const kv = (label, control) => el('div', { class: 'st-kv' }, el('span', { text: label }), control);
+  const select = (opts, value, onChange, disabled) => {
+    const s = el('select', { disabled });
+    opts.forEach(([v, t]) => s.append(el('option', { value: v, text: t })));
+    s.value = String(value); s.addEventListener('change', () => onChange(s.value)); return s;
+  };
+  const field = (label, value, onInput, { multi = false, code = false, attrs = {} } = {}) => {
+    const i = el(multi ? 'textarea' : 'input', { ...attrs, class: code ? 'st-code' : null }); i.value = value ?? '';
+    i.addEventListener('input', () => { onInput(i.value); changed({ panel: false, coalesce: true }); });
+    return el('label', { class: 'st-field' }, label, i);
+  };
+  const ordinal = (n) => ['1st', '2nd', '3rd'][n - 1] || `${n}th`;
+  function contentFields(host, b, depth = 0) {
     const p = b.props || (b.props = {});
-    if (b.type === 'heading') { host.append(input('Text', p.text, (v) => { p.text = v; })); if (mode === 'advanced' && p.style !== 'kicker') host.append(input('Level (1-4)', p.level || 2, (v) => { p.level = Number(v) || 2; })); }
-    if (b.type === 'text') host.append(input('Text (blank line = new paragraph)', textOf(p.rich), (v) => { p.rich = richFrom(v); }, true));
-    if (b.type === 'button') { host.append(input('Label', p.label, (v) => { p.label = v; }), input('Link', p.href, (v) => { p.href = v; })); }
+    if (b.type === 'heading') host.append(field('Heading text', p.text, (v) => { p.text = v; }, { attrs: { 'data-sync': b.id } }));
+    if (b.type === 'text') host.append(field('Text (blank line = new paragraph)', textOf(p.rich), (v) => { p.rich = richFrom(v); }, { multi: true, attrs: { 'data-sync': b.id } }));
+    if (b.type === 'button') { host.append(field('Button words', p.label, (v) => { p.label = v; }, { attrs: { 'data-sync': b.id } })); host.append(kv('Link', (() => { const i = el('input', { value: p.href || '', 'aria-label': 'Link', style: 'width:96px;border:0;text-align:right' }); i.addEventListener('change', () => { p.href = i.value.trim(); changed({ panel: false }); }); return i; })())); }
     if (b.type === 'image') {
-      host.append(input('Image URL', p.src, (v) => { p.src = v; }), input('Alt text (describe the picture)', p.alt, (v) => { p.alt = v; }));
+      host.append(field('Describe the picture (alt text)', p.alt, (v) => { p.alt = v; }));
       const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp' });
       file.addEventListener('change', async () => {
         const f = file.files[0]; if (!f) return;
-        if (f.size > 10 * 1024 * 1024) { showErrors(['Images must be 10 MB or smaller.']); return; }
-        const fd = new FormData(); fd.append('file', f); status('Uploading…');
-        const out = await call(`${api}/upload`, 'POST', null, fd); p.src = out.src; changed(); renderInspector(); status('Image uploaded');
+        if (f.size > 10 * 1024 * 1024) { toast('Images must be 10 MB or smaller.', true); return; }
+        const fd = new FormData(); fd.append('file', f); toast('Uploading…');
+        try { const out = await call(`${api}/upload`, 'POST', null, fd); p.src = out.src; changed(); toast('Image uploaded'); } catch (e) { toast(e.message, true); }
       });
-      host.append(el('label', {}, document.createTextNode('Upload an image (max 10 MB)'), file));
+      host.append(el('label', { class: 'st-field' }, 'Replace picture (max 10 MB)', file));
+      if (isAdmin()) host.append(el('div', { class: 'st-adv' }, field('Image URL', p.src, (v) => { p.src = v; })));
     }
-    if (b.type === 'logos') host.append(el('p', { class: 'sc-note', text: p.auto ? 'Shows the site logo and the Blue Regiment mark automatically.' : 'Custom logos.' }));
     if (b.type === 'html') {
-      if (state.can_html) host.append(input('HTML', p.html, (v) => { p.html = v; p.locked = false; }, true));
-      else host.append(el('p', { class: 'sc-note', text: '🔒 This part keeps the original page markup. Ask the Super Admin to change it.' }));
+      if (isAdmin()) host.append(el('div', { class: depth ? '' : 'st-adv' }, field('HTML (Super Admin)', p.html, (v) => { p.html = v; p.locked = false; }, { multi: true, code: true })));
+      if (!isAdmin() || mode === 'simple') host.append(el('p', { class: 'st-lock', text: p.locked ? '🔒 Original page markup. Only a Super Admin can change it (Advanced mode).' : 'Custom HTML (Super Admin only).' }));
     }
+    if (b.type === 'logos') host.append(el('p', { class: 'st-note', text: 'Shows the school logo and the Blue Regiment mark automatically.' }));
     if (b.type === 'card') {
       (p.children || []).forEach((kid, i) => {
-        const box = el('fieldset', { class: 'sc-child' }, el('legend', { text: `${kid.type} ${i + 1}` }));
-        propEditors(box, kid);
-        if (state.can_layout) box.append(el('button', { type: 'button', text: 'Remove from card', onclick: () => { p.children.splice(i, 1); changed(); renderInspector(); } }));
-        host.append(box);
+        const fs = el('fieldset', { class: 'st-kid' }, el('legend', { text: `${TYPE_NAMES[kid.type] || kid.type}` }));
+        fs.style.cssText = 'border:1px solid #d6dce8;border-radius:7px;padding:4px 6px;margin:0 0 6px;font-size:10px';
+        contentFields(fs, kid, depth + 1);
+        if (canLayout()) fs.append(el('div', { class: 'st-actions' }, el('button', { type: 'button', class: 'danger', text: 'Remove', onclick: () => { p.children.splice(i, 1); changed(); } })));
+        host.append(fs);
       });
-      if (state.can_layout) {
-        const sel = el('select'); ['text', 'heading', 'button', 'image', 'divider'].forEach((t) => sel.append(el('option', { value: t, text: t })));
-        host.append(el('div', { class: 'sc-row' }, sel, el('button', { type: 'button', text: 'Add to card', onclick: () => {
-          const def = PALETTE.find(([t]) => t === sel.value); p.children.push({ id: uid('c'), type: sel.value, props: def[2]() }); changed(); renderInspector();
+      if (canLayout()) {
+        const s = el('select', { 'aria-label': 'Add to card' }); [['text', 'Text'], ['heading', 'Heading'], ['button', 'Button'], ['image', 'Image'], ['divider', 'Divider']].forEach(([v, t]) => s.append(el('option', { value: v, text: t })));
+        host.append(el('div', { class: 'st-actions' }, s, el('button', { type: 'button', text: '+ Add to card', onclick: () => {
+          const mk = { text: () => ({ rich: rich('Card text') }), heading: () => ({ level: 3, text: 'Heading' }), button: () => ({ label: 'Learn more', href: '/contact.html' }), image: () => ({ src: '/assets/efhs-photo-1.png', alt: 'Band photo' }), divider: () => ({}) }[s.value];
+          p.children.push({ id: uid('c'), type: s.value, props: mk() }); changed();
         } })));
       }
     }
-  };
-  const renderInspector = () => {
+  }
+  function syncPanelText() {
+    const found = selected && findBlock(selected); if (!found) return;
+    const all = found.block.type === 'card' ? found.block.props.children : [found.block];
+    all.forEach((b) => { const i = $(`[data-sync="${CSS.escape(b.id)}"]`); if (!i || document.activeElement === i) return; i.value = b.type === 'text' ? textOf(b.props.rich) : b.type === 'button' ? b.props.label : b.props.text; });
+  }
+  function renderInspector() {
     const host = $('[data-inspector]'); host.innerHTML = '';
     const found = selected && findBlock(selected);
-    if (!found) { host.append(el('p', { class: 'sc-note', text: 'Click a block to edit it.' })); return; }
-    const { section, block: b } = found;
-    host.append(el('h3', { text: `${b.type} block` }));
-    propEditors(host, b);
-    if (state.can_layout) {
-      if (mode === 'advanced') {
-        const pos = el('div', { class: 'sc-pos' });
-        ['x', 'y', 'w', 'h'].forEach((k) => pos.append(input(k, b[k], (v) => { const r = { ...b, [k]: Number.parseInt(v, 10) }; if (fits(section, b, r)) { b[k] = r[k]; renderCanvas(); } })));
-        host.append(pos);
-        const order = input('Phone order (blank = same)', b.mobile?.order ?? '', (v) => { b.mobile = { ...(b.mobile || {}), order: v === '' ? undefined : Number(v) }; });
-        const hide = el('input', { type: 'checkbox' }); hide.checked = !!b.mobile?.hidden;
-        hide.addEventListener('change', () => { b.mobile = { ...(b.mobile || {}), hidden: hide.checked }; changed(false); });
-        host.append(order, el('label', {}, hide, document.createTextNode(' Hide on phones')));
-      }
-      host.append(el('button', { type: 'button', class: 'danger', text: 'Delete block', onclick: () => {
-        if (b.type === 'html' && b.props?.locked && !state.can_html) return;
-        section.blocks = section.blocks.filter((x) => x !== b); selected = null; changed();
-      } }));
+    if (!found) {
+      host.append(el('h2', { text: 'Page settings' }), el('p', { class: 'st-selname', text: `${state?.page?.title || slug} · nothing selected` }));
+      host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it.' }));
+      host.append(el('div', { class: 'st-group', text: 'Page' }), kv('Address', el('b', { text: state?.page?.path || '' })), kv('Live editor', el('b', { text: state?.page?.editor || 'legacy' })), kv('Sections', el('b', { text: String(layout?.sections?.length || 0) })));
+      host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
+      host.append(el('p', { class: 'st-note', text: `You can ${canLayout() ? 'change words and layout' : 'change words, links and pictures'} here.` }));
+      return;
     }
-  };
-  const renderPalette = () => {
-    const host = $('[data-palette]'); host.innerHTML = '';
-    if (!state.can_layout) { host.append(el('p', { class: 'sc-note', text: 'You can change words, links and pictures. Layout changes need the “can also change layout” permission.' })); return; }
-    PALETTE.filter(([t]) => t !== 'html' || state.can_html).filter(([t]) => mode === 'advanced' || !['spacer', 'html'].includes(t)).forEach(([type, name, make]) => {
-      host.append(el('button', { type: 'button', text: `+ ${name}`, onclick: () => {
-        const section = (selected && findBlock(selected)?.section) || layout.sections[layout.sections.length - 1];
-        const y = Math.max(0, ...section.blocks.map((b) => b.y + b.h));
-        const b = { id: uid(), type, x: 0, y, w: 12, h: type === 'card' || type === 'image' ? 3 : 1, props: make() };
-        section.blocks.push(b); selected = b.id; changed();
-      } }));
-    });
-    if (mode === 'advanced') host.append(el('button', { type: 'button', text: '+ Section', onclick: () => { layout.sections.push({ id: uid('s'), variant: 'content', blocks: [] }); changed(); } }));
-  };
-
-  const preview = async () => {
-    try {
-      const { html } = await call(`${api}/render`, 'POST', { layout });
-      $('[data-preview]').srcdoc = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/public-theme.css"><link rel="stylesheet" href="/theme.css"><main id="main">${html}</main>`;
-    } catch { /* errors shown */ }
-  };
-  function changed(rebuild = true) {
-    if ($('[data-json]')) $('[data-json]').value = JSON.stringify(layout, null, 2);
-    if (rebuild) { renderCanvas(); renderInspector(); renderPalette(); }
-    clearTimeout(previewTimer); previewTimer = setTimeout(preview, 300);
-    status('Unsaved changes');
+    const { section, block: b } = found; const grid = isGrid(section); const lay = canLayout();
+    const name = TYPE_NAMES[b.type] || b.type;
+    host.append(el('h2', { text: `${b.type === 'card' ? 'Card' : name} settings` }), el('p', { class: 'st-selname', text: `“${short(labelOf(b), 26)}” · selected` }));
+    // SIZE & PLACE
+    host.append(el('div', { class: 'st-group', text: 'Size & place' }));
+    const setRect = (r) => { const t = { ...b, ...r }; if (t.x < 0 || t.w < 1 || t.x + t.w > COLS || t.h < 1) return toast('That does not fit on the 12-column grid.', true); const hit = section.blocks.find((o) => o !== b && overlaps(t, o)); if (hit) { toast(`No overlap: “${short(labelOf(hit), 20)}” stays put.`, true); renderInspector(); return; } Object.assign(b, r); changed(); };
+    if (grid) {
+      const opts = Array.from({ length: 12 }, (_, i) => [String(i + 1), String(i + 1)]);
+      const cols = el('span', { class: 'st-sw' }, select(opts, b.x + 1, (v) => setRect({ x: Number(v) - 1, w: Math.max(1, b.x + b.w - (Number(v) - 1)) }), !lay), el('b', { text: '–' }), select(opts, b.x + b.w, (v) => setRect({ w: Number(v) - b.x }), !lay));
+      host.append(kv('Columns', cols));
+      host.append(kv('Rows', select(Array.from({ length: 16 }, (_, i) => [String(i + 1), `${i + 1} tall`]), b.h, (v) => setRect({ h: Number(v) }), !lay)));
+    } else {
+      host.append(kv('Columns', el('b', { text: '1 – 12' })), kv('Rows', el('b', { text: 'auto' })));
+    }
+    const phoneVal = b.mobile?.hidden ? 'hide' : Number.isInteger(b.mobile?.order) ? String(b.mobile.order) : 'same';
+    host.append(kv('On phone', select([['same', 'Full width, same'], ...[1, 2, 3, 4, 5, 6].map((n) => [String(n), `Full width, ${ordinal(n)}`]), ['hide', 'Hidden']], phoneVal, (v) => {
+      const m = { ...(b.mobile || {}) }; delete m.order; delete m.hidden;
+      if (v === 'hide') m.hidden = true; else if (v !== 'same') m.order = Number(v);
+      if (Object.keys(m).length) b.mobile = m; else delete b.mobile; changed();
+    }, !lay || !grid)));
+    if (!grid && lay && !section.raw) host.append(el('p', { class: 'st-note' }, 'This section keeps the original layout (full width, drag ⠿ to reorder). ', el('button', { type: 'button', class: 'st-linkbtn', text: 'Make it a free grid', onclick: () => { if (!confirm('Switch this section to the free 12-column grid? Its look may change slightly. You can undo.')) return; section.flow = false; delete section.wrap; delete section.wrapClass; changed(); } })));
+    if (section.raw) host.append(el('p', { class: 'st-note', text: 'Part of the original page. Drop new elements below it, or drag ⠿ to reorder.' }));
+    // LOOK
+    host.append(el('div', { class: 'st-group', text: 'Look' }));
+    const look = b.look || {};
+    const setLook = (k, v) => { const l = { ...(b.look || {}) }; if (v == null || v === '') delete l[k]; else l[k] = v; if (Object.keys(l).length) b.look = l; else delete b.look; changed(); };
+    const lookOk = grid && lay;
+    const color = (k, def) => { const i = el('input', { type: 'color', value: look[k] || def, disabled: !lookOk, 'aria-label': k }); i.addEventListener('change', () => setLook(k, i.value)); return el('span', { class: 'st-sw' }, look[k] && lookOk ? el('button', { type: 'button', title: 'Use site default', text: '✕', onclick: () => setLook(k, null) }) : null, i); };
+    host.append(kv('Background', color('bg', '#ffffff')), kv('Accent', color('accent', '#c8102e')));
+    host.append(kv('Corners', select([['', 'Site default'], ['square', 'Square'], ['round', 'Round'], ['pill', 'Extra round']], look.radius || '', (v) => setLook('radius', v), !lookOk)));
+    host.append(kv('Shadow', select([['', 'Site default'], ['none', 'None'], ['soft', 'Soft'], ['strong', 'Strong']], look.shadow || '', (v) => setLook('shadow', v), !lookOk)));
+    if (!grid) host.append(el('p', { class: 'st-note', text: 'Look settings work in free grid sections.' }));
+    // CONTENT
+    host.append(el('div', { class: 'st-group', text: 'Content' }));
+    host.append(kv('Linked data', el('b', { text: 'None' })));
+    contentFields(host, b);
+    // WHO CAN EDIT
+    host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
+    // ADVANCED
+    if (lay) {
+      const adv = el('div', { class: 'st-adv' }, el('div', { class: 'st-group', text: 'Advanced' }));
+      ['x', 'y', 'w', 'h'].forEach((k) => { const i = el('input', { type: 'number', value: b[k], min: 0, max: k === 'h' ? 99 : 12 }); i.addEventListener('change', () => setRect({ [k]: Number.parseInt(i.value, 10) })); adv.append(kv(k.toUpperCase(), i)); });
+      adv.append(kv('Section', el('b', { text: `${section.id} · ${section.raw ? 'original' : grid ? 'grid' : 'flow'}` })));
+      host.append(adv);
+      const locked = b.type === 'html' && b.props?.locked && !isAdmin();
+      host.append(el('div', { class: 'st-actions' },
+        el('button', { type: 'button', text: 'Duplicate', disabled: locked, onclick: () => duplicate(section, b) }),
+        el('button', { type: 'button', text: '↑', title: 'Move up', onclick: () => nudge(section, b, -1) }),
+        el('button', { type: 'button', text: '↓', title: 'Move down', onclick: () => nudge(section, b, 1) }),
+        el('button', { type: 'button', class: 'danger', text: 'Delete', disabled: locked, onclick: () => del(section, b) })));
+    }
   }
-  const renderHistory = () => {
+  function duplicate(section, b) {
+    const copy = JSON.parse(JSON.stringify(b)); copy.id = uid();
+    (copy.props?.children || []).forEach((k) => { k.id = uid('c'); });
+    if (isGrid(section)) { copy.y = Math.max(0, ...section.blocks.map((o) => o.y + o.h)); section.blocks.push(copy); }
+    else { const order = sorted(section); order.splice(order.indexOf(b) + 1, 0, copy); renumberFlow(section, order); }
+    selected = copy.id; changed();
+  }
+  function nudge(section, b, dir) {
+    if (isGrid(section)) { const t = { ...b, y: b.y + dir }; if (t.y < 0 || section.blocks.some((o) => o !== b && overlaps(t, o))) return toast('No room there. Neighbours stay put.', true); b.y = t.y; changed(); return; }
+    const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); changed();
+  }
+  function del(section, b) {
+    section.blocks = section.blocks.filter((x) => x !== b);
+    if (!section.blocks.length && layout.sections.length > 1 && !section.flow) layout.sections = layout.sections.filter((s) => s !== section);
+    selected = null; changed(); toast('Deleted. Press Undo to bring it back.');
+  }
+
+  // ---------- history panel ----------
+  function renderHistory() {
     const ol = $('[data-history]'); ol.innerHTML = '';
+    if (isDirty()) ol.append(el('li', {}, el('b', { text: 'Unpublished draft' }), `Autosaved ${lastSaved ? ago(lastSaved) : 'earlier'}. Visitors do not see it until you press Publish.`));
     (state.versions || []).forEach((v) => {
-      const when = new Date(`${String(v.created_at).replace(' ', 'T')}Z`).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
-      const li = el('li', { text: `${v.kind === 'restore' ? 'Restored' : 'Published'} by ${v.created_by_name || '?'} · ${when} ET${v.id === state.page.live_version_id ? ' (live)' : ''} ` });
-      if (v.id !== state.page.live_version_id) li.append(el('button', { type: 'button', text: 'Restore', onclick: async () => { await call(`${api}/restore`, 'POST', { version_id: v.id }); await load(); status('Restored'); } }));
-      ol.append(li);
+      const when = new Date(`${String(v.created_at).replace(' ', 'T')}Z`).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+      const live = v.id === state.page.live_version_id;
+      ol.append(el('li', { class: live ? 'is-live' : null }, el('b', { text: `${v.kind === 'restore' ? 'Restored' : 'Published'}${live ? ' · live now' : ''}` }), `${v.created_by_name || '?'} · ${when} ET`,
+        live ? null : el('div', {}, el('button', { type: 'button', class: 'st-btn', text: 'Restore this version', onclick: async () => {
+          if (!confirm('Restore this version? It becomes the live page.')) return;
+          try { await call(`${api}/restore`, 'POST', { version_id: v.id }); await load(true); toast('Restored'); } catch (e) { toast(e.message, true); }
+        } }))));
     });
-  };
-  const setMode = (m) => {
-    mode = m; localStorage.setItem('studio-mode', m);
-    document.body.dataset.mode = m;
-    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    if (!(state.versions || []).length) ol.append(el('li', { text: 'No published versions yet.' }));
+  }
+  const renderJson = () => { const t = $('[data-json]'); if (t && document.activeElement !== t) t.value = JSON.stringify(layout, null, 2); };
+
+  // ---------- modes, toolbar, menu ----------
+  function setMode(m) {
+    mode = m; localStorage.setItem('studio-mode', m); document.body.dataset.mode = m;
+    $$('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
     renderPalette(); renderInspector();
-  };
-  async function load() {
-    state = await call(api, 'GET');
-    $('[data-slug-label]').textContent = `· ${state.page.title || slug}`;
-    const starter = JSON.parse($('#studio-starter').textContent || 'null');
-    layout = state.draft?.layout || state.live_layout || starter;
-    if (!layout && state.can_html) { try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; } catch { /* fall through */ } }
-    if (!layout) layout = { version: 1, sections: [{ id: 'main', variant: 'content', blocks: [] }] };
-    if (state.can_flag) { $('.studio-flag').hidden = false; $('[data-editor]').value = state.page.editor || 'legacy'; }
-    if (!state.can_html) { const d = $('[data-json-wrap]'); if (d) d.remove(); }
-    renderHistory(); setMode(mode); changed(); status(`Live editor: ${state.page.editor || 'legacy'}`);
+  }
+  function keys(e) {
+    const t = e.target; const typing = t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && canLayout()) { const f = findBlock(selected); if (f && !(f.block.type === 'html' && f.block.props?.locked && !isAdmin())) { e.preventDefault(); del(f.section, f.block); } }
+    if (e.key === 'Escape' && !typing) { selected = null; afterSelect(); }
+  }
+  document.addEventListener('keydown', keys);
+  async function preview() {
+    const w = window.open('', '_blank');
+    try {
+      const html = await renderHtml(false);
+      const d = template.cloneNode(true); $('#sc-editor-style', d)?.remove(); $('main', d).innerHTML = html;
+      const bar = d.createElement('div'); bar.setAttribute('style', 'position:sticky;top:0;z-index:9999;background:#c8102e;color:#fff;font:700 14px/1.2 system-ui;padding:8px 14px;text-align:center'); bar.textContent = 'Preview of your draft. Not live until you press Publish.';
+      d.body.prepend(bar);
+      if (w) { w.document.open(); w.document.write(`<!doctype html>${d.documentElement.outerHTML}`); w.document.close(); }
+    } catch (e) { if (w) w.close(); toast(e.message, true); }
+  }
+  async function publish() {
+    clearTimeout(saveTimer);
+    try {
+      const pub = $('[data-act="publish"]'); pub.disabled = true; pub.textContent = 'Publishing…';
+      await call(`${api}/publish`, 'POST', { layout });
+      await load(true); toast('Published. The live page is updated.');
+    } catch (e) { toast(`Not published: ${e.message}`, true); updateChrome(); }
   }
   document.addEventListener('click', async (e) => {
-    const t = e.target?.closest?.('[data-act],[data-mode],[data-device]'); if (!t) return;
-    if (t.dataset.mode) return setMode(t.dataset.mode);
-    if (t.dataset.device) { $('[data-preview-wrap]').dataset.device = t.dataset.device; document.querySelectorAll('[data-device]').forEach((b) => b.setAttribute('aria-pressed', String(b === t))); return; }
+    const menu = $('[data-menu]');
+    if (!e.target.closest('.st-more')) { menu.hidden = true; $('[data-act="more"]').setAttribute('aria-expanded', 'false'); }
+    const t = e.target.closest('[data-act],[data-mode],[data-device]'); if (!t || t.closest('[data-palette]')) return;
+    if (t.dataset.mode) { setMode(t.dataset.mode); menu.hidden = true; return; }
+    if (t.dataset.device) { device = t.dataset.device; $$('[data-device]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.device === device))); sizeStage(); return; }
     const act = t.dataset.act;
-    if (act === 'apply-json') { try { layout = JSON.parse($('[data-json]').value); changed(); } catch { showErrors(['That JSON could not be read.']); } return; }
-    if (act === 'draft') { await call(`${api}/draft`, 'PUT', { layout }); status('Draft saved'); }
-    if (act === 'publish') { await call(`${api}/publish`, 'POST', { layout }); await load(); status('Published'); }
-    if (act === 'migrate') { layout = (await call(`${api}/migrate`, 'POST', {})).layout; selected = null; changed(); status('Rebuilt from the current page'); }
+    if (act === 'more') { menu.hidden = !menu.hidden; t.setAttribute('aria-expanded', String(!menu.hidden)); return; }
+    if (act === 'undo') return undo();
+    if (act === 'redo') return redo();
+    if (act === 'grid') { showGrid = !showGrid; t.setAttribute('aria-pressed', String(showGrid)); $('[data-gridnote]').textContent = showGrid ? 'Grid: 12 columns · snap on' : 'Grid hidden · snap on'; drawOverlay(); return; }
+    if (act === 'preview') return preview();
+    if (act === 'publish') return publish();
+    if (act === 'history') { const p = $('[data-history-panel]'); p.hidden = !p.hidden; $$('[data-act="history"].st-btn').forEach((b) => b.setAttribute('aria-pressed', String(!p.hidden))); if (!p.hidden) renderHistory(); return; }
+    if (act === 'json') { menu.hidden = true; renderJson(); $('[data-json-dialog]').showModal(); return; }
+    if (act === 'apply-json') { try { layout = JSON.parse($('[data-json]').value); selected = null; changed(); $('[data-json-dialog]').close(); } catch { toast('That JSON could not be read.', true); } return; }
+    if (act === 'migrate') { menu.hidden = true; if (!confirm('Rebuild this draft from the current page? You can undo.')) return; try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; selected = null; changed(); toast('Rebuilt from the current page'); } catch (er) { toast(er.message, true); } return; }
+    if (act === 'discard') { menu.hidden = true; if (!state.live_layout) return toast('Nothing is live yet.', true); if (!confirm('Throw away unpublished changes and go back to the live page?')) return; layout = JSON.parse(liveJson); selected = null; changed(); toast('Back to the live version'); }
   });
-  $('[data-editor]').addEventListener('change', async (e) => { await call(`${api}/editor`, 'POST', { editor: e.target.value }); await load(); });
-  load().catch(() => status('Could not load'));
+  $('[data-editor]').addEventListener('change', async (e) => { try { await call(`${api}/editor`, 'POST', { editor: e.target.value }); await load(true); toast(`Live editor: ${e.target.value}`); } catch (er) { toast(er.message, true); } });
+  $('[data-page-pick]').addEventListener('change', (e) => { if (e.target.value !== slug) window.location.href = `/admin/studio/${encodeURIComponent(e.target.value)}`; });
+  async function loadPages() {
+    try {
+      const me = await call('/api/admin/me', 'GET'); const sel = $('[data-page-pick]'); sel.innerHTML = '';
+      (me.pages || []).forEach((p) => sel.append(el('option', { value: p.slug, text: p.title || p.slug })));
+      if (![...sel.options].some((o) => o.value === slug)) sel.prepend(el('option', { value: slug, text: state?.page?.title || slug }));
+      sel.value = slug;
+    } catch { /* keep default */ }
+  }
+
+  async function load(reload) {
+    state = await call(api, 'GET');
+    liveJson = JSON.stringify(state.live_layout || null);
+    if (!reload) {
+      const starter = JSON.parse($('#studio-starter').textContent || 'null');
+      layout = state.draft?.layout || state.live_layout || starter;
+      if (!layout && state.can_html) { try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; } catch { /* fall through */ } }
+      if (!layout) layout = { version: 1, sections: [{ id: 'main', variant: 'content', blocks: [] }] };
+      if (state.draft?.updated_at) lastSaved = new Date(`${String(state.draft.updated_at).replace(' ', 'T')}Z`).getTime() || null;
+      if (!mode) mode = state.can_html ? 'advanced' : 'simple';
+    } else {
+      layout = state.draft?.layout || state.live_layout || layout;
+    }
+    lastSnap = snapshot();
+    $('[data-admin-only]').hidden = !state.can_html;
+    if (state.can_flag) $('[data-editor]').value = state.page.editor || 'legacy';
+    document.title = `Site Studio: ${state.page.title || slug}`;
+    if (!template) await loadTemplate();
+    setMode(mode); renderJson(); updateChrome();
+    if (!$('[data-history-panel]').hidden) renderHistory();
+    firstRender = firstRender || !canvasDoc; await renderCanvas(); makeEditable();
+  }
+  window.__studio = { get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, select: (id) => { selected = id; afterSelect(); } };
+  load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });
+
+  const CANVAS_CSS = `
+.site-header,.home-sticky-nav,[data-sticky-nav]{position:relative!important;top:auto!important}
+#sc-layer{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483000}
+#sc-layer>div{position:absolute;box-sizing:border-box}
+.sc-grid{pointer-events:none}
+.sc-col{position:absolute;top:0;bottom:0;background:rgba(47,125,225,.045);border-left:1px solid rgba(47,125,225,.16);border-right:1px solid rgba(47,125,225,.16)}
+.sc-hover{border:1.5px dashed rgba(47,125,225,.7);border-radius:8px}
+.sc-sel{border:2.5px solid #2f7de1;border-radius:9px;box-shadow:0 0 0 4px rgba(47,125,225,.14)}
+.sc-sel.is-dragging{opacity:.45}
+.sc-name{position:absolute;left:-2px;top:-24px;display:flex;gap:4px;font:700 12px/1 "Work Sans",system-ui,sans-serif;white-space:nowrap}
+.sc-name>span{background:#2f7de1;color:#fff;padding:5px 7px;border-radius:6px 6px 0 0}
+.sc-move{pointer-events:auto;cursor:grab;background:#0b2a5b!important}
+.sc-resize{position:absolute;right:-8px;bottom:-8px;width:16px;height:16px;border-radius:50%;background:#2f7de1;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);pointer-events:auto;cursor:nwse-resize}
+.sc-ghost{border:2.5px dashed #c8102e;border-radius:10px;background:rgba(200,16,46,.05)}
+.sc-ghost.is-bad{border-color:#c8102e;background:rgba(200,16,46,.18)}
+.sc-nb{border:2px solid rgba(47,125,225,.5);border-radius:9px;background:rgba(47,125,225,.07)}
+.sc-line{background:#c8102e;border-radius:3px}
+.sc-hint,.sc-hint2{transform:translate(-100%,-50%);font:800 13px/1 "Work Sans",system-ui,sans-serif;padding:6px 9px;border-radius:6px;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.2)}
+.sc-hint{background:#ffd21f;color:#0b2a5b}
+.sc-hint.is-bad{background:#c8102e;color:#fff}
+.sc-hint2{transform:translate(0,-50%);background:#d6e7ff;color:#0b2a5b}
+[data-sc-block]{cursor:pointer}
+.sc-editable{outline:1.5px dashed rgba(47,125,225,.55);outline-offset:3px;cursor:text!important;border-radius:3px}
+.sc-editable:focus{outline:2px solid #ffd21f;background:rgba(255,210,31,.12)}
+body.sc-dragging,body.sc-dragging *{cursor:grabbing!important;user-select:none}
+html{scroll-behavior:auto!important}
+*{animation-play-state:paused!important}
+.reveal,[data-reveal]{opacity:1!important;transform:none!important}
+`;
 })();

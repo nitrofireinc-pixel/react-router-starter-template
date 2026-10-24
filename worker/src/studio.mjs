@@ -178,6 +178,32 @@ export function rectsOverlap(a, b) {
 const FIELD_RE = /^[a-z0-9_-]{1,40}$/i;
 const CLASS_RE = /^[a-z0-9 _-]{0,120}$/i;
 
+export const WRAP_OPEN_RE = /^<div(?: class="[a-z0-9 _-]{0,120}")?(?: data-[a-z][a-z0-9-]{0,40})*>$/;
+export const LOOK_RADIUS = { square: '0', round: '14px', pill: '28px' };
+export const LOOK_SHADOW = { none: 'none', soft: '0 6px 18px rgba(8,30,70,.14)', strong: '0 14px 34px rgba(8,30,70,.28)' };
+const COLOR_RE = /^#[0-9a-f]{6}$/i;
+export function validateLook(look, bw) {
+  const errors = [];
+  if (typeof look !== 'object' || Array.isArray(look)) return [`${bw}: look must be an object`];
+  for (const [k, v] of Object.entries(look)) {
+    if (k === 'bg' || k === 'accent') { if (!COLOR_RE.test(String(v))) errors.push(`${bw}: ${k} must be a #rrggbb colour`); }
+    else if (k === 'radius') { if (!(v in LOOK_RADIUS)) errors.push(`${bw}: unknown corners ${v}`); }
+    else if (k === 'shadow') { if (!(v in LOOK_SHADOW)) errors.push(`${bw}: unknown shadow ${v}`); }
+    else errors.push(`${bw}: look.${k} not allowed`);
+  }
+  return errors;
+}
+function lookStyle(look) {
+  if (!look) return '';
+  let s = '';
+  if (look.bg) s += `;background:${look.bg}`;
+  if (look.accent) s += `;border-top:4px solid ${look.accent}`;
+  if (look.radius) s += `;border-radius:${LOOK_RADIUS[look.radius]}`;
+  if (look.shadow) s += `;box-shadow:${LOOK_SHADOW[look.shadow]}`;
+  if (look.bg || look.accent || look.shadow) s += ';padding:16px';
+  return s;
+}
+
 /** Collect locked html blocks (id -> html) so non-admins may keep migrated markup. */
 export function lockedHtmlById(layout) {
   const map = new Map();
@@ -222,6 +248,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
   try { size = JSON.stringify(layout).length; } catch { errors.push('layout is not serializable'); }
   if (size > MAX_LAYOUT_BYTES) errors.push(`layout is too large (${size} bytes)`);
   if (!Array.isArray(layout.sections) || !layout.sections.length) errors.push('layout needs at least one section');
+  if (layout.wrapOpen != null && !WRAP_OPEN_RE.test(String(layout.wrapOpen))) errors.push('layout wrapper is not allowed');
   const locked = lockedHtmlById(baseline);
   const htmlOk = (block) => allowHtml || (block.props?.locked && locked.get(block.id) === String(block.props.html || ''));
   const ids = new Set();
@@ -253,6 +280,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
       }
       placed.push(block);
       if (block.mobile && typeof block.mobile !== 'object') errors.push(`${bw}: mobile must be an object`);
+      if (block.look != null) errors.push(...validateLook(block.look, bw));
       validateBlockProps(block, bw, errors, htmlOk);
       if (block.type === 'card') {
         const kids = block.props?.children;
@@ -278,15 +306,15 @@ function blockStructure(b) {
     if (CONTENT_PROP_KEYS.has(k)) continue;
     props[k] = k === 'children' && Array.isArray(v) ? v.map(blockStructure) : v;
   }
-  return { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, mobile: b.mobile || null, props };
+  return { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, mobile: b.mobile || null, look: b.look || null, props };
 }
 
 function structureOf(layout) {
-  return JSON.stringify((layout?.sections || []).map((s) => ({
+  return JSON.stringify([layout?.wrapOpen || null, ...(layout?.sections || []).map((s) => ({
     id: s.id, variant: s.variant || 'plain', style: s.style || null, flow: Boolean(s.flow),
     wrap: s.wrap || null, className: s.className || null, wrapClass: s.wrapClass || null, attrs: s.attrs || null,
     blocks: (s.blocks || []).map(blockStructure),
-  })));
+  }))]);
 }
 
 /** True when only words/links/images changed (page:{slug} is enough). */
@@ -337,7 +365,7 @@ function blockInner(block, ctx = {}) {
     case 'card': {
       const cls = p.className ? escapeHtml(p.className) : 'card';
       const tag = p.tag === 'article' ? 'article' : 'div';
-      return `<${tag} class="${cls}"${fieldAttr(p)}>${(p.children || []).map((kid) => blockInner(kid, ctx)).join('')}</${tag}>`;
+      return `<${tag} class="${cls}"${fieldAttr(p)}>${(p.children || []).map((kid) => (ctx.annotate ? `<!--sk:${escapeHtml(kid.id)}-->${blockInner(kid, ctx)}<!--/sk-->` : blockInner(kid, ctx))).join('')}</${tag}>`;
     }
     default:
       return '';
@@ -374,10 +402,17 @@ function wrapInner(section, inner) {
  */
 export function renderLayout(layout, ctx = {}) {
   let usesGrid = false;
+  // ctx.annotate (editor canvas only, never published): comment markers around
+  // every block/section so the editor can map rendered nodes back to blocks.
+  const mark = (block, html) => (ctx.annotate ? `<!--sb:${escapeHtml(block.id)}-->${html}<!--/sb-->` : html);
   const sections = (layout.sections || []).map((section) => {
-    if (section.raw) return sortBlocks(section.blocks).map((block) => blockInner(block, ctx)).join('');
+    const out = renderSection(section);
+    return ctx.annotate ? `<!--ss:${escapeHtml(section.id)}-->${out}<!--/ss-->` : out;
+  }).join('');
+  function renderSection(section) {
+    if (section.raw) return sortBlocks(section.blocks).map((block) => mark(block, blockInner(block, ctx))).join('');
     if (section.flow) {
-      const inner = sortBlocks(section.blocks).map((block) => blockInner(block, ctx)).join('');
+      const inner = sortBlocks(section.blocks).map((block) => mark(block, blockInner(block, ctx))).join('');
       const cls = section.className != null ? ` class="${escapeHtml(section.className)}"` : '';
       return `<section${cls}${sectionAttrs(section)}>${wrapInner(section, inner)}</section>`;
     }
@@ -388,15 +423,16 @@ export function renderLayout(layout, ctx = {}) {
       .map((block) => {
         const order = Number.isInteger(block.mobile?.order) ? block.mobile.order : null;
         const hide = block.mobile?.hidden ? ' studio-hide-mobile' : '';
-        const style = `grid-column:${block.x + 1} / span ${block.w};grid-row:${block.y + 1} / span ${block.h}${order !== null ? `;--studio-order:${order}` : ''}`;
-        return `<div class="studio-block studio-${block.type}${hide}" data-block="${escapeHtml(block.id)}" style="${style}">${blockInner(block, ctx)}</div>`;
+        const style = `grid-column:${block.x + 1} / span ${block.w};grid-row:${block.y + 1} / span ${block.h}${order !== null ? `;--studio-order:${order}` : ''}${lookStyle(block.look)}`;
+        return mark(block, `<div class="studio-block studio-${block.type}${hide}" data-block="${escapeHtml(block.id)}" style="${style}">${blockInner(block, ctx)}</div>`);
       }).join('');
     const inner = `<div class="studio-grid">${blocks}</div>`;
     return `<section class="${SECTION_CLASS[variant]}${extra}" data-section="${escapeHtml(section.id)}"${sectionAttrs(section)}>${wrapInner(section, inner)}</section>`;
-  }).join('');
-  if (!usesGrid) return sections;
+  }
+  const body = layout.wrapOpen && WRAP_OPEN_RE.test(String(layout.wrapOpen)) ? `${layout.wrapOpen}${sections}</div>` : sections;
+  if (!usesGrid) return body;
   const css = `<style>.studio-grid{display:grid;grid-template-columns:repeat(${GRID_COLUMNS},minmax(0,1fr));grid-auto-rows:minmax(${GRID_ROW_UNIT}px,auto);gap:${GRID_GAP}px}.studio-block>:first-child{margin-top:0}.studio-block>:last-child{margin-bottom:0}@media (max-width:720px){.studio-grid{display:flex;flex-direction:column}.studio-block{order:var(--studio-order,0)}.studio-hide-mobile{display:none}}</style>`;
-  return `${css}${sections}`;
+  return `${css}${body}`;
 }
 
 // ---------- pilot: coming-soon as layout JSON ----------
@@ -557,9 +593,57 @@ export function htmlToLayout(html = '', ctx = {}) {
     }
     sections.push(section);
   }
-  if (!sections.length || sections.includes(null)) return fallback();
+  const split = () => {
+    if (ctx.noSplit) return fallback();
+    const out = splitLayout(src, ctx);
+    return out && renderLayout(out, ctx) === src ? out : fallback();
+  };
+  if (!sections.length || sections.includes(null)) return split();
   const layout = { version: 1, grid: { columns: GRID_COLUMNS, rowUnit: GRID_ROW_UNIT, gap: GRID_GAP }, sections };
-  return renderLayout(layout, ctx) === src ? layout : fallback();
+  return renderLayout(layout, ctx) === src ? layout : split();
+}
+
+/**
+ * Fallback migration that still splits a page into separately selectable
+ * pieces: an optional outer <div> wrapper, then each top-level node becomes
+ * its own section (a structured flow section when it round-trips, otherwise
+ * a locked html block). Render stays byte-identical or the caller falls back.
+ */
+function splitLayout(src, ctx) {
+  let top = splitTopLevel(src);
+  if (!top) return null;
+  let wrapOpen = null;
+  if (top.length === 1 && top[0].tag === 'div' && WRAP_OPEN_RE.test(top[0].open)) {
+    wrapOpen = top[0].open;
+    top = splitTopLevel(top[0].html.slice(top[0].open.length, top[0].html.length - '</div>'.length));
+    if (!top) return null;
+  }
+  const sections = [];
+  let raw = null; let n = 0;
+  for (const node of top) {
+    const isWs = !node.tag && !node.html.trim();
+    if (isWs && raw) { raw.blocks[raw.blocks.length - 1].props.html += node.html; continue; }
+    let sec = null;
+    if (node.tag === 'section') {
+      const tryLayout = htmlToLayoutSections(node.html, `s${n + 1}`, ctx);
+      if (tryLayout) sec = tryLayout;
+    }
+    n += 1;
+    if (sec) { sections.push(sec); raw = null; continue; }
+    if (!raw) { raw = { id: `s${n}`, variant: 'plain', flow: true, wrap: 'none', raw: true, blocks: [] }; sections.push(raw); }
+    raw.blocks.push({ id: `${raw.id}-${raw.blocks.length + 1}`, type: 'html', x: 0, y: raw.blocks.length, w: 12, h: 1, props: { html: node.html, locked: true } });
+  }
+  if (!sections.length) return null;
+  return { version: 1, grid: { columns: GRID_COLUMNS, rowUnit: GRID_ROW_UNIT, gap: GRID_GAP }, ...(wrapOpen ? { wrapOpen } : {}), sections };
+}
+
+function htmlToLayoutSections(html, sid, ctx) {
+  const one = htmlToLayout(html, { ...ctx, noSplit: true });
+  if (!one || one.sections.length !== 1 || one.sections[0].raw) return null;
+  const sec = one.sections[0];
+  sec.id = sid;
+  sec.blocks.forEach((b, i) => { b.id = `${sid}-${i + 1}`; });
+  return renderLayout({ version: 1, sections: [sec] }, ctx) === html ? sec : null;
 }
 
 /** Plain-text skeleton used by tests and the pilot comparison. */
@@ -667,7 +751,7 @@ export async function handleStudioApi(request, env, url, deps) {
   if (action === 'render') {
     const result = validateLayout(body.layout, { allowHtml: admin, baseline: await baselineP });
     if (!result.ok) return jsonResponse({ detail: 'Layout is not valid', errors: result.errors }, 422);
-    return jsonResponse({ html: renderLayout(body.layout, renderCtx) });
+    return jsonResponse({ html: renderLayout(body.layout, { ...renderCtx, annotate: Boolean(body.annotate) }) });
   }
   if (action === 'migrate') {
     // Super Admin: build a draft from the page's legacy HTML (byte-identical render).

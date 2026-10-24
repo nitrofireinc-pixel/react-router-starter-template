@@ -3138,7 +3138,7 @@ function pageShortcutLabel(page) {
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['home', 'in-kind', 'letterman-jacket']);
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['in-kind', 'letterman-jacket']);
 
 function isVisualEditorPageSlug(slug) {
   const key = String(slug || '').trim().toLowerCase();
