@@ -6,6 +6,8 @@
   const api = `/api/admin/studio/pages/${slug}`;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const UNDO_CAP = 3; // Undo keeps the last 3 changes only (small memory while editing).
+  const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
   const COLS = 12; const GAP = 16; const ROW = 40; const DESK = 1180; const PHONE = 390;
   const uid = (p = 'b') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const rich = (t) => ({ paragraphs: [[{ text: t }]] });
@@ -168,7 +170,7 @@
     if (coalesce && now < coalesceUntil) { coalesceUntil = now + 900; return; }
     coalesceUntil = coalesce ? now + 900 : 0;
     if (lastSnap) undoStack.push(lastSnap);
-    if (undoStack.length > 100) undoStack.shift();
+    while (undoStack.length > UNDO_CAP) undoStack.shift();
     redoStack = [];
   }
   /** Call after every edit. opts: { canvas: re-render canvas, panel: re-render inspector, coalesce: typing } */
@@ -185,7 +187,7 @@
     updateChrome();
   }
   function undo() { if (!undoStack.length) return; redoStack.push(lastSnap); lastSnap = undoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Undone'); }
-  function redo() { if (!redoStack.length) return; undoStack.push(lastSnap); lastSnap = redoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Redone'); }
+  function redo() { if (!redoStack.length) return; undoStack.push(lastSnap); while (undoStack.length > UNDO_CAP) undoStack.shift(); lastSnap = redoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Redone'); }
   function afterJump(msg) { pseudo = new WeakMap(); if (selected && !findBlock(selected)) selected = null; scheduleRender(0); renderInspector(); renderJson(); scheduleSave(); updateChrome(); toast(msg); }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 1200); updateChrome(); }
   async function saveDraft() {
@@ -215,6 +217,7 @@
     pub.textContent = dirty ? '🚀 Publish' : '✓ Published';
     pub.title = dirty ? 'Unpublished changes: press to make this draft live' : 'Nothing new to publish';
     $('[data-act="undo"]').disabled = !undoStack.length;
+    const dis = $('[data-act="discard"]'); if (dis) dis.disabled = !dirty || !state?.live_layout;
     $('[data-act="redo"]').disabled = !redoStack.length;
   }
   setInterval(updateChrome, 5000);
@@ -249,6 +252,7 @@
       canvasDoc.defaultView.scrollTo(0, y);
     }
     buildIndex(); sizeStage(); drawOverlay(); makeEditable();
+    if (scrollToSel && selected && isMobile()) { scrollToSel = false; revealSelected(); }
     if (scrollToSel && selected) { scrollToSel = false; const r = docRect(index.blocks.get(selected) || []); const w = canvasDoc.defaultView; if (r && (r.top < w.scrollY || r.top + Math.min(r.height, 200) > w.scrollY + w.innerHeight)) { w.scrollTo(0, Math.max(0, r.top - 120)); drawOverlay(); } }
   }
   function buildIndex() {
@@ -479,6 +483,24 @@
     selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
   }
 
+  /** Touch: add a tile right after the selected block (no drag needed). */
+  function addAfter(def) {
+    if (!canLayout()) return;
+    const [, , name, make, size] = def;
+    const found = selected && findBlock(selected);
+    if (!found) { addAtEnd(def); return; }
+    const { section, block: ref } = found;
+    const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
+    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    else if (isGrid(section)) {
+      const y = ref.y + ref.h; block.w = Math.min(12, size.w); block.y = y;
+      section.blocks.forEach((o) => { if (o.y >= y) o.y += block.h; }); section.blocks.push(block);
+    } else {
+      const order = sorted(section); order.splice(order.indexOf(ref) + 1, 0, block);
+      if (section.nested) section.blocks = order; else { block.h = block.h || 1; renumberFlow(section, order); }
+    }
+    selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
+  }
   function startBlockDrag(ev, resize) {
     const found = findBlock(selected); if (!found || !canLayout()) return;
     ev.preventDefault(); ev.stopPropagation();
@@ -592,11 +614,62 @@
     d.addEventListener('keydown', keys);
     d.defaultView.addEventListener('scroll', () => { if (!drag) drawOverlay(); });
   }
-  function afterSelect() { renderInspector(); drawOverlay(); makeEditable(); }
+  function afterSelect() { renderInspector(); drawOverlay(); makeEditable(); if (isMobile() && selected && sheet) revealSelected(); }
+  // ---------- desktop side panels: load collapsed; only the user's toggle opens/closes them ----------
+  const panels = { left: false, right: false };
+  const panelKey = () => `efhs-studio-panels:${state?.editor_uid ?? 'me'}`;
+  function applyPanels() {
+    document.body.classList.toggle('st-lc', !panels.left); document.body.classList.toggle('st-rc', !panels.right);
+    $$('[data-panel-toggle]').forEach((b) => { const open = panels[b.dataset.panelToggle]; if (b.classList.contains('st-ptoggle')) { b.setAttribute('aria-pressed', String(open)); b.title = `${open ? 'Hide' : 'Show'} the ${b.dataset.panelToggle === 'left' ? 'Add elements' : 'Settings'} panel`; } });
+    requestAnimationFrame(sizeStage);
+  }
+  function loadPanels() {
+    try {
+      // Remember the choice for this browser session only: a new session starts collapsed.
+      if (!sessionStorage.getItem('efhs-studio-session')) { sessionStorage.setItem('efhs-studio-session', '1'); localStorage.removeItem(panelKey()); }
+      const v = JSON.parse(localStorage.getItem(panelKey()) || '{}'); panels.left = !!v.left; panels.right = !!v.right;
+    } catch { /* storage blocked: stay collapsed */ }
+    applyPanels();
+  }
+  function togglePanel(side) { panels[side] = !panels[side]; try { localStorage.setItem(panelKey(), JSON.stringify(panels)); } catch {} applyPanels(); }
+  document.addEventListener('click', (e) => { const t = e.target.closest('[data-panel-toggle]'); if (t) { e.preventDefault(); togglePanel(t.dataset.panelToggle); } });
+  applyPanels();
+  // ---------- mobile bottom sheets ----------
+  let sheet = null;
+  function openSheet(name) {
+    sheet = name; document.body.dataset.sheet = name;
+    $$('button[data-sheet]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sheet === name)));
+    if (name === 'history') { $('[data-history-panel]').hidden = false; renderHistory(); } else $('[data-history-panel]').hidden = true;
+    if (name === 'edit') requestAnimationFrame(revealSelected);
+  }
+  function closeSheet() {
+    sheet = null; delete document.body.dataset.sheet; $$('button[data-sheet]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    if (isMobile()) $('[data-history-panel]').hidden = true;
+  }
+  /** Keep the selected block visible above the open sheet. */
+  function revealSelected() {
+    if (!canvasDoc || !selected) return;
+    const r = docRect(index.blocks.get(selected) || []); if (!r) return;
+    const w = canvasDoc.defaultView; const frame = $('[data-canvas]').getBoundingClientRect();
+    const sh = document.querySelector(sheet === 'edit' ? '.st-right' : sheet === 'add' ? '.st-left' : '.st-history');
+    const sheetTop = sheet && sh ? sh.getBoundingClientRect().top : window.innerHeight;
+    const visible = Math.max(80, Math.min(frame.bottom, sheetTop) - frame.top);
+    const top = r.top - w.scrollY;
+    if (top < 36 || top + Math.min(r.height, visible - 60) > visible) { w.scrollTo(0, Math.max(0, r.top - 40)); drawOverlay(); }
+  }
 
   // ---------- stage sizing (device toggle) ----------
   function sizeStage() {
     const center = $('[data-center]'); const stage = $('[data-stage]'); const frame = $('[data-canvas]');
+    if (isMobile()) {
+      // Phones/tablets: real page width at 1:1 so the page renders readable, not shrunk.
+      const W = Math.max(320, center.clientWidth); const H = Math.max(300, center.clientHeight);
+      scale = 1; frame.style.width = `${W}px`; frame.style.height = `${H}px`; frame.style.transform = 'none';
+      stage.style.width = `${W}px`; stage.style.height = `${H}px`; stage.dataset.device = 'fit';
+      if (canvasDoc) canvasDoc.body.classList.add('sc-touch');
+      requestAnimationFrame(() => drawOverlay()); return;
+    }
+    if (canvasDoc) canvasDoc.body.classList.remove('sc-touch');
     const availW = center.clientWidth - 28; const availH = center.clientHeight - 28;
     const W = device === 'phone' ? PHONE : DESK;
     scale = device === 'phone' ? Math.min(1, availW / (PHONE + 16)) : Math.min(1, availW / DESK);
@@ -606,7 +679,8 @@
     stage.dataset.device = device;
     requestAnimationFrame(() => drawOverlay());
   }
-  window.addEventListener('resize', () => sizeStage());
+  let lastMobile = null;
+  window.addEventListener('resize', () => { const m = isMobile(); if (m !== lastMobile) { lastMobile = m; if (!m) closeSheet(); } sizeStage(); });
 
   // ---------- palette ----------
   function renderPalette() {
@@ -619,12 +693,14 @@
       for (const def of items) {
         const [key, icon, name, make, , flag] = def;
         const soon = flag === 'soon'; const adminOnly = flag === 'admin';
-        if (adminOnly && !isAdmin()) { tiles.append(el('button', { type: 'button', class: 'st-tile', disabled: true, title: 'HTML is for Super Admins only' }, el('span', { class: 'st-soon', text: 'admin' }), el('span', { class: 'st-ti', text: icon }), name)); continue; }
+        if (adminOnly && !isAdmin()) { tiles.append(el('button', { type: 'button', class: 'st-tile', disabled: true, title: 'HTML is for Super Admins only' }, el('span', { class: 'st-soon', text: 'admin' }), el('span', { class: 'st-ti', 'aria-hidden': 'true', text: icon }), el('span', { class: 'st-tn', text: name }))); tiles.lastChild.setAttribute('aria-label', name); continue; }
         const t = el('button', { type: 'button', class: 'st-tile', 'data-tile': key, disabled: soon || !lay || !make, title: soon ? `${name}: coming soon` : `Drag ${name} onto the page (or click to add it at the end)` },
-          soon ? el('span', { class: 'st-soon', text: 'soon' }) : null, el('span', { class: 'st-ti', text: icon }), name);
+          soon ? el('span', { class: 'st-soon', text: 'soon' }) : null, el('span', { class: 'st-ti', 'aria-hidden': 'true', text: icon }), el('span', { class: 'st-tn', text: name }));
+        t.setAttribute('aria-label', name);
         if (!soon && make) {
           let moved = false; let downAt = null;
-          t.addEventListener('pointerdown', (e) => { moved = false; downAt = [e.clientX, e.clientY];
+          t.addEventListener('click', () => { if (isMobile()) addAfter(def); });
+          t.addEventListener('pointerdown', (e) => { if (isMobile()) return; moved = false; downAt = [e.clientX, e.clientY];
             const onMove = (ev) => { if (!moved && Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) { moved = true; t.removeEventListener('pointermove', onMove); startPaletteDrag(ev, def); } };
             t.addEventListener('pointermove', onMove);
             t.setPointerCapture?.(e.pointerId);
@@ -745,6 +821,21 @@
     const { section, block: b } = found; const grid = isGrid(section); const lay = canLayout();
     const name = TYPE_NAMES[b.type] || b.type;
     host.append(el('h2', { text: `${b.type === 'card' ? 'Card' : TREE.has(b.type) ? typeName(b).replace(/ · .*/, '') : name} settings` }), el('p', { class: 'st-selname', text: `“${short(labelOf(b), 26)}” · selected` }));
+    if (lay) {
+      const span = section.nested ? (b.props?.span || 12) : b.w;
+      const setW = (d) => {
+        if (section.nested) { const n = Math.max(1, Math.min(12, (b.props.span || 12) + d)); if (n >= 12) delete b.props.span; else b.props.span = n; changed(); return; }
+        if (grid) { const w = Math.max(1, Math.min(12 - b.x, b.w + d)); if (w !== b.w) setRect({ w }); else toast('No more room on that side.', true); return; }
+        toast('This section is always full width.', true);
+      };
+      host.append(el('div', { class: 'st-quick st-m-only', 'data-quick': '' },
+        el('button', { type: 'button', 'data-quick-act': 'up', text: '↑ Move up', onclick: () => nudge(section, b, -1) }),
+        el('button', { type: 'button', 'data-quick-act': 'down', text: '↓ Move down', onclick: () => nudge(section, b, 1) }),
+        el('span', { class: 'st-stepper' },
+          el('button', { type: 'button', 'data-quick-act': 'narrower', 'aria-label': 'Narrower', text: '−', onclick: () => setW(-1) }),
+          el('b', { 'data-quick-width': '', text: `${span}/12 wide` }),
+          el('button', { type: 'button', 'data-quick-act': 'wider', 'aria-label': 'Wider', text: '+', onclick: () => setW(1) }))));
+    }
     // SIZE & PLACE
     host.append(el('div', { class: 'st-group', text: 'Size & place' }));
     const setRect = (r) => { const t = { ...b, ...r }; if (t.x < 0 || t.w < 1 || t.x + t.w > COLS || t.h < 1) return toast('That does not fit on the 12-column grid.', true); const hit = section.blocks.find((o) => o !== b && overlaps(t, o)); if (hit) { toast(`No overlap: “${short(labelOf(hit), 20)}” stays put.`, true); renderInspector(); return; } Object.assign(b, r); changed(); };
@@ -806,9 +897,10 @@
     selected = copy.id; changed();
   }
   function nudge(section, b, dir) {
+    if (section.nested) { const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return toast(dir < 0 ? 'Already at the top.' : 'Already at the bottom.'); [order[i], order[j]] = [order[j], order[i]]; section.blocks = order; scrollToSel = true; changed(); return; }
     if (isGrid(section)) { const t = { ...b, y: b.y + dir }; if (t.y < 0 || section.blocks.some((o) => o !== b && overlaps(t, o))) return toast('No room there. Neighbours stay put.', true); b.y = t.y; changed(); return; }
     const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); changed();
+    [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); scrollToSel = true; changed();
   }
   function del(section, b) {
     section.blocks = section.blocks.filter((x) => x !== b);
@@ -844,7 +936,7 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && canLayout()) { const f = findBlock(selected); if (f && !(f.block.type === 'html' && f.block.props?.locked && !isAdmin()) && !(f.block.type === 'group' && !isAdmin())) { e.preventDefault(); del(f.section, f.block); } }
-    if (e.key === 'Escape' && !typing) { selected = null; afterSelect(); }
+    if (e.key === 'Escape' && !typing) { if (sheet) { closeSheet(); return; } selected = null; afterSelect(); }
   }
   document.addEventListener('keydown', keys);
   async function preview() {
@@ -857,6 +949,19 @@
       if (w) { w.document.open(); w.document.write(`<!doctype html>${d.documentElement.outerHTML}`); w.document.close(); }
     } catch (e) { if (w) w.close(); toast(e.message, true); }
   }
+  async function discardAll() {
+    if (!state.live_layout) return toast('Nothing is live yet.', true);
+    if (!isDirty()) return;
+    if (!confirm('Throw away all unpublished changes and go back to the live page?')) return;
+    clearTimeout(saveTimer); saveTimer = 0;
+    try {
+      await call(`${api}/draft`, 'DELETE');
+      undoStack = []; redoStack = []; selected = null; saveError = ''; lastSaved = null;
+      await load(true);
+      undoStack = []; redoStack = [];
+      renderInspector(); updateChrome(); toast('Discarded. Back to the live page.');
+    } catch (e) { toast(`Not discarded: ${e.message}`, true); }
+  }
   async function publish() {
     clearTimeout(saveTimer);
     try {
@@ -865,6 +970,11 @@
       await load(true); toast('Published. The live page is updated.');
     } catch (e) { toast(`Not published: ${e.message}`, true); updateChrome(); }
   }
+  document.addEventListener('click', (e) => {
+    const sb = e.target.closest('button[data-sheet]'); if (sb) { if (sheet === sb.dataset.sheet) closeSheet(); else openSheet(sb.dataset.sheet); return; }
+    if (e.target.closest('[data-close-sheet],[data-scrim]')) { closeSheet(); return; }
+    if (isMobile() && e.target.closest('[data-history-panel] [data-act="history"]')) { e.stopImmediatePropagation(); closeSheet(); }
+  }, true);
   document.addEventListener('click', async (e) => {
     const menu = $('[data-menu]');
     if (!e.target.closest('.st-more')) { menu.hidden = true; $('[data-act="more"]').setAttribute('aria-expanded', 'false'); }
@@ -882,7 +992,8 @@
     if (act === 'json') { menu.hidden = true; renderJson(); $('[data-json-dialog]').showModal(); return; }
     if (act === 'apply-json') { try { layout = JSON.parse($('[data-json]').value); selected = null; changed(); $('[data-json-dialog]').close(); } catch { toast('That JSON could not be read.', true); } return; }
     if (act === 'migrate') { menu.hidden = true; if (!confirm('Rebuild this draft from the current page? You can undo.')) return; try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; selected = null; changed(); toast('Rebuilt from the current page'); } catch (er) { toast(er.message, true); } return; }
-    if (act === 'discard') { menu.hidden = true; if (!state.live_layout) return toast('Nothing is live yet.', true); if (!confirm('Throw away unpublished changes and go back to the live page?')) return; layout = JSON.parse(liveJson); selected = null; changed(); toast('Back to the live version'); }
+    if (act === 'discard') return discardAll();
+    if (act === 'grid-m') { menu.hidden = true; showGrid = !showGrid; drawOverlay(); return; }
   });
   $('[data-editor]').addEventListener('change', async (e) => { try { await call(`${api}/editor`, 'POST', { editor: e.target.value }); await load(true); toast(`Live editor: ${e.target.value}`); } catch (er) { toast(er.message, true); } });
   $('[data-page-pick]').addEventListener('change', (e) => { if (e.target.value !== slug) window.location.href = `/admin/studio/${encodeURIComponent(e.target.value)}`; });
@@ -899,6 +1010,7 @@
     state = await call(api, 'GET');
     liveJson = JSON.stringify(state.live_layout || null);
     if (!reload) {
+      loadPanels();
       const starter = JSON.parse($('#studio-starter').textContent || 'null');
       layout = state.draft?.layout || state.live_layout || starter;
       if (!layout && state.can_html) { try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; } catch { /* fall through */ } }
@@ -917,7 +1029,7 @@
     if (!$('[data-history-panel]').hidden) renderHistory();
     firstRender = firstRender || !canvasDoc; await renderCanvas(); makeEditable();
   }
-  window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, select: (id) => { selected = id; afterSelect(); } };
+  window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, get sheet() { return sheet; }, get dirty() { return isDirty(); }, select: (id) => { selected = id; afterSelect(); } };
   load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });
 
   const CANVAS_CSS = `
@@ -931,7 +1043,12 @@
 .sc-sel.is-dragging{opacity:.45}
 .sc-name{position:absolute;left:-2px;top:-24px;display:flex;gap:4px;font:700 12px/1 "Work Sans",system-ui,sans-serif;white-space:nowrap}
 .sc-name>span{background:#2f7de1;color:#fff;padding:5px 7px;border-radius:6px 6px 0 0}
-.sc-move{pointer-events:auto;cursor:grab;background:#0b2a5b!important}
+.sc-move{pointer-events:auto;cursor:grab;background:#0b2a5b!important;touch-action:none}
+.sc-resize{touch-action:none}
+body.sc-touch .sc-name{top:-34px;font-size:14px}
+body.sc-touch .sc-name>span{padding:9px 11px}
+body.sc-touch .sc-resize{width:28px;height:28px;right:-14px;bottom:-14px}
+body.sc-touch{overflow-x:hidden}
 .sc-resize{position:absolute;right:-8px;bottom:-8px;width:16px;height:16px;border-radius:50%;background:#2f7de1;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);pointer-events:auto;cursor:nwse-resize}
 .sc-ghost{border:2.5px dashed #c8102e;border-radius:10px;background:rgba(200,16,46,.05)}
 .sc-ghost.is-bad{border-color:#c8102e;background:rgba(200,16,46,.18)}

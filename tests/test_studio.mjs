@@ -146,3 +146,39 @@ test('Studio API: content editors cannot change layout or flip the flag', async 
   assert.equal(r.status, 409); // must publish first
   resetStudioSchemaMemo();
 });
+
+test('studio editor: undo capped at 3, visible undo/redo + discard, mobile sheets', async () => {
+  const { readFileSync } = await import('node:fs');
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../admin-studio.css', import.meta.url), 'utf8');
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  const st = readFileSync(new URL('../worker/src/studio.mjs', import.meta.url), 'utf8');
+  assert.match(js, /const UNDO_CAP = 3;/);
+  assert.match(js, /while \(undoStack\.length > UNDO_CAP\) undoStack\.shift\(\)/);
+  assert.doesNotMatch(js, /undoStack\.length > 100/);
+  assert.match(w, /title="Undo \(up to 3 changes\)/);
+  assert.match(w, /class="st-btn st-danger" data-act="discard"[^>]*disabled>/);
+  assert.doesNotMatch(w, /<button type="button" data-act="discard">Discard unpublished changes/);
+  assert.match(js, /Throw away all unpublished changes and go back to the live page\?/);
+  assert.match(js, /call\(`\$\{api\}\/draft`, 'DELETE'\)/);
+  assert.match(st, /action === 'draft' && method === 'DELETE'[\s\S]{0,200}DELETE FROM page_drafts WHERE slug = \?/);
+  assert.match(css, /@media \(max-width:900px\)\{[\s\S]*\.st-bottom\{display:grid/);
+  assert.match(css, /env\(safe-area-inset-bottom\)/);
+  assert.match(w, /class="st-bottom"[\s\S]*data-sheet="add"[\s\S]*data-sheet="edit"[\s\S]*data-act="preview"[\s\S]*data-sheet="history"/);
+});
+
+test('studio desktop panels load collapsed, toggle only via toolbar, no auto-open', async () => {
+  const { readFileSync } = await import('node:fs');
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../admin-studio.css', import.meta.url), 'utf8');
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  assert.match(w, /<body class="studio-app st-lc st-rc"/);
+  assert.match(w, /data-panel-toggle="left" aria-pressed="false"/);
+  assert.match(w, /data-panel-toggle="right" aria-pressed="false"/);
+  assert.match(css, /body\.st-lc \.st-main\{--st-lw:56px\}/);
+  assert.match(css, /body\.st-rc \.st-right \[data-inspector\]\{display:none\}/);
+  assert.match(js, /localStorage\.setItem\(panelKey\(\)/);
+  assert.doesNotMatch(js, /openSheet\('edit'\); revealSelected/);
+  assert.doesNotMatch(js, /toast\(`\$\{name\} added`\); openSheet/);
+  assert.match(js, /closest\('button\[data-sheet\]'\)/);
+});

@@ -982,9 +982,15 @@ export async function handleStudioApi(request, env, url, deps) {
   if (!action && method === 'GET') {
     const state = await loadStudioState(env, slug);
     if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
-    return jsonResponse({ ...state, can_layout: canLayout, can_html: admin, can_flag: admin, live_sources: LIVE_SOURCES, live_templates: LIVE_TEMPLATES });
+    return jsonResponse({ ...state, can_layout: canLayout, can_html: admin, can_flag: admin, editor_uid: user?.id ?? null, live_sources: LIVE_SOURCES, live_templates: LIVE_TEMPLATES });
   }
-  if (method !== 'POST' && !(action === 'draft' && method === 'PUT')) return jsonResponse({ detail: 'Method not allowed' }, 405);
+  if (action === 'draft' && method === 'DELETE') {
+    // Discard all unpublished changes: drop the draft row only. Live page untouched.
+    await ensureStudioSchema(env);
+    await env.DB.prepare('DELETE FROM page_drafts WHERE slug = ?').bind(slug).run();
+    return jsonResponse({ ok: true, discarded: 'draft' });
+  }
+  if (method !== 'POST' && !(action === 'draft' && (method === 'PUT'))) return jsonResponse({ detail: 'Method not allowed' }, 405);
   await ensureStudioSchema(env);
   const page = await env.DB.prepare('SELECT slug, path, editor, live_version_id FROM cms_pages WHERE slug = ?').bind(slug).first();
   if (!page) return jsonResponse({ detail: 'Page not found' }, 404);
