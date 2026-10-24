@@ -569,7 +569,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261024h';
+export const ASSET_VERSION = 'cms-p2-20261024i';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2610,6 +2610,8 @@ async function migrateAndSeedDb(env) {
       .run();
   }
   for (const soonPage of COMING_SOON_PAGES) {
+    // The generic /coming-soon page was deleted on purpose; do not re-seed it.
+    if (soonPage.slug === 'coming-soon') continue;
     const existingSoon = await env.DB.prepare('SELECT id FROM cms_pages WHERE slug = ?').bind(soonPage.slug).first();
     if (!existingSoon) {
       await env.DB.prepare('INSERT INTO cms_pages (slug, path, title, body_html, nav_order, is_home, active) VALUES (?, ?, ?, ?, ?, ?, ?)')

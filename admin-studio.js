@@ -339,6 +339,7 @@
         const name = canvasDoc.createElement('div'); name.className = 'sc-name';
         if (editingLayout) { const h = canvasDoc.createElement('span'); h.className = 'sc-move'; h.dataset.scHandle = 'move'; h.title = 'Drag to move'; h.textContent = '⠿ Move'; name.append(h); }
         const lab = canvasDoc.createElement('span'); lab.textContent = `${found.block.type === 'live' ? '⚡ ' : ''}${typeName(found.block)}${found.block.props?.locked ? ' 🔒' : ''}`; if (found.block.type === 'live') lab.className = 'sc-live-tag'; name.append(lab);
+        if (canDelete(found.block)) { const x = canvasDoc.createElement('span'); x.className = 'sc-del'; x.dataset.scHandle = 'delete'; x.setAttribute('role', 'button'); x.setAttribute('aria-label', 'Delete this block'); x.title = 'Delete'; x.textContent = '✕'; name.append(x); }
         sel.append(name);
         if (editingLayout && (isGrid(found.section) || found.section.nested)) { const h = canvasDoc.createElement('span'); h.className = 'sc-resize'; h.dataset.scHandle = 'resize'; h.title = 'Drag to resize'; sel.append(h); }
         L.append(sel);
@@ -694,6 +695,7 @@
     d.addEventListener('submit', (e) => e.preventDefault(), true);
     d.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-sc-handle]');
+      if (h && h.dataset.scHandle === 'delete') { e.preventDefault(); e.stopPropagation(); askDelete(selected); return; }
       if (h) { if (isMobile() && h.dataset.scHandle === 'move') { e.preventDefault(); e.stopPropagation(); startPick(selected); return; } startBlockDrag(e, h.dataset.scHandle === 'resize'); return; }
       const b = e.target.closest('[data-sc-block]');
       if (!b) { if (!e.target.closest('#sc-layer')) { selected = null; afterSelect(); } return; }
@@ -1006,7 +1008,7 @@
         el('button', { type: 'button', text: 'Duplicate', disabled: locked, onclick: () => duplicate(section, b) }),
         el('button', { type: 'button', text: '↑', title: 'Move up', onclick: () => nudge(section, b, -1) }),
         el('button', { type: 'button', text: '↓', title: 'Move down', onclick: () => nudge(section, b, 1) }),
-        el('button', { type: 'button', class: 'danger', text: 'Delete', disabled: locked && !TREE.has(b.type), onclick: () => del(section, b) })));
+        el('button', { type: 'button', class: 'danger', text: 'Delete', disabled: !canDelete(b), onclick: () => askDelete(b.id) })));
     }
   }
   function duplicate(section, b) {
@@ -1036,6 +1038,28 @@
     }
     const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return edge();
     [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); done(dir < 0 ? 'Moved up' : 'Moved down');
+  }
+  // Delete with confirm. Never offered on live-data blocks (incl. the locked Calendar app): those keep Hide only.
+  function canDelete(b) { return !!b && canLayout() && b.type !== 'live' && !(b.type === 'html' && b.props?.locked && !isAdmin()) && !(b.type === 'group' && !isAdmin()); }
+  const countInner = (b) => (b.props?.children || []).reduce((n, k) => n + 1 + countInner(k), 0);
+  let confirmOpen = null;
+  function askDelete(id) {
+    const f = findBlock(id); if (!f || !canDelete(f.block) || confirmOpen) return;
+    const n = countInner(f.block); const back = document.activeElement;
+    const close = (yes) => { document.removeEventListener('keydown', onKey, true); canvasDoc?.removeEventListener('keydown', onKey, true); wrap.remove(); confirmOpen = null; if (yes) { const g = findBlock(id); if (g) del(g.section, g.block); } else back?.focus?.(); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); } };
+    const yes = el('button', { type: 'button', class: 'st-cf-yes', 'data-confirm': 'yes', text: 'Yes, delete', onclick: () => close(true) });
+    const no = el('button', { type: 'button', class: 'st-cf-no', 'data-confirm': 'no', text: 'No', onclick: () => close(false) });
+    const wrap = el('div', { class: 'st-confirm', 'data-confirm-delete': id, role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'st-cf-t' },
+      el('div', { class: 'st-cf-box' },
+        el('p', { id: 'st-cf-t', class: 'st-cf-title', text: 'Delete this block? Are you sure?' }),
+        n ? el('p', { class: 'st-cf-note', 'data-confirm-count': String(n), text: `This also deletes the ${n} block${n === 1 ? '' : 's'} inside it.` }) : null,
+        el('p', { class: 'st-cf-note', text: 'You can Undo this. Nothing goes live until you Publish.' }),
+        el('div', { class: 'st-cf-row' }, no, yes)));
+    wrap.addEventListener('pointerdown', (e) => { if (e.target === wrap) close(false); });
+    document.body.append(wrap); confirmOpen = wrap;
+    document.addEventListener('keydown', onKey, true); canvasDoc?.addEventListener('keydown', onKey, true);
+    no.focus();
   }
   function del(section, b) {
     section.blocks = section.blocks.filter((x) => x !== b);
@@ -1070,7 +1094,8 @@
     const t = e.target; const typing = t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && canLayout()) { const f = findBlock(selected); if (f && !(f.block.type === 'html' && f.block.props?.locked && !isAdmin()) && !(f.block.type === 'group' && !isAdmin())) { e.preventDefault(); del(f.section, f.block); } }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && !confirmOpen) { const f = findBlock(selected); if (f && canDelete(f.block)) { e.preventDefault(); askDelete(selected); } return; }
+    if (confirmOpen) return;
     if (e.key === 'Escape' && !typing) { if (sheet) { closeSheet(); return; } selected = null; afterSelect(); }
   }
   document.addEventListener('keydown', keys);
@@ -1181,6 +1206,8 @@
 .sc-lifted{opacity:.5!important;box-shadow:0 18px 40px rgba(10,30,70,.38)!important;outline:3px dashed #2f7de1!important;outline-offset:2px;position:relative;z-index:50;transition:none}
 body.sc-picked{touch-action:none;-webkit-user-select:none;user-select:none}
 #sc-dropline{position:absolute;height:4px;background:#c8102e;border-radius:2px;z-index:99999;pointer-events:none;box-shadow:0 0 0 2px #fff}
+.sc-del{pointer-events:auto;cursor:pointer;background:#b42318!important;min-width:14px;text-align:center}
+body.sc-touch .sc-del{min-width:22px;padding:5px 10px!important}
 .sc-move{pointer-events:auto;cursor:grab;background:#0b2a5b!important;touch-action:none}
 .sc-resize{touch-action:none}
 body.sc-touch .sc-name{top:-34px;font-size:14px}

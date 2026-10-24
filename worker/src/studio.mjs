@@ -1140,3 +1140,21 @@ export async function serveStudioUpload(env, path) {
     'x-content-type-options': 'nosniff',
   } });
 }
+
+/** Block delete rules shared with the Studio editor (admin-studio.js mirrors these). */
+export function isDeletableBlock(block, { canLayout = false, isAdmin = false } = {}) {
+  if (!block || !canLayout || block.type === 'live') return false;
+  if (block.type === 'html' && block.props?.locked && !isAdmin) return false;
+  if (block.type === 'group' && !isAdmin) return false;
+  return true;
+}
+export function countInnerBlocks(block) {
+  return (block?.props?.children || []).reduce((n, k) => n + 1 + countInnerBlocks(k), 0);
+}
+/** Returns a new layout without the block (and everything inside it). */
+export function removeBlockById(layout, id) {
+  const next = structuredClone(layout); let removed = null;
+  const strip = (list) => list.filter((b) => { if (b.id === id) { removed = b; return false; } if (b.props?.children) b.props.children = strip(b.props.children); return true; });
+  next.sections.forEach((s) => { s.blocks = strip(s.blocks); });
+  return { layout: next, removed, inner: removed ? countInnerBlocks(removed) : 0 };
+}

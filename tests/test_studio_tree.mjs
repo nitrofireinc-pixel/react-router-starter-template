@@ -81,3 +81,26 @@ test('donate and email-list placeholders are live blocks; round-trip byte-identi
   assert.deepEqual(src, ['donate', 'email-list', 'email-list']);
   assert.ok(validateLayout(l, { baseline: l }).ok);
 });
+
+import { isDeletableBlock, countInnerBlocks, removeBlockById } from '../worker/src/studio.mjs';
+test('delete: containers take their children, live blocks and the calendar app cannot be deleted', () => {
+  const H = '<section><div class="wrap"><div class="card"><h2>Title</h2><p>One</p><p>Two</p></div><p>After</p><div id="caldev-app" class="caldev-app"><div></div></div><div class="next" data-home-slot="next-fund"><p>x</p></div></div></section>';
+  const l = htmlToLayout(H); const all = flat(l);
+  const group = all.find((b) => b.type === 'group' && countInnerBlocks(b) >= 3);
+  assert.ok(group, 'has a container');
+  const n = countInnerBlocks(group);
+  const r = removeBlockById(l, group.id);
+  assert.equal(r.removed.id, group.id); assert.equal(r.inner, n);
+  const left = flat(r.layout).map((b) => b.id);
+  assert.ok(!left.includes(group.id)); flat({ sections: [{ blocks: [group] }] }).forEach((b) => assert.ok(!left.includes(b.id)));
+  assert.ok(validateLayout(r.layout, { baseline: l }).ok);
+  assert.ok(!renderLayout(r.layout).includes('Title'));
+  assert.ok(renderLayout(r.layout).includes('After'));
+  const live = all.filter((b) => b.type === 'live'); assert.equal(live.length, 2);
+  live.forEach((b) => assert.equal(isDeletableBlock(b, { canLayout: true, isAdmin: true }), false));
+  const p = all.find((b) => b.type !== 'live' && b.type !== 'group' && JSON.stringify(b.props).includes('After'));
+  assert.equal(isDeletableBlock(p, { canLayout: true }), true);
+  assert.equal(isDeletableBlock(p, { canLayout: false }), false);
+  assert.equal(isDeletableBlock(group, { canLayout: true, isAdmin: false }), false);
+  assert.deepEqual(flat(l).map((b) => b.id), all.map((b) => b.id), 'original untouched');
+});
