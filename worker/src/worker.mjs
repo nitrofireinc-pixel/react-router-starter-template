@@ -305,6 +305,9 @@ export const DEFAULT_SITE = {
   maintenance_mode: '0',
   boosters_dues_enabled: '1',
   sponsor_ad_seconds: '6',
+  sponsor_flyin_gold_weight: '2',
+  sponsor_flyin_silver_weight: '1',
+  sponsor_flyin_house_ad: '1',
   utility_links: JSON.stringify(DEFAULT_UTILITY_LINKS),
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
   error_pages: JSON.stringify(DEFAULT_ERROR_PAGES),
@@ -499,7 +502,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261023a';
+export const ASSET_VERSION = 'cms-p1-20261023c';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -2654,6 +2657,13 @@ export function readMaintenanceReturnPath(request) {
   }
 }
 
+export function normalizeFlyinWeightValue(value, fallback) {
+  if (value === '' || value === null || value === undefined) return fallback;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(10, Math.max(0, n));
+}
+
 export function normalizeSponsorAdSeconds(value, fallback = 6) {
   const raw = Number(value);
   const base = Number.isFinite(raw) ? raw : Number(fallback);
@@ -3537,6 +3547,9 @@ export function publicSitePayload(site = {}) {
   payload.maintenance_mode = isMaintenanceMode(payload) ? 1 : 0;
   payload.boosters_dues_enabled = isBoostersDuesEnabled(payload) ? 1 : 0;
   payload.sponsor_ad_seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
+  payload.sponsor_flyin_gold_weight = normalizeFlyinWeightValue(payload.sponsor_flyin_gold_weight, 2);
+  payload.sponsor_flyin_silver_weight = normalizeFlyinWeightValue(payload.sponsor_flyin_silver_weight, 1);
+  payload.sponsor_flyin_house_ad = String(payload.sponsor_flyin_house_ad) === '0' ? 0 : 1;
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   payload.error_pages = normalizeErrorPages(payload.error_pages);
@@ -11948,7 +11961,12 @@ async function routeApi(request, env, url, ctx = null) {
     if (auth.response) return auth.response;
     if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
     const site = await getSite(env);
-    return jsonResponse({ sponsor_ad_seconds: site.sponsor_ad_seconds });
+    return jsonResponse({
+      sponsor_ad_seconds: site.sponsor_ad_seconds,
+      sponsor_flyin_gold_weight: normalizeFlyinWeightValue(site.sponsor_flyin_gold_weight, 2),
+      sponsor_flyin_silver_weight: normalizeFlyinWeightValue(site.sponsor_flyin_silver_weight, 1),
+      sponsor_flyin_house_ad: String(site.sponsor_flyin_house_ad) === '0' ? 0 : 1,
+    });
   }
   if (url.pathname === '/api/admin/sponsors/settings' && request.method === 'PUT') {
     const auth = await requireLogin(request, env);
@@ -11956,10 +11974,17 @@ async function routeApi(request, env, url, ctx = null) {
     if (!hasPermission(auth.user, 'sponsors') && !canEditPage(auth.user, 'sponsors')) return jsonResponse({ detail: 'Permission required: sponsors' }, 403);
     const payload = await request.json();
     const seconds = normalizeSponsorAdSeconds(payload.sponsor_ad_seconds, 6);
-    await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
-      .bind('sponsor_ad_seconds', String(seconds))
-      .run();
-    return jsonResponse({ sponsor_ad_seconds: seconds });
+    const goldWeight = normalizeFlyinWeightValue(payload.sponsor_flyin_gold_weight, 2);
+    const silverWeight = normalizeFlyinWeightValue(payload.sponsor_flyin_silver_weight, 1);
+    const houseAd = payload.sponsor_flyin_house_ad === 0 || payload.sponsor_flyin_house_ad === '0' || payload.sponsor_flyin_house_ad === false ? 0 : 1;
+    const upsert = 'INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value';
+    await env.DB.batch([
+      env.DB.prepare(upsert).bind('sponsor_ad_seconds', String(seconds)),
+      env.DB.prepare(upsert).bind('sponsor_flyin_gold_weight', String(goldWeight)),
+      env.DB.prepare(upsert).bind('sponsor_flyin_silver_weight', String(silverWeight)),
+      env.DB.prepare(upsert).bind('sponsor_flyin_house_ad', String(houseAd)),
+    ]);
+    return jsonResponse({ sponsor_ad_seconds: seconds, sponsor_flyin_gold_weight: goldWeight, sponsor_flyin_silver_weight: silverWeight, sponsor_flyin_house_ad: houseAd });
   }
   if (url.pathname === '/api/admin/checkout/config' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
@@ -14753,7 +14778,7 @@ __ADMIN_SIDEBAR__
   <div id="gold-sponsors-print-preview" class="gold-sponsors-print-preview" aria-live="polite"></div>
   <button class="btn outline" type="button" id="print-gold-sponsors">Print Gold sponsors PDF</button>
   <p class="status" id="gold-sponsors-print-status"></p>
-</div><form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form></div></div><div class="sponsors-editor-col"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option><option value="Honorable Mention">Honorable Mention</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><p class="muted">Uncheck to hide the directory card only. Bronze, Silver, Gold, and Honorable Mention still appear on the site-wide marquee.</p></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form></div></div></section>
+</div><form id="sponsor-ad-settings-form" class="admin-card stack sponsor-ad-settings-card"><h2>Homepage fly-in timing</h2><p class="muted">Silver and Gold sponsors can appear in the homepage fly-in. Choose how long it stays before closing.</p><label>Display time (seconds)<input name="sponsor_ad_seconds" type="number" min="2" max="30" step="1" value="6" required></label><p class="muted">Rotation: each visit shows the next sponsor in turn. Gold gets more turns than Silver; Bronze and Honorable Mention never fly in.</p><label>Gold turns per cycle<input name="sponsor_flyin_gold_weight" type="number" min="0" max="10" step="1" value="2"></label><label>Silver turns per cycle<input name="sponsor_flyin_silver_weight" type="number" min="0" max="10" step="1" value="1"></label><label class="checkline"><input name="sponsor_flyin_house_ad" type="checkbox" checked> When a tier (Gold or Silver) has no sponsors, fill its turns with an “Advertise here — become a sponsor” card</label><button class="btn primary" type="submit">Save ad timing</button><p class="status" id="sponsor-ad-settings-status"></p></form></div></div><div class="sponsors-editor-col"><form id="sponsor-form" class="admin-card stack"><input type="hidden" name="id"><div class="form-grid"><label>Sponsor name<input name="name" required placeholder="ABC Company"></label><label>Sponsor tier<select name="level"><option value="Bronze Sponsor">Bronze — marquee</option><option value="Silver Sponsor">Silver — marquee + fly-in</option><option value="Gold Sponsor" selected>Gold - Marquee + Fly-in + public advert</option><option value="Honorable Mention">Honorable Mention</option></select></label><p class="sponsor-tier-benefits muted" id="sponsor-tier-benefits" aria-live="polite"></p><label class="full">Street address<input name="address" placeholder="123 Main Street"></label><label>City<input name="city" value="Kernersville" placeholder="Kernersville"></label><label>State<select name="state"><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC" selected>North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option></select></label><label class="full">Logo URL<input name="logo_url" placeholder="https://example.com/logo.png or /uploads/logo.png"></label><label class="full">Upload logo<input name="logo_file" type="file" accept="image/*,.svg"><small class="field-hint">Upload a file or paste a URL above. Upload replaces the URL when you save.</small></label><div class="sponsor-logo-preview" data-sponsor-logo-preview hidden><img alt="Sponsor logo preview"></div><label>Fallback logo text<input name="mark_text" placeholder="ABC"></label><label class="checkline"><input name="active" type="checkbox" checked> Show on public Sponsors page</label><p class="muted">Uncheck to hide the directory card only. Bronze, Silver, Gold, and Honorable Mention still appear on the site-wide marquee.</p></div><button class="btn primary">Save Sponsor</button><p class="status" id="sponsor-status"></p></form></div></div></section>
 <section id="tab-ledger" class="cms-panel ledger-panel" hidden><div class="panel-head"><div><p class="kicker">Treasurer</p><h1>Ledger</h1><p>Accountant view for donors, sponsors, fundraisers, dues, and expenses. Cash and in-kind entries update the downloadable Excel ledger.</p></div><div class="panel-actions"><a class="btn outline" id="download-ledger-excel" href="/api/admin/ledger.xls">Download Excel</a><button class="btn outline" type="button" id="refresh-ledger">Refresh</button><button class="btn primary" type="button" id="new-ledger-entry">Add entry</button></div></div>
 <div class="ledger-summary-grid" id="ledger-summary" aria-live="polite"></div>
 <div class="admin-card stack ledger-table-card">

@@ -229,9 +229,122 @@ function canPlaceInSiteChrome(parent, child) {
   return child.parentElement !== parent;
 }
 
-function pickRandomSponsor(sponsors) {
-  if (!Array.isArray(sponsors) || !sponsors.length) return null;
-  return sponsors[Math.floor(Math.random() * sponsors.length)];
+// --- Homepage fly-in weighted rotation (per-visitor cursor in localStorage; no server writes) ---
+const SPONSOR_FLYIN_CURSOR_KEY = 'efhs-sponsor-flyin-cursor-v1';
+const SPONSOR_FLYIN_DEFAULT_WEIGHTS = { gold: 2, silver: 1 };
+function sponsorFlyinHouseAd(tier) {
+  const label = tier === 'gold' ? 'Gold' : 'Silver';
+  return {
+    id: `house-become-a-${tier}-sponsor`,
+    name: 'Advertise here',
+    level: `Become a ${label} sponsor`,
+    tier,
+    tier_label: `Your ${label}`,
+    mark_text: '★',
+    flyin_href: '/become-a-sponsor.html',
+    flyin_cta: `Become a ${label} sponsor`,
+    is_house_ad: true,
+  };
+}
+
+function normalizeFlyinWeight(value, fallback) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(10, Math.max(0, n));
+}
+
+function flyinGcd(a, b) { return b ? flyinGcd(b, a % b) : a; }
+
+// Build one full deterministic rotation: tiers interleaved by smooth weighted
+// round-robin, sponsors in each tier taken in order so each gets an equal share.
+function buildSponsorFlyinRotation(gold = [], silver = [], weights = {}) {
+  const tiers = [
+    { list: Array.isArray(gold) ? gold : [], weight: normalizeFlyinWeight(weights.gold, SPONSOR_FLYIN_DEFAULT_WEIGHTS.gold) },
+    { list: Array.isArray(silver) ? silver : [], weight: normalizeFlyinWeight(weights.silver, SPONSOR_FLYIN_DEFAULT_WEIGHTS.silver) },
+  ].filter((tier) => tier.list.length && tier.weight > 0);
+  if (!tiers.length) return [];
+  const totalWeight = tiers.reduce((sum, tier) => sum + tier.weight, 0);
+  // Tier pattern for one cycle (e.g. 2:1 -> G S G).
+  const current = tiers.map(() => 0);
+  const pattern = [];
+  for (let i = 0; i < totalWeight; i += 1) {
+    let best = 0;
+    tiers.forEach((tier, index) => {
+      current[index] += tier.weight;
+      if (current[index] > current[best]) best = index;
+    });
+    current[best] -= totalWeight;
+    pattern.push(best);
+  }
+  // Repeat cycles until every tier list wraps evenly (capped for safety).
+  let cycles = 1;
+  tiers.forEach((tier) => {
+    const need = tier.list.length / flyinGcd(tier.list.length, tier.weight);
+    cycles = (cycles * need) / flyinGcd(cycles, need);
+  });
+  cycles = Math.min(cycles, 120);
+  const cursors = tiers.map(() => 0);
+  const rotation = [];
+  for (let c = 0; c < cycles; c += 1) {
+    pattern.forEach((tierIndex) => {
+      const tier = tiers[tierIndex];
+      rotation.push(tier.list[cursors[tierIndex] % tier.list.length]);
+      cursors[tierIndex] += 1;
+    });
+  }
+  // Avoid the same sponsor back to back (including wrap-around) when possible.
+  const same = (a, b) => a === b || (a?.id != null && a?.id === b?.id);
+  for (let i = 0; i < rotation.length && rotation.length > 2; i += 1) {
+    const next = (i + 1) % rotation.length;
+    if (!same(rotation[i], rotation[next])) continue;
+    for (let j = 2; j < rotation.length; j += 1) {
+      const k = (i + j) % rotation.length;
+      const after = (k + 1) % rotation.length;
+      const before = (k - 1 + rotation.length) % rotation.length;
+      if (!same(rotation[k], rotation[i])
+        && !same(rotation[before === next ? i : before], rotation[next])
+        && !same(rotation[after], rotation[next])) {
+        [rotation[next], rotation[k]] = [rotation[k], rotation[next]];
+        break;
+      }
+    }
+  }
+  return rotation;
+}
+
+function sponsorFlyinTiers(sponsors = [], site = {}) {
+  const gold = [];
+  const silver = [];
+  (Array.isArray(sponsors) ? sponsors : []).filter((sponsor) => sponsorShowsFlyin(sponsor) && !sponsor.is_house_ad).forEach((sponsor) => {
+    if (resolveSponsorTierKey(sponsor) === 'gold') gold.push(sponsor);
+    else silver.push(sponsor);
+  });
+  const houseOff = site?.sponsor_flyin_house_ad === 0 || site?.sponsor_flyin_house_ad === '0' || site?.sponsor_flyin_house_ad === false;
+  // Auto "advertise here" card for any fly-in tier that has no real sponsors yet.
+  if (!houseOff) {
+    if (!gold.length) gold.push(sponsorFlyinHouseAd('gold'));
+    if (!silver.length) silver.push(sponsorFlyinHouseAd('silver'));
+  }
+  return { gold, silver };
+}
+
+function pickRotatingSponsor(sponsors = [], site = {}, storage) {
+  const { gold, silver } = sponsorFlyinTiers(sponsors, site);
+  const rotation = buildSponsorFlyinRotation(gold, silver, {
+    gold: site?.sponsor_flyin_gold_weight,
+    silver: site?.sponsor_flyin_silver_weight,
+  });
+  if (!rotation.length) return null;
+  let cursor;
+  try {
+    const store = storage === undefined ? window.localStorage : storage;
+    const raw = Number.parseInt(store.getItem(SPONSOR_FLYIN_CURSOR_KEY) || '0', 10);
+    cursor = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+    store.setItem(SPONSOR_FLYIN_CURSOR_KEY, String((cursor + 1) % 100000));
+  } catch {
+    cursor = Math.floor(Math.random() * rotation.length);
+  }
+  return rotation[cursor % rotation.length];
 }
 
 function dismissSponsorAd(root) {
@@ -276,13 +389,13 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">
       <button type="button" class="sponsor-flyin-close" aria-label="Close sponsor ad">×</button>
-      <a class="sponsor-flyin-card" href="/sponsors.html">
+      <a class="sponsor-flyin-card" href="${escapeHtml(sponsor.flyin_href || '/sponsors.html')}">
         ${logo}
         <div class="sponsor-flyin-copy">
           <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
           <strong>${escapeHtml(sponsor.name)}</strong>
           <span class="sponsor-flyin-tier">${escapeHtml(sponsor.level || 'Sponsor')}</span>
-          <em>View all sponsors</em>
+          <em>${escapeHtml(sponsor.flyin_cta || 'View all sponsors')}</em>
         </div>
       </a>
     </div>
@@ -308,6 +421,8 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
 
 function sponsorShowsFlyin(sponsor = {}) {
   if (Number(sponsor.active) === 0) return false;
+  const tierKey = resolveSponsorTierKey(sponsor);
+  if (tierKey === 'bronze' || tierKey === 'honorable') return false;
   if (sponsor.show_flyin === true || sponsor.show_flyin === 1) return true;
   const tier = String(sponsor.tier || sponsor.level || '').toLowerCase();
   return /\b(silver|gold)\b/.test(tier) || Number(sponsor.homepage_ad) === 1;
@@ -509,9 +624,7 @@ async function maybeShowHomepageSponsorAd() {
         ? bootstrap.site
         : fetch('/api/site', { cache: 'no-store' }).then((response) => (response.ok ? response.json() : {})),
     ]);
-    const eligible = (Array.isArray(sponsors) ? sponsors : []).filter(sponsorShowsFlyin);
-    if (!eligible.length) return;
-    const picked = pickRandomSponsor(eligible);
+    const picked = pickRotatingSponsor(sponsors, site);
     if (picked) showHomepageSponsorAd(picked, site?.sponsor_ad_seconds);
   } catch {
     // Bypass the ad entirely if sponsors cannot be loaded.

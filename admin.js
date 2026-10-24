@@ -1794,8 +1794,8 @@ async function discardPageEdits() {
       const isHomePage = Boolean(page.is_home) || page.slug === 'home';
       state.homeBodyHtml = isHomePage ? restoreHomeHeroCardUploadSrc(String(page.body_html || '')) : '';
       fillForm(form, { ...page, ...structuredPageFields(page), original_slug: page.slug });
+      fillPageSeoFields(form, page).catch(() => null);
       form.elements.active.checked = Boolean(page.active);
-      await fillPageSeoFields(form, page);
       syncPreviewFromForm();
       capturePageBaseline();
       return;
@@ -4126,6 +4126,12 @@ async function loadSponsorAdSettings() {
     const settings = await jsonFetch('/api/admin/sponsors/settings');
     const input = formControl(form, 'sponsor_ad_seconds');
     if (input) input.value = String(settings.sponsor_ad_seconds ?? 6);
+    const goldInput = formControl(form, 'sponsor_flyin_gold_weight');
+    if (goldInput) goldInput.value = String(settings.sponsor_flyin_gold_weight ?? 2);
+    const silverInput = formControl(form, 'sponsor_flyin_silver_weight');
+    if (silverInput) silverInput.value = String(settings.sponsor_flyin_silver_weight ?? 1);
+    const houseInput = formControl(form, 'sponsor_flyin_house_ad');
+    if (houseInput) houseInput.checked = Number(settings.sponsor_flyin_house_ad ?? 1) !== 0;
   } catch (error) {
     const status = document.querySelector('#sponsor-ad-settings-status');
     if (status) status.textContent = `Could not load ad timing: ${error.message}`;
@@ -8485,7 +8491,12 @@ function bindForms() {
     try {
       const saved = await jsonFetch('/api/admin/sponsors/settings', {
         method: 'PUT',
-        body: JSON.stringify({ sponsor_ad_seconds: seconds }),
+        body: JSON.stringify({
+          sponsor_ad_seconds: seconds,
+          sponsor_flyin_gold_weight: Number(formControl(form, 'sponsor_flyin_gold_weight')?.value ?? 2),
+          sponsor_flyin_silver_weight: Number(formControl(form, 'sponsor_flyin_silver_weight')?.value ?? 1),
+          sponsor_flyin_house_ad: formControl(form, 'sponsor_flyin_house_ad')?.checked === false ? 0 : 1,
+        }),
       });
       formControl(form, 'sponsor_ad_seconds').value = String(saved.sponsor_ad_seconds);
       if (status) status.textContent = `Homepage fly-in will close after ${saved.sponsor_ad_seconds} seconds.`;
@@ -9207,7 +9218,6 @@ refreshAll()
 });
 
 /* hero-rich-formatting: 20260802-49 */
-
 
 // Per-page search title/description (stored in site_content page_seo).
 async function loadPageSeo(force = false) {
