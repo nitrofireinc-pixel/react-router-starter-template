@@ -89,16 +89,16 @@ test('validateSelfPasswordChange requires length match and confirmation', () => 
   }).ok, false);
   assert.equal(validateSelfPasswordChange({
     current_password: 'oldpass12',
-    new_password: 'newpass99',
-    confirm_password: 'newpass98',
+    new_password: 'Newpass99!',
+    confirm_password: 'Newpass98!',
   }).detail, 'New password and confirmation do not match');
   const ok = validateSelfPasswordChange({
     current_password: 'oldpass12',
-    new_password: 'newpass99',
-    confirm_password: 'newpass99',
+    new_password: 'Newpass99!',
+    confirm_password: 'Newpass99!',
   });
   assert.equal(ok.ok, true);
-  assert.equal(ok.new_password, 'newpass99');
+  assert.equal(ok.new_password, 'Newpass99!');
 });
 
 test('jsonResponse returns JSON with status and content-type', async () => {

@@ -166,6 +166,7 @@ import {
   attachD1Bookmark,
   cachedPublicRead,
   invalidatePublicReadCache,
+  invalidatePublicReadKeys,
   openD1Session,
   readCachedQueryBatch,
   renderPublicReadBootstrap,
@@ -232,7 +233,8 @@ import {
   saveVisualPage,
   stripVisualLockedLabels,
 } from './visual-page-editor.mjs';
-import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema } from './studio.mjs';
+import { checkPasswordRule, getAccountLock, lockStatus, recordAccountFailure, clearAccountFailures, unlockAccount, listAccountLocks } from './account-lock.mjs';
+import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema, serveStudioUpload } from './studio.mjs';
 import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
@@ -313,7 +315,38 @@ export const DEFAULT_SITE = {
   social_links: JSON.stringify(DEFAULT_SOCIAL_LINKS),
   error_pages: JSON.stringify(DEFAULT_ERROR_PAGES),
   holiday_theme: '',
+  holiday_theme_mode: 'manual',
+  holiday_month_map: '',
+  studio_theme: '',
 };
+
+export const STUDIO_THEME_STYLES = Object.freeze({
+  classic: { label: 'Classic (current look)', css: '' },
+  modern: { label: 'Modern (rounded, airy)', css: '.card,.btn{border-radius:14px}.page-hero h1{letter-spacing:.02em}' },
+  bold: { label: 'Bold (strong headings)', css: 'h1,h2,h3{text-transform:uppercase;letter-spacing:.04em}.btn{font-weight:800}' },
+});
+const THEME_COLOR_VARS = { primary: '--efhs-navy', accent: '--efhs-blue', highlight: '--efhs-blue-bright', soft: '--efhs-silver' };
+
+/** Theme = style + editable colors. Empty unless switched on, so legacy output is unchanged. */
+export function normalizeStudioTheme(value) {
+  let t = value;
+  if (typeof t === 'string') { try { t = JSON.parse(t || '{}'); } catch { t = {}; } }
+  if (!t || typeof t !== 'object') t = {};
+  const colors = {};
+  for (const key of Object.keys(THEME_COLOR_VARS)) {
+    const c = String(t.colors?.[key] || '');
+    if (/^#[0-9a-f]{6}$/i.test(c)) colors[key] = c.toLowerCase();
+  }
+  return { active: Boolean(t.active), style: STUDIO_THEME_STYLES[t.style] ? t.style : 'classic', colors };
+}
+
+export function studioThemeCss(value) {
+  const t = normalizeStudioTheme(value);
+  if (!t.active) return '';
+  const vars = Object.entries(t.colors).map(([k, c]) => `${THEME_COLOR_VARS[k]}:${c}`).join(';');
+  const css = `${vars ? `:root{${vars}}` : ''}${STUDIO_THEME_STYLES[t.style].css}`;
+  return css ? `<style data-studio-theme>${css}</style>` : '';
+}
 
 /** Holiday overlays toggled in CMS → Site settings → Holiday themes. Add entries here for more holidays. */
 export const HOLIDAY_THEMES = Object.freeze([
@@ -336,9 +369,40 @@ export const HOLIDAY_THEMES = Object.freeze([
   Object.freeze({ key: "christmas", label: "Christmas", hint: "Suggested: Dec 21 \u2013 Dec 26. Top-corner designs, a glowing top-center snare and edge lights." }),
 ]);
 
+export function renderStudioThemeFieldset() {
+  const styles = Object.entries(STUDIO_THEME_STYLES).map(([key, s]) => `<option value="${key}">${escapeHtml(s.label)}</option>`).join('');
+  const colors = [['primary', 'Main color', '#002142'], ['accent', 'Accent', '#0b63d6'], ['highlight', 'Highlight', '#3c8bff'], ['soft', 'Soft', '#c9d4e4']]
+    .map(([k, l, d]) => `<label>${l} <input type="color" data-theme-color="${k}" value="${d}"></label>`).join('');
+  return `<fieldset class="studio-theme-setting" data-studio-theme><legend>Site theme</legend><label><input type="checkbox" data-theme-active> Use a custom theme (off = current look)</label><label>Style <select data-theme-style>${styles}</select></label><div class="studio-theme-colors">${colors}</div></fieldset>`;
+}
+
+export function renderHolidayMonthTable() {
+  return `<fieldset class="holiday-months-setting"><label class="holiday-mode">Schedule <select name="holiday_theme_mode" data-holiday-mode><option value="manual">Use the theme picked above</option><option value="monthly">Use the 12-month table (Eastern time, whole months)</option></select></label><table class="holiday-month-table" data-holiday-months><thead><tr><th scope="col">Month</th><th scope="col">Theme</th></tr></thead><tbody>${HOLIDAY_MONTHS.map((month, i) => `<tr><th scope="row">${month}</th><td><select data-holiday-month="${i}" aria-label="${month} theme"><option value="">None</option>${HOLIDAY_THEMES.map((theme) => `<option value="${escapeHtml(theme.key)}">${escapeHtml(theme.label)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></fieldset>`;
+}
+
 export function renderHolidayThemesFieldset() {
   const opts = HOLIDAY_THEMES.map((theme) => `<option value="${escapeHtml(theme.key)}" data-hint="${escapeHtml(theme.hint)}">${escapeHtml(theme.label)}</option>`).join('');
   return `<fieldset class="holiday-themes-setting" data-holiday-themes><p class="muted">Light decorations on every public page (never on admin screens). Pick one theme or None, then Apply.</p><div class="holiday-theme-picker"><select id="holiday-theme-select" name="holiday_theme" data-holiday-select aria-label="Holiday theme"><option value="" data-hint="No holiday decorations on public pages.">None (off)</option>${opts}</select><button type="submit" class="btn" data-holiday-apply>Apply</button></div><p class="muted holiday-theme-hint" data-holiday-hint></p></fieldset>`;
+}
+
+export const HOLIDAY_MONTHS = Object.freeze(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']);
+
+/** 12-month holiday table: array of 12 theme keys ('' = none). */
+export function normalizeHolidayMonthMap(value) {
+  let list = value;
+  if (typeof list === 'string') { try { list = JSON.parse(list || '[]'); } catch { list = []; } }
+  if (!Array.isArray(list)) list = [];
+  return HOLIDAY_MONTHS.map((_, i) => normalizeHolidayTheme(list[i]));
+}
+
+export function easternMonthIndex(now = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'numeric' }).format(now)) - 1;
+}
+
+/** Whole-month schedule in Eastern time when mode is 'monthly'; otherwise the manual pick. */
+export function resolveHolidayTheme({ holiday_theme = '', holiday_theme_mode = 'manual', holiday_month_map = '' } = {}, now = new Date()) {
+  if (holiday_theme_mode === 'monthly') return normalizeHolidayMonthMap(holiday_month_map)[easternMonthIndex(now)] || '';
+  return normalizeHolidayTheme(holiday_theme);
 }
 
 /** One active holiday theme at most: a HOLIDAY_THEMES key, or '' for none. */
@@ -3554,7 +3618,10 @@ export function publicSitePayload(site = {}) {
   payload.utility_links = normalizeUtilityLinks(payload.utility_links);
   payload.social_links = normalizeSocialLinks(payload.social_links);
   payload.error_pages = normalizeErrorPages(payload.error_pages);
-  payload.holiday_theme = normalizeHolidayTheme(payload.holiday_theme);
+  payload.studio_theme = normalizeStudioTheme(payload.studio_theme);
+  payload.holiday_theme_mode = payload.holiday_theme_mode === 'monthly' ? 'monthly' : 'manual';
+  payload.holiday_month_map = normalizeHolidayMonthMap(payload.holiday_month_map);
+  payload.holiday_theme = resolveHolidayTheme({ ...payload, holiday_month_map: payload.holiday_month_map });
   payload.page_seo = normalizePageSeo(payload.page_seo);
   return payload;
 }
@@ -7567,8 +7634,9 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
       mark: PUBLIC_BRAND_MARK,
     });
   }
-  // Site Studio v2: serve the HTML saved at publish time (no render on request).
-  if (page.studio_html) return page.studio_html;
+  // Site Studio v2: the HTML saved at publish time replaces body_html and still
+  // runs through the same slug decorators, so v2 output matches legacy.
+  if (page.studio_html) page = { ...page, body_html: page.studio_html };
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -8830,6 +8898,8 @@ export function validateSelfPasswordChange(payload = {}) {
   if (!new_password || new_password.length < 8) {
     return { ok: false, status: 422, detail: 'New password must be at least 8 characters' };
   }
+  const rule = checkPasswordRule(new_password);
+  if (!rule.ok) return { ok: false, status: 422, detail: rule.detail, checks: rule.checks };
   if (confirm_password !== new_password) {
     return { ok: false, status: 422, detail: 'New password and confirmation do not match' };
   }
@@ -9471,7 +9541,11 @@ async function routeFundraiserCardsApi(request, env, url, ctx = null) {
     const before = await getFundraiserCard(env, itemMatch[1]);
     if (!before) return jsonResponse({ detail: 'Fundraiser card not found' }, 404);
     const payload = await request.json().catch(() => ({}));
-    const card = await updateFundraiserCard(env, itemMatch[1], payload, { user: auth.user });
+    let card = await updateFundraiserCard(env, itemMatch[1], payload, { user: auth.user });
+    // A non-approver's edit to a live card goes back for approval.
+    if (!canPublish && before.status === 'approved') {
+      card = await setFundraiserCardStatus(env, itemMatch[1], 'draft', { user: auth.user });
+    }
     await logFundraiserCardAudit(env, ctx, request, {
       user: auth.user,
       action: 'fundraiser.card.edit',
@@ -11241,6 +11315,18 @@ async function routeApi(request, env, url, ctx = null) {
         .bind('holiday_theme', normalizeHolidayTheme(payload.holiday_theme))
         .run();
     }
+    if (payload.studio_theme !== undefined) {
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .bind('studio_theme', JSON.stringify(normalizeStudioTheme(payload.studio_theme))).run();
+    }
+    if (payload.holiday_theme_mode !== undefined) {
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .bind('holiday_theme_mode', payload.holiday_theme_mode === 'monthly' ? 'monthly' : 'manual').run();
+    }
+    if (payload.holiday_month_map !== undefined) {
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .bind('holiday_month_map', JSON.stringify(normalizeHolidayMonthMap(payload.holiday_month_map))).run();
+    }
     if (payload.boosters_dues_enabled !== undefined) {
       if (!isSuperAdmin(auth.user)) {
         return jsonResponse({ detail: 'Only Super Admins can change the Band dues Boosters setting.' }, 403);
@@ -11557,6 +11643,8 @@ async function routeApi(request, env, url, ctx = null) {
     const password = String(payload.password || '');
     if (!username || !password) return jsonResponse({ detail: 'Username and password are required' }, 422);
     if (password.length < 8) return jsonResponse({ detail: 'Password must be at least 8 characters' }, 422);
+    const passwordRule = checkPasswordRule(password);
+    if (!passwordRule.ok) return jsonResponse({ detail: passwordRule.detail, checks: passwordRule.checks }, 422);
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
     const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
@@ -11630,6 +11718,10 @@ async function routeApi(request, env, url, ctx = null) {
     );
     const displayName = String(payload.display_name || '').trim();
     if (!displayName) return jsonResponse({ detail: 'Display name is required' }, 422);
+    if (nextPayload.password) {
+      const passwordRule = checkPasswordRule(nextPayload.password);
+      if (!passwordRule.ok) return jsonResponse({ detail: passwordRule.detail, checks: passwordRule.checks }, 422);
+    }
     await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, role = ?, permissions = ?, active = ? WHERE id = ?').bind(String(nextPayload.username || existing.username).trim(), displayName, role, permissions, nextPayload.active === false ? 0 : 1, id).run();
     if (nextPayload.password) await updatePassword(env, id, nextPayload.password);
     const updated = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(id).first();
@@ -11698,10 +11790,32 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true });
   }
 
+  if (url.pathname === '/api/admin/users/locks' && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!isSuperAdmin(auth.user)) return jsonResponse({ detail: 'Super Admin only' }, 403);
+    return jsonResponse(await listAccountLocks(env));
+  }
+  const unlockMatch = url.pathname.match(/^\/api\/admin\/users\/(\d+)\/unlock$/);
+  if (unlockMatch && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!isSuperAdmin(auth.user)) return jsonResponse({ detail: 'Only the Super Admin can unlock accounts' }, 403);
+    await unlockAccount(env, Number(unlockMatch[1]));
+    return jsonResponse({ ok: true });
+  }
   if (url.pathname.startsWith('/api/admin/studio/')) {
     const studioResponse = await handleStudioApi(request, env, url, {
       requireLogin, jsonResponse, canEditPageContent, canEditPageLayout, isSuperAdmin,
-      invalidate: invalidatePublicReadCache,
+      invalidate: (path) => invalidatePublicReadKeys(path ? [`page-path:${path}`] : []),
+      renderCtx: async () => ({
+        logo: (await getSiteContentValue(env, 'logo_url').catch(() => '')) || '/assets/efhs-logo.png',
+        mark: PUBLIC_BRAND_MARK,
+      }),
+      legacyBodyHtml: async (slug) => {
+        const row = await env.DB.prepare('SELECT body_html FROM cms_pages WHERE slug = ?').bind(slug).first();
+        return String(row?.body_html || '');
+      },
     });
     if (studioResponse) return studioResponse;
   }
@@ -13521,6 +13635,9 @@ async function handlePhotoVariantGet(env, url, ctx, parsed) {
 async function handleUploadGet(request, env, url, ctx = null) {
   const variantPath = parsePhotoVariantPath(url.pathname);
   if (variantPath) return handlePhotoVariantGet(env, url, ctx, variantPath);
+  if (url.pathname.startsWith('/uploads/studio/')) {
+    return (await serveStudioUpload(env, url.pathname)) || new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
   const cacheKey = uploadCacheRequest(url);
   const hit = await matchUploadCache(url);
   if (hit) return hit;
@@ -13622,9 +13739,31 @@ async function handleLogin(request, env, ctx = null) {
     console.error('login_d1_unavailable', String(error?.message || error));
     return d1UnavailableHtml('/admin/login');
   }
+  const accountLock = user ? lockStatus(await getAccountLock(env, user.id)) : { locked: false };
+  if (accountLock.locked) {
+    const lockedResponse = applyAuthCookies(
+      htmlResponse(
+        renderLoginHtml(nextPath).replace('</form>', accountLock.reset_required
+          ? "<p class='error'>This account is locked. Ask the Super Admin to unlock it.</p></form>"
+          : "<p class='error'>This account is locked for 30 minutes after 3 failed sign-ins.</p></form>"),
+        429,
+      ),
+      { token: '', maxAge: 0 },
+    );
+    await maybeLogAccessDenial(env, { request, url: requestUrl, response: lockedResponse, actor: { username }, ctx, deviceClient });
+    return lockedResponse;
+  }
   if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     const nextLock = registerLoginFailure(username, ip);
-    const lockedNow = Boolean(nextLock.locked);
+    let lockedNow = Boolean(nextLock.locked);
+    if (user) {
+      try {
+        const acct = await recordAccountFailure(env, user.id, { ip, city: request.cf?.city || '', region: request.cf?.regionCode || '' });
+        if (acct.locked) lockedNow = true;
+      } catch (error) {
+        console.error('account_lock_write_failed', String(error?.message || error));
+      }
+    }
     const failedResponse = applyAuthCookies(
       htmlResponse(
         renderLoginHtml(nextPath).replace('</form>', lockedNow
@@ -13652,6 +13791,7 @@ async function handleLogin(request, env, ctx = null) {
     // Best-effort; login should still succeed if the column is missing mid-deploy.
   }
   clearLoginFailures(username, ip);
+  await clearAccountFailures(env, user.id);
   const token = await makeSession(user, env, { device: deviceClient });
   await enqueueAdminAudit(env, ctx, {
     request,
@@ -13836,7 +13976,7 @@ async function handleStudioEditorPage(request, env, slug) {
   if (!canEditPageContent(user, slug)) return htmlResponse('<!doctype html><title>Not allowed</title><p>You do not have access to this page.</p>', 403);
   await ensureStudioSchema(env);
   const starter = slug === 'coming-soon' ? comingSoonLayout({ mark: PUBLIC_BRAND_MARK }) : null;
-  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Studio: ${escapeHtml(slug)}</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head><body class="studio-app" data-slug="${escapeAttr(slug)}"><script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script><header class="studio-top"><a href="/admin">&larr; Staff menu</a><h1>Site Studio <span data-slug-label></span></h1><span class="studio-status" data-status></span></header><main class="studio-main"><section class="studio-panel"><div class="studio-actions"><button type="button" data-act="draft">Save draft</button><button type="button" data-act="publish" class="primary">Publish</button><label class="studio-flag" hidden>Editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div><div data-blocks></div><details><summary>Layout JSON</summary><textarea data-json rows="18"></textarea><button type="button" data-act="apply-json">Apply JSON</button></details><h2>History (last 3)</h2><ol data-history></ol><ul class="studio-errors" data-errors></ul></section><section class="studio-preview"><iframe title="Preview" data-preview sandbox=""></iframe></section></main><script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`);
+  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Studio: ${escapeHtml(slug)}</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head><body class="studio-app" data-slug="${escapeAttr(slug)}"><script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script><header class="studio-top"><a href="/admin">&larr; Staff menu</a><h1>Site Studio <span data-slug-label></span></h1><div class="sc-toggle" role="group" aria-label="Editor mode"><button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button></div><span class="studio-status" data-status></span></header><main class="studio-main"><section class="studio-panel"><div class="studio-actions"><button type="button" data-act="draft">Save draft</button><button type="button" data-act="publish" class="primary">Publish</button><label class="studio-flag" hidden>Live editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div><h2>Add a block</h2><div class="sc-palette" data-palette></div><h2>Edit</h2><div data-inspector></div><h2>History (last 3)</h2><ol data-history></ol><details class="sc-advanced" data-json-wrap><summary>Layout JSON (Super Admin)</summary><textarea data-json rows="18"></textarea><button type="button" data-act="apply-json">Apply JSON</button> <button type="button" data-act="migrate">Rebuild from current page</button></details><ul class="studio-errors" data-errors></ul></section><section class="studio-canvas-wrap"><div data-canvas></div></section><section class="studio-preview" data-preview-wrap data-device="desktop"><div class="sc-toggle" role="group" aria-label="Preview size"><button type="button" data-device="desktop" aria-pressed="true">Desktop</button><button type="button" data-device="phone">Phone</button></div><iframe title="Preview" data-preview sandbox=""></iframe></section></main><script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`);
 }
 
 async function handleVisualEditorPage(request, env, slug, ctx = null) {
@@ -14171,7 +14311,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
   ${extraCss}
-  ${themePhotoStyle}
+  ${themePhotoStyle}${studioThemeCss(site.studio_theme)}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
@@ -14488,7 +14628,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         && !isDeliberateComingSoonPage(page)
         && canPreviewUnpublishedCmsPage(user, page);
       const livePage = previewUnpublished ? { ...page, active: 1 } : publicCmsPageForRender(page);
-      const studioHtml = await cachedPublicRead(`studio-html:${path}`, () => loadStudioLiveHtml(env, path), { ctx });
+      const studioHtml = await cachedPublicRead(`studio-html:${path}:${page.updated_at || ''}:${page.editor || ''}`, () => loadStudioLiveHtml(env, path), { ctx });
       if (studioHtml && isPublicCmsPageActive(page)) livePage.studio_html = studioHtml;
       const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
@@ -14914,7 +15054,7 @@ __ADMIN_SIDEBAR__
     <label class="full" data-error-pane="429">429 copy<input name="error_429_copy" maxlength="280"></label>
   </div>
 </div>
-<div class="admin-card stack site-switches-card"><h2>Site switches</h2><div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div></div><div class="admin-card stack holiday-themes-card"><h2>Holiday themes</h2>${renderHolidayThemesFieldset()}</div></div><div class="admin-card site-settings-savebar"><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></div></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
+<div class="admin-card stack site-switches-card"><h2>Site switches</h2><div class="site-settings-switches"><label class="toggle-line" data-maintenance-mode-setting hidden><span><b>Maintenance mode</b><small>Super Admin only. When enabled, the public and non-super-admin users see a 503 maintenance page. Super Admins can open site pages to test, with a maintenance banner at the top. Each flip is written to the Security log.</small></span><input name="maintenance_mode" type="checkbox" role="switch" aria-label="Enable maintenance mode"></label><label class="toggle-line" data-boosters-dues-setting hidden><span><b>Show band dues on Boosters</b><small>Super Admin only. When off, the Pay dues card is hidden on the public Boosters page. Turning it back on restores the card.</small></span><input name="boosters_dues_enabled" type="checkbox" role="switch" aria-label="Show band dues card on Boosters page" checked></label></div></div><div class="admin-card stack holiday-themes-card"><h2>Holiday themes</h2>${renderHolidayThemesFieldset()}${renderHolidayMonthTable()}</div><div class="admin-card stack studio-theme-card"><h2>Site theme</h2>${renderStudioThemeFieldset()}</div></div><div class="admin-card site-settings-savebar"><button class="btn primary">Save site settings</button><p class="status" id="site-status"></p></div></form><form id="logo-form" class="admin-card stack"><h2>Upload new logo</h2><label>Logo file<input name="file" type="file" accept="image/*,.svg" required></label><button class="btn secondary">Upload logo</button><p class="status" id="logo-status"></p></form></div></section>
 <section id="tab-social" class="cms-panel social-panel">
 <div class="panel-head"><div><p class="kicker">Social</p><h1>Social Media</h1><p>Add Instagram, YouTube, and other account links for the site footer. Connect Facebook and Instagram through Zernio to publish posts. New gallery photos can auto-post to Instagram when it is connected.</p></div></div>
 <div class="editor-layout">

@@ -53,3 +53,7 @@ database_id = "e71387af-9198-48e6-b6e9-72729866bdae"
 
 [triggers]
 crons = ["20 11 * * *"]
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "efhsband-files-dev"

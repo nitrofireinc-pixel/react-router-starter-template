@@ -137,10 +137,15 @@ export function canEditFundraiserCards(user, deps = {}) {
   return false;
 }
 
+/**
+ * Approving (publishing) fundraiser cards is President, Vice President, or
+ * Super Admin only. Self-approval is allowed: an approver may approve a card
+ * they wrote themselves.
+ */
 export function canPublishFundraiserCards(user, deps = {}) {
   if (typeof deps.isSuperAdmin === 'function' && deps.isSuperAdmin(user)) return true;
-  if (typeof deps.hasPermission === 'function' && deps.hasPermission(user, 'pages')) return true;
-  if (typeof deps.canEditPageLayout === 'function' && deps.canEditPageLayout(user, 'fundraising')) return true;
+  if (typeof deps.hasPermission === 'function'
+    && (deps.hasPermission(user, 'president') || deps.hasPermission(user, 'vice-president'))) return true;
   return false;
 }
 

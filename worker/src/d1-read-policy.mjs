@@ -334,3 +334,16 @@ export function renderPublicReadBootstrap(payload = {}) {
   }).replace(/</g, '\\u003c');
   return `<script type="application/json" id="efhs-public-read">${body}</script>`;
 }
+
+/**
+ * Purge the shared public cache plus specific keys this isolate may never have
+ * read (for example `page-path:/join.html` cached by another isolate). Used by
+ * Site Studio so an edit is visible immediately everywhere.
+ */
+export async function invalidatePublicReadKeys(extraKeys = []) {
+  await invalidatePublicReadCache();
+  if (typeof caches === 'undefined' || !caches?.default) return;
+  await Promise.all([...new Set(extraKeys)].filter(Boolean).map(async (key) => {
+    try { await caches.default.delete(cacheRequestFor(key)); } catch { /* expires via max-age */ }
+  }));
+}

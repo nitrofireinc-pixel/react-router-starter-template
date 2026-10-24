@@ -1,0 +1,28 @@
+.studio-app{margin:0;font-family:system-ui,sans-serif;background:#f4f6fa}
+.studio-top{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;padding:.6rem 1rem;background:#0b2a5b;color:#fff}
+.studio-top a{color:#fff}.studio-top h1{font-size:1.1rem;margin:0}
+.studio-status{margin-left:auto;font-size:.9rem}
+.studio-main{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr) minmax(320px,1fr);gap:1rem;padding:1rem}
+.studio-panel,.studio-canvas-wrap{background:#fff;border-radius:8px;padding:1rem;overflow:auto;max-height:calc(100vh - 90px)}
+.studio-preview{display:flex;flex-direction:column;gap:.5rem}
+.studio-preview iframe{width:100%;height:calc(100vh - 140px);border:1px solid #ccd;border-radius:8px;background:#fff;margin:0 auto;display:block}
+[data-preview-wrap][data-device="phone"] iframe{width:390px;max-width:100%}
+.studio-actions,.sc-toggle,.sc-palette{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem}
+.studio-actions button.primary{background:#0b2a5b;color:#fff}
+button[aria-pressed="true"]{background:#0b2a5b;color:#fff}
+button.danger{color:#a00;margin-top:.6rem}
+.sc-section-head{font-size:.85rem;margin:.6rem 0 .3rem;color:#334}
+.sc-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:4px;background:repeating-linear-gradient(90deg,#eef2f8 0 calc(100%/12 - 4px),transparent calc(100%/12 - 4px) calc(100%/12));padding:4px;border:1px dashed #b8c2d6;border-radius:6px}
+.sc-block{position:relative;background:#fff;border:1px solid #9fb0cf;border-radius:4px;padding:2px 6px;overflow:hidden;font-size:.78rem;cursor:grab;touch-action:none;user-select:none}
+.sc-block.is-selected{outline:2px solid #e2a400}
+.sc-type{display:block;font-size:.65rem;text-transform:uppercase;color:#56607a}
+.sc-resize{position:absolute;right:0;bottom:0;width:12px;height:12px;background:#0b2a5b;cursor:nwse-resize}
+.studio-panel label{display:block;font-size:.8rem;margin:.3rem 0}
+.studio-panel input:not([type=checkbox]),.studio-panel textarea,.studio-panel select{width:100%;box-sizing:border-box}
+.sc-pos{display:grid;grid-template-columns:repeat(4,1fr);gap:.3rem}
+.sc-child{border:1px solid #dde;border-radius:6px;margin:.4rem 0}
+.sc-note{font-size:.85rem;color:#445}
+.studio-errors{color:#a00}
+textarea[data-json]{width:100%;font-family:monospace;font-size:.8rem}
+body[data-mode="simple"] .sc-advanced{display:none}
+@media (max-width:1100px){.studio-main{grid-template-columns:1fr}}

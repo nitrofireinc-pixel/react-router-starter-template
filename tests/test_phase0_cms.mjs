@@ -723,7 +723,7 @@ test('Users-permission holder can save their own name and password through the U
     body: JSON.stringify({
       username: 'editor@efhsband.org',
       display_name: 'Editor Updated',
-      password: 'brand-new-pass',
+      password: 'Brand-new-pass1',
       role: 'editor',
       permissions: ['users'],
       active: true,

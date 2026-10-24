@@ -609,6 +609,37 @@ function fillHolidayThemesForm(form, activeTheme) {
   select.addEventListener('change', showHint);
 }
 
+function collectHolidayMonths(form) {
+  return [...(form?.querySelectorAll('[data-holiday-month]') || [])]
+    .sort((a, b) => Number(a.dataset.holidayMonth) - Number(b.dataset.holidayMonth))
+    .map((sel) => sel.value || '');
+}
+
+function fillHolidayMonthsForm(form, site) {
+  if (!form) return;
+  const mode = form.querySelector('[data-holiday-mode]');
+  if (mode) mode.value = site?.holiday_theme_mode === 'monthly' ? 'monthly' : 'manual';
+  const map = Array.isArray(site?.holiday_month_map) ? site.holiday_month_map : [];
+  form.querySelectorAll('[data-holiday-month]').forEach((sel) => { sel.value = map[Number(sel.dataset.holidayMonth)] || ''; });
+}
+
+function collectStudioTheme(form) {
+  const box = form?.querySelector('[data-studio-theme]');
+  if (!box) return undefined;
+  const colors = {};
+  box.querySelectorAll('[data-theme-color]').forEach((input) => { colors[input.dataset.themeColor] = input.value; });
+  return { active: Boolean(box.querySelector('[data-theme-active]')?.checked), style: box.querySelector('[data-theme-style]')?.value || 'classic', colors };
+}
+
+function fillStudioThemeForm(form, theme) {
+  const box = form?.querySelector('[data-studio-theme]');
+  if (!box) return;
+  const t = theme && typeof theme === 'object' ? theme : {};
+  const active = box.querySelector('[data-theme-active]'); if (active) active.checked = Boolean(t.active);
+  const style = box.querySelector('[data-theme-style]'); if (style && t.style) style.value = t.style;
+  box.querySelectorAll('[data-theme-color]').forEach((input) => { const v = t.colors?.[input.dataset.themeColor]; if (/^#[0-9a-f]{6}$/i.test(v || '')) input.value = v; });
+}
+
 function bindErrorPagePicker(form) {
   const select = form?.querySelector('[data-error-page-select]');
   if (!select || select.dataset.bound) return;
@@ -3910,6 +3941,8 @@ async function loadSite() {
   fillForm(form, state.site);
   fillErrorPagesForm(form, state.site?.error_pages);
   fillHolidayThemesForm(form, state.site?.holiday_theme);
+  fillHolidayMonthsForm(form, state.site);
+  fillStudioThemeForm(form, state.site?.studio_theme);
   bindSiteTextPicker(form);
   bindErrorPagePicker(form);
   await loadUtilityLinksEditor();
@@ -5598,9 +5631,18 @@ function renderSecurityLogPager({ page = 1, total = 0, totalPages = 1 } = {}) {
   });
 }
 
+function userLockBadge(user) {
+  const lock = state.userLocks?.[String(user.id)];
+  if (!lock?.locked) return '';
+  const until = lock.reset_required ? 'needs a Super Admin unlock or password reset'
+    : `until ${new Date(lock.lock_until).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET`;
+  return `<small class="user-lock-badge"><b>Locked</b> ${escapeHtml(until)} <button type="button" data-unlock-user="${user.id}">Unlock</button></small>`;
+}
+
 async function loadUsers() {
   if (!hasPermission('users')) return;
   state.users = await jsonFetch('/api/admin/users');
+  state.userLocks = isSuperAdmin() ? await jsonFetch('/api/admin/users/locks').catch(() => ({})) : {};
   const list = document.querySelector('#users-list');
   const roleSelect = document.querySelector('#user-form [name="role"]');
   if (roleSelect) {
@@ -5617,7 +5659,7 @@ async function loadUsers() {
         : '<div class="row-actions"><span class="muted">View only</span></div>';
       return `
     <article class="admin-row user-admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small><small class="user-last-login">${escapeHtml(formatUserLastLoginLabel(user.last_login_at))}</small></div>
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small><small class="user-last-login">${escapeHtml(formatUserLastLoginLabel(user.last_login_at))}</small>${userLockBadge(user)}</div>
       ${actions}
     </article>`;
     }).join('')
@@ -5651,6 +5693,15 @@ async function loadUsers() {
     if (status) status.textContent = `Editing ${user.display_name || user.username}.`;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     formControl(form, 'display_name')?.focus();
+  }));
+  list.querySelectorAll('[data-unlock-user]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Unlock this account now?')) return;
+    try {
+      await jsonFetch(`/api/admin/users/${button.dataset.unlockUser}/unlock`, { method: 'POST', body: '{}' });
+      await loadUsers();
+    } catch (error) {
+      alert(error.message || 'Could not unlock.');
+    }
   }));
   list.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', async () => {
     const user = state.users.find(item => item.id === Number(button.dataset.deleteUser));
@@ -7980,11 +8031,17 @@ function bindForms() {
       delete payload.boosters_dues_enabled;
     }
     payload.error_pages = collectErrorPages(form);
+    payload.holiday_month_map = collectHolidayMonths(form);
+    if (payload.holiday_theme_mode === 'monthly') delete payload.holiday_theme; // keep the saved manual pick
+    const theme = collectStudioTheme(form);
+    if (theme) payload.studio_theme = theme;
     const saved = await jsonFetch('/api/admin/site', { method: 'POST', body: JSON.stringify(payload) });
     state.site = saved;
     fillForm(form, saved);
     fillErrorPagesForm(form, saved.error_pages);
     fillHolidayThemesForm(form, saved.holiday_theme);
+    fillHolidayMonthsForm(form, saved);
+    fillStudioThemeForm(form, saved.studio_theme);
     if (status) {
       const duesNote = form.elements.boosters_dues_enabled
         ? (saved.boosters_dues_enabled

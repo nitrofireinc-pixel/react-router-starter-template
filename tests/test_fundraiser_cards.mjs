@@ -272,9 +272,14 @@ test('content-only fundraising editors cannot approve, hide, delete, or reject',
   const admin = { role: 'admin', permissions: JSON.stringify(['all']) };
   assert.equal(canEditFundraiserCards(content, perms), true);
   assert.equal(canPublishFundraiserCards(content, perms), false);
-  assert.equal(canPublishFundraiserCards(layout, perms), true);
-  assert.equal(canPublishFundraiserCards(pages, perms), true);
+  // Approval is President, VP, or Super Admin only (self-approval allowed).
+  assert.equal(canPublishFundraiserCards(layout, perms), false);
+  assert.equal(canPublishFundraiserCards(pages, perms), false);
   assert.equal(canPublishFundraiserCards(admin, perms), true);
+  const president = { role: 'editor', permissions: JSON.stringify(['president', 'page:fundraising']) };
+  const vp = { role: 'editor', permissions: JSON.stringify(['vice-president', 'page:fundraising']) };
+  assert.equal(canPublishFundraiserCards(president, perms), true);
+  assert.equal(canPublishFundraiserCards(vp, perms), true);
 });
 
 test('first migrate imports Mattress Sale and Silent Auction as approved', async () => {

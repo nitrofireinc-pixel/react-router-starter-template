@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   validateLayout, renderLayout, isContentOnlyChange, comingSoonLayout, textSkeleton,
   studioTableStatements, STUDIO_CMS_PAGE_COLUMNS, ensureStudioSchema, resetStudioSchemaMemo,
-  STUDIO_SCHEMA_KEY, renderRichText, handleStudioApi,
+  STUDIO_SCHEMA_KEY, renderRichText, handleStudioApi, htmlToLayout, STUDIO_EXTRA_COLUMNS,
 } from '../worker/src/studio.mjs';
 import { comingSoonPageHtml, injectComingSoonLogos } from '../worker/src/home-redesign.mjs';
 import { DB_SCHEMA_VERSION } from '../worker/src/worker.mjs';
@@ -17,7 +17,8 @@ test('Studio does not bump the main schema version (audit schema never re-runs)'
 
 test('Studio schema is additive and never touches audit tables', () => {
   const all = [...studioTableStatements(), ...STUDIO_CMS_PAGE_COLUMNS.map(([, sql]) => sql),
-    readFileSync(new URL('../migrations/2026-10-24.s1-studio.sql', import.meta.url), 'utf8').replace(/--.*$/gm, '')].join('\n');
+    ...STUDIO_EXTRA_COLUMNS.map(([, , sql]) => sql),
+    ...['s1', 's2'].map((v) => readFileSync(new URL(`../migrations/2026-10-24.${v}-studio.sql`, import.meta.url), 'utf8').replace(/--.*$/gm, ''))].join('\n');
   assert.doesNotMatch(all, /\b(DROP|DELETE|RENAME|UPDATE|TRIGGER)\b/i);
   assert.doesNotMatch(all, /audit/i);
 });
@@ -27,6 +28,26 @@ test('coming-soon layout validates and matches the legacy page text', () => {
   assert.deepEqual(validateLayout(layout), { ok: true, errors: [] });
   const legacy = injectComingSoonLogos(comingSoonPageHtml({ title: 'Coming soon', heading: 'Coming soon', intro: 'This page is on the way. Check back soon, or contact the band office.' }));
   assert.equal(textSkeleton(renderLayout(layout)), textSkeleton(legacy));
+  // Byte for byte: logos auto-placed, intro keeps its field tag, button inside the card, no grid wrapper.
+  assert.equal(renderLayout(layout), legacy);
+});
+
+test('legacy HTML migrates to a layout that renders byte-identical', () => {
+  const ctx = { logo: '/assets/efhs-logo.png', mark: '/assets/efhs-blue-regiment-mark.png' };
+  const legacy = injectComingSoonLogos(comingSoonPageHtml({ heading: 'Gallery', intro: 'Soon.' }), ctx);
+  const layout = htmlToLayout(legacy, ctx);
+  assert.equal(validateLayout(layout, { allowHtml: true }).ok, true);
+  assert.equal(renderLayout(layout, ctx), legacy);
+  assert.ok(layout.sections[0].blocks.some((b) => b.type === 'logos'));
+  const odd = '<div class="x">loose</div><section class="content"><div class="wrap"><p>Hi</p></div></section>';
+  assert.equal(renderLayout(htmlToLayout(odd)), odd);
+});
+
+test('non-admins keep locked migrated html unchanged but cannot edit it', () => {
+  const base = htmlToLayout('<section class="content"><div class="wrap"><table><tr><td>1</td></tr></table></div></section>');
+  assert.equal(validateLayout(base, { baseline: base }).ok, true);
+  const edited = clone(base); edited.sections[0].blocks[0].props.html = '<b>x</b>';
+  assert.equal(validateLayout(edited, { baseline: base }).ok, false);
 });
 
 test('overlapping blocks, bad links and out-of-grid blocks are rejected', () => {
@@ -36,7 +57,7 @@ test('overlapping blocks, bad links and out-of-grid blocks are rejected', () => 
   assert.match(validateLayout(bad).errors.join(), /overlaps logos/);
   const wide = clone(layout); wide.sections[1].blocks[0].x = 6;
   assert.match(validateLayout(wide).errors.join(), /past column/);
-  const js = clone(layout); js.sections[1].blocks[1].props.href = 'javascript:alert(1)';
+  const js = clone(layout); js.sections[1].blocks[0].props.children[1].props.href = 'javascript:alert(1)';
   assert.equal(validateLayout(js).ok, false);
 });
 
@@ -52,7 +73,7 @@ test('content-only diff: words may change, positions may not', () => {
   const a = comingSoonLayout();
   const words = clone(a); words.sections[0].blocks[2].props.text = 'Join us';
   assert.equal(isContentOnlyChange(a, words), true);
-  const moved = clone(a); moved.sections[1].blocks[1].w = 6;
+  const moved = clone(a); moved.sections[1].blocks[0].w = 6;
   assert.equal(isContentOnlyChange(a, moved), false);
   const added = clone(a); added.sections[1].blocks.push({ id: 'n', type: 'divider', x: 0, y: 3, w: 12, h: 1 });
   assert.equal(isContentOnlyChange(a, added), false);
@@ -98,7 +119,7 @@ test('Studio API: content editors cannot change layout or flip the flag', async 
         sql, bind() { return this; },
         async first() {
           if (sql.includes('site_content')) return { value: '2026-10-24.s1' };
-          if (sql.startsWith('SELECT slug, editor')) return { slug: 'coming-soon', editor: 'legacy', live_version_id: null };
+          if (sql.startsWith('SELECT slug, path, editor')) return { slug: 'coming-soon', editor: 'legacy', live_version_id: null };
           if (sql.includes('FROM page_drafts')) return { layout_json: JSON.stringify(live) };
           return null;
         },
@@ -116,7 +137,7 @@ test('Studio API: content editors cannot change layout or flip the flag', async 
   });
   const editor = { id: 2, username: 'e@x.org', role: 'user' };
   const req = (path, body) => new Request(`https://x${path}`, { method: 'POST', body: JSON.stringify(body) });
-  const moved = clone(live); moved.sections[1].blocks[1].w = 6;
+  const moved = clone(live); moved.sections[1].blocks[0].w = 6;
   let r = await handleStudioApi(req('/api/admin/studio/pages/coming-soon/publish', { layout: moved }), { DB: db }, new URL('https://x/api/admin/studio/pages/coming-soon/publish'), deps(editor));
   assert.equal(r.status, 403);
   r = await handleStudioApi(req('/api/admin/studio/pages/coming-soon/editor', { editor: 'v2' }), { DB: db }, new URL('https://x/api/admin/studio/pages/coming-soon/editor'), deps(editor));
