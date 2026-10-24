@@ -215,6 +215,7 @@
     pub.classList.toggle('has-changes', dirty);
     pub.disabled = !dirty;
     pub.textContent = dirty ? '🚀 Publish' : '✓ Published';
+    pub.dataset.state = dirty ? 'dirty' : 'clean'; pub.setAttribute('aria-label', dirty ? 'Publish' : 'Published');
     pub.title = dirty ? 'Unpublished changes: press to make this draft live' : 'Nothing new to publish';
     $('[data-act="undo"]').disabled = !undoStack.length;
     const dis = $('[data-act="discard"]'); if (dis) dis.disabled = !dirty || !state?.live_layout;
@@ -535,18 +536,21 @@
       }
       drawOverlay();
     };
-    const up = () => {
-      canvasDoc.removeEventListener('pointermove', move); canvasDoc.removeEventListener('pointerup', up);
+    try { ev.target.setPointerCapture?.(ev.pointerId); } catch {}
+    const up = (e) => {
+      canvasDoc.removeEventListener('pointermove', move); canvasDoc.removeEventListener('pointerup', up); canvasDoc.removeEventListener('pointercancel', up);
       canvasDoc.body.classList.remove('sc-dragging');
       const plan = drag.plan; drag = null;
+      // A tap on the handle (no drag) or a touch the browser cancelled: say how to move instead of doing nothing.
+      if (!plan || e?.type === 'pointercancel') { drawOverlay(); if (!resize) toast(isMobile() ? 'Hold ⠿ Move and drag, or use ↑ Move up / ↓ Move down in Edit.' : 'Drag ⠿ Move to move this block.'); return; }
       if (plan?.ok) {
         const same = (plan.kind === 'grid' && ['x', 'y', 'w', 'h'].every((k) => plan.rect[k] === start[k]))
           || (plan.kind === 'span' && (plan.span >= COLS ? block.props.span == null : block.props.span === plan.span));
-        if (!same && applyPlan(plan, block, false)) { changed(); return; }
+        if (!same && applyPlan(plan, block, false)) { selected = block.id; scrollToSel = true; changed(); toast('Moved'); return; }
       } else if (plan) toast(resize ? 'Blocks cannot overlap. Make room first.' : 'That spot is taken. Neighbours stay put.', true);
       drawOverlay();
     };
-    canvasDoc.addEventListener('pointermove', move); canvasDoc.addEventListener('pointerup', up);
+    canvasDoc.addEventListener('pointermove', move); canvasDoc.addEventListener('pointerup', up); canvasDoc.addEventListener('pointercancel', up);
   }
 
   // ---------- inline editing on the canvas ----------
@@ -589,8 +593,100 @@
       node.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); node.blur(); } if (e.key === 'Escape') node.blur(); };
     });
   }
+  // ---------- phone/tablet pick-up & drag (one shared layout model; desktop uses the same order) ----------
+  let pick = null; let lp = null;
+  const pickEls = () => (pick ? index.blocks.get(pick.id) || [] : []);
+  function pickBar(show) {
+    let bar = $('[data-pick-bar]');
+    if (!bar) { bar = el('div', { class: 'st-pickbar', 'data-pick-bar': '' }, el('span', { text: '⠿ Drag to move' }), el('button', { type: 'button', 'data-pick-cancel': '', text: 'Cancel', onclick: () => cancelPick(true) })); document.body.append(bar); }
+    bar.hidden = !show;
+  }
+  function startPick(id) {
+    const f = id && findBlock(id); if (!f || !canLayout()) return;
+    if (pick) cancelPick();
+    selected = id; afterSelect(); closeSheet();
+    pick = { id, section: f.section, block: f.block, k: null };
+    pickEls().forEach((n) => n.classList.add('sc-lifted')); canvasDoc.body.classList.add('sc-picked');
+    try { navigator.vibrate?.(15); } catch {}
+    pickBar(true);
+  }
+  function siblingsOf(p) { return sorted(p.section).filter((b) => b !== p.block); }
+  function dropLine(y, left, width) {
+    let ln = canvasDoc.getElementById('sc-dropline');
+    if (y == null) { ln?.remove(); return; }
+    if (!ln) { ln = canvasDoc.createElement('div'); ln.id = 'sc-dropline'; canvasDoc.body.append(ln); }
+    Object.assign(ln.style, { top: `${y - 2}px`, left: `${left}px`, width: `${width}px` });
+  }
+  function pickMove(clientY) {
+    const w = canvasDoc.defaultView; const py = clientY + w.scrollY; const sib = siblingsOf(pick);
+    // Only blocks with something on screen count as drop slots; map back to the full sibling list (which may hold invisible fragments).
+    const vis = sib.map((b) => [b, docRect(index.blocks.get(b.id) || [])]).filter(([, r]) => r && r.height > 0);
+    const rects = vis.map(([, r]) => r);
+    let k = 0; rects.forEach((r) => { if (r.top + r.height / 2 < py) k++; });
+    pick.k = vis[k] ? sib.indexOf(vis[k][0]) : (vis.length ? sib.indexOf(vis[vis.length - 1][0]) + 1 : sib.length);
+    const me = docRect(pickEls()); const ref = rects[k] || rects[rects.length - 1] || me;
+    const y = rects[k] ? rects[k].top - 4 : (ref.top + ref.height + 4);
+    dropLine(y, (me || ref).left, Math.max(60, (me || ref).width));
+    const els = pickEls(); const dy = me ? py - (me.top + me.height / 2) : 0;
+    els.forEach((n) => { n.style.transform = `translateY(${Math.round(dy)}px)`; });
+    // Auto-scroll near the visible top/bottom (the bottom bar and sheets cover the frame's own bottom edge).
+    const fr = $('[data-canvas]').getBoundingClientRect(); const s = scale || 1; const bar = $('.st-bottom');
+    const visBottom = Math.min(fr.bottom, bar && bar.offsetParent ? bar.getBoundingClientRect().top : innerHeight);
+    const sy = fr.top + clientY * s; const zone = 90;
+    let v = 0;
+    if (sy > visBottom - zone) v = Math.ceil(30 * (sy - (visBottom - zone)) / zone) + 4;
+    else if (sy < fr.top + zone && w.scrollY > 0) v = -(Math.ceil(30 * (fr.top + zone - sy) / zone) + 4);
+    pick.lastY = clientY;
+    if (v) { const y0 = w.scrollY; w.scrollBy(0, v); if (w.scrollY !== y0 && !pick.raf) pick.raf = requestAnimationFrame(() => { if (pick) { pick.raf = 0; if (pick.dragging) pickMove(pick.lastY); } }); }
+  }
+  /** Reorder pick.block to reading-order slot k among its siblings. Grid sections get a sensible desktop placement:
+   * it takes the target slot's row and column, and the blocks after it are pushed down so nothing overlaps. */
+  function reorderTo(section, b, k) {
+    const sib = sorted(section).filter((o) => o !== b);
+    const old = sorted(section).indexOf(b); if (k === old) return false;
+    if (section.nested || !isGrid(section)) { sib.splice(k, 0, b); if (section.nested) section.blocks = sib; else renumberFlow(section, sib); return true; }
+    const t = sib[k];
+    if (t) { b.x = Math.min(t.x, 12 - b.w); b.y = t.y; } else { b.x = 0; b.y = sib.reduce((m, o) => Math.max(m, o.y + o.h), 0); }
+    const placed = [b];
+    for (const o of sib.slice().sort((p, q) => p.y - q.y || p.x - q.x)) { let hit; while ((hit = placed.find((q) => overlaps(o, q)))) o.y = hit.y + hit.h; placed.push(o); }
+    // close the vertical gap the block left behind
+    return true;
+  }
+  function endPick(drop) {
+    if (!pick) return;
+    const p = pick; pick = null; if (p.raf) cancelAnimationFrame(p.raf); dropLine(null); pickBar(false);
+    (index.blocks.get(p.id) || []).forEach((n) => { n.classList.remove('sc-lifted'); n.style.transform = ''; });
+    canvasDoc.body.classList.remove('sc-picked');
+    if (drop && p.k != null && reorderTo(p.section, p.block, p.k)) { selected = p.id; scrollToSel = true; changed(); toast('Moved'); requestAnimationFrame(() => requestAnimationFrame(revealSelected)); }
+    else if (drop) { drawOverlay(); toast('Dropped back where it was.'); }
+  }
+  function cancelPick(say) { if (!pick) return; pick.k = null; endPick(false); if (say) toast('Move cancelled.'); }
+  function wirePick(d) {
+    let dragging = false; let start = null;
+    d.addEventListener('touchstart', (e) => {
+      if (!isMobile() || !canLayout() || e.touches.length > 1) { clearTimeout(lp); return; }
+      const t = e.touches[0]; const target = d.elementFromPoint(t.clientX, t.clientY) || e.target;
+      if (pick) {
+        if (pickEls().some((n) => n.contains(target)) || target.closest?.('[data-sc-handle]')) { dragging = true; pick.dragging = true; e.preventDefault(); pickMove(t.clientY); }
+        else { cancelPick(true); }
+        return;
+      }
+      const b = target.closest?.('[data-sc-block]'); if (!b || target.closest('[contenteditable="true"]')) return;
+      start = [t.clientX, t.clientY]; clearTimeout(lp);
+      lp = setTimeout(() => { lp = null; startPick(b.dataset.scBlock); dragging = true; if (pick) pick.dragging = true; }, 450);
+    }, { passive: false });
+    d.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (lp && start && Math.hypot(t.clientX - start[0], t.clientY - start[1]) > 8) { clearTimeout(lp); lp = null; }
+      if (pick && dragging) { e.preventDefault(); pickMove(t.clientY); }
+    }, { passive: false });
+    const end = () => { clearTimeout(lp); lp = null; if (pick && dragging) { dragging = false; pick.dragging = false; if (pick.raf) { cancelAnimationFrame(pick.raf); pick.raf = 0; } if (pick.k != null) endPick(true); } };
+    d.addEventListener('touchend', end); d.addEventListener('touchcancel', () => { clearTimeout(lp); lp = null; dragging = false; });
+    d.addEventListener('contextmenu', (e) => { if (isMobile()) e.preventDefault(); });
+  }
   function wireCanvas() {
     const d = canvasDoc;
+    wirePick(d);
     d.addEventListener('click', (e) => {
       const a = e.target.closest('a'); if (a) e.preventDefault();
       const f = e.target.closest('form'); if (f) e.preventDefault();
@@ -598,7 +694,7 @@
     d.addEventListener('submit', (e) => e.preventDefault(), true);
     d.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-sc-handle]');
-      if (h) { startBlockDrag(e, h.dataset.scHandle === 'resize'); return; }
+      if (h) { if (isMobile() && h.dataset.scHandle === 'move') { e.preventDefault(); e.stopPropagation(); startPick(selected); return; } startBlockDrag(e, h.dataset.scHandle === 'resize'); return; }
       const b = e.target.closest('[data-sc-block]');
       if (!b) { if (!e.target.closest('#sc-layer')) { selected = null; afterSelect(); } return; }
       const id = b.dataset.scBlock;
@@ -899,10 +995,24 @@
     selected = copy.id; changed();
   }
   function nudge(section, b, dir) {
-    if (section.nested) { const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return toast(dir < 0 ? 'Already at the top.' : 'Already at the bottom.'); [order[i], order[j]] = [order[j], order[i]]; section.blocks = order; scrollToSel = true; changed(); return; }
-    if (isGrid(section)) { const t = { ...b, y: b.y + dir }; if (t.y < 0 || section.blocks.some((o) => o !== b && overlaps(t, o))) return toast('No room there. Neighbours stay put.', true); b.y = t.y; changed(); return; }
-    const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); scrollToSel = true; changed();
+    // Move up/down always gives feedback: it moves the block (re-selected + scrolled into view) or says why not.
+    const done = (msg) => { selected = b.id; scrollToSel = true; changed(); toast(msg); requestAnimationFrame(() => requestAnimationFrame(revealSelected)); };
+    const edge = () => toast(dir < 0 ? 'Already at the top.' : 'Already at the bottom.');
+    if (section.nested) { const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return edge(); [order[i], order[j]] = [order[j], order[i]]; section.blocks = order; return done(dir < 0 ? 'Moved up' : 'Moved down'); }
+    if (isGrid(section)) {
+      // Grid sections: swap places with the previous/next block in reading order (rows, then columns).
+      const order = [...section.blocks].sort((p, q) => p.y - q.y || p.x - q.x); const i = order.indexOf(b);
+      for (let j = i + dir; j >= 0 && j < order.length; j += dir) {
+        const n = order[j]; const tb = { ...b, x: n.x, y: n.y }; const tn = { ...n, x: b.x, y: b.y };
+        if (tb.x + tb.w > 12) tb.x = 12 - tb.w; if (tn.x + tn.w > 12) tn.x = 12 - tn.w;
+        const others = section.blocks.filter((o) => o !== b && o !== n);
+        if (!overlaps(tb, tn) && !others.some((o) => overlaps(tb, o) || overlaps(tn, o))) { [b.x, b.y, n.x, n.y] = [tb.x, tb.y, tn.x, tn.y]; return done(dir < 0 ? 'Moved up' : 'Moved down'); }
+      }
+      if (i + dir < 0 || i + dir >= order.length) return edge();
+      return toast('No room to swap there. Try dragging ⠿ Move instead.', true);
+    }
+    const order = sorted(section); const i = order.indexOf(b); const j = i + dir; if (j < 0 || j >= order.length) return edge();
+    [order[i], order[j]] = [order[j], order[i]]; renumberFlow(section, order); done(dir < 0 ? 'Moved up' : 'Moved down');
   }
   function del(section, b) {
     section.blocks = section.blocks.filter((x) => x !== b);
@@ -1031,7 +1141,7 @@
     if (!$('[data-history-panel]').hidden) renderHistory();
     firstRender = firstRender || !canvasDoc; await renderCanvas(); makeEditable();
   }
-  window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, get sheet() { return sheet; }, get dirty() { return isDirty(); }, select: (id) => { selected = id; afterSelect(); } };
+  window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, get sheet() { return sheet; }, get pick() { return pick && { id: pick.id, k: pick.k }; }, get dirty() { return isDirty(); }, select: (id) => { selected = id; afterSelect(); } };
   load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });
 
   const CANVAS_CSS = `
@@ -1045,6 +1155,9 @@
 .sc-sel.is-dragging{opacity:.45}
 .sc-name{position:absolute;left:-2px;top:-24px;display:flex;gap:4px;font:700 12px/1 "Work Sans",system-ui,sans-serif;white-space:nowrap}
 .sc-name>span{background:#2f7de1;color:#fff;padding:5px 7px;border-radius:6px 6px 0 0}
+.sc-lifted{opacity:.5!important;box-shadow:0 18px 40px rgba(10,30,70,.38)!important;outline:3px dashed #2f7de1!important;outline-offset:2px;position:relative;z-index:50;transition:none}
+body.sc-picked{touch-action:none;-webkit-user-select:none;user-select:none}
+#sc-dropline{position:absolute;height:4px;background:#c8102e;border-radius:2px;z-index:99999;pointer-events:none;box-shadow:0 0 0 2px #fff}
 .sc-move{pointer-events:auto;cursor:grab;background:#0b2a5b!important;touch-action:none}
 .sc-resize{touch-action:none}
 body.sc-touch .sc-name{top:-34px;font-size:14px}

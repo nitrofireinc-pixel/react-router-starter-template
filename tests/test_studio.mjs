@@ -190,3 +190,37 @@ test('studio mobile: Add sheet (only) closes after adding and reveals the new bl
   assert.match(fn, /toast\(`\$\{name\} added`\);\n\s*\/\/ Add sheet only[^\n]*\n\s*closeSheet\(\); requestAnimationFrame/);
   assert.doesNotMatch(fn, /openSheet\('edit'\)/);
 });
+
+test('studio mobile: compact toolbar (small font, 40px icon squares, flexible page select, short Publish)', () => {
+  const css = readFileSync(new URL('../admin-studio.css', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const m = css.slice(css.indexOf('Compact mobile toolbar'));
+  assert.match(m, /\.st-ib,\.st-danger,\.st-more>\.st-btn\{height:44px;width:40px/);
+  assert.match(m, /\.st-page-pick\{flex:1 1 auto;min-width:0/);
+  assert.match(m, /\.st-publish\[data-state="dirty"\]::before\{content:"Publish"/);
+  assert.match(js, /pub\.dataset\.state = dirty \? 'dirty' : 'clean'/);
+});
+
+test('studio: Move up/down always gives feedback and re-selects + reveals the moved block', () => {
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const n = js.slice(js.indexOf('function nudge('), js.indexOf('function del('));
+  assert.match(n, /Already at the top\./); assert.match(n, /Already at the bottom\./);
+  assert.match(n, /selected = b\.id; scrollToSel = true; changed\(\); toast\(msg\); requestAnimationFrame/);
+  assert.doesNotMatch(n, /j >= order\.length\) return;/);
+  assert.match(n, /swap places with the previous\/next block in reading order/);
+});
+
+test('studio mobile: long-press / Move tap picks a block up; vertical touch drag with drop line, cancel and edge auto-scroll', () => {
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  assert.match(js, /lp = setTimeout\(\(\) => \{ lp = null; startPick\(b\.dataset\.scBlock\)/);
+  assert.match(js, /\}, 450\);/);
+  assert.match(js, /navigator\.vibrate\?\.\(15\)/);
+  assert.match(js, /isMobile\(\) && h\.dataset\.scHandle === 'move'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); startPick\(selected\)/);
+  assert.match(js, /addEventListener\('touchmove', \(e\) => \{[\s\S]*?if \(pick && dragging\) \{ e\.preventDefault\(\)/);
+  assert.match(js, /\{ passive: false \}/);
+  assert.match(js, /\.sc-lifted\{opacity:\.5!important/);
+  assert.match(js, /body\.sc-picked\{touch-action:none/);
+  assert.match(js, /#sc-dropline\{/);
+  assert.match(js, /'data-pick-cancel': '', text: 'Cancel'/);
+  assert.match(js, /pushed down so nothing overlaps/);
+});

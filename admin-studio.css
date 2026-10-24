@@ -153,6 +153,23 @@ body[data-sheet="add"] .st-left,body[data-sheet="edit"] .st-right,body[data-shee
 .st-bottom button span{font-size:20px;line-height:1}
 .st-bottom button[aria-pressed="true"]{background:#eef3fb;color:var(--st-red)}
 .st-toast{bottom:calc(72px + env(safe-area-inset-bottom))}
+/* Compact mobile toolbar (≤900px): smaller type, 40px square icon buttons, flexible page select, short Publish */
+.st-pill{font-size:10.5px;padding:3px 8px;max-width:58vw}
+.st-pill::before{content:""}
+.st-toolbar{min-height:52px;padding-top:4px;padding-bottom:4px;gap:4px;font-size:13px}
+.st-tb-left{flex:1 1 auto;min-width:0}
+.st-tb-right{flex:none;gap:3px}
+.st-page-pick{flex:1 1 auto;min-width:0;max-width:none;height:44px;padding:0 4px;font-size:13.5px}
+.st-page-pick select{font-size:13.5px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;padding-right:2px}
+.st-ib,.st-danger,.st-more>.st-btn{height:44px;width:40px;min-width:40px;padding:0;font-size:16px}
+.st-more>.st-btn{font-size:0}
+.st-more>.st-btn::before{font-size:20px}
+.st-publish{height:44px;min-width:0;padding:0 10px;font-size:13px}
+.st-publish[data-state]{font-size:0}
+.st-publish[data-state="dirty"]::before{content:"Publish";font-size:13px}
+.st-publish[data-state="clean"]{width:40px;padding:0}
+.st-publish[data-state="clean"]::before{content:"✓";font-size:18px}
+@media (min-width:600px){.st-ib,.st-danger{width:auto;padding:0 10px;font-size:13px}.st-pill{max-width:none}.st-publish[data-state="clean"]{width:auto;padding:0 12px}.st-publish[data-state="clean"]::before{content:"✓ Published";font-size:13px}}
 }
 
 /* Desktop side panels: collapsible (load collapsed; only the toolbar toggles open/close them) */
@@ -174,3 +191,7 @@ body.st-rc .st-rail-title{display:flex;flex-direction:column;align-items:center;
 body.st-rc .st-rail-txt{writing-mode:vertical-rl}
 }
 @media (max-width:900px){.st-ptoggle{display:none}}
+
+.st-pickbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(110px + env(safe-area-inset-top));z-index:60;display:flex;align-items:center;gap:10px;background:#0b2a5b;color:#fff;border-radius:999px;padding:4px 4px 4px 14px;font-size:14px;font-weight:700;box-shadow:0 8px 24px rgba(10,30,70,.3)}
+.st-pickbar[hidden]{display:none}
+.st-pickbar button{min-height:40px;border:0;border-radius:999px;background:#fff;color:#c8102e;font-weight:800;padding:0 14px}
