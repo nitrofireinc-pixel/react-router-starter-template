@@ -699,9 +699,22 @@ export function stripHomeHeroLogoLockup(html) {
   return String(html || '').replace(/<div\b[^>]*\blogo-lockup\b[^>]*>[\s\S]*?<\/div>\s*/gi, '');
 }
 
-export function decorateHomeRedesign(html, data = {}) {
-  let next = stripHomeHeroLogoLockup(html);
-  if (!next.includes(HOME_REDESIGN_MARKER) && !next.includes('data-home-slot')) return next;
+/** Item limit a Studio live block set on a slot (data-limit), or null. */
+function slotLimit(html, name) {
+  const open = new RegExp(`<[a-z0-9]+\\b[^>]*\\bdata-home-slot="${name}"[^>]*>`, 'i').exec(String(html || ''));
+  const m = open && open[0].match(/\sdata-limit="(\d+)"/);
+  return m ? Number(m[1]) : null;
+}
+const limitList = (list, limit) => (limit == null ? list : list.slice(0, limit));
+
+/**
+ * Fill every data-home-slot with live data (Calendar fundraisers and events,
+ * Become a Sponsor tiers, Booster Members, Sponsors). Used by Home and by any
+ * Studio page that embeds a live data block.
+ */
+export function fillLiveSlots(html, data = {}) {
+  let next = String(html || '');
+  if (!next.includes('data-home-slot')) return next;
   const schedule = selectHomeSchedule(data.events || []);
   const deal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
   const flyer = firstFundraisingImage(data.fundraisingHtml) || '/assets/home/mattress-flyer.jpg';
@@ -709,10 +722,10 @@ export function decorateHomeRedesign(html, data = {}) {
     next = replaceSlot(next, 'next-fund', renderNextFundraiserCard(schedule.nextFundraiser, { dealHtml: deal }));
     next = replaceSlot(next, 'featured-fund', renderFeaturedFundraiser(schedule.nextFundraiser, { flyer, dealHtml: deal }));
   }
-  const others = schedule.fundraisers.slice(1).map(renderOtherFundraiserCard).join('');
+  const others = limitList(schedule.fundraisers.slice(1), slotLimit(next, 'other-funds')).map(renderOtherFundraiserCard).join('');
   if (others) next = replaceSlot(next, 'other-funds', others);
   if (schedule.display.length) {
-    next = replaceSlot(next, 'events', schedule.display.map(renderHomeEventArticle).join(''));
+    next = replaceSlot(next, 'events', limitList(schedule.display, slotLimit(next, 'events')).map(renderHomeEventArticle).join(''));
   }
   const tiers = renderHomeSponsorTiers(data.tiers || {});
   if (tiers) next = replaceSlot(next, 'sponsor-tiers', tiers);
@@ -722,9 +735,17 @@ export function decorateHomeRedesign(html, data = {}) {
   if (officers) next = replaceSlot(next, 'officers', officers);
   const sponsorList = Array.isArray(data.sponsors) ? data.sponsors : [];
   if (sponsorList.some((sponsor) => String(sponsor?.logo_url || '').trim())) {
-    const thanks = renderHomeSponsorThanks(sponsorList);
+    const thanksLimit = slotLimit(next, 'sponsor-thanks');
+    const thanks = renderHomeSponsorThanks(thanksLimit == null ? sponsorList : limitList(sponsorList.filter((sponsor) => String(sponsor?.logo_url || '').trim()), thanksLimit));
     if (thanks) next = replaceSlot(next, 'sponsor-thanks', thanks);
   }
+  return next;
+}
+
+export function decorateHomeRedesign(html, data = {}) {
+  let next = stripHomeHeroLogoLockup(html);
+  if (!next.includes(HOME_REDESIGN_MARKER) && !next.includes('data-home-slot')) return next;
+  next = fillLiveSlots(next, data);
   const instagram = String(data.instagramHref || '').trim();
   if (instagram) {
     next = next.replace(/href="#instagram"/g, `href="${escapeAttr(instagram)}"`);

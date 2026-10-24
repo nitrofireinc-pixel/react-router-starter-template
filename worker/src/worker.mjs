@@ -122,6 +122,7 @@ import {
   comingSoonPageHtml,
   decorateFundraisingPage,
   decorateHomeRedesign,
+  fillLiveSlots,
   injectComingSoonLogos,
   plainHeroSubtitle,
   renderHomeStickySupport,
@@ -235,7 +236,7 @@ import {
 } from './visual-page-editor.mjs';
 import { MINUTES_UPLOAD_MAX_BYTES, MINUTES_UPLOAD_MAX_LABEL, sniffMinutesFile, getMinutesFile, listMinutesFileIds, saveMinutesFile, deleteMinutesFile } from './minutes-files.mjs';
 import { checkPasswordRule, getAccountLock, lockStatus, recordAccountFailure, clearAccountFailures, unlockAccount, listAccountLocks } from './account-lock.mjs';
-import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema, serveStudioUpload } from './studio.mjs';
+import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema, serveStudioUpload, replaceElementInner } from './studio.mjs';
 import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
@@ -568,7 +569,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261024c';
+export const ASSET_VERSION = 'cms-p2-20261024d';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7638,6 +7639,11 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
   // Site Studio v2: the HTML saved at publish time replaces body_html and still
   // runs through the same slug decorators, so v2 output matches legacy.
   if (page.studio_html) page = { ...page, body_html: page.studio_html };
+  // Live data blocks placed on any non-Home Studio page fill from the same sources as Home.
+  const isHomeSlug = Boolean(page.is_home) || page.slug === 'home';
+  if (page.studio_html && !isHomeSlug && extras.home && page.body_html.includes('data-home-slot')) {
+    page = { ...page, body_html: fillLiveSlots(page.body_html, extras.home) };
+  }
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -11826,6 +11832,34 @@ async function routeApi(request, env, url, ctx = null) {
         logo: (await getSiteContentValue(env, 'logo_url').catch(() => '')) || '/assets/efhs-logo.png',
         mark: PUBLIC_BRAND_MARK,
       }),
+      decorateLive: async (html, slug) => {
+        if (!/data-home-slot|data-photo-gallery|data-site-field|#instagram/.test(html)) return html;
+        const today = new Date().toISOString().slice(0, 10);
+        const reads = await loadPublicCmsReads(env, { path: '/', today, isHome: true, needsEvents: true, needsBoosters: true, needsPhotos: true });
+        const homeSources = reads.homeSources || {};
+        const instagramHref = normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '';
+        let out = fillLiveSlots(html, {
+          events: reads.homeEvents,
+          members: reads.boosterMembers,
+          fundraisingHtml: homeSources.fundraising?.body_html || '',
+          tiers: extractSponsorTierFields(homeSources.sponsor?.body_html || ''),
+          sponsors: (reads.sponsors || []).filter(sponsorShowsOnPage),
+        });
+        out = replaceElementInner(out, (tag) => /\sdata-site-field="hero_(title|subtitle)"/.test(tag), (tag) => {
+          const key = tag.match(/data-site-field="([^"]+)"/)[1];
+          const value = String(reads.site?.[key] || '');
+          return value ? (key === 'hero_title' ? sanitizeInlineRichHtml(value) || escapeHtml(value) : escapeHtml(htmlToPlainText(value))) : null;
+        });
+        const photos = reads.photos || [];
+        out = replaceElementInner(out, (tag) => /\sdata-photo-gallery/.test(tag), (tag) => {
+          const limit = Number(tag.match(/data-limit="(\d+)"/)?.[1] || 0) || photos.length;
+          const list = photos.slice(0, limit);
+          if (!list.length) return null;
+          return list.map((photo) => `<figure class="gallery-item"><img src="${escapeHtml(photo.thumb_url || photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy"></figure>`).join('');
+        });
+        if (instagramHref) out = out.replace(/href="#instagram"/g, `href="${escapeHtml(instagramHref)}"`);
+        return out;
+      },
       legacyBodyHtml: async (slug) => {
         const row = await env.DB.prepare('SELECT body_html FROM cms_pages WHERE slug = ?').bind(slug).first();
         return String(row?.body_html || '');
@@ -14710,13 +14744,14 @@ async function serveStaticOrCms(request, env, url, ctx) {
       const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
       const isFundraising = pageIsLive && page.slug === 'fundraising';
+      const usesLiveSlots = !isHome && Boolean(livePage.studio_html) && livePage.studio_html.includes('data-home-slot');
       const reads = await loadPublicCmsReads(env, {
         path,
         today,
-        isHome,
-        needsEvents: isHome,
+        isHome: isHome || usesLiveSlots,
+        needsEvents: isHome || usesLiveSlots,
         needsFundraiserCards: isFundraising,
-        needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome),
+        needsBoosters: pageIsLive && (page.slug === 'boosters' || isHome || usesLiveSlots),
         needsStaff: pageIsLive && page.slug === 'directors',
         needsPhotos: pageIsLive && (isHome || page.slug === 'gallery'),
         ctx,
@@ -14729,7 +14764,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
       const homeSources = reads.homeSources || {};
       const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
       const sponsors = pageIsLive && page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
-      const home = isHome ? {
+      const home = isHome || usesLiveSlots ? {
         events: reads.homeEvents,
         members: boosterMembers,
         fundraisingHtml: homeSources.fundraising?.body_html || '',

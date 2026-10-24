@@ -9,7 +9,9 @@
   const COLS = 12; const GAP = 16; const ROW = 40; const DESK = 1180; const PHONE = 390;
   const uid = (p = 'b') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const rich = (t) => ({ paragraphs: [[{ text: t }]] });
-  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML' };
+  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML', el: 'Element', group: 'Container', live: 'Live data' };
+  const TREE = new Set(['el', 'group', 'live']);
+  const liveMake = (source, limit) => () => ({ type: 'live', props: { source, html: (state?.live_templates || {})[source] || '', ...(limit ? { limit } : {}) } });
   // [key, icon, label, make(), {w,h}, flags]
   const PALETTE = [
     ['Big blocks', [
@@ -38,8 +40,9 @@
       ['html', '</>', 'HTML', () => ({ type: 'html', props: { html: '<p>HTML</p>' } }), { w: 12, h: 1 }, 'admin'],
     ]],
     ['Live data', [
-      ['events', '📅', 'Events', null, null, 'soon'],
-      ['sponsors', '🤝', 'Sponsors', null, null, 'soon'],
+      ['events', '📅', 'Events', liveMake('events', 4), { w: 12, h: 4 }],
+      ['sponsors', '🤝', 'Sponsors', liveMake('sponsor-thanks'), { w: 12, h: 3 }],
+      ['nextfund', '💰', 'Next fundraiser', liveMake('next-fund'), { w: 6, h: 4 }],
     ]],
   ];
 
@@ -73,11 +76,75 @@
   const textOf = (r) => (r?.paragraphs || []).map((p) => p.map((x) => x.text).join('')).join('\n\n');
   const richFrom = (t) => ({ paragraphs: String(t).split(/\n\s*\n/).filter((x) => x.trim()).map((x) => [{ text: x.trim() }]) });
   const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  const findBlock = (id) => { for (const s of layout.sections) for (const b of s.blocks) if (b.id === id) return { section: s, block: b }; return null; };
+  // Nested blocks (inside an original-markup container) live in a pseudo
+  // section whose blocks are the container's children; moves reorder them.
+  let pseudo = new WeakMap();
+  const groupSection = (top, owner) => {
+    let p = pseudo.get(owner);
+    if (!p) {
+      p = { id: owner.id, nested: true, flow: true, _owner: owner, _top: top, get blocks() { return owner.props.children; }, set blocks(v) { owner.props.children = v; } };
+      pseudo.set(owner, p);
+    }
+    return p;
+  };
+  const findBlock = (id) => {
+    const walk = (list, section, top) => {
+      for (const b of list) {
+        if (b.id === id) return { section, block: b, top };
+        if (b.type === 'group') { const hit = walk(b.props.children || [], groupSection(top, b), top); if (hit) return hit; }
+      }
+      return null;
+    };
+    for (const s of layout.sections) { const hit = walk(s.blocks, s, s); if (hit) return hit; }
+    return null;
+  };
+  // ---------- original-markup elements: text segments ----------
+  const TOKEN_RE = /<!--[\s\S]*?-->|<\/?[a-zA-Z][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>/g;
+  const tokens = (html) => { const out = []; let last = 0; let m; const s2 = String(html || ''); TOKEN_RE.lastIndex = 0; while ((m = TOKEN_RE.exec(s2))) { if (m.index > last) out.push({ text: s2.slice(last, m.index) }); out.push({ tag: m[0] }); last = TOKEN_RE.lastIndex; } if (last < s2.length) out.push({ text: s2.slice(last) }); return out; };
+  const decoder = document.createElement('textarea');
+  const decode = (t) => { decoder.innerHTML = t; return decoder.value; };
+  const encode = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\u00a0/g, '&nbsp;');
+  const textSegs = (html) => tokens(html).map((t, i) => ({ ...t, i })).filter((t) => t.text != null && decode(t.text).length);
+  const wordsOf = (html) => textSegs(html).map((t) => decode(t.text).replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+  /** Replace changed text segments only, so untouched bytes stay identical. */
+  function withTexts(html, texts) {
+    const toks = tokens(html); const segs = textSegs(html);
+    if (segs.length !== texts.length) return null;
+    segs.forEach((seg, k) => { if (decode(seg.text) !== texts[k]) toks[seg.i].text = encode(texts[k]); });
+    return toks.map((t) => t.tag ?? t.text).join('');
+  }
+  const tagAttr = (tagStr, name) => { const m = tagStr.match(new RegExp(`\\s${name}="([^"]*)"`)); return m ? decode(m[1]) : null; };
+  function withAttr(html, tagIndex, name, value) {
+    const toks = tokens(html); let n = -1;
+    for (const t of toks) {
+      if (t.tag == null || t.tag.startsWith('</') || t.tag.startsWith('<!')) continue;
+      n += 1; if (n !== tagIndex) continue;
+      const v = String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+      t.tag = new RegExp(`\\s${name}="`).test(t.tag) ? t.tag.replace(new RegExp(`\\s${name}="[^"]*"`), ` ${name}="${v}"`) : t.tag.replace(/\s*(\/?>)$/, ` ${name}="${v}"$1`);
+    }
+    return toks.map((t) => t.tag ?? t.text).join('');
+  }
+  const openTags = (html) => tokens(html).filter((t) => t.tag && !t.tag.startsWith('</') && !t.tag.startsWith('<!')).map((t) => t.tag);
+  const rootTag = (html) => (String(html || '').match(/^<([a-zA-Z0-9-]+)/)?.[1] || '').toLowerCase();
+  const liveInfo = (b) => (state?.live_sources || {})[b.props?.source] || { label: b.props?.source || 'another page', admin: '/admin.html' };
+  const typeName = (b) => {
+    if (b.type === 'live') return `Live data · ${liveInfo(b).label}`;
+    if (b.type === 'el') {
+      const t = rootTag(b.props.html); const first = openTags(b.props.html)[0] || '';
+      if (/^h[1-6]$/.test(t)) return 'Heading';
+      if (t === 'a' || t === 'button') return /\bbtn\b/.test(first) ? 'Button' : 'Link';
+      if (t === 'p') return 'Text';
+      if (t === 'li') return 'List item';
+      if (t === 'img' || t === 'picture') return 'Image';
+      if (t === 'svg') return 'Icon';
+      return 'Element';
+    }
+    return TYPE_NAMES[b.type] || b.type;
+  };
   const isGrid = (s) => !s.flow && !s.raw;
   const canLayout = () => !!state?.can_layout;
   const isAdmin = () => !!state?.can_html;
-  const sorted = (s) => [...s.blocks].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const sorted = (s) => (s.nested ? [...s.blocks] : [...s.blocks].sort((a, b) => (a.y - b.y) || (a.x - b.x)));
   const labelOf = (b) => {
     const p = b.props || {};
     if (b.type === 'heading') return p.text;
@@ -85,6 +152,9 @@
     if (b.type === 'button') return p.label;
     if (b.type === 'image') return p.alt || 'Image';
     if (b.type === 'card') { const h = (p.children || []).find((k) => k.type === 'heading'); return h ? h.props.text : 'Card'; }
+    if (b.type === 'el') return wordsOf(p.html) || typeName(b);
+    if (b.type === 'live') return `Live: ${liveInfo(b).label}`;
+    if (b.type === 'group') { const first = (p.children || []).map(labelOf).find((t) => t && t !== 'Container'); return first || 'Container'; }
     if (b.type === 'html') return String(p.html || '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || 'HTML';
     return TYPE_NAMES[b.type] || b.type;
   };
@@ -116,7 +186,7 @@
   }
   function undo() { if (!undoStack.length) return; redoStack.push(lastSnap); lastSnap = undoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Undone'); }
   function redo() { if (!redoStack.length) return; undoStack.push(lastSnap); lastSnap = redoStack.pop(); layout = JSON.parse(lastSnap); coalesceUntil = 0; afterJump('Redone'); }
-  function afterJump(msg) { if (selected && !findBlock(selected)) selected = null; scheduleRender(0); renderInspector(); renderJson(); scheduleSave(); updateChrome(); toast(msg); }
+  function afterJump(msg) { pseudo = new WeakMap(); if (selected && !findBlock(selected)) selected = null; scheduleRender(0); renderInspector(); renderJson(); scheduleSave(); updateChrome(); toast(msg); }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 1200); updateChrome(); }
   async function saveDraft() {
     clearTimeout(saveTimer); saving = true; updateChrome();
@@ -208,7 +278,7 @@
   const sectionOf = (id) => layout.sections.find((s) => s.id === id);
   /** Column geometry for a section: { left, top, width, height, cols:[{l,r}], rows:[{t,b}] } in document coords. */
   function geometry(section) {
-    const els = index.sections.get(section.id) || [];
+    const els = (section.nested ? index.blocks.get(section._owner.id) : index.sections.get(section.id)) || [];
     const w = canvasDoc.defaultView;
     let box = null; let cols = null; let rows = null;
     if (isGrid(section)) {
@@ -223,7 +293,7 @@
       }
     }
     if (!box) {
-      const inner = els[0] && (els.length === 1 ? (els[0].querySelector(':scope > .wrap, :scope > .page-title, :scope > div') || els[0]) : null);
+      const inner = section.nested ? els[0] : els[0] && (els.length === 1 ? (els[0].querySelector(':scope > .wrap, :scope > .page-title, :scope > div') || els[0]) : null);
       const r = inner ? docRect([inner]) : docRect(els);
       const sr = docRect(els) || r;
       if (!r) return null;
@@ -263,9 +333,9 @@
         const sel = box(`sc-sel${drag ? ' is-dragging' : ''}`, r);
         const name = canvasDoc.createElement('div'); name.className = 'sc-name';
         if (editingLayout) { const h = canvasDoc.createElement('span'); h.className = 'sc-move'; h.dataset.scHandle = 'move'; h.title = 'Drag to move'; h.textContent = '⠿ Move'; name.append(h); }
-        const lab = canvasDoc.createElement('span'); lab.textContent = `${TYPE_NAMES[found.block.type] || found.block.type}${found.block.props?.locked ? ' 🔒' : ''}`; name.append(lab);
+        const lab = canvasDoc.createElement('span'); lab.textContent = `${found.block.type === 'live' ? '⚡ ' : ''}${typeName(found.block)}${found.block.props?.locked ? ' 🔒' : ''}`; if (found.block.type === 'live') lab.className = 'sc-live-tag'; name.append(lab);
         sel.append(name);
-        if (editingLayout && isGrid(found.section)) { const h = canvasDoc.createElement('span'); h.className = 'sc-resize'; h.dataset.scHandle = 'resize'; h.title = 'Drag to resize'; sel.append(h); }
+        if (editingLayout && (isGrid(found.section) || found.section.nested)) { const h = canvasDoc.createElement('span'); h.className = 'sc-resize'; h.dataset.scHandle = 'resize'; h.title = 'Drag to resize'; sel.append(h); }
         L.append(sel);
       }
     }
@@ -300,7 +370,8 @@
   const rectOf = (g, r) => { const c0 = g.cols[r.x]; const c1 = g.cols[Math.min(COLS - 1, r.x + r.w - 1)]; const r0 = g.rows[r.y] || { t: g.top + g.height }; const r1 = g.rows[r.y + r.h - 1] || { b: r0.t + ROW * r.h }; return { left: c0.l, top: r0.t, width: c1.r - c0.l, height: Math.max(ROW, r1.b - r0.t) }; };
   /** Compute a drop/move target. item: {block?, w, h, label} ; returns plan */
   function planAt(item, cx, cy, grab = { dx: 0, dy: 0 }) {
-    const section = sectionAt(cx, cy); if (!section) return null;
+    const own = item.block ? findBlock(item.block.id)?.section : null;
+    const section = own?.nested ? own : sectionAt(cx, cy); if (!section) return null;
     const w = canvasDoc.defaultView; const px = cx + w.scrollX; const py = cy + w.scrollY;
     const g = geometry(section); if (!g) return null;
     if (isGrid(section)) {
@@ -327,15 +398,22 @@
     // Flow section: reorder / insert by position.
     const list = sorted(section).filter((b) => b.id !== item.block?.id);
     let before = null;
-    for (const b of list) { const r = docRect(index.blocks.get(b.id) || []); if (r && py < r.top + r.height / 2) { before = b; break; } }
+    let side = false;
+    for (const b of list) {
+      const r = docRect(index.blocks.get(b.id) || []); if (!r) continue;
+      if (!section.nested) { if (py < r.top + r.height / 2) { before = b; break; } continue; }
+      if (py < r.top) { before = b; break; }
+      const narrow = r.width < g.width * 0.85;
+      if (py <= r.top + r.height && (narrow ? px < r.left + r.width / 2 : py < r.top + r.height / 2)) { before = b; side = narrow; break; }
+    }
     if (item.block && item.block && findBlock(item.block.id).section !== section) return { kind: 'none', ok: false, hint: { x: px, y: py - 14, text: '✕ move it within its own section', bad: true } };
     const ref = before ? docRect(index.blocks.get(before.id) || []) : docRect(list.length ? index.blocks.get(list[list.length - 1].id) || [] : []);
     const lineY = before ? (ref ? ref.top - 3 : g.top) : (ref ? ref.top + ref.height + 1 : g.top + 4);
-    const line = { left: g.left, top: lineY, width: g.width, height: 4 };
+    const line = side && ref ? { left: ref.left - 4, top: ref.top, width: 4, height: ref.height } : { left: g.left, top: lineY, width: g.width, height: 4 };
     const text = before ? `↕ goes above “${short(labelOf(before), 22)}”` : '↕ goes at the end of this section';
     return { kind: 'flow', section, before, ok: true, hint: { line, x: g.left + 12, y: lineY - 13, text } };
   }
-  function renumberFlow(section, order) { let y = 0; order.forEach((b) => { b.x = 0; b.w = 12; b.y = y; y += b.h || 1; }); section.blocks = order; }
+  function renumberFlow(section, order) { if (section.nested) { section.blocks = order; return; } let y = 0; order.forEach((b) => { b.x = 0; b.w = 12; b.y = y; y += b.h || 1; }); section.blocks = order; }
   function applyPlan(plan, block, isNew) {
     if (!plan || !plan.ok) return false;
     if (plan.kind === 'grid') {
@@ -344,7 +422,10 @@
     } else if (plan.kind === 'flow') {
       const order = sorted(plan.section).filter((b) => b !== block);
       const at = plan.before ? order.indexOf(plan.before) : order.length;
-      block.h = block.h || 1; order.splice(at, 0, block); renumberFlow(plan.section, order);
+      if (!plan.section.nested) block.h = block.h || 1;
+      order.splice(at, 0, block); renumberFlow(plan.section, order);
+    } else if (plan.kind === 'span') {
+      if (plan.span >= COLS) delete block.props.span; else block.props.span = plan.span;
     } else if (plan.kind === 'newsection') {
       const i = layout.sections.indexOf(plan.section);
       Object.assign(block, { x: plan.x || 0, y: 0, w: Math.min(12, block.w || 12) });
@@ -408,7 +489,14 @@
     canvasDoc.body.classList.add('sc-dragging');
     const move = (e) => {
       autoScroll(e.clientY);
-      if (resize) {
+      if (resize && section.nested) {
+        const px = e.clientX + w.scrollX; const er = docRect(index.blocks.get(block.id) || []);
+        if (!g || !er) return;
+        const span = Math.max(1, Math.min(COLS, Math.round(((px - er.left) / g.width) * COLS)));
+        drag.plan = { kind: 'span', section, span, ok: true };
+        const ghost = { left: er.left, top: er.top, width: (g.width * span) / COLS, height: er.height };
+        drag.hint = { ghost, x: ghost.left + ghost.width - 8, y: ghost.top + ghost.height + 4, text: span >= COLS ? 'full width (original size)' : `${span} of ${COLS} columns wide` };
+      } else if (resize) {
         const px = e.clientX + w.scrollX; const py = e.clientY + w.scrollY;
         const r = { x: start.x, y: start.y, w: Math.max(1, Math.min(COLS - start.x, colAt(g, px) - start.x + 1)), h: Math.max(1, rowAt(g, py) - start.y + 1) };
         const hits = section.blocks.filter((o) => o !== block && overlaps(r, o));
@@ -428,7 +516,8 @@
       canvasDoc.body.classList.remove('sc-dragging');
       const plan = drag.plan; drag = null;
       if (plan?.ok) {
-        const same = plan.kind === 'grid' && ['x', 'y', 'w', 'h'].every((k) => plan.rect[k] === start[k]);
+        const same = (plan.kind === 'grid' && ['x', 'y', 'w', 'h'].every((k) => plan.rect[k] === start[k]))
+          || (plan.kind === 'span' && (plan.span >= COLS ? block.props.span == null : block.props.span === plan.span));
         if (!same && applyPlan(plan, block, false)) { changed(); return; }
       } else if (plan) toast(resize ? 'Blocks cannot overlap. Make room first.' : 'That spot is taken. Neighbours stay put.', true);
       drawOverlay();
@@ -453,6 +542,21 @@
       }
     };
     const els = index.blocks.get(found.block.id) || [];
+    if (found.block.type === 'el') {
+      const node = els[0]; const b = found.block;
+      if (node && !/^(IMG|SVG|PICTURE|VIDEO|IFRAME|svg)$/.test(node.tagName) && textSegs(b.props.html).some((t) => decode(t.text).trim())) {
+        node.setAttribute('contenteditable', 'plaintext-only'); node.classList.add('sc-editable'); node.spellcheck = true;
+        node.oninput = () => {
+          const walker = canvasDoc.createTreeWalker(node, NodeFilter.SHOW_TEXT); const texts = [];
+          for (let t = walker.nextNode(); t; t = walker.nextNode()) if (t.data.length) texts.push(t.data);
+          const next = withTexts(b.props.html, texts);
+          if (next == null) { toast('Type inside the existing words. Use the panel on the right for bigger changes.', true); scheduleRender(0); return; }
+          b.props.html = next; changed({ canvas: false, panel: false, coalesce: true }); syncPanelText();
+        };
+        node.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); node.blur(); } if (e.key === 'Escape') node.blur(); };
+      }
+      return;
+    }
     if (found.block.type === 'card') (found.block.props.children || []).forEach((k) => collect(k, index.kids.get(k.id) || []));
     else collect(found.block, els);
     targets.forEach(([node, set]) => {
@@ -475,6 +579,10 @@
       if (!b) { if (!e.target.closest('#sc-layer')) { selected = null; afterSelect(); } return; }
       const id = b.dataset.scBlock;
       if (id !== selected) { selected = id; afterSelect(); }
+    });
+    d.addEventListener('dblclick', (e) => {
+      const b = e.target.closest('[data-sc-block]'); const f = b && findBlock(b.dataset.scBlock);
+      if (f?.block.type === 'live') toast(`Live data from ${liveInfo(f.block).label}. It updates by itself, so edit it at the source (link in the panel).`);
     });
     d.addEventListener('pointermove', (e) => {
       if (drag) return;
@@ -564,6 +672,41 @@
       if (isAdmin()) host.append(el('div', { class: depth ? '' : 'st-adv' }, field('HTML (Super Admin)', p.html, (v) => { p.html = v; p.locked = false; }, { multi: true, code: true })));
       if (!isAdmin() || mode === 'simple') host.append(el('p', { class: 'st-lock', text: p.locked ? '🔒 Original page markup. Only a Super Admin can change it (Advanced mode).' : 'Custom HTML (Super Admin only).' }));
     }
+    if (b.type === 'el') {
+      const segs = textSegs(p.html);
+      segs.forEach((seg, k) => {
+        if (!decode(seg.text).trim()) return;
+        host.append(field(segs.length > 1 ? `Words (${k + 1})` : 'Words', decode(seg.text), (v) => {
+          const texts = textSegs(p.html).map((t) => decode(t.text)); texts[k] = v; const next = withTexts(p.html, texts); if (next != null) p.html = next; scheduleRender();
+        }, { attrs: { 'data-sync': `${b.id}:${k}` } }));
+      });
+      openTags(p.html).forEach((t, ti) => {
+        const href = tagAttr(t, 'href'); const src = tagAttr(t, 'src'); const alt = tagAttr(t, 'alt');
+        if (href != null) { const i = el('input', { value: href, 'aria-label': 'Link', 'data-link-field': b.id, style: 'width:150px;border:0;text-align:right' }); i.addEventListener('change', () => { p.html = withAttr(p.html, ti, 'href', i.value.trim()); changed({ panel: false }); }); host.append(kv('Link', i)); }
+        if (alt != null && /^<img/i.test(t)) host.append(field('Describe the picture (alt text)', alt, (v) => { p.html = withAttr(p.html, ti, 'alt', v); scheduleRender(); }));
+        if (src != null && /^<img/i.test(t) && isAdmin()) host.append(el('div', { class: 'st-adv' }, field('Image URL', src, (v) => { p.html = withAttr(p.html, ti, 'src', v); scheduleRender(); })));
+      });
+      if (!segs.some((t) => decode(t.text).trim()) && !openTags(p.html).some((t) => /\s(href|alt)="/.test(t))) host.append(el('p', { class: 'st-note', text: 'Decoration from the original design. Move or resize it, or hide it with Delete.' }));
+      if (isAdmin()) host.append(el('div', { class: 'st-adv' }, field('HTML (Super Admin)', p.html, (v) => { p.html = v; }, { multi: true, code: true })));
+    }
+    if (b.type === 'group') {
+      host.append(el('p', { class: 'st-note', text: `A container from the original design with ${(p.children || []).length} parts. Click a part inside it to edit, move or resize it.` }));
+      if (isAdmin()) host.append(el('div', { class: 'st-adv' }, field('Opening tag (Super Admin)', p.open, (v) => { p.open = v; }, { code: true })));
+    }
+    if (b.type === 'live') {
+      const info = liveInfo(b);
+      host.append(el('p', { class: 'st-live', 'data-live-badge': p.source }, '⚡ Live data from ', el('b', { text: info.label })));
+      host.append(el('p', { class: 'st-note', text: 'This part fills in by itself from its source and updates automatically, so its words cannot be typed over here. You can move it, resize it, hide it or change its settings.' }));
+      host.append(el('p', {}, el('a', { class: 'st-linkbtn', href: info.admin, target: '_blank', rel: 'noopener', 'data-live-source-link': '', text: `Edit ${info.label} ↗` })));
+      const lay = canLayout();
+      const show = el('input', { type: 'checkbox', checked: !p.hidden, disabled: !lay, 'aria-label': 'Show on page' });
+      show.addEventListener('click', () => { if (show.checked) delete p.hidden; else p.hidden = true; changed(); });
+      host.append(kv('Show on page', show));
+      if (info.limit) {
+        const cur = p.limit || 0;
+        host.append(kv('Number of items', select([['0', 'Default'], ...Array.from({ length: 12 }, (_, i) => [String(i + 1), String(i + 1)])], cur, (v) => { const n = Number(v); if (n) p.limit = n; else delete p.limit; changed(); }, !lay)));
+      }
+    }
     if (b.type === 'logos') host.append(el('p', { class: 'st-note', text: 'Shows the school logo and the Blue Regiment mark automatically.' }));
     if (b.type === 'card') {
       (p.children || []).forEach((kid, i) => {
@@ -585,6 +728,7 @@
   function syncPanelText() {
     const found = selected && findBlock(selected); if (!found) return;
     const all = found.block.type === 'card' ? found.block.props.children : [found.block];
+    if (found.block.type === 'el') { textSegs(found.block.props.html).forEach((seg, k) => { const i = $(`[data-sync="${CSS.escape(found.block.id)}:${k}"]`); if (i && document.activeElement !== i) i.value = decode(seg.text); }); return; }
     all.forEach((b) => { const i = $(`[data-sync="${CSS.escape(b.id)}"]`); if (!i || document.activeElement === i) return; i.value = b.type === 'text' ? textOf(b.props.rich) : b.type === 'button' ? b.props.label : b.props.text; });
   }
   function renderInspector() {
@@ -600,7 +744,7 @@
     }
     const { section, block: b } = found; const grid = isGrid(section); const lay = canLayout();
     const name = TYPE_NAMES[b.type] || b.type;
-    host.append(el('h2', { text: `${b.type === 'card' ? 'Card' : name} settings` }), el('p', { class: 'st-selname', text: `“${short(labelOf(b), 26)}” · selected` }));
+    host.append(el('h2', { text: `${b.type === 'card' ? 'Card' : TREE.has(b.type) ? typeName(b).replace(/ · .*/, '') : name} settings` }), el('p', { class: 'st-selname', text: `“${short(labelOf(b), 26)}” · selected` }));
     // SIZE & PLACE
     host.append(el('div', { class: 'st-group', text: 'Size & place' }));
     const setRect = (r) => { const t = { ...b, ...r }; if (t.x < 0 || t.w < 1 || t.x + t.w > COLS || t.h < 1) return toast('That does not fit on the 12-column grid.', true); const hit = section.blocks.find((o) => o !== b && overlaps(t, o)); if (hit) { toast(`No overlap: “${short(labelOf(hit), 20)}” stays put.`, true); renderInspector(); return; } Object.assign(b, r); changed(); };
@@ -609,6 +753,9 @@
       const cols = el('span', { class: 'st-sw' }, select(opts, b.x + 1, (v) => setRect({ x: Number(v) - 1, w: Math.max(1, b.x + b.w - (Number(v) - 1)) }), !lay), el('b', { text: '–' }), select(opts, b.x + b.w, (v) => setRect({ w: Number(v) - b.x }), !lay));
       host.append(kv('Columns', cols));
       host.append(kv('Rows', select(Array.from({ length: 16 }, (_, i) => [String(i + 1), `${i + 1} tall`]), b.h, (v) => setRect({ h: Number(v) }), !lay)));
+    } else if (section.nested) {
+      host.append(kv('Width', select([['12', 'Original (full)'], ...Array.from({ length: 11 }, (_, i) => [String(11 - i), `${11 - i} of 12 columns`])], b.props?.span || 12, (v) => { const n = Number(v); if (n >= 12) delete b.props.span; else b.props.span = n; changed(); }, !lay)));
+      host.append(el('p', { class: 'st-note' }, 'Inside an original-design container: drag ⠿ to reorder it, the blue corner to resize. ', el('button', { type: 'button', class: 'st-linkbtn', text: 'Select the container', 'data-select-parent': '', onclick: () => { selected = section._owner.id; afterSelect(); } })));
     } else {
       host.append(kv('Columns', el('b', { text: '1 – 12' })), kv('Rows', el('b', { text: 'auto' })));
     }
@@ -632,27 +779,28 @@
     if (!grid) host.append(el('p', { class: 'st-note', text: 'Look settings work in free grid sections.' }));
     // CONTENT
     host.append(el('div', { class: 'st-group', text: 'Content' }));
-    host.append(kv('Linked data', el('b', { text: 'None' })));
+    host.append(kv('Linked data', b.type === 'live' ? el('a', { href: liveInfo(b).admin, target: '_blank', rel: 'noopener', text: liveInfo(b).label }) : el('b', { text: 'None (typed here)' })));
     contentFields(host, b);
     // WHO CAN EDIT
     host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
     // ADVANCED
     if (lay) {
       const adv = el('div', { class: 'st-adv' }, el('div', { class: 'st-group', text: 'Advanced' }));
-      ['x', 'y', 'w', 'h'].forEach((k) => { const i = el('input', { type: 'number', value: b[k], min: 0, max: k === 'h' ? 99 : 12 }); i.addEventListener('change', () => setRect({ [k]: Number.parseInt(i.value, 10) })); adv.append(kv(k.toUpperCase(), i)); });
+      if (!section.nested) ['x', 'y', 'w', 'h'].forEach((k) => { const i = el('input', { type: 'number', value: b[k], min: 0, max: k === 'h' ? 99 : 12 }); i.addEventListener('change', () => setRect({ [k]: Number.parseInt(i.value, 10) })); adv.append(kv(k.toUpperCase(), i)); });
       adv.append(kv('Section', el('b', { text: `${section.id} · ${section.raw ? 'original' : grid ? 'grid' : 'flow'}` })));
       host.append(adv);
-      const locked = b.type === 'html' && b.props?.locked && !isAdmin();
+      const locked = (b.type === 'html' && b.props?.locked && !isAdmin()) || (TREE.has(b.type) && !isAdmin());
       host.append(el('div', { class: 'st-actions' },
         el('button', { type: 'button', text: 'Duplicate', disabled: locked, onclick: () => duplicate(section, b) }),
         el('button', { type: 'button', text: '↑', title: 'Move up', onclick: () => nudge(section, b, -1) }),
         el('button', { type: 'button', text: '↓', title: 'Move down', onclick: () => nudge(section, b, 1) }),
-        el('button', { type: 'button', class: 'danger', text: 'Delete', disabled: locked, onclick: () => del(section, b) })));
+        el('button', { type: 'button', class: 'danger', text: 'Delete', disabled: locked && !TREE.has(b.type), onclick: () => del(section, b) })));
     }
   }
   function duplicate(section, b) {
     const copy = JSON.parse(JSON.stringify(b)); copy.id = uid();
-    (copy.props?.children || []).forEach((k) => { k.id = uid('c'); });
+    const reid = (x) => (x.props?.children || []).forEach((k) => { k.id = uid('c'); reid(k); }); reid(copy);
+    if (section.nested) { const order = sorted(section); order.splice(order.indexOf(b) + 1, 0, copy); section.blocks = order; selected = copy.id; changed(); return; }
     if (isGrid(section)) { copy.y = Math.max(0, ...section.blocks.map((o) => o.y + o.h)); section.blocks.push(copy); }
     else { const order = sorted(section); order.splice(order.indexOf(b) + 1, 0, copy); renumberFlow(section, order); }
     selected = copy.id; changed();
@@ -695,7 +843,7 @@
     const t = e.target; const typing = t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && canLayout()) { const f = findBlock(selected); if (f && !(f.block.type === 'html' && f.block.props?.locked && !isAdmin())) { e.preventDefault(); del(f.section, f.block); } }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selected && canLayout()) { const f = findBlock(selected); if (f && !(f.block.type === 'html' && f.block.props?.locked && !isAdmin()) && !(f.block.type === 'group' && !isAdmin())) { e.preventDefault(); del(f.section, f.block); } }
     if (e.key === 'Escape' && !typing) { selected = null; afterSelect(); }
   }
   document.addEventListener('keydown', keys);
@@ -760,7 +908,7 @@
     } else {
       layout = state.draft?.layout || state.live_layout || layout;
     }
-    lastSnap = snapshot();
+    lastSnap = snapshot(); pseudo = new WeakMap();
     $('[data-admin-only]').hidden = !state.can_html;
     if (state.can_flag) $('[data-editor]').value = state.page.editor || 'legacy';
     document.title = `Site Studio: ${state.page.title || slug}`;
@@ -769,7 +917,7 @@
     if (!$('[data-history-panel]').hidden) renderHistory();
     firstRender = firstRender || !canvasDoc; await renderCanvas(); makeEditable();
   }
-  window.__studio = { get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, select: (id) => { selected = id; afterSelect(); } };
+  window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, select: (id) => { selected = id; afterSelect(); } };
   load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });
 
   const CANVAS_CSS = `
@@ -794,6 +942,8 @@
 .sc-hint.is-bad{background:#c8102e;color:#fff}
 .sc-hint2{transform:translate(0,-50%);background:#d6e7ff;color:#0b2a5b}
 [data-sc-block]{cursor:pointer}
+.sc-name>span.sc-live-tag{background:#0f7a43}
+.studio-live-hidden{border:2px dashed #0f7a43;border-radius:10px;padding:12px;color:#0f7a43;font:700 14px/1.3 "Work Sans",system-ui,sans-serif;text-align:center;background:rgba(15,122,67,.06)}
 .sc-editable{outline:1.5px dashed rgba(47,125,225,.55);outline-offset:3px;cursor:text!important;border-radius:3px}
 .sc-editable:focus{outline:2px solid #ffd21f;background:rgba(255,210,31,.12)}
 body.sc-dragging,body.sc-dragging *{cursor:grabbing!important;user-select:none}

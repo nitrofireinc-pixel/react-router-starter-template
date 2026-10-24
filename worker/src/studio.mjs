@@ -13,7 +13,7 @@ export const GRID_COLUMNS = 12;
 export const GRID_ROW_UNIT = 40;
 export const GRID_GAP = 16;
 export const MAX_LAYOUT_BYTES = 200_000;
-export const BLOCK_TYPES = ['heading', 'text', 'button', 'image', 'logos', 'spacer', 'divider', 'html', 'card'];
+export const BLOCK_TYPES = ['heading', 'text', 'button', 'image', 'logos', 'spacer', 'divider', 'html', 'card', 'el', 'group', 'live'];
 export const CARD_CHILD_TYPES = ['heading', 'text', 'button', 'image', 'divider', 'html'];
 export const SECTION_WRAPS = ['page-title', 'wrap', 'none'];
 export const SECTION_ATTRS = ['data-cms-layout', 'data-cms-block', 'id'];
@@ -209,7 +209,7 @@ export function lockedHtmlById(layout) {
   const map = new Map();
   const visit = (block) => {
     if (block?.type === 'html' && block.props?.locked) map.set(block.id, String(block.props.html || ''));
-    if (block?.type === 'card') (block.props?.children || []).forEach(visit);
+    if (block?.type === 'card' || block?.type === 'group') (block.props?.children || []).forEach(visit);
   };
   (layout?.sections || []).forEach((section) => (section.blocks || []).forEach(visit));
   return map;
@@ -250,6 +250,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
   if (!Array.isArray(layout.sections) || !layout.sections.length) errors.push('layout needs at least one section');
   if (layout.wrapOpen != null && !WRAP_OPEN_RE.test(String(layout.wrapOpen))) errors.push('layout wrapper is not allowed');
   const locked = lockedHtmlById(baseline);
+  const base = treeBaseline(baseline);
   const htmlOk = (block) => allowHtml || (block.props?.locked && locked.get(block.id) === String(block.props.html || ''));
   const ids = new Set();
   const takeId = (obj, where) => {
@@ -282,6 +283,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
       if (block.mobile && typeof block.mobile !== 'object') errors.push(`${bw}: mobile must be an object`);
       if (block.look != null) errors.push(...validateLook(block.look, bw));
       validateBlockProps(block, bw, errors, htmlOk);
+      if (TREE_TYPES.has(block.type)) validateTreeBlock(block, bw, errors, { allowHtml, base, takeId });
       if (block.type === 'card') {
         const kids = block.props?.children;
         if (!Array.isArray(kids)) errors.push(`${bw}: card needs a children array`);
@@ -362,6 +364,10 @@ function blockInner(block, ctx = {}) {
       return '<hr>';
     case 'html':
       return String(p.html || '');
+    case 'el':
+    case 'group':
+    case 'live':
+      return renderTree(block, ctx);
     case 'card': {
       const cls = p.className ? escapeHtml(p.className) : 'card';
       const tag = p.tag === 'article' ? 'article' : 'div';
@@ -513,6 +519,249 @@ function attrsOf(openTag = '') {
 
 const decodeEntities = (t) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 
+// ---------- tree blocks: editable legacy markup + live data ----------
+/**
+ * Live data sources. A live block keeps its original slot markup; the public
+ * renderer fills it from the source on every request, so it is never hand-edited.
+ */
+export const LIVE_SOURCES = {
+  'next-fund': { label: 'Calendar (next fundraiser)', admin: '/admin.html#calendar', limit: false },
+  'featured-fund': { label: 'Calendar (next fundraiser)', admin: '/admin.html#calendar', limit: false },
+  'other-funds': { label: 'Calendar (upcoming fundraisers)', admin: '/admin.html#calendar', limit: true },
+  events: { label: 'Calendar', admin: '/admin.html#calendar', limit: true },
+  'sponsor-tiers': { label: 'Become a Sponsor page', admin: '/admin.html#pages/become-a-sponsor', limit: false },
+  'sponsor-thanks': { label: 'Sponsors', admin: '/admin.html#sponsors', limit: true },
+  officers: { label: 'Booster Members', admin: '/admin.html#boosters', limit: false },
+  gallery: { label: 'Photos', admin: '/admin.html#photos', limit: true },
+  'site:hero_title': { label: 'Site Settings (hero headline)', admin: '/admin.html#site', limit: false },
+  'site:hero_subtitle': { label: 'Site Settings (hero subtitle)', admin: '/admin.html#site', limit: false },
+  instagram: { label: 'Site Settings (social links)', admin: '/admin.html#site', limit: false },
+  'fundraising-cards': { label: 'Fundraiser cards', admin: '/admin.html#fundraising', limit: false },
+  'booster-meetings': { label: 'Calendar (booster meetings)', admin: '/admin.html#calendar', limit: false },
+  'booster-members': { label: 'Booster Members', admin: '/admin.html#boosters', limit: false },
+  sponsors: { label: 'Sponsors', admin: '/admin.html#sponsors', limit: false },
+  staff: { label: 'Directors & Staff', admin: '/admin.html#staff', limit: false },
+  'contact-form': { label: 'Contact forms', admin: '/admin.html#contact', limit: false },
+};
+const LIVE_ATTRS = { 'data-fundraising-cards': 'fundraising-cards', 'data-booster-meetings': 'booster-meetings', 'data-booster-members': 'booster-members', 'data-sponsors': 'sponsors', 'data-staff': 'staff', 'data-contact-form-slot': 'contact-form' };
+const EMBED = (inner) => `<div class="home-redesign studio-live-embed">${inner}</div>`;
+/** Palette templates for live blocks on any page (styled by home-redesign.css). */
+export const LIVE_TEMPLATES = {
+  events: EMBED('<section class="studio-live-events"><div class="events" data-home-slot="events" data-home-dynamic><p class="note">Upcoming events appear here from the Calendar.</p></div></section>'),
+  'sponsor-thanks': EMBED('<div class="thanks"><div class="thanks-logos" data-home-slot="sponsor-thanks" data-home-dynamic><p class="note">Sponsor logos appear here from Sponsors.</p></div></div>'),
+  'next-fund': EMBED('<aside class="next-fund" data-home-slot="next-fund" data-home-dynamic><div class="nf-top"><span class="nf-kicker">Next fundraiser</span></div><h3>Coming soon</h3><p>The next fundraiser on the Calendar appears here.</p></aside>'),
+};
+
+const LEAF_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'button', 'li', 'figcaption', 'dt', 'dd', 'label', 'blockquote', 'svg', 'img', 'span', 'strong', 'em', 'b', 'i', 'small', 'time', 'summary', 'td', 'th', 'caption', 'select', 'textarea', 'form', 'iframe', 'video', 'picture', 'table', 'script', 'style', 'noscript']);
+
+/** Which live source an element belongs to, or ''. */
+export function liveSourceOf(tag, open, html = '') {
+  const a = attrsOf(open);
+  if (a['data-home-slot']) return a['data-home-slot'];
+  if (a['data-photo-gallery'] != null) return 'gallery';
+  if (a['data-site-field']) return `site:${a['data-site-field']}`;
+  if (tag === 'a' && a.href === '#instagram') return 'instagram';
+  for (const [attr, src] of Object.entries(LIVE_ATTRS)) if (a[attr] != null) return src;
+  if (LEAF_TAGS.has(tag)) {
+    const m = html.match(/data-home-slot="([^"]+)"|(data-photo-gallery)|data-site-field="([^"]+)"|href="#instagram"/);
+    if (m) return m[1] || (m[2] ? 'gallery' : m[3] ? `site:${m[3]}` : 'instagram');
+  }
+  return '';
+}
+
+/** Turn one element node into an editable tree block (group / el / live). */
+export function treeBlock(node, id) {
+  const live = liveSourceOf(node.tag, node.open, node.html);
+  if (live) return { id, type: 'live', props: { source: live, html: node.html } };
+  const close = VOID_TAGS.has(node.tag) || /\/>$/.test(node.open) ? '' : `</${node.tag}>`;
+  if (LEAF_TAGS.has(node.tag) || !close || !node.html.endsWith(close)) return { id, type: 'el', props: { html: node.html } };
+  const inner = node.html.slice(node.open.length, node.html.length - close.length);
+  if (/data-home-slot=|data-photo-gallery|data-site-field=|href="#instagram"/.test(inner) === false && !/<[a-z]/i.test(inner)) {
+    return { id, type: 'el', props: { html: node.html } };
+  }
+  const kids = splitTopLevel(inner);
+  if (!kids || kids.some((k) => !k.tag && k.html.trim()) || !kids.some((k) => k.tag)) {
+    // Direct text mixed with tags (or unparsable): one editable element, unless it hides live data.
+    return /data-home-slot=|data-photo-gallery|data-site-field=/.test(inner)
+      ? { id, type: 'html', props: { html: node.html, locked: true } }
+      : { id, type: 'el', props: { html: node.html } };
+  }
+  const children = [];
+  let lead = '';
+  kids.forEach((k) => {
+    if (!k.tag) { lead += k.html; return; }
+    const child = treeBlock(k, `${id}-${children.length + 1}`);
+    if (lead) child.props.lead = lead;
+    lead = '';
+    children.push(child);
+  });
+  return { id, type: 'group', props: { open: node.open, close, ...(lead ? { tail: lead } : {}), children } };
+}
+
+/** Tokenise markup into tags and text. */
+export function tokenizeHtml(html = '') {
+  const out = [];
+  const re = /<!--[\s\S]*?-->|<\/?[a-zA-Z][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>/g;
+  let last = 0; let m;
+  const s = String(html);
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push({ text: s.slice(last, m.index) });
+    out.push({ tag: m[0] });
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.push({ text: s.slice(last) });
+  return out;
+}
+
+const EDITABLE_ATTRS = new Set(['href', 'src', 'alt', 'title', 'aria-label']);
+/** True when `next` only changes text, links, image src/alt versus `base`. */
+export function sameSkeleton(base, next) {
+  const a = tokenizeHtml(base); const b = tokenizeHtml(next);
+  const tagsA = a.filter((t) => t.tag); const tagsB = b.filter((t) => t.tag);
+  if (tagsA.length !== tagsB.length) return false;
+  if (b.some((t) => t.text && /[<>]/.test(t.text))) return false;
+  return tagsA.every((ta, i) => {
+    const tb = tagsB[i].tag;
+    if (ta.tag === tb) return true;
+    const na = ta.tag.match(/^<\/?([a-zA-Z0-9-]+)/)?.[1]; const nb = tb.match(/^<\/?([a-zA-Z0-9-]+)/)?.[1];
+    if (na !== nb || ta.tag.startsWith('</') || tb.startsWith('</')) return false;
+    const aa = attrsOf(ta.tag); const ab = attrsOf(tb);
+    const keys = new Set([...Object.keys(aa), ...Object.keys(ab)]);
+    for (const k of keys) {
+      if (aa[k] === ab[k]) continue;
+      if (!EDITABLE_ATTRS.has(k) || ab[k] == null) return false;
+      if (k === 'href' && !safeHref(decodeEntities(ab[k]))) return false;
+      if (k === 'src' && !safeSrc(decodeEntities(ab[k]))) return false;
+      if (/[<>"]/.test(ab[k])) return false;
+    }
+    return true;
+  });
+}
+
+/** Add Studio-only presentation (width, item limit) to an element's open tag; untouched when unset. */
+export function tweakOpen(html, p = {}) {
+  let out = String(html || '');
+  if (Number.isInteger(p.limit)) {
+    const slotRe = /<[a-zA-Z0-9-]+\b[^>]*?(?:data-home-slot="[^"]*"|data-photo-gallery)[^>]*>/;
+    out = out.replace(slotRe, (tag) => (/\sdata-limit="[^"]*"/.test(tag)
+      ? tag.replace(/\sdata-limit="[^"]*"/, ` data-limit="${p.limit}"`)
+      : tag.replace(/(\/?>)$/, ` data-limit="${p.limit}"$1`)));
+  }
+  if (Number.isInteger(p.span) && p.span >= 1 && p.span < GRID_COLUMNS) {
+    const width = `width:${+((p.span / GRID_COLUMNS) * 100).toFixed(3)}%;max-width:100%`;
+    out = out.replace(/^(<[a-zA-Z0-9-]+)([^>]*?)(\/?>)/, (all, t, rest, end) => (
+      /\sstyle="/.test(rest) ? `${t}${rest.replace(/\sstyle="([^"]*)"/, (s, v) => ` style="${v}${v && !/;\s*$/.test(v) ? ';' : ''}${width}"`)}${end}` : `${t}${rest} style="${width}"${end}`
+    ));
+  }
+  return out;
+}
+
+export const TREE_TYPES = new Set(['el', 'group', 'live']);
+
+function treeBaseline(baseline) {
+  const map = new Map();
+  const visit = (b) => {
+    if (!b) return;
+    if (TREE_TYPES.has(b.type)) map.set(b.id, b);
+    (b.props?.children || []).forEach(visit);
+  };
+  (baseline?.sections || []).forEach((s) => (s.blocks || []).forEach(visit));
+  return map;
+}
+
+function validateTreeBlock(block, bw, errors, { allowHtml, base, takeId }) {
+  const p = block.props || {};
+  if (p.lead != null && (typeof p.lead !== 'string' || p.lead.trim())) errors.push(`${bw}: lead must be whitespace`);
+  if (p.span != null && !(isInt(p.span) && p.span >= 1 && p.span <= GRID_COLUMNS)) errors.push(`${bw}: width must be 1-${GRID_COLUMNS} columns`);
+  if (p.hidden != null && typeof p.hidden !== 'boolean') errors.push(`${bw}: hidden must be true/false`);
+  const old = base.get(block.id);
+  const unsafe = (h) => /<script\b|\son[a-z]+\s*=|javascript:/i.test(String(h || ''));
+  if (block.type === 'el') {
+    if (typeof p.html !== 'string' || !/^<[a-zA-Z]/.test(p.html)) { errors.push(`${bw}: element html required`); return; }
+    if (!allowHtml) {
+      if (!old || old.type !== 'el') errors.push(`${bw}: new markup elements are Super Admin only`);
+      else if (!sameSkeleton(old.props.html, p.html)) errors.push(`${bw}: only words, links and images can change here`);
+      else if (unsafe(p.html) && !unsafe(old.props.html)) errors.push(`${bw}: scripts are not allowed`);
+    }
+  } else if (block.type === 'live') {
+    if (!LIVE_SOURCES[p.source]) errors.push(`${bw}: unknown live source ${p.source}`);
+    if (typeof p.html !== 'string') errors.push(`${bw}: live html required`);
+    if (p.limit != null && !(isInt(p.limit) && p.limit >= 1 && p.limit <= 24)) errors.push(`${bw}: number of items must be 1-24`);
+    const template = Object.values(LIVE_TEMPLATES).includes(p.html);
+    if (!allowHtml && !template && !(old && old.type === 'live' && old.props.html === p.html && old.props.source === p.source)) {
+      errors.push(`${bw}: live data blocks can't be hand-edited`);
+    }
+  } else if (block.type === 'group') {
+    if (typeof p.open !== 'string' || !/^<[a-zA-Z]/.test(p.open) || typeof p.close !== 'string') { errors.push(`${bw}: group open/close required`); return; }
+    if (!Array.isArray(p.children)) { errors.push(`${bw}: group needs children`); return; }
+    if (p.tail != null && (typeof p.tail !== 'string' || p.tail.trim())) errors.push(`${bw}: tail must be whitespace`);
+    if (!allowHtml) {
+      if (!old || old.type !== 'group' || old.props.open !== p.open || old.props.close !== p.close) errors.push(`${bw}: this container's markup is Super Admin only`);
+      else {
+        const allowedKids = new Set((old.props.children || []).map((c) => c.id));
+        p.children.forEach((c) => { if (!allowedKids.has(c?.id) && !(c?.type === 'live' && Object.values(LIVE_TEMPLATES).includes(c?.props?.html))) errors.push(`${bw}: ${c?.id} can only move inside its own container`); });
+      }
+    }
+    p.children.forEach((kid, ki) => {
+      const kw = `${bw} > ${kid?.id || ki}`;
+      takeId(kid, kw);
+      if (!TREE_TYPES.has(kid?.type) && kid?.type !== 'html') { errors.push(`${kw}: ${kid?.type} cannot go inside a container`); return; }
+      if (kid.type === 'html') {
+        if (!allowHtml && !(old && (old.props.children || []).some((c) => c.id === kid.id && c.type === 'html' && c.props?.html === kid.props?.html))) errors.push(`${kw}: html blocks are Super Admin only`);
+        return;
+      }
+      validateTreeBlock(kid, kw, errors, { allowHtml, base, takeId });
+    });
+  }
+}
+
+function renderTree(block, ctx) {
+  const p = block.props || {};
+  if (block.type === 'el') return tweakOpen(p.html, p);
+  if (block.type === 'live') {
+    if (p.hidden) return ctx.annotate ? `<div class="studio-live-hidden">Hidden: live data from ${escapeHtml(LIVE_SOURCES[p.source]?.label || p.source)}</div>` : '';
+    return tweakOpen(p.html, p);
+  }
+  if (block.type === 'html') return String(p.html || '');
+  if (block.type === 'group') {
+    const kids = (p.children || []).map((kid) => {
+      const inner = renderTree(kid, ctx);
+      return `${kid.props?.lead || ''}${ctx.annotate ? `<!--sb:${escapeHtml(kid.id)}-->${inner}<!--/sb-->` : inner}`;
+    }).join('');
+    return `${tweakOpen(p.open, p)}${kids}${p.tail || ''}${p.close}`;
+  }
+  return '';
+}
+
+
+/** Replace the contents of every element whose open tag matches `test` (editor canvas live preview). */
+export function replaceElementInner(html, test, innerFor) {
+  const src = String(html || '');
+  const re = /<!--[\s\S]*?-->|<\/?([a-zA-Z][a-zA-Z0-9-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+  let out = ''; let last = 0; let m;
+  while ((m = re.exec(src))) {
+    const tok = m[0];
+    if (tok.startsWith('<!--') || tok.startsWith('</') || !test(tok)) continue;
+    const name = m[1].toLowerCase();
+    if (VOID_TAGS.has(name)) continue;
+    const start = re.lastIndex;
+    const inner = new RegExp(`<!--[\\s\\S]*?-->|<\\/?${name}\\b[^>]*>`, 'gi');
+    inner.lastIndex = start;
+    let depth = 1; let t;
+    while ((t = inner.exec(src))) {
+      if (t[0].startsWith('<!--')) continue;
+      depth += t[0].startsWith('</') ? -1 : 1;
+      if (depth === 0) break;
+    }
+    if (!t) break;
+    const next = innerFor(tok, src.slice(start, t.index));
+    out += src.slice(last, start) + (next == null ? src.slice(start, t.index) : next);
+    last = t.index;
+    re.lastIndex = t.index;
+  }
+  return out + src.slice(last);
+}
+
 /** Try to express one legacy element as a structured block; null if it would not round-trip. */
 function structuredBlock(node, id) {
   const a = attrsOf(node.open);
@@ -532,13 +781,14 @@ function structuredBlock(node, id) {
   return blockInner(block) === node.html ? block : null;
 }
 
-function nodesToBlocks(nodes, prefix) {
+function nodesToBlocks(nodes, prefix, ctx = {}) {
   const blocks = [];
   let y = 0;
   nodes.forEach((node, i) => {
     const id = `${prefix}-${i + 1}`;
     const structured = node.tag ? structuredBlock(node, id) : null;
-    const block = structured || { id, type: 'html', props: { html: node.html, locked: true } };
+    const tree = !structured && node.tag && node.tag !== 'x' && !ctx.noTree ? treeBlock(node, id) : null;
+    const block = structured || tree || { id, type: 'html', props: { html: node.html, locked: true } };
     blocks.push({ ...block, x: 0, y, w: 12, h: 1 });
     y += 1;
   });
@@ -581,15 +831,15 @@ export function htmlToLayout(html = '', ctx = {}) {
         const leaves = splitTopLevel(wrapInnerHtml);
         if (leaves) {
           // Coming-soon logos become the auto logos block.
-          section.blocks = nodesToBlocks(leaves, sid).map((b) => {
+          section.blocks = nodesToBlocks(leaves, sid, ctx).map((b) => {
             const auto = blockInner({ type: 'logos', props: { auto: true } }, ctx);
-            return b.type === 'html' && b.props.html === auto ? { ...b, type: 'logos', props: { auto: true } } : b;
+            return (b.type === 'html' || b.type === 'el' || b.type === 'group') && blockInner(b, ctx) === auto ? { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, type: 'logos', props: { auto: true } } : b;
           });
         } else section.blocks = nodesToBlocks([{ tag: 'x', open: '', html: wrapInnerHtml }], sid);
       }
     }
     if (!section.blocks.length) {
-      section.blocks = kids ? nodesToBlocks(kids, sid) : nodesToBlocks([{ tag: 'x', open: '', html: inner }], sid);
+      section.blocks = kids ? nodesToBlocks(kids, sid, ctx) : nodesToBlocks([{ tag: 'x', open: '', html: inner }], sid);
     }
     sections.push(section);
   }
@@ -622,7 +872,12 @@ function splitLayout(src, ctx) {
   let raw = null; let n = 0;
   for (const node of top) {
     const isWs = !node.tag && !node.html.trim();
-    if (isWs && raw) { raw.blocks[raw.blocks.length - 1].props.html += node.html; continue; }
+    if (isWs && raw) {
+      const last = raw.blocks[raw.blocks.length - 1];
+      if (last.type === 'html') last.props.html += node.html;
+      else raw.blocks.push({ id: `${raw.id}-${raw.blocks.length + 1}`, type: 'html', x: 0, y: raw.blocks.length, w: 12, h: 1, props: { html: node.html, locked: true, spacing: true } });
+      continue;
+    }
     let sec = null;
     if (node.tag === 'section') {
       const tryLayout = htmlToLayoutSections(node.html, `s${n + 1}`, ctx);
@@ -631,7 +886,9 @@ function splitLayout(src, ctx) {
     n += 1;
     if (sec) { sections.push(sec); raw = null; continue; }
     if (!raw) { raw = { id: `s${n}`, variant: 'plain', flow: true, wrap: 'none', raw: true, blocks: [] }; sections.push(raw); }
-    raw.blocks.push({ id: `${raw.id}-${raw.blocks.length + 1}`, type: 'html', x: 0, y: raw.blocks.length, w: 12, h: 1, props: { html: node.html, locked: true } });
+    const bid = `${raw.id}-${raw.blocks.length + 1}`;
+    const tree = node.tag && !ctx.noTree ? treeBlock(node, bid) : null;
+    raw.blocks.push({ ...(tree || { id: bid, type: 'html', props: { html: node.html, locked: true } }), x: 0, y: raw.blocks.length, w: 12, h: 1 });
   }
   if (!sections.length) return null;
   return { version: 1, grid: { columns: GRID_COLUMNS, rowUnit: GRID_ROW_UNIT, gap: GRID_GAP }, ...(wrapOpen ? { wrapOpen } : {}), sections };
@@ -725,7 +982,7 @@ export async function handleStudioApi(request, env, url, deps) {
   if (!action && method === 'GET') {
     const state = await loadStudioState(env, slug);
     if (!state) return jsonResponse({ detail: 'Page not found' }, 404);
-    return jsonResponse({ ...state, can_layout: canLayout, can_html: admin, can_flag: admin });
+    return jsonResponse({ ...state, can_layout: canLayout, can_html: admin, can_flag: admin, live_sources: LIVE_SOURCES, live_templates: LIVE_TEMPLATES });
   }
   if (method !== 'POST' && !(action === 'draft' && method === 'PUT')) return jsonResponse({ detail: 'Method not allowed' }, 405);
   await ensureStudioSchema(env);
@@ -751,7 +1008,10 @@ export async function handleStudioApi(request, env, url, deps) {
   if (action === 'render') {
     const result = validateLayout(body.layout, { allowHtml: admin, baseline: await baselineP });
     if (!result.ok) return jsonResponse({ detail: 'Layout is not valid', errors: result.errors }, 422);
-    return jsonResponse({ html: renderLayout(body.layout, { ...renderCtx, annotate: Boolean(body.annotate) }) });
+    let html = renderLayout(body.layout, { ...renderCtx, annotate: Boolean(body.annotate) });
+    // Editor canvas: show live data blocks filled with today's data.
+    if (body.annotate && deps.decorateLive) html = await deps.decorateLive(html, slug).catch(() => html);
+    return jsonResponse({ html });
   }
   if (action === 'migrate') {
     // Super Admin: build a draft from the page's legacy HTML (byte-identical render).
