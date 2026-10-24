@@ -112,6 +112,7 @@ import {
   normalizeCaldevPayload,
   parseCaldevUpcomingLimit,
   renderSiteDeadlineBannersHtml,
+  restoreCaldevEvent,
   seedCaldevFromProduction,
   updateCaldevEvent,
 } from './caldev.mjs';
@@ -569,7 +570,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261024i';
+export const ASSET_VERSION = 'cms-p2-20261024j';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -696,7 +697,7 @@ export function normalizeStaticPath(pathname) {
 
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
-  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'admin-studio.js', 'admin-studio.css', 'caldev.js', 'site-content.js',
+  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'caldev.js', 'site-content.js',
   'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
@@ -13359,6 +13360,21 @@ async function routeApi(request, env, url, ctx = null) {
     const created = await insertCaldevEvent(env, p);
     return jsonResponse(created, 201);
   }
+  if (url.pathname === '/api/admin/caldev/events/restore' && request.method === 'POST') {
+    // Event manager Undo of a delete: re-inserts the row with its original id.
+    const auth = await requireScheduleBoardAccess(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const payload = await request.json().catch(() => ({}));
+    const p = normalizeCaldevPayload(payload);
+    if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
+    try {
+      const restored = await restoreCaldevEvent(env, { ...p, id: payload?.id });
+      return jsonResponse(restored, 201);
+    } catch (error) {
+      return jsonResponse({ detail: error?.message || 'Restore failed' }, 409);
+    }
+  }
   if (url.pathname === '/api/admin/caldev/seed' && request.method === 'POST') {
     const auth = await requireScheduleBoardAccess(request, env);
     if (auth.response) return auth.response;
@@ -14049,6 +14065,38 @@ async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {
     alertEmails: await getFundraiserAlertEmails(env),
     ...nav,
   })), user);
+}
+
+// Event manager (plan 2.20): full-page Studio-look month calendar over caldev_events.
+async function handleEventsManagerPage(request, env) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/events-manager');
+  const user = session.user;
+  if (!user) return redirect('/admin/login?next=/admin/events-manager');
+  if (!canAccessScheduleBoard(user)) {
+    return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: calendar or events' });
+  }
+  const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
+  const rail = [
+    ['🏠', 'Staff menu', '/admin'],
+    ['📄', 'Pages', '/admin?tab=pages'],
+    ['📅', 'Calendar events', '/admin/events-manager', true],
+    ['💰', 'Fundraiser cards', '/admin/fundraiser-cards'],
+    ['🤝', 'Sponsors', '/admin?tab=sponsors'],
+    ['👥', 'Boosters', '/admin?tab=booster-members'],
+    ['⚙️', 'Site settings', '/admin?tab=site'],
+  ].map(([i, t, h, cur]) => `<a href="${h}" title="${t}" aria-label="${t}"${cur ? ' aria-current="page"' : ''}><span aria-hidden="true">${i}</span></a>`).join('');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"></head>
+<body class="ev-app" data-can-notify="${canNotifyCalendarSubscribers(user) ? '1' : ''}">
+<header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Calendar</span></a>
+<div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
+<div class="ev-body"><nav class="ev-rail" aria-label="Staff areas">${rail}</nav>
+<main class="ev-main" id="ev-root" aria-label="Calendar events"><p class="ev-loading">Loading calendar…</p></main></div>
+<script src="/admin-events.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+  return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
 async function handleStudioEditorPage(request, env, slug) {
@@ -14966,6 +15014,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
       return handleFundraiserCardsPage(request, env, ctx);
     }
+    if (url.pathname === '/admin/events-manager' || url.pathname === '/admin/events-manager/') {
+      return handleEventsManagerPage(request, env);
+    }
     const studioEditorMatch = url.pathname.match(/^\/admin\/studio\/([a-z0-9-]+)\/?$/);
     if (studioEditorMatch) return handleStudioEditorPage(request, env, studioEditorMatch[1]);
     const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
@@ -15535,7 +15586,7 @@ __ADMIN_SIDEBAR__
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p><p><a class="btn outline" href="/admin/events-manager">📅 Open the full-page event manager</a></p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">

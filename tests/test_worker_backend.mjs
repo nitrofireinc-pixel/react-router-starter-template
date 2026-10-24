@@ -2423,7 +2423,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261024i'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261024j'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -4018,7 +4018,7 @@ test('ensureCaldevSchema only migrates once per isolate', async () => {
   };
   await ensureCaldevSchema(env);
   await ensureCaldevSchema(env);
-  assert.equal(runs, 5); // 1 CREATE TABLE + 3 ALTER + 1 start_date index
+  assert.equal(runs, 8); // 1 CREATE TABLE + 3 ALTER + 1 start_date index + 3 event-manager ALTERs
 });
 
 test('worker source gates initDb behind schema_version', () => {

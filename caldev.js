@@ -6,6 +6,7 @@
     { id: 'deadline', label: 'IMPORTANT', color: '#FDD703', ink: '#002142' },
     { id: 'trip', label: 'Trips', color: '#7c3aed' },
     { id: 'other', label: 'Other', color: '#5b6472' },
+    { id: 'fundraiser', label: 'Fundraising', color: '#F2B705', ink: '#002142' },
   ];
   const TRACK_MAP = Object.fromEntries(TRACKS.map((t) => [t.id, t]));
   const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -168,6 +169,7 @@
   function activeDeadlineEvents(events, today) {
     return (events || []).filter((event) => {
       if (String(event?.track || '').toLowerCase() !== 'deadline') return false;
+      if (event?.cancelled_at) return false;
       const due = deadlineDueIso(event);
       if (!due) return false;
       const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);

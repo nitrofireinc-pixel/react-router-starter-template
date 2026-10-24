@@ -7,6 +7,7 @@ export const CALDEV_TRACKS = [
   { id: 'deadline', label: 'IMPORTANT', color: '#FDD703' },
   { id: 'trip', label: 'Trips', color: '#7c3aed' },
   { id: 'other', label: 'Other', color: '#5b6472' },
+  { id: 'fundraiser', label: 'Fundraising', color: '#F2B705' },
 ];
 
 const TRACK_IDS = new Set(CALDEV_TRACKS.map((t) => t.id));
@@ -241,6 +242,9 @@ export function hydrateCaldevRow(row) {
     all_day: Number(row.all_day) ? 1 : 0,
     source_event_id: row.source_event_id == null ? null : Number(row.source_event_id),
     booster_event_id: row.booster_event_id == null ? null : Number(row.booster_event_id),
+    series_id: row.series_id == null ? null : Number(row.series_id),
+    series_rule: row.series_rule == null ? null : String(row.series_rule),
+    cancelled_at: row.cancelled_at == null || row.cancelled_at === '' ? null : String(row.cancelled_at),
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || ''),
   };
@@ -327,6 +331,8 @@ export function deadlineDueIso(event) {
 
 export function isDeadlineBannerActive(event, todayIso = '') {
   if (normalizeCaldevTrack(event?.track) !== 'deadline') return false;
+  // A cancelled date never shows the red banner.
+  if (event?.cancelled_at) return false;
   const due = deadlineDueIso(event);
   if (!due || !isIsoDate(todayIso)) return false;
   const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
@@ -445,6 +451,10 @@ export async function ensureCaldevSchema(env) {
         'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
         'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
         'CREATE INDEX IF NOT EXISTS idx_caldev_events_start_date ON caldev_events (start_date, start_time, id)',
+        // Additive (event manager): series link, series rule JSON, cancelled date.
+        'ALTER TABLE caldev_events ADD COLUMN series_id INTEGER',
+        'ALTER TABLE caldev_events ADD COLUMN series_rule TEXT',
+        'ALTER TABLE caldev_events ADD COLUMN cancelled_at TEXT',
       ]) {
         try {
           await env.DB.prepare(sql).run();
@@ -467,7 +477,8 @@ export async function ensureCaldevSchema(env) {
 
 const CALDEV_SELECT = `
   id, title, description, location, who, start_date, end_date, start_time, end_time,
-  track, all_day, source_event_id, booster_event_id, created_at, updated_at
+  track, all_day, source_event_id, booster_event_id, created_at, updated_at,
+  series_id, series_rule, cancelled_at
 `;
 
 async function setCaldevBoosterEventId(env, caldevId, boosterEventId) {
@@ -775,4 +786,23 @@ export async function seedCaldevFromProduction(env, { getEvents, expandRecurring
     inserted += 1;
   }
   return { inserted, source_count: (production || []).length };
+}
+
+// Undo of a delete: put the row back with its original id (event manager).
+export async function restoreCaldevEvent(env, row, options = {}) {
+  const id = Number(row?.id);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Restore needs the original id');
+  const taken = await env.DB.prepare('SELECT id FROM caldev_events WHERE id = ?').bind(id).first();
+  if (taken) throw new Error('That event already exists');
+  const p = normalizeCaldevPayload(row);
+  await env.DB.prepare(`
+    INSERT INTO caldev_events (
+      id, title, description, location, who, start_date, end_date, start_time, end_time,
+      track, all_day, source_event_id, booster_event_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+  `).bind(id, p.title, p.description, p.location, p.who, p.start_date, p.end_date,
+    p.start_time, p.end_time, p.track, p.all_day, p.source_event_id).run();
+  let restored = await getCaldevEventById(env, id);
+  if (options.syncBoosters !== false) restored = await syncCaldevMeetingToBoosters(env, restored);
+  return restored;
 }
