@@ -1965,7 +1965,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(normalizeMinutesPayload({ meeting_date: '08042026', body_html: '<p>x</p>' }).meeting_date, '2026-08-04');
   assert.match(payload.body_html, /Called to order/);
   assert.doesNotMatch(payload.body_html, /script/i);
-  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 48);
+  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 240);
 
   const secretary = { role: 'editor', permissions: ['minutes:edit'] };
   const legacySecretary = { role: 'editor', permissions: ['minutes'] };
@@ -1974,8 +1974,8 @@ test('meeting minutes dates and secretary edit window', () => {
   const admin = { role: 'admin', permissions: [] };
   const now = new Date('2026-10-04T22:00:00.000Z');
   const hoursAgo = (hours) => new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
-  const fresh = { meeting_date: '2026-10-04', created_at: hoursAgo(47) };
-  const stale = { meeting_date: '2026-10-02', created_at: hoursAgo(49) };
+  const fresh = { meeting_date: '2026-10-04', created_at: hoursAgo(239) };
+  const stale = { meeting_date: '2026-10-02', created_at: hoursAgo(241) };
   assert.equal(canViewMeetingMinutes(secretary), true);
   assert.equal(canViewMeetingMinutes(viewer), true);
   assert.equal(canViewMeetingMinutes(outsider), true);
@@ -1996,8 +1996,8 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canDeleteMeetingMinutes({ role: 'editor', permissions: ['minutes:edit', 'users'] }), false);
   assert.equal(canDeleteMeetingMinutes(null), false);
   assert.ok(minutesEditableUntil(fresh) instanceof Date);
-  assert.equal(minutesEditableUntil({ created_at: '2026-08-04 00:00:00' })?.toISOString(), '2026-08-06T00:00:00.000Z');
-  // Window is created_at + 48h, not the meeting date — a just-uploaded older meeting stays editable.
+  assert.equal(minutesEditableUntil({ created_at: '2026-08-04 00:00:00' })?.toISOString(), '2026-08-14T00:00:00.000Z');
+  // Window is created_at + 10 days, not the meeting date — a just-uploaded older meeting stays editable.
   assert.equal(canEditMeetingMinutes(secretary, {
     meeting_date: '2026-07-01',
     created_at: hoursAgo(1),

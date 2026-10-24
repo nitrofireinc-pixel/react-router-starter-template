@@ -233,6 +233,7 @@ import {
   saveVisualPage,
   stripVisualLockedLabels,
 } from './visual-page-editor.mjs';
+import { MINUTES_UPLOAD_MAX_BYTES, MINUTES_UPLOAD_MAX_LABEL, sniffMinutesFile, getMinutesFile, listMinutesFileIds, saveMinutesFile, deleteMinutesFile } from './minutes-files.mjs';
 import { checkPasswordRule, getAccountLock, lockStatus, recordAccountFailure, clearAccountFailures, unlockAccount, listAccountLocks } from './account-lock.mjs';
 import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema, serveStudioUpload } from './studio.mjs';
 import {
@@ -573,8 +574,8 @@ export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-202
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
-const MINUTES_DOCX_MAX_BYTES = 8_000_000;
-const MINUTES_DOCX_MAX_LABEL = '8 MB';
+const MINUTES_DOCX_MAX_BYTES = 10 * 1024 * 1024;
+const MINUTES_DOCX_MAX_LABEL = '10 MB';
 const ZERNIO_API_BASE = 'https://zernio.com/api/v1';
 const ZERNIO_PROFILE_KEY = 'zernio_profile_id';
 const ZERNIO_FACEBOOK_KEY = 'zernio_facebook';
@@ -8151,7 +8152,8 @@ export function adminSidebarAllows(user, tab) {
   }
 }
 
-export const MINUTES_EDIT_WINDOW_HOURS = 48;
+export const MINUTES_EDIT_WINDOW_DAYS = 10;
+export const MINUTES_EDIT_WINDOW_HOURS = MINUTES_EDIT_WINDOW_DAYS * 24;
 
 export function parseMeetingDateInput(value) {
   const raw = String(value || '').trim();
@@ -8552,6 +8554,9 @@ export function canEditMeetingMinutes(user, record, now = new Date()) {
   if (!user || !record) return false;
   if (isSuperAdmin(user)) return true;
   if (!canManageMeetingMinutes(user)) return false;
+  // Uploaded files are admin-only to change; written minutes only by their author.
+  if (record.uploaded_file) return false;
+  if (record.created_by && user.id && Number(record.created_by) !== Number(user.id)) return false;
   return minutesWithinEditWindow(record, now);
 }
 
@@ -8804,7 +8809,14 @@ function serializeMinutesRow(row, user = null) {
     can_manage: canManageMeetingMinutes(user),
     can_delete: canDeleteMeetingMinutes(user),
     document_url: row.id ? `/api/admin/minutes/${row.id}/document` : '',
+    uploaded_file: row.uploaded_file || null,
+    file_url: row.uploaded_file && row.id ? `/api/admin/minutes/${row.id}/file` : '',
   };
+}
+
+function withMinutesFile(row, file) {
+  if (!row || !file) return row;
+  return { ...row, uploaded_file: { filename: file.filename, mime: file.mime } };
 }
 
 async function listMeetingMinutes(env, user = null) {
@@ -8815,7 +8827,8 @@ async function listMeetingMinutes(env, user = null) {
      LEFT JOIN users u ON u.id = m.created_by
      ORDER BY date(m.meeting_date) DESC, datetime(m.created_at) DESC, m.id DESC`,
   ).all();
-  return (rows.results || []).map((row) => serializeMinutesRow(row, user));
+  const files = await listMinutesFileIds(env);
+  return (rows.results || []).map((row) => serializeMinutesRow(withMinutesFile(row, files.get(Number(row.id))), user));
 }
 
 async function getMeetingMinutesById(env, id, user = null) {
@@ -8826,7 +8839,8 @@ async function getMeetingMinutesById(env, id, user = null) {
      LEFT JOIN users u ON u.id = m.created_by
      WHERE m.id = ?`,
   ).bind(id).first();
-  return serializeMinutesRow(row, user);
+  if (!row) return null;
+  return serializeMinutesRow(withMinutesFile(row, await getMinutesFile(env, id)), user);
 }
 
 export async function requireSuperAdmin(request, env) {
@@ -12811,6 +12825,9 @@ async function routeApi(request, env, url, ctx = null) {
         'INSERT INTO booster_meeting_minutes (meeting_date, body_html, created_by) VALUES (?, ?, ?)',
       ).bind(payload.meeting_date, payload.body_html, auth.user.id).run();
       const createdId = Number(result?.meta?.last_row_id || 0);
+      if (createdId && r2Key) {
+        await saveMinutesFile(env, { minutes_id: createdId, r2_key: r2Key, filename, mime: kind.mime, size, uploaded_by: auth.user.id });
+      }
       const created = createdId ? await getMeetingMinutesById(env, createdId, auth.user) : null;
       if (!created?.id) {
         return jsonResponse({ detail: 'Minutes saved but could not be reloaded. Refresh and check the list.' }, 500);
@@ -12843,23 +12860,37 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const file = form.get('file') || form.get('docx') || form.get('minutes');
     if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
-      return jsonResponse({ detail: 'Choose a .docx meeting minutes file to upload' }, 422);
+      return jsonResponse({ detail: 'Choose a .doc, .docx or .pdf meeting minutes file to upload' }, 422);
     }
-    const filename = String(file.name || 'minutes.docx');
-    const lower = filename.toLowerCase();
-    if (!lower.endsWith('.docx')) {
-      return jsonResponse({ detail: 'Only .docx Word files are supported for minutes upload' }, 422);
-    }
+    const filename = String(file.name || 'minutes.docx').replace(/[\\/\r\n"]/g, '_').slice(0, 160);
     const size = Number(file.size || 0);
-    if (size <= 0) return jsonResponse({ detail: 'Uploaded DOCX file is empty' }, 422);
-    if (size > MINUTES_DOCX_MAX_BYTES) {
-      return jsonResponse({ detail: `DOCX must be ${MINUTES_DOCX_MAX_LABEL} or smaller` }, 422);
+    if (size <= 0) return jsonResponse({ detail: 'Uploaded file is empty' }, 422);
+    if (size > MINUTES_UPLOAD_MAX_BYTES) {
+      return jsonResponse({ detail: `Minutes files must be ${MINUTES_UPLOAD_MAX_LABEL} or smaller` }, 422);
     }
-    let parsed;
-    try {
-      parsed = await parseBoostersMinutesDocx(await file.arrayBuffer(), filename);
-    } catch (error) {
-      return jsonResponse({ detail: error?.message || 'Could not read the DOCX minutes file' }, 422);
+    const buffer = await file.arrayBuffer();
+    const kind = sniffMinutesFile(new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength)), filename);
+    if (!kind) {
+      return jsonResponse({ detail: 'Only real Word (.doc, .docx) or PDF files are supported for minutes upload' }, 422);
+    }
+    let parsed = null;
+    if (kind.ext === 'docx') {
+      try { parsed = await parseBoostersMinutesDocx(buffer, filename); } catch { parsed = null; }
+    }
+    if (!parsed) {
+      const meetingDate = parseMeetingDateInput(form.get('meeting_date')) || extractMeetingDateFromFilename(filename);
+      if (!meetingDate) {
+        return jsonResponse({ detail: 'Add the meeting date (MM/DD/YYYY) or put it in the file name' }, 422);
+      }
+      parsed = {
+        meeting_date: meetingDate,
+        body_html: `<p>Uploaded minutes file: <b>${escapeHtml(filename)}</b>. Open the original to read it.</p>`,
+      };
+    }
+    let r2Key = '';
+    if (env.FILES) {
+      r2Key = `minutes/${crypto.randomUUID()}.${kind.ext}`;
+      await env.FILES.put(r2Key, buffer, { httpMetadata: { contentType: kind.mime } });
     }
     try {
       const result = await env.DB.prepare(
@@ -12898,6 +12929,22 @@ async function routeApi(request, env, url, ctx = null) {
     const embed = String(url.searchParams.get('embed') || '') === '1';
     return htmlResponse(renderMinutesDocumentHtml(site, existing, { embed }));
   }
+  const minutesFileMatch = url.pathname.match(/^\/api\/admin\/minutes\/(\d+)\/file$/);
+  if (minutesFileMatch && request.method === 'GET') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    if (!canViewMeetingMinutes(auth.user)) return jsonResponse({ detail: 'Login required to view meeting minutes' }, 403);
+    const meta = await getMinutesFile(env, Number(minutesFileMatch[1]));
+    const obj = meta && env.FILES ? await env.FILES.get(meta.r2_key) : null;
+    if (!obj) return jsonResponse({ detail: 'Uploaded file not found' }, 404);
+    const disposition = meta.mime === 'application/pdf' ? 'inline' : 'attachment';
+    return new Response(obj.body, { headers: {
+      'content-type': meta.mime,
+      'content-disposition': `${disposition}; filename="${meta.filename}"`,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, no-store',
+    } });
+  }
   const minutesMatch = url.pathname.match(/^\/api\/admin\/minutes\/(\d+)$/);
   if (minutesMatch && ['GET', 'PUT', 'DELETE'].includes(request.method)) {
     const auth = await requireLogin(request, env);
@@ -12914,6 +12961,7 @@ async function routeApi(request, env, url, ctx = null) {
         return jsonResponse({ detail: 'Only Super Admins can delete meeting minutes' }, 403);
       }
       await env.DB.prepare('DELETE FROM booster_meeting_minutes WHERE id = ?').bind(id).run();
+      await deleteMinutesFile(env, id);
       await writeMinutesAudit(env, request, auth.user, {
         action: 'minutes.delete',
         status: 200,
@@ -12935,11 +12983,11 @@ async function routeApi(request, env, url, ctx = null) {
         minutes: existing,
         before: await sha256Hex(existing.body_html || ''),
         beforeHtml: existing.body_html || '',
-        detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit',
+        detail: 'Meeting minutes can only be edited within 10 days of creation (uploaded files: Super Admin only); after that only a Super Admin can edit',
         ctx,
       });
       markRequestAuditWritten(request);
-      return jsonResponse({ detail: 'Meeting minutes can only be edited within 48 hours of creation; after that only a Super Admin can edit' }, 403);
+      return jsonResponse({ detail: 'Meeting minutes can only be edited within 10 days of creation (uploaded files: Super Admin only); after that only a Super Admin can edit' }, 403);
     }
     let payload;
     try {
@@ -12964,7 +13012,7 @@ async function routeApi(request, env, url, ctx = null) {
         after: await sha256Hex(updated?.body_html || payload.body_html || ''),
         beforeHtml: existing.body_html || '',
         afterHtml: updated?.body_html || payload.body_html || '',
-        detail: afterWindow ? `${existing.meeting_date} edited after 48h` : `${existing.meeting_date} edited`,
+        detail: afterWindow ? `${existing.meeting_date} edited after 10 days` : `${existing.meeting_date} edited`,
         ctx,
       });
       return jsonResponse(updated);
@@ -15251,7 +15299,7 @@ __ADMIN_SIDEBAR__
   </div>
 </div>
 </section>
-<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Select a meeting to open the document. Secretaries can add, edit, or upload .docx minutes. Only Super Admins can delete.</p></div><div class="panel-actions minutes-panel-actions" data-minutes-manage-actions hidden><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx">Upload .docx</button><input id="minutes-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><p id="minutes-empty" class="minutes-empty-hint muted">Choose a meeting date from the list to open it.</p><article id="minutes-view" class="admin-card stack minutes-view minutes-view-card" hidden aria-labelledby="minutes-view-title"><button type="button" class="btn outline minutes-view-back" data-minutes-view-dismiss>← Minutes list</button><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 id="minutes-view-title" data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button><button class="btn outline minutes-view-close" type="button" data-minutes-view-dismiss>Close</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div></div>
+<section id="tab-minutes" class="cms-panel minutes-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Meeting Minutes</h1><p>All CMS users can view and print booster meeting minutes by date. Select a meeting to open the document. Anyone with Minutes can upload a Word/PDF file or write minutes, and fix their own written minutes for 10 days. Uploaded files can only be changed by a Super Admin. Only Super Admins can delete.</p></div><div class="panel-actions minutes-panel-actions" data-minutes-manage-actions hidden><button class="btn primary" type="button" id="new-minutes">Add Minutes</button><button class="btn outline" type="button" id="upload-minutes-docx">Upload file</button><input id="minutes-docx-file" type="file" accept=".doc,.docx,.pdf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></div></div><div class="editor-layout minutes-layout"><aside class="admin-card minutes-nav-card"><div class="minutes-nav-desktop-head"><h2>Minutes list</h2><p class="muted">Select a date to open the document.</p></div><div class="minutes-mobile-bar"><button type="button" class="minutes-nav-toggle" aria-expanded="false" aria-controls="minutes-mobile-menu">Minutes</button></div><div id="minutes-mobile-menu" class="minutes-mobile-menu" hidden></div><nav id="minutes-list" class="minutes-nav" aria-label="Submitted meeting minutes"></nav></aside><div class="minutes-main"><p id="minutes-empty" class="minutes-empty-hint muted">Choose a meeting date from the list to open it.</p><article id="minutes-view" class="admin-card stack minutes-view minutes-view-card" hidden aria-labelledby="minutes-view-title"><button type="button" class="btn outline minutes-view-back" data-minutes-view-dismiss>← Minutes list</button><div class="minutes-view-head"><div><p class="kicker">Meeting minutes</p><h2 id="minutes-view-title" data-minutes-view-date></h2><p class="muted" data-minutes-view-meta></p></div><div class="panel-actions"><button class="btn outline" type="button" id="print-minutes" hidden>Print / Save PDF</button><button class="btn primary" type="button" id="edit-minutes" hidden>Edit</button><button class="btn outline" type="button" id="delete-minutes" hidden>Delete</button><button class="btn outline minutes-view-close" type="button" data-minutes-view-dismiss>Close</button></div></div><div class="minutes-document-frame-wrap"><iframe id="minutes-document-frame" class="minutes-document-frame" title="Meeting minutes document" hidden></iframe><div class="minutes-view-body cms-content" data-minutes-view-body hidden></div></div></article></div></div>
 <div id="minutes-editor-modal" class="minutes-frame-modal minutes-editor-modal" hidden>
   <button type="button" class="minutes-frame-backdrop" data-minutes-editor-dismiss aria-label="Close minutes editor"></button>
   <div class="minutes-editor-dialog minutes-docx-dialog admin-card stack" role="dialog" aria-modal="true" aria-labelledby="minutes-editor-title">
@@ -15455,7 +15503,7 @@ __ADMIN_SIDEBAR__
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (create/edit, 48h)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (upload + write; edit own for 10 days)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

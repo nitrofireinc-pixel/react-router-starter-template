@@ -34,3 +34,8 @@ CREATE TABLE IF NOT EXISTS unlock_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token_hash TEXT NOT NULL UNIQUE,
   created_at TEXT, expires_at TEXT, used_at TEXT, requested_ip TEXT
 );
+
+-- Phase 2: uploaded minutes originals (created at runtime by worker/src/minutes-files.mjs).
+-- CREATE TABLE IF NOT EXISTS minutes_files (id INTEGER PRIMARY KEY AUTOINCREMENT, minutes_id INTEGER NOT NULL UNIQUE,
+--   r2_key TEXT NOT NULL, filename TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, uploaded_by INTEGER,
+--   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);

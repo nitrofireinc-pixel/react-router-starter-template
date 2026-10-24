@@ -584,14 +584,14 @@ test('ensemble body content stays editable; added sections need layout:ensembles
   assert.notEqual(visualStructureSignature(existing), visualStructureSignature(extraSection));
 });
 
-test('minutes:edit is 48h from created_at UTC; admin can edit after the window', () => {
-  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 48);
+test('minutes:edit is 10 days from created_at UTC; admin can edit after the window', () => {
+  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 240);
   const now = new Date('2026-10-04T22:00:00.000Z');
   const editor = { role: 'editor', permissions: ['minutes:edit'] };
   const admin = { role: 'admin', permissions: [] };
   const viewer = { role: 'editor', permissions: ['mail'] };
-  const fresh = { meeting_date: '2026-08-01', created_at: sqliteUtc(47, now) };
-  const locked = { meeting_date: '2026-08-01', created_at: sqliteUtc(49, now) };
+  const fresh = { meeting_date: '2026-08-01', created_at: sqliteUtc(239, now) };
+  const locked = { meeting_date: '2026-08-01', created_at: sqliteUtc(241, now) };
 
   assert.equal(canViewMeetingMinutes(viewer), true);
   assert.equal(canManageMeetingMinutes(editor), true);
@@ -601,7 +601,7 @@ test('minutes:edit is 48h from created_at UTC; admin can edit after the window',
   assert.equal(canEditMeetingMinutes(editor, fresh, now), true);
   assert.equal(canEditMeetingMinutes(editor, locked, now), false);
   assert.equal(canEditMeetingMinutes(admin, locked, now), true);
-  assert.equal(minutesEditableUntil(fresh)?.toISOString(), new Date(Date.parse(`${fresh.created_at.replace(' ', 'T')}Z`) + 48 * 3600 * 1000).toISOString());
+  assert.equal(minutesEditableUntil(fresh)?.toISOString(), new Date(Date.parse(`${fresh.created_at.replace(' ', 'T')}Z`) + 240 * 3600 * 1000).toISOString());
 });
 
 test('capabilities expose content vs layout slugs and minutes_edit', () => {
@@ -710,7 +710,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.match(workerSrc, /capabilities: userPageCapabilities/);
   assert.match(workerSrc, /minutes\.edit\.admin_after_window/);
   assert.match(workerSrc, /if \(!canManageMeetingMinutes\(auth\.user\)\) \{[\s\S]*Permission required: minutes:edit[\s\S]*if \(!canEditMeetingMinutes/);
-  assert.match(workerSrc, /within 48 hours of creation/);
+  assert.match(workerSrc, /within 10 days of creation/);
   assert.match(workerSrc, /mayEditBoosters = existing\.slug === 'boosters' && hasPermission\(auth\.user, 'boosters'\)/);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/minutes/3', 'PUT'), false);

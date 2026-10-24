@@ -5560,7 +5560,9 @@ async function loadSecurityLog({ resetPage = false } = {}) {
         const meta = entry.meta && Object.keys(entry.meta).length
           ? `<pre class="security-log-meta">${escapeHtml(JSON.stringify(entry.meta, null, 2))}</pre>`
           : '';
-        return `<article class="security-log-entry">
+        return `<article class="security-log-entry${/fail|denied|locked/i.test(entry.action || '') ? ' security-log-flag' : ''}">
+          <p class="security-log-sentence"><b>${escapeHtml(securityLogSentence(entry))}</b></p>
+          <details class="security-log-details"><summary>Details</summary>
           <header>
             <b>${when}</b>
             <span>${who}</span>
@@ -5575,6 +5577,7 @@ async function loadSecurityLog({ resetPage = false } = {}) {
           ${integrity}
           ${sha}
           ${meta}
+          </details>
         </article>`;
       }).join('');
     }
@@ -5594,6 +5597,31 @@ async function loadSecurityLog({ resetPage = false } = {}) {
     if (pager) pager.hidden = true;
     if (status) status.textContent = error.message || 'Security log unavailable';
   }
+}
+
+// Readable log view: plain-language sentence per entry, built on screen only.
+// The sealed log rows, hashes and exports are not changed.
+const SECURITY_LOG_SENTENCES = {
+  'auth.login': '{actor} logged in',
+  'auth.logout': '{actor} logged out',
+  'auth.login_failed': 'Failed sign-in for {actor}',
+  'auth.locked': '{actor} was locked out',
+  'minutes.create': '{actor} created minutes',
+  'minutes.edit': '{actor} edited minutes',
+  'minutes.edit.admin_after_window': '{actor} edited minutes after the 10-day window',
+  'minutes.delete': '{actor} deleted minutes',
+  'access.denied': '{actor} was blocked from a screen they do not have access to',
+};
+function securityLogSentence(entry) {
+  const actor = entry.actor_username || 'Someone';
+  const action = String(entry.action || '');
+  const tmpl = SECURITY_LOG_SENTENCES[action];
+  let text = tmpl ? tmpl.replace('{actor}', actor) : `${actor} ${entry.summary || action || 'did something'}`;
+  const when = entry.created_at_et || entry.created_at || '';
+  if (when) text += ` · ${when}`;
+  if (entry.ip) text += ` · ${entry.ip}${entry.country ? ` (${entry.country})` : ''}`;
+  // TODO(geo_city): town names need Trevor's auth code for geo_city/hash_v; country only for now.
+  return text;
 }
 
 function renderSecurityLogPager({ page = 1, total = 0, totalPages = 1 } = {}) {
@@ -7582,15 +7610,24 @@ function renderMinutesView(item) {
   if (item.created_by_name) meta.push(`Recorded by ${item.created_by_name}`);
   if (item.created_at) meta.push(`Submitted ${new Date(item.created_at).toLocaleString()}`);
   if (item.can_edit && item.editable_until) {
-    meta.push(`Editable until ${new Date(item.editable_until).toLocaleString()} (48 hours from creation)`);
+    meta.push(`Editable until ${new Date(item.editable_until).toLocaleString()} (10 days from creation)`);
   } else if (!item.can_edit) {
     meta.push(isSuperAdmin() ? 'Locked for secretaries · Super Admin can still edit' : 'View only');
   }
-  view.querySelector('[data-minutes-view-meta]').textContent = meta.join(' · ');
+  const metaEl = view.querySelector('[data-minutes-view-meta]');
+  metaEl.textContent = meta.join(' · ');
+  if (item.file_url) {
+    const link = document.createElement('a');
+    link.href = item.file_url; link.target = '_blank'; link.rel = 'noopener';
+    link.textContent = ` · Open original (${item.uploaded_file?.filename || 'file'})`;
+    metaEl.append(link);
+  }
   const frame = document.querySelector('#minutes-document-frame');
   const body = document.querySelector('[data-minutes-view-body]');
   const documentUrl = item.document_url || `/api/admin/minutes/${item.id}/document`;
-  const embedUrl = documentUrl.includes('?') ? `${documentUrl}&embed=1` : `${documentUrl}?embed=1`;
+  const embedUrl = item.file_url && item.uploaded_file?.mime === 'application/pdf'
+    ? item.file_url
+    : (documentUrl.includes('?') ? `${documentUrl}&embed=1` : `${documentUrl}?embed=1`);
   if (frame) {
     frame.toggleAttribute('hidden', false);
     if (frame.getAttribute('src') !== embedUrl) frame.setAttribute('src', embedUrl);
@@ -7681,12 +7718,16 @@ async function uploadMinutesDocxFile(file) {
   if (!canManageMinutes()) return;
   if (!file) return;
   const name = String(file.name || '').toLowerCase();
-  if (!name.endsWith('.docx')) {
-    window.alert('Please choose a .docx Word file.');
+  if (!/\.(docx?|pdf)$/.test(name)) {
+    window.alert('Please choose a Word (.doc, .docx) or PDF file.');
     return;
   }
   const payload = new FormData();
   payload.append('file', file, file.name || 'minutes.docx');
+  if (!name.endsWith('.docx')) {
+    const date = window.prompt('Meeting date (MM/DD/YYYY)? Leave blank if it is in the file name.', '');
+    if (date) payload.append('meeting_date', date);
+  }
   try {
     const saved = await jsonFetch('/api/admin/minutes/upload', {
       method: 'POST',

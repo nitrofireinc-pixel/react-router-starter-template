@@ -48,3 +48,24 @@ test('studio upload sniffs real image bytes', () => {
   assert.equal(sniffImageType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0])), 'image/png');
   assert.equal(sniffImageType(new TextEncoder().encode('<svg>')), '');
 });
+
+test('minutes: 10-day own-edit window, uploaded files admin-only, magic-byte sniff', async () => {
+  const { canEditMeetingMinutes, MINUTES_EDIT_WINDOW_HOURS } = await import('../worker/src/worker.mjs');
+  const { sniffMinutesFile, MINUTES_UPLOAD_MAX_BYTES } = await import('../worker/src/minutes-files.mjs');
+  assert.equal(MINUTES_EDIT_WINDOW_HOURS, 240);
+  assert.equal(MINUTES_UPLOAD_MAX_BYTES, 10 * 1024 * 1024);
+  const now = new Date('2026-10-24T12:00:00Z');
+  const sec = { id: 8, role: 'editor', permissions: ['minutes'] };
+  const admin = { id: 1, role: 'admin', permissions: [] };
+  const mine = { created_by: 8, created_at: '2026-10-20 12:00:00' };
+  assert.equal(canEditMeetingMinutes(sec, mine, now), true);
+  assert.equal(canEditMeetingMinutes(sec, { ...mine, created_by: 10 }, now), false);
+  assert.equal(canEditMeetingMinutes(sec, { ...mine, created_at: '2026-10-13 12:00:00' }, now), false);
+  assert.equal(canEditMeetingMinutes(sec, { ...mine, uploaded_file: { filename: 'a.pdf' } }, now), false);
+  assert.equal(canEditMeetingMinutes(admin, { ...mine, uploaded_file: { filename: 'a.pdf' } }, now), true);
+  assert.equal(sniffMinutesFile(new TextEncoder().encode('%PDF-1.7'), 'm.pdf').ext, 'pdf');
+  assert.equal(sniffMinutesFile(new TextEncoder().encode('%PDF-1.7'), 'm.docx'), null);
+  assert.equal(sniffMinutesFile(new Uint8Array([0x50, 0x4b, 3, 4]), 'm.docx').ext, 'docx');
+  assert.equal(sniffMinutesFile(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), 'm.doc').ext, 'doc');
+  assert.equal(sniffMinutesFile(new TextEncoder().encode('<html>'), 'm.pdf'), null);
+});
