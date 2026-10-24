@@ -525,23 +525,27 @@ const decodeEntities = (t) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').repl
  * renderer fills it from the source on every request, so it is never hand-edited.
  */
 export const LIVE_SOURCES = {
-  'next-fund': { label: 'Calendar (next fundraiser)', admin: '/admin.html#calendar', limit: false },
-  'featured-fund': { label: 'Calendar (next fundraiser)', admin: '/admin.html#calendar', limit: false },
-  'other-funds': { label: 'Calendar (upcoming fundraisers)', admin: '/admin.html#calendar', limit: true },
-  events: { label: 'Calendar', admin: '/admin.html#calendar', limit: true },
-  'sponsor-tiers': { label: 'Become a Sponsor page', admin: '/admin.html#pages/become-a-sponsor', limit: false },
-  'sponsor-thanks': { label: 'Sponsors', admin: '/admin.html#sponsors', limit: true },
-  officers: { label: 'Booster Members', admin: '/admin.html#boosters', limit: false },
-  gallery: { label: 'Photos', admin: '/admin.html#photos', limit: true },
-  'site:hero_title': { label: 'Site Settings (hero headline)', admin: '/admin.html#site', limit: false },
-  'site:hero_subtitle': { label: 'Site Settings (hero subtitle)', admin: '/admin.html#site', limit: false },
-  instagram: { label: 'Site Settings (social links)', admin: '/admin.html#site', limit: false },
-  'fundraising-cards': { label: 'Fundraiser cards', admin: '/admin.html#fundraising', limit: false },
-  'booster-meetings': { label: 'Calendar (booster meetings)', admin: '/admin.html#calendar', limit: false },
-  'booster-members': { label: 'Booster Members', admin: '/admin.html#boosters', limit: false },
-  sponsors: { label: 'Sponsors', admin: '/admin.html#sponsors', limit: false },
-  staff: { label: 'Directors & Staff', admin: '/admin.html#staff', limit: false },
-  'contact-form': { label: 'Contact forms', admin: '/admin.html#contact', limit: false },
+  'next-fund': { label: 'Calendar (next fundraiser)', admin: '/admin?tab=caldev', limit: false },
+  'featured-fund': { label: 'Calendar (next fundraiser)', admin: '/admin?tab=caldev', limit: false },
+  'other-funds': { label: 'Calendar (upcoming fundraisers)', admin: '/admin?tab=caldev', limit: true },
+  events: { label: 'Calendar', admin: '/admin?tab=caldev', limit: true },
+  'sponsor-tiers': { label: 'Become a Sponsor page', admin: '/admin/studio/become-a-sponsor', limit: false },
+  'sponsor-thanks': { label: 'Sponsors', admin: '/admin?tab=sponsors', limit: true },
+  officers: { label: 'Booster Members', admin: '/admin?tab=booster-members', limit: false },
+  gallery: { label: 'Photos', admin: '/admin?tab=photos', limit: true },
+  'site:hero_title': { label: 'Site Settings (hero headline)', admin: '/admin?tab=site', limit: false },
+  'site:hero_subtitle': { label: 'Site Settings (hero subtitle)', admin: '/admin?tab=site', limit: false },
+  instagram: { label: 'Site Settings (social links)', admin: '/admin?tab=site', limit: false },
+  'fundraising-cards': { label: 'Fundraiser cards', admin: '/admin?tab=fundraiser-cards', limit: false },
+  'booster-meetings': { label: 'Calendar (booster meetings)', admin: '/admin?tab=caldev', limit: false },
+  'booster-members': { label: 'Booster Members', admin: '/admin?tab=booster-members', limit: false },
+  sponsors: { label: 'Sponsors', admin: '/admin?tab=sponsors', limit: false },
+  staff: { label: 'Directors & Staff', admin: '/admin?tab=staff', limit: false },
+  'contact-form': { label: 'Contact forms', admin: '/admin?tab=contact', limit: false },
+  // Whole web apps: one locked block, never split into parts.
+  'calendar-app': { label: 'Calendar', admin: '/admin?tab=caldev', limit: false, app: true, manage: 'Manage events' },
+  donate: { label: 'Donations (Square checkout)', admin: '/admin?tab=site', limit: false },
+  'email-list': { label: 'Email list signup', admin: '/admin?tab=mail', limit: false },
 };
 const LIVE_ATTRS = { 'data-fundraising-cards': 'fundraising-cards', 'data-booster-meetings': 'booster-meetings', 'data-booster-members': 'booster-members', 'data-sponsors': 'sponsors', 'data-staff': 'staff', 'data-contact-form-slot': 'contact-form' };
 const EMBED = (inner) => `<div class="home-redesign studio-live-embed">${inner}</div>`;
@@ -561,7 +565,11 @@ export function liveSourceOf(tag, open, html = '') {
   if (a['data-photo-gallery'] != null) return 'gallery';
   if (a['data-site-field']) return `site:${a['data-site-field']}`;
   if (tag === 'a' && a.href === '#instagram') return 'instagram';
+  if (a.id === 'caldev-app' || /(?:^|\s)caldev-app(?:\s|$)/.test(a.class || '')) return 'calendar-app';
   for (const [attr, src] of Object.entries(LIVE_ATTRS)) if (a[attr] != null) return src;
+  if (a['data-visual-locked'] === 'donate' || (a['data-donate-open'] != null && /visual-locked-slot/.test(a.class || ''))) return 'donate';
+  if (a['data-visual-locked'] === 'email-list') return 'email-list';
+  if (a['data-email-list-signup'] != null && !/<[a-z]/i.test(html.slice(open.length))) return 'email-list';
   if (LEAF_TAGS.has(tag)) {
     const m = html.match(/data-home-slot="([^"]+)"|(data-photo-gallery)|data-site-field="([^"]+)"|href="#instagram"/);
     if (m) return m[1] || (m[2] ? 'gallery' : m[3] ? `site:${m[3]}` : 'instagram');

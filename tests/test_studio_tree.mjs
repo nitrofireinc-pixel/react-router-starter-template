@@ -54,3 +54,30 @@ test('fillLiveSlots honours data-limit for events', () => {
   assert.ok(count(two) <= 2);
   assert.ok(count(all) >= count(two));
 });
+
+test('calendar web app is one locked live block with no inner blocks', () => {
+  const H = '<section class="page-title"><div class="wrap"><h1>Calendar</h1><p>Upcoming events</p></div></section>\n<section><div class="wrap"><div id="caldev-app" class="caldev-app"><div class="cal-head"><button>Prev</button></div><div class="cal-grid"></div></div></div></section>';
+  const l = htmlToLayout(H);
+  assert.equal(renderLayout(l), H);
+  const all = flat(l);
+  const app = all.filter((b) => b.type === 'live');
+  assert.equal(app.length, 1);
+  assert.equal(app[0].props.source, 'calendar-app');
+  assert.equal((app[0].props.children || []).length, 0);
+  assert.ok(all.some((b) => b.type !== 'live' && JSON.stringify(b.props).includes('Upcoming events')));
+  const bad = structuredClone(l);
+  flat(bad).find((b) => b.type === 'live').props.html = '<div id="caldev-app" class="caldev-app"><p>Hacked</p></div>';
+  assert.equal(validateLayout(bad, { baseline: l }).ok, false);
+  const hide = structuredClone(l);
+  flat(hide).find((b) => b.type === 'live').hidden = true;
+  assert.ok(validateLayout(hide, { baseline: l }).ok);
+});
+
+test('donate and email-list placeholders are live blocks; round-trip byte-identical', () => {
+  const H = '<section><div class="wrap"><h2>Give</h2><div class="visual-locked-slot" data-visual-locked="donate"></div>\n<div data-email-list-signup></div><div class="x" data-visual-locked="email-list"></div></div></section>';
+  const l = htmlToLayout(H);
+  assert.equal(renderLayout(l), H);
+  const src = flat(l).filter((b) => b.type === 'live').map((b) => b.props.source);
+  assert.deepEqual(src, ['donate', 'email-list', 'email-list']);
+  assert.ok(validateLayout(l, { baseline: l }).ok);
+});

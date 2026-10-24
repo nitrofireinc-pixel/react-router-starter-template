@@ -195,3 +195,4 @@ body.st-rc .st-rail-txt{writing-mode:vertical-rl}
 .st-pickbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(110px + env(safe-area-inset-top));z-index:60;display:flex;align-items:center;gap:10px;background:#0b2a5b;color:#fff;border-radius:999px;padding:4px 4px 4px 14px;font-size:14px;font-weight:700;box-shadow:0 8px 24px rgba(10,30,70,.3)}
 .st-pickbar[hidden]{display:none}
 .st-pickbar button{min-height:40px;border:0;border-radius:999px;background:#fff;color:#c8102e;font-weight:800;padding:0 14px}
+.st-layers{display:flex;flex-direction:column;gap:4px;margin:6px 0 10px}.st-layer{text-align:left;min-height:40px;border:1px solid var(--st-line);border-radius:8px;background:#fff;color:var(--st-navy);font-weight:700;font-size:14px;padding:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.st-layer.on{border-color:#2563eb;background:#eff6ff}.st-layers-wrap summary{cursor:pointer}

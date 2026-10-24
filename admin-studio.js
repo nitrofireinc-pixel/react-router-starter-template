@@ -130,7 +130,7 @@
   const rootTag = (html) => (String(html || '').match(/^<([a-zA-Z0-9-]+)/)?.[1] || '').toLowerCase();
   const liveInfo = (b) => (state?.live_sources || {})[b.props?.source] || { label: b.props?.source || 'another page', admin: '/admin.html' };
   const typeName = (b) => {
-    if (b.type === 'live') return `Live data · ${liveInfo(b).label}`;
+    if (b.type === 'live') return liveInfo(b).app ? `Live app · ${liveInfo(b).label}` : `Live data · ${liveInfo(b).label}`;
     if (b.type === 'el') {
       const t = rootTag(b.props.html); const first = openTags(b.props.html)[0] || '';
       if (/^h[1-6]$/.test(t)) return 'Heading';
@@ -702,7 +702,7 @@
     });
     d.addEventListener('dblclick', (e) => {
       const b = e.target.closest('[data-sc-block]'); const f = b && findBlock(b.dataset.scBlock);
-      if (f?.block.type === 'live') toast(`Live data from ${liveInfo(f.block).label}. It updates by itself, so edit it at the source (link in the panel).`);
+      if (f?.block.type === 'live') toast(liveInfo(f.block).app ? `${liveInfo(f.block).label} app: it has a fixed design. Move, resize or hide it; manage its content with the link in the panel.` : `Live data from ${liveInfo(f.block).label}. It updates by itself, so edit it at the source (link in the panel).`);
     });
     d.addEventListener('pointermove', (e) => {
       if (drag) return;
@@ -869,9 +869,13 @@
     }
     if (b.type === 'live') {
       const info = liveInfo(b);
-      host.append(el('p', { class: 'st-live', 'data-live-badge': p.source }, '⚡ Live data from ', el('b', { text: info.label })));
-      host.append(el('p', { class: 'st-note', text: 'This part fills in by itself from its source and updates automatically, so its words cannot be typed over here. You can move it, resize it, hide it or change its settings.' }));
-      host.append(el('p', {}, el('a', { class: 'st-linkbtn', href: info.admin, target: '_blank', rel: 'noopener', 'data-live-source-link': '', text: `Edit ${info.label} ↗` })));
+      host.append(info.app
+        ? el('p', { class: 'st-live', 'data-live-badge': p.source }, '⚡ Live app: ', el('b', { text: info.label }))
+        : el('p', { class: 'st-live', 'data-live-badge': p.source }, '⚡ Live data from ', el('b', { text: info.label })));
+      host.append(el('p', { class: 'st-note', text: info.app
+        ? `The ${info.label} is a web app with its own fixed design, so nothing inside it can be edited here. You can move it, resize it, or hide and show it. Its content comes from the CMS.`
+        : 'This part fills in by itself from its source and updates automatically, so its words cannot be typed over here. You can move it, resize it, hide it or change its settings.' }));
+      host.append(el('p', {}, el('a', { class: 'st-linkbtn', href: info.admin, target: '_blank', rel: 'noopener', 'data-live-source-link': '', text: `${info.manage || `Edit ${info.label}`} ↗` })));
       const lay = canLayout();
       const show = el('input', { type: 'checkbox', checked: !p.hidden, disabled: !lay, 'aria-label': 'Show on page' });
       show.addEventListener('click', () => { if (show.checked) delete p.hidden; else p.hidden = true; changed(); });
@@ -905,6 +909,24 @@
     if (found.block.type === 'el') { textSegs(found.block.props.html).forEach((seg, k) => { const i = $(`[data-sync="${CSS.escape(found.block.id)}:${k}"]`); if (i && document.activeElement !== i) i.value = decode(seg.text); }); return; }
     all.forEach((b) => { const i = $(`[data-sync="${CSS.escape(b.id)}"]`); if (!i || document.activeElement === i) return; i.value = b.type === 'text' ? textOf(b.props.rich) : b.type === 'button' ? b.props.label : b.props.text; });
   }
+  function layerName(x) {
+    const l = labelOf(x); if (x.type !== 'html' && l && l !== 'HTML') return l;
+    const h = x.props?.html || ''; const w = wordsOf(h); if (w) return w;
+    if (/<img\b/i.test(h)) { const a = /alt="([^"]+)"/i.exec(h); return a ? `Image: ${a[1]}` : 'Image'; }
+    const c = /class="([^"]+)"/i.exec(h); return c ? `Shape · ${c[1].split(/\s+/)[0]}` : (l || typeName(x));
+  }
+  function layersList(host, section, b) {
+    // Layers: every block stacked in this section (plus the selected block's inner blocks), so covered blocks can still be picked.
+    let sibs = section.nested ? sorted(section) : [...section.blocks].sort((p, q) => (p.y ?? 0) - (q.y ?? 0) || (p.x ?? 0) - (q.x ?? 0));
+    const blank = (x) => x.type === 'html' && x.id !== b.id && !String(x.props?.html || '').trim();
+    const kids = (b.props?.children || []).filter((x) => !blank(x));
+    sibs = sibs.filter((x) => !blank(x));
+    if (sibs.length < 2 && !kids.length) return;
+    const row = (x, depth) => el('button', { type: 'button', class: `st-layer${x.id === b.id ? ' on' : ''}`, 'data-layer': x.id, 'aria-current': x.id === b.id ? 'true' : 'false', style: depth ? 'padding-left:22px' : '', text: `${x.type === 'live' ? '⚡ ' : ''}${short(layerName(x), 30)}${x.hidden ? ' (hidden)' : ''}`, onclick: () => { selected = x.id; afterSelect(); revealSelected(); } });
+    const list = el('div', { class: 'st-layers', 'data-layers': '' });
+    sibs.slice(0, 20).forEach((x) => { list.append(row(x, 0)); if (x.id === b.id) kids.slice(0, 20).forEach((k) => list.append(row(k, 1))); });
+    host.append(el('details', { class: 'st-layers-wrap', open: '' }, el('summary', { class: 'st-group', text: `Layers (${sibs.length})` }), list));
+  }
   function renderInspector() {
     const host = $('[data-inspector]'); host.innerHTML = '';
     const found = selected && findBlock(selected);
@@ -919,6 +941,7 @@
     const { section, block: b } = found; const grid = isGrid(section); const lay = canLayout();
     const name = TYPE_NAMES[b.type] || b.type;
     host.append(el('h2', { text: `${b.type === 'card' ? 'Card' : TREE.has(b.type) ? typeName(b).replace(/ · .*/, '') : name} settings` }), el('p', { class: 'st-selname', text: `“${short(labelOf(b), 26)}” · selected` }));
+    layersList(host, section, b);
     if (lay) {
       const span = section.nested ? (b.props?.span || 12) : b.w;
       const setW = (d) => {
@@ -1175,6 +1198,10 @@ body.sc-touch{overflow-x:hidden}
 .sc-hint2{transform:translate(0,-50%);background:#d6e7ff;color:#0b2a5b}
 [data-sc-block]{cursor:pointer}
 .sc-name>span.sc-live-tag{background:#0f7a43}
+.caldev-app:empty,[data-fundraising-cards]:empty,[data-visual-locked]:empty,[data-staff]:empty,[data-sponsors]:empty,[data-booster-members]:empty,[data-booster-meetings]:empty,[data-contact-form-slot]:empty,[data-photo-gallery]:empty{display:flex!important;align-items:center;justify-content:center;min-height:90px;border:2px dashed #0f7a43;border-radius:10px;background:#f1faf5;color:#0f5a33;font:600 14px/1.3 system-ui,sans-serif;padding:16px;text-align:center}
+.caldev-app:empty{min-height:260px}.caldev-app:empty::before{content:'⚡ Calendar app (live). Events show here on the public page.'}
+[data-fundraising-cards]:empty::before{content:'⚡ Fundraiser cards (live)'}[data-visual-locked="email-list"]:empty::before{content:'⚡ Email list signup (live)'}
+[data-staff]:empty::before{content:'⚡ Directors & Staff (live)'}[data-sponsors]:empty::before{content:'⚡ Sponsors (live)'}[data-booster-members]:empty::before{content:'⚡ Booster Members (live)'}[data-booster-meetings]:empty::before{content:'⚡ Booster meetings (live)'}[data-contact-form-slot]:empty::before{content:'⚡ Contact form (live)'}[data-photo-gallery]:empty::before{content:'⚡ Photos (live)'}
 .studio-live-hidden{border:2px dashed #0f7a43;border-radius:10px;padding:12px;color:#0f7a43;font:700 14px/1.3 "Work Sans",system-ui,sans-serif;text-align:center;background:rgba(15,122,67,.06)}
 .sc-editable{outline:1.5px dashed rgba(47,125,225,.55);outline-offset:3px;cursor:text!important;border-radius:3px}
 .sc-editable:focus{outline:2px solid #ffd21f;background:rgba(255,210,31,.12)}
