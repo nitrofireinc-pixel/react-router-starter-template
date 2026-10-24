@@ -232,6 +232,7 @@ import {
   saveVisualPage,
   stripVisualLockedLabels,
 } from './visual-page-editor.mjs';
+import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema } from './studio.mjs';
 import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
@@ -629,7 +630,7 @@ export function normalizeStaticPath(pathname) {
 
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
-  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'caldev.js', 'site-content.js',
+  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'admin-studio.js', 'admin-studio.css', 'caldev.js', 'site-content.js',
   'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
@@ -7566,6 +7567,8 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
       mark: PUBLIC_BRAND_MARK,
     });
   }
+  // Site Studio v2: serve the HTML saved at publish time (no render on request).
+  if (page.studio_html) return page.studio_html;
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);
@@ -11695,6 +11698,13 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true });
   }
 
+  if (url.pathname.startsWith('/api/admin/studio/')) {
+    const studioResponse = await handleStudioApi(request, env, url, {
+      requireLogin, jsonResponse, canEditPageContent, canEditPageLayout, isSuperAdmin,
+      invalidate: invalidatePublicReadCache,
+    });
+    if (studioResponse) return studioResponse;
+  }
   const visualPageMatch = url.pathname.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)$/);
   const visualRestoreMatch = url.pathname.match(/^\/api\/admin\/visual-pages\/([a-z0-9-]+)\/restore$/);
   if (visualPageMatch && request.method === 'GET') {
@@ -13817,6 +13827,18 @@ async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {
   })), user);
 }
 
+async function handleStudioEditorPage(request, env, slug) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml(`/admin/studio/${slug}`);
+  const user = session.user;
+  if (!user) return redirect('/admin/login');
+  if (!canEditPageContent(user, slug)) return htmlResponse('<!doctype html><title>Not allowed</title><p>You do not have access to this page.</p>', 403);
+  await ensureStudioSchema(env);
+  const starter = slug === 'coming-soon' ? comingSoonLayout({ mark: PUBLIC_BRAND_MARK }) : null;
+  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site Studio: ${escapeHtml(slug)}</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head><body class="studio-app" data-slug="${escapeAttr(slug)}"><script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script><header class="studio-top"><a href="/admin">&larr; Staff menu</a><h1>Site Studio <span data-slug-label></span></h1><span class="studio-status" data-status></span></header><main class="studio-main"><section class="studio-panel"><div class="studio-actions"><button type="button" data-act="draft">Save draft</button><button type="button" data-act="publish" class="primary">Publish</button><label class="studio-flag" hidden>Editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div><div data-blocks></div><details><summary>Layout JSON</summary><textarea data-json rows="18"></textarea><button type="button" data-act="apply-json">Apply JSON</button></details><h2>History (last 3)</h2><ol data-history></ol><ul class="studio-errors" data-errors></ul></section><section class="studio-preview"><iframe title="Preview" data-preview sandbox=""></iframe></section></main><script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`);
+}
+
 async function handleVisualEditorPage(request, env, slug, ctx = null) {
   await initDb(env);
   const session = await inspectSessionCookie(request, env);
@@ -14466,6 +14488,8 @@ async function serveStaticOrCms(request, env, url, ctx) {
         && !isDeliberateComingSoonPage(page)
         && canPreviewUnpublishedCmsPage(user, page);
       const livePage = previewUnpublished ? { ...page, active: 1 } : publicCmsPageForRender(page);
+      const studioHtml = await cachedPublicRead(`studio-html:${path}`, () => loadStudioLiveHtml(env, path), { ctx });
+      if (studioHtml && isPublicCmsPageActive(page)) livePage.studio_html = studioHtml;
       const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
       const isFundraising = pageIsLive && page.slug === 'fundraising';
@@ -14686,6 +14710,8 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
       return handleFundraiserCardsPage(request, env, ctx);
     }
+    const studioEditorMatch = url.pathname.match(/^\/admin\/studio\/([a-z0-9-]+)\/?$/);
+    if (studioEditorMatch) return handleStudioEditorPage(request, env, studioEditorMatch[1]);
     const visualEditorMatch = url.pathname.match(new RegExp(`^${VISUAL_EDITOR_PATH_PREFIX}/([a-z0-9-]+)/?$`));
     if (visualEditorMatch) {
       return handleVisualEditorPage(request, env, visualEditorMatch[1], ctx);
