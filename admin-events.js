@@ -33,6 +33,10 @@
     busy: false,
     editing: null,     // event being edited or null for new
     exceptions: [],
+    mode: "",          // "" | "one" (just this date) | "series" (whole series) for series rows
+    shift: null,       // whole-series day shift {from, to}
+    settings: null,    // overlap settings {evening_start, evening_end, modes}
+    canEditSettings: false,
   };
   let toastTimer = null;
 
@@ -76,6 +80,19 @@
   const apiUpdate = (id, p) => api(`/api/admin/caldev/events/${id}`, { method: "PUT", body: JSON.stringify(p) });
   const apiDelete = (id) => api(`/api/admin/caldev/events/${id}`, { method: "DELETE" });
   const apiRestore = (row) => api("/api/admin/caldev/events/restore", { method: "POST", body: JSON.stringify(row) });
+  const apiPutBack = (rows, deleteIds, label) => api("/api/admin/caldev/put-back", { method: "POST", body: JSON.stringify({ rows: rows || [], delete_ids: deleteIds || [], undo: label || "" }) });
+  const q = (flag) => (flag === "force" ? "?force=1" : "?check=1");
+  // Every save asks the server to check overlaps first; nothing is written when it finds any.
+  async function withOverlapCheck(send, adding) {
+    const first = await send("check");
+    if (first && first.saved === false && first.count) {
+      const choice = await showConflicts(first, adding);
+      if (choice !== "force") return { cancelled: true };
+      const data = await send("force");
+      return { data, overlaps: first.count };
+    }
+    return { data: first, overlaps: 0 };
+  }
   function payloadOf(ev) {
     return {
       title: ev.title || "", description: ev.description || "", location: ev.location || "", who: ev.who || "",
@@ -105,6 +122,7 @@
         if (op.type === "delete") await apiDelete(op.id).catch((e) => { if (!/not found/i.test(e.message)) throw e; });
         else if (op.type === "put") await apiUpdate(op.id, op.payload);
         else if (op.type === "restore") await apiRestore(op.row);
+        else if (op.type === "putback") await apiPutBack(op.rows, op.delete_ids, step.label);
       }
       await load();
       toast(`↶ Undid: ${step.label}`);
@@ -139,6 +157,7 @@
 <div class="ev-bar2">
   <div class="ev-show"><span class="ev-show-h">Show:</span><span data-chips></span><span class="ev-legend">↻ = repeating · <s>struck</s> = cancelled</span></div>
   <div class="ev-bar2-r">
+    <button type="button" class="ev-link" data-act="settings">⚙ Overlap settings</button>
     <button type="button" class="ev-link" data-act="undated" aria-expanded="false">Needs a date (<span data-undated-n>0</span>)</button>
     ${canNotify ? '<button type="button" class="ev-btn ev-finished" data-act="finished">✉ Finished: notify subscribers</button>' : ""}
   </div>
@@ -149,7 +168,9 @@
 <button type="button" class="ev-fab" data-act="new">＋ New event</button>
 <div class="ev-toast" data-toast role="status" aria-live="polite" hidden></div>
 <div class="ev-scrim" data-scrim hidden></div>
-<form class="ev-dialog" data-form role="dialog" aria-modal="true" aria-labelledby="ev-form-h" hidden novalidate></form>`;
+<form class="ev-dialog" data-form role="dialog" aria-modal="true" aria-labelledby="ev-form-h" hidden novalidate></form>
+<div class="ev-sheet-scrim" data-sheet-scrim hidden></div>
+<div class="ev-sheet" data-sheet role="dialog" aria-modal="true" aria-labelledby="ev-sheet-h" hidden></div>`;
   }
 
   function renderChips() {
@@ -241,22 +262,30 @@ ${list.length ? list.map((ev) => { const t = TRACK[ev.track] || TRACK.other; ret
   function radioCats(sel) {
     return TRACKS.map((t) => `<label class="ev-cat" style="--c:${t.color};--i:${t.ink || "#fff"}"><input type="radio" name="track" value="${t.id}"${t.id === sel ? " checked" : ""}><span>${esc(FORM_LABEL[t.id])}</span></label>`).join("");
   }
-  function openForm(ev, dateKey) {
+  function openForm(ev, dateKey, chosen) {
+    if (ev && ev.series_id && !ev.cancelled_at && !chosen) { state.mode = ""; state.shift = null; seriesChooser(ev); return; }
+    if (!chosen) { state.mode = ""; state.shift = null; }
     state.editing = ev || null;
     state.exceptions = [];
     const f = ev ? payloadOf(ev) : { title: "", description: "", location: "", start_date: dateKey || todayIso(), end_date: "", start_time: "", end_time: "", all_day: true, track: "rehearsal" };
     let suggested = false;
     if (ev && f.track === "other" && FUNDRAISER_RE.test(`${f.title} ${plain(f.description)}`)) { f.track = "fundraiser"; suggested = true; }
-    const title = ev ? "Edit event" : `New event · ${longDate(f.start_date)}`;
+    const inSeries = ev && ev.series_id && !ev.cancelled_at;
+    const title = !ev ? `New event · ${longDate(f.start_date)}`
+      : state.mode === "series" ? "Edit whole series (today onward)"
+      : inSeries ? "Edit just this date" : ev.cancelled_at ? "Edit event · Cancelled" : "Edit event";
     const form = root.querySelector("[data-form]");
     form.innerHTML = `
 <div class="ev-f-grab" aria-hidden="true"></div>
 <div class="ev-f-head"><h2 id="ev-form-h">${esc(title)}</h2><button type="button" class="ev-btn" data-close>✕ <span class="ev-lbl">Close</span></button></div>
 <div class="ev-f-body">
+${state.mode === "series" ? `<p class="ev-note ev-series-note">↻ Changes apply to every date in this series from today on${state.shift ? ` · each ${DOW[state.shift.from]} moves to ${DOW[state.shift.to]} of the same week` : ""}. Past and detached dates are not touched.</p>` : ""}
+${state.mode === "one" ? '<p class="ev-note ev-series-note">Saving removes this date from its series; the rest of the series keeps going.</p>' : ""}
+${ev && ev.cancelled_at ? '<p class="ev-note ev-cancel-note">⊘ <b>Cancelled</b> · shows struck through on the calendar. Restore brings it back.</p>' : ""}
 <label class="ev-f ev-f-wide"><span>Title</span><input name="title" maxlength="200" required value="${esc(f.title)}" placeholder="Event title"></label>
 <div class="ev-f-row">
-  <label class="ev-f"><span>Date</span><input name="start_date" type="date" value="${esc(f.start_date)}"></label>
-  <label class="ev-f"><span>End date (optional)</span><input name="end_date" type="date" value="${esc(f.end_date)}"></label>
+  <label class="ev-f"><span>Date</span><input name="start_date" type="date" value="${esc(f.start_date)}"${state.mode === "series" ? " disabled" : ""}></label>
+  <label class="ev-f"><span>End date (optional)</span><input name="end_date" type="date" value="${esc(f.end_date)}"${state.mode === "series" ? " disabled" : ""}></label>
 </div>
 ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
   <div class="ev-seg"><label><input type="radio" name="repeat" value="yes"><span>Yes</span></label><label><input type="radio" name="repeat" value="no" checked><span>No</span></label></div>
@@ -287,7 +316,9 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
 </div>
 </div>
 <div class="ev-f-foot">
-  ${ev ? '<button type="button" class="ev-btn ev-danger" data-delete>🗑 Delete</button>' : ""}
+  ${ev ? `<button type="button" class="ev-btn ev-danger" data-delete>🗑 ${state.mode === "series" ? "Delete whole series…" : "Delete"}</button>` : ""}
+  ${ev && state.mode !== "series" ? (ev.cancelled_at ? '<button type="button" class="ev-btn" data-uncancel>↺ Restore</button>' : '<button type="button" class="ev-btn" data-cancel-date>⊘ Cancel this date</button>') : ""}
+  ${ev && !ev.series_id && !ev.cancelled_at ? '<button type="button" class="ev-btn" data-group>⛓ Group as series…</button>' : ""}
   <span class="ev-note">Saves go live; Undo can reverse the last 3 changes</span>
   <button type="button" class="ev-btn" data-close>Cancel</button>
   <button type="submit" class="ev-btn ev-primary" data-save>${ev ? "Save" : "Add event"}</button>
@@ -301,7 +332,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
     root.querySelector("[data-form]").hidden = true;
     root.querySelector("[data-scrim]").hidden = true;
     document.body.classList.remove("ev-modal");
-    state.editing = null;
+    state.editing = null; state.mode = ""; state.shift = null;
   }
 
   function cleanDesc(html) {
@@ -368,35 +399,53 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
     return out;
   }
 
+  const fullRow = (ev) => ({ ...ev });
+  function okToast(base, overlaps) {
+    toast(overlaps ? `✓ Saved (overlaps noted)` : base, false, true);
+  }
   async function save(e) {
     e.preventDefault();
     if (state.busy) return;
     const p = readForm();
     if (!p.title) { toast("Title is required", true); return; }
-    if (!p.start_date && !p.repeat) { toast("Date is required", true); return; }
+    if (!p.start_date && !p.repeat && state.mode !== "series") { toast("Date is required", true); return; }
     const { repeat, days, months, ...body } = p;
+    const ev = state.editing;
     state.busy = true; setStatus("Saving…");
     try {
-      if (state.editing) {
-        const before = payloadOf(state.editing);
-        const saved = await apiUpdate(state.editing.id, body);
-        pushUndo(`Edit “${saved.title}”`, [{ type: "put", id: saved.id, payload: before }]);
-        replace(saved);
-        closeForm(); toast(`✓ Saved “${saved.title}”`, false, true);
+      if (ev && state.mode === "series") {
+        const fields = { title: body.title, description: body.description, location: body.location, track: body.track, all_day: body.all_day, start_time: body.start_time, end_time: body.end_time };
+        const shift = state.shift;
+        const r = await withOverlapCheck((flag) => api(`/api/admin/caldev/series/${ev.series_id}${q(flag)}`, { method: "PUT", body: JSON.stringify({ fields, day_shift: shift }) }), body);
+        if (r.cancelled) { setStatus("Not saved"); return; }
+        await load();
+        pushUndo(`Change series “${body.title}”`, [{ type: "putback", rows: r.data.before || [] }]);
+        closeForm(); okToast(`✓ Changed ${r.data.rows.length} dates in the series`, r.overlaps);
+      } else if (ev) {
+        const extra = ev.series_id && !ev.cancelled_at ? { detach: true } : {};
+        const r = await withOverlapCheck((flag) => api(`/api/admin/caldev/events/${ev.id}${q(flag)}`, { method: "PUT", body: JSON.stringify({ ...body, ...extra }) }), body);
+        if (r.cancelled) { setStatus("Not saved"); return; }
+        pushUndo(`Edit “${r.data.title}”`, [{ type: "putback", rows: [fullRow(ev)] }]);
+        replace(r.data);
+        closeForm(); okToast(`✓ Saved “${r.data.title}”`, r.overlaps);
       } else if (repeat) {
         const dates = repeatDates(p);
         if (!dates.length) { toast("Choose at least one weekday and one month to repeat", true); return; }
-        const made = [];
-        for (const d of dates) { made.push(await apiCreate({ ...body, start_date: d, end_date: "" })); }
+        const rule = { kind: "weekly", days: [...days].sort(), months: [...months].sort((a, b) => a - b), year: Number(dates[0].slice(0, 4)), skip: [...state.exceptions].sort() };
+        const r = await withOverlapCheck((flag) => api(`/api/admin/caldev/series${q(flag)}`, { method: "POST", body: JSON.stringify({ event: { ...body, end_date: "" }, dates, rule }) }), body);
+        if (r.cancelled) { setStatus("Not saved"); return; }
+        const made = r.data.rows || [];
         state.events.push(...made);
-        pushUndo(`Add ${made.length} “${p.title}” dates`, made.map((x) => ({ type: "delete", id: x.id })));
-        closeForm(); toast(`✓ Added ${made.length} “${p.title}” dates`, false, true);
+        pushUndo(`Add ${made.length} “${p.title}” dates`, [{ type: "putback", rows: [], delete_ids: made.map((x) => x.id) }]);
+        closeForm(); okToast(`✓ Added ${made.length} “${p.title}” dates`, r.overlaps);
       } else {
-        const made = await apiCreate(body);
+        const r = await withOverlapCheck((flag) => api(`/api/admin/caldev/events${q(flag)}`, { method: "POST", body: JSON.stringify(body) }), body);
+        if (r.cancelled) { setStatus("Not saved"); return; }
+        const made = r.data;
         state.events.push(made);
         pushUndo(`Add “${made.title}”`, [{ type: "delete", id: made.id }]);
         if (state.picked) state.picked = dayOf(made) || state.picked;
-        closeForm(); toast(`✓ Added “${made.title}”`, false, true);
+        closeForm(); okToast(`✓ Added “${made.title}”`, r.overlaps);
       }
       setStatus("✓ Saved · live on the public Calendar");
     } catch (err) {
@@ -407,16 +456,210 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
 
   async function remove() {
     const ev = state.editing; if (!ev || state.busy) return;
+    if (state.mode === "series") return removeSeries(ev);
     if (!window.confirm("Delete this Schedule Board event? Meetings will also be removed from Boosters.")) return;
     state.busy = true; setStatus("Deleting…");
     try {
       await apiDelete(ev.id);
       state.events = state.events.filter((x) => String(x.id) !== String(ev.id));
-      pushUndo(`Delete “${ev.title}”`, [{ type: "restore", row: { id: ev.id, ...payloadOf(ev) } }]);
+      pushUndo(`Delete “${ev.title}”`, [{ type: "restore", row: { ...payloadOf(ev), id: ev.id, series_id: ev.series_id, series_rule: ev.series_rule, cancelled_at: ev.cancelled_at } }]);
       closeForm(); toast(`🗑 Deleted “${ev.title}”`, false, true);
       setStatus("✓ Saved · live on the public Calendar");
     } catch (err) { toast(err.message || "Delete failed", true); setStatus("Not deleted", true); }
     finally { state.busy = false; render(); }
+  }
+  async function removeSeries(ev) {
+    let info;
+    try { info = await api(`/api/admin/caldev/series/${ev.series_id}`); } catch (err) { toast(err.message, true); return; }
+    const n = info.future_count;
+    const ok = await confirmSheet("Delete whole series?", `<p>This deletes <b>${n}</b> date${n === 1 ? "" : "s"} of “${esc(ev.title)}” from today on that are still in the series.</p><p class="ev-note">Past, cancelled and detached dates stay. Undo brings them all back.</p>`, `🗑 Delete ${n} date${n === 1 ? "" : "s"}`, true);
+    if (!ok) return;
+    state.busy = true; setStatus("Deleting…");
+    try {
+      const res = await api(`/api/admin/caldev/series/${ev.series_id}`, { method: "DELETE" });
+      await load();
+      pushUndo(`Delete series “${ev.title}”`, [{ type: "putback", rows: res.deleted || [] }]);
+      closeForm(); toast(`🗑 Deleted ${res.deleted.length} dates of “${ev.title}”`, false, true);
+      setStatus("✓ Saved · live on the public Calendar");
+    } catch (err) { toast(err.message || "Delete failed", true); setStatus("Not deleted", true); }
+    finally { state.busy = false; render(); }
+  }
+  async function setCancelled(on) {
+    const ev = state.editing; if (!ev || state.busy) return;
+    state.busy = true; setStatus(on ? "Cancelling…" : "Restoring…");
+    try {
+      const saved = await apiUpdate(ev.id, { cancelled: on });
+      replace(saved);
+      pushUndo(`${on ? "Cancel" : "Restore"} “${ev.title}”`, [{ type: "putback", rows: [fullRow(ev)] }]);
+      closeForm(); toast(on ? `⊘ Cancelled “${ev.title}” · ${shortDate(dayOf(ev))}` : `↺ Restored “${ev.title}”`, false, true);
+      setStatus("✓ Saved · live on the public Calendar");
+    } catch (err) { toast(err.message || "Failed", true); setStatus("Not saved", true); }
+    finally { state.busy = false; render(); }
+  }
+
+  // ---------- sheet (series chooser, overlap check, group, settings) ----------
+  let sheetDone = null;
+  function openSheet(html, cls) {
+    const prev = root.querySelector("[data-sheet]");
+    const sh = prev.cloneNode(false); // fresh node: no listeners left from the last sheet
+    prev.replaceWith(sh);
+    sh.className = `ev-sheet${cls ? ` ${cls}` : ""}`;
+    sh.innerHTML = html; sh.hidden = false;
+    root.querySelector("[data-sheet-scrim]").hidden = false;
+    setTimeout(() => sh.querySelector("button.ev-primary, button")?.focus(), 20);
+    return sh;
+  }
+  function closeSheet(result) {
+    root.querySelector("[data-sheet]").hidden = true;
+    root.querySelector("[data-sheet-scrim]").hidden = true;
+    const done = sheetDone; sheetDone = null;
+    if (done) done(result);
+  }
+  function sheetPromise() { return new Promise((resolve) => { sheetDone = resolve; }); }
+  function confirmSheet(title, bodyHtml, okLabel, danger) {
+    openSheet(`<div class="ev-sh-head"><h2 id="ev-sheet-h">${esc(title)}</h2><button type="button" class="ev-btn" data-sheet-close>✕</button></div>
+<div class="ev-sh-body">${bodyHtml}</div>
+<div class="ev-sh-foot"><button type="button" class="ev-btn" data-sheet-close>Back</button><button type="button" class="ev-btn ${danger ? "ev-danger-solid" : "ev-primary"}" data-sheet-ok>${esc(okLabel)}</button></div>`);
+    return sheetPromise();
+  }
+
+  function seriesChooser(ev) {
+    const d = parse(dayOf(ev)).getDay();
+    openSheet(`<div class="ev-sh-head"><h2 id="ev-sheet-h">Change a repeating event</h2><button type="button" class="ev-btn" data-sheet-close>✕</button></div>
+<p class="ev-sh-sub">↻ ${esc(ev.title)} · ${esc(longDate(dayOf(ev)))}</p>
+<div class="ev-sh-body">
+<label class="ev-choice"><input type="radio" name="smode" value="one" checked><span><b>Just this date</b> (removes it from the series)<small>Edit, move or cancel ${esc(shortDate(dayOf(ev)))} only. It becomes a single event; the series keeps going.</small></span></label>
+<label class="ev-choice"><input type="radio" name="smode" value="series"><span><b>Whole series</b><small>Change every date in the series from today on, at once.</small></span></label>
+<div class="ev-shift" data-shift hidden><b>Whole-series shift</b>
+  <div class="ev-f-row">Day: <select data-shift-from>${DOW.map((x, i) => `<option value="${i}"${i === d ? " selected" : ""}>${x}</option>`).join("")}</select> → <select data-shift-to>${DOW.map((x, i) => `<option value="${i}"${i === d ? " selected" : ""}>${x}</option>`).join("")}</select></div>
+  <p class="ev-note">Each date moves to that day of the same week. Detached and past dates are not touched.</p>
+  <div class="ev-preview" data-shift-preview></div>
+</div></div>
+<div class="ev-sh-foot"><button type="button" class="ev-btn" data-sheet-close>Back</button><button type="button" class="ev-btn ev-primary" data-series-go>Continue</button></div>`, "ev-sheet-side");
+    const sh = root.querySelector("[data-sheet]");
+    const refresh = async () => {
+      const whole = sh.querySelector('[name="smode"][value="series"]').checked;
+      sh.querySelector("[data-shift]").hidden = !whole;
+      if (!whole) return;
+      const from = Number(sh.querySelector("[data-shift-from]").value), to = Number(sh.querySelector("[data-shift-to]").value);
+      const box = sh.querySelector("[data-shift-preview]");
+      try {
+        const res = await api(`/api/admin/caldev/series/${ev.series_id}?preview=1`, { method: "PUT", body: JSON.stringify({ fields: {}, day_shift: from === to ? null : { from, to } }) });
+        const moved = res.preview.filter((x) => x.old_date !== x.new_date);
+        box.innerHTML = `Preview: <b>${res.preview.length}</b> date${res.preview.length === 1 ? "" : "s"} change${moved.length ? ` · ${moved.length} move` : ""}${moved.length ? `<ul class="ev-moves">${moved.slice(0, 6).map((x) => `<li>${esc(shortDate(x.old_date))} → <b>${esc(shortDate(x.new_date))}</b></li>`).join("")}${moved.length > 6 ? `<li>and ${moved.length - 6} more</li>` : ""}</ul>` : ""}`;
+      } catch (err) { box.textContent = err.message; }
+    };
+    sh.addEventListener("change", refresh);
+    sheetDone = (r) => {
+      if (r !== "go") return;
+      const whole = sh.querySelector('[name="smode"][value="series"]').checked;
+      const from = Number(sh.querySelector("[data-shift-from]").value), to = Number(sh.querySelector("[data-shift-to]").value);
+      state.mode = whole ? "series" : "one";
+      state.shift = whole && from !== to ? { from, to } : null;
+      openForm(ev, null, true);
+    };
+  }
+
+  function fmtMin(m) { if (m >= 1440) return "midnight"; const h = Math.floor(m / 60), mm = m % 60; return `${((h + 11) % 12) + 1}:${pad(mm)} ${h >= 12 ? "PM" : "AM"}`; }
+  function winLabel(w) { return w.kind === "whole_day" ? "Whole day" : `${fmtMin(w.start)}–${fmtMin(w.end)}`; }
+  function bar(w, cls, label) {
+    const lo = 720, span = 720;
+    const a = Math.max(w.start, lo), b = Math.min(w.end, 1440);
+    if (b <= a) return `<div class="ev-tl-row"><span class="ev-tl-out">${esc(label)} · before 12 PM</span></div>`;
+    return `<div class="ev-tl-row"><span class="ev-tl-bar ${cls}" style="left:${((a - lo) / span) * 100}%;width:${((b - a) / span) * 100}%">${esc(label)}</span></div>`;
+  }
+  function conflictBlock(c) {
+    const ex = c.existing, ad = c.adding;
+    const exT = TRACK[ex.track] || TRACK.other, adT = TRACK[ad.track] || TRACK.other;
+    const eveningNote = (w, t) => (w.kind === "evening" ? `All-day ${(FORM_LABEL[t] || "").replace(/s$/, "").toLowerCase()}, counted from ${fmtMin(w.start)}` : "");
+    const lo = 720, ov = c.overlap;
+    return `<div class="ev-cf">
+<h3>⚠ ${esc(longDate(c.date))}: overlaps “${esc(ex.title)}”</h3>
+<div class="ev-cf-pair">
+  <div class="ev-cf-card" style="--c:${exT.color}"><small>ALREADY SCHEDULED</small><b>${esc(ex.title)}</b><span>${esc(shortDate(c.date))} · ${esc(ex.all_day ? "All day" : timeLabel(ex))} (${esc(FORM_LABEL[ex.track] || "Other")})</span>${ex.window.kind !== "timed" ? `<span>counted ${esc(winLabel(ex.window))}</span>` : ""}</div>
+  <span class="ev-cf-vs">vs</span>
+  <div class="ev-cf-card is-new" style="--c:${adT.color}"><small>YOU ARE ADDING</small><b>${esc(ad.title)}</b><span>${esc(shortDate(c.date))} · ${esc(ad.all_day ? "All day" : timeLabel(ad))} (${esc(FORM_LABEL[ad.track] || "Other")})</span>${ad.window.kind !== "timed" ? `<span>counted ${esc(winLabel(ad.window))}</span>` : ""}</div>
+</div>
+<div class="ev-tl" aria-hidden="true"><div class="ev-tl-scale"><span>12 PM</span><span>2 PM</span><span>4 PM</span><span>6 PM</span><span>8 PM</span><span>10 PM</span><span>12 AM</span></div>
+${bar(ex.window, ex.window.kind === "evening" ? "is-hatch" : "", eveningNote(ex.window, ex.track) || ex.title)}
+${bar(ad.window, `is-new${ad.window.kind === "evening" ? " is-hatch" : ""}`, eveningNote(ad.window, ad.track) || ad.title)}
+${ov.end > lo ? `<div class="ev-tl-row ev-tl-ovrow"><span class="ev-tl-ov" style="left:${((Math.max(ov.start, lo) - lo) / 720) * 100}%;width:${((Math.min(ov.end, 1440) - Math.max(ov.start, lo)) / 720) * 100}%"></span></div>` : ""}
+</div>
+<p class="ev-cf-legend">Orange = overlap ${esc(fmtMin(ov.start))}–${esc(fmtMin(ov.end))}.</p>
+</div>`;
+  }
+  function showConflicts(res, adding) {
+    const all = res.all && res.all.length ? res.all : res.conflicts;
+    const first = all.slice(0, 5), rest = all.slice(5);
+    const more = res.count - first.length;
+    openSheet(`<div class="ev-sh-grab" aria-hidden="true"></div>
+<div class="ev-sh-head"><h2 id="ev-sheet-h">Check before saving</h2><button type="button" class="ev-btn" data-sheet-close aria-label="Go back">✕</button></div>
+<p class="ev-sh-sub">${esc(adding?.title || "")}: <b>${res.count} overlap${res.count === 1 ? "" : "s"}</b></p>
+<div class="ev-sh-body ev-cf-list">${first.map(conflictBlock).join("")}
+${more > 0 ? `<button type="button" class="ev-link" data-more aria-expanded="false">and ${more} more ▾</button><div data-more-list hidden>${rest.map(conflictBlock).join("")}${res.count > all.length ? `<p class="ev-note">…plus ${res.count - all.length} more not shown.</p>` : ""}</div>` : ""}
+<p class="ev-note">Saving is never blocked. “Save anyway” is logged as saved with ${res.count} overlap${res.count === 1 ? "" : "s"}. IMPORTANT and Other items are never conflicts; back-to-back (one ends 5:00, next starts 5:00) is fine.</p></div>
+<div class="ev-sh-foot"><button type="button" class="ev-btn" data-sheet-close>← Go back and edit</button><button type="button" class="ev-btn ev-primary" data-sheet-force>Save anyway</button></div>`, "ev-sheet-cf");
+    return sheetPromise();
+  }
+
+  function openGroup(ev) {
+    const key = (r) => `${String(r.title).trim().toLowerCase()}|${r.track}|${r.start_time}|${r.end_time}`;
+    const free = state.events.filter((r) => dayOf(r) && !r.series_id && !r.cancelled_at).sort(sortEv);
+    const similar = new Set(free.filter((r) => key(r) === key(ev)).map((r) => String(r.id)));
+    const row = (r) => `<label class="ev-grp"><input type="checkbox" name="gid" value="${r.id}"${similar.has(String(r.id)) ? " checked" : ""}> <span>${esc(shortDate(dayOf(r)))} · ${esc(r.title)} · ${esc(timeLabel(r))}</span></label>`;
+    openSheet(`<div class="ev-sh-head"><h2 id="ev-sheet-h">⛓ Group as series</h2><button type="button" class="ev-btn" data-sheet-close>✕</button></div>
+<p class="ev-sh-sub">Pick separate events to join into one series, so whole-series changes work on them.</p>
+<div class="ev-sh-body"><button type="button" class="ev-btn" data-find-similar>Find similar (same title, category and time)</button>
+<div class="ev-grp-list" data-grp-list>${free.filter((r) => similar.has(String(r.id))).map(row).join("")}</div>
+<details><summary>Show all other single events</summary>${free.filter((r) => !similar.has(String(r.id))).map(row).join("")}</details>
+<p class="ev-note" data-grp-n></p></div>
+<div class="ev-sh-foot"><button type="button" class="ev-btn" data-sheet-close>Back</button><button type="button" class="ev-btn ev-primary" data-group-go>Review</button></div>`, "ev-sheet-side");
+    const sh = root.querySelector("[data-sheet]");
+    const count = () => { const n = sh.querySelectorAll('[name="gid"]:checked').length; sh.querySelector("[data-grp-n]").textContent = `${n} selected`; return n; };
+    count(); sh.addEventListener("change", count);
+    sh.querySelector("[data-find-similar]").addEventListener("click", () => { sh.querySelectorAll('[name="gid"]').forEach((c) => { c.checked = similar.has(c.value); }); count(); });
+    sheetDone = async (r) => {
+      if (r !== "group") return;
+      const ids = [...sh.querySelectorAll('[name="gid"]:checked')].map((c) => Number(c.value));
+      if (ids.length < 2) { toast("Pick at least two events", true); return; }
+      const picked = state.events.filter((x) => ids.includes(Number(x.id))).sort(sortEv);
+      const ok = await confirmSheet("Review: group as series", `<p>Join <b>${ids.length}</b> events into one series:</p><ul class="ev-moves">${picked.slice(0, 10).map((x) => `<li>${esc(shortDate(dayOf(x)))} · ${esc(x.title)}</li>`).join("")}${picked.length > 10 ? `<li>and ${picked.length - 10} more</li>` : ""}</ul><p class="ev-note">Dates do not change. One Undo step.</p>`, `⛓ Group ${ids.length} events`);
+      if (!ok) return;
+      state.busy = true;
+      try {
+        const res = await api("/api/admin/caldev/group-series", { method: "POST", body: JSON.stringify({ ids }) });
+        await load();
+        pushUndo(`Group ${ids.length} “${ev.title}” events`, [{ type: "putback", rows: res.before }]);
+        closeForm(); toast(`⛓ Grouped ${ids.length} events as a series`, false, true);
+      } catch (err) { toast(err.message || "Group failed", true); }
+      finally { state.busy = false; render(); }
+    };
+  }
+
+  const MODE_LABEL = { evening: "Evening only", whole_day: "Whole day", skip: "Not checked" };
+  async function openSettings() {
+    let res;
+    try { res = await api("/api/admin/caldev/overlap-settings"); } catch (err) { toast(err.message, true); return; }
+    const st = res.settings, can = !!res.can_edit;
+    const order = ["game", "trip", "rehearsal", "meeting", "fundraiser", "other", "deadline"];
+    openSheet(`<div class="ev-sh-head"><h2 id="ev-sheet-h">⚙ Calendar overlap check</h2><button type="button" class="ev-btn" data-sheet-close>✕</button></div>
+<p class="ev-sh-sub">Super Admin or events:manage · changes are logged${can ? "" : " · <b>view only</b>"}</p>
+<div class="ev-sh-body"><b class="ev-sh-k">EVENING WINDOW (for untimed “evening” categories)</b>
+<div class="ev-f-row"><label class="ev-f"><span>Starts</span><input type="time" data-set="evening_start" value="${esc(st.evening_start)}"${can ? "" : " disabled"}></label><label class="ev-f"><span>Ends</span><input type="time" data-set="evening_end" value="${esc(st.evening_end)}"${can ? "" : " disabled"}></label></div>
+<b class="ev-sh-k">UNTIMED EVENTS IN EACH CATEGORY COUNT AS</b>
+${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span><select data-mode="${t}"${can ? "" : " disabled"}>${Object.entries(MODE_LABEL).map(([k, v]) => `<option value="${k}"${st.modes[t] === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>`).join("")}
+<p class="ev-note">Timed events always use their own times. Multi-day untimed events apply the rule on each day.</p></div>
+<div class="ev-sh-foot"><button type="button" class="ev-btn" data-sheet-close>Close</button>${can ? '<button type="button" class="ev-btn ev-primary" data-settings-save>Save settings</button>' : ""}</div>`, "ev-sheet-side");
+    const sh = root.querySelector("[data-sheet]");
+    sheetDone = async (r) => {
+      if (r !== "save") return;
+      const body = { evening_start: sh.querySelector('[data-set="evening_start"]').value, evening_end: sh.querySelector('[data-set="evening_end"]').value, modes: {} };
+      sh.querySelectorAll("[data-mode]").forEach((x) => { body.modes[x.dataset.mode] = x.value; });
+      try {
+        const out = await api("/api/admin/caldev/overlap-settings", { method: "PUT", body: JSON.stringify(body) });
+        toast(out.changed ? `✓ Overlap settings saved (${out.changed} change${out.changed === 1 ? "" : "s"})` : "No changes");
+      } catch (err) { toast(err.message || "Not saved", true); }
+    };
   }
 
   // Finished keeps exactly the Schedule Board behaviour.
@@ -443,10 +686,22 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
 
   function bind() {
     root.addEventListener("click", (e) => {
-      const t = e.target.closest("button, [data-day], [data-scrim]");
+      const t = e.target.closest("button, [data-day], [data-scrim], [data-sheet-scrim]");
       if (!t) return;
       if (t.matches("[data-scrim]")) { closeForm(); return; }
+      if (t.matches("[data-sheet-scrim]")) return closeSheet(false);
+      if (t.matches("[data-sheet-close]")) return closeSheet(false);
+      if (t.matches("[data-sheet-ok]")) return closeSheet(true);
+      if (t.matches("[data-sheet-force]")) return closeSheet("force");
+      if (t.matches("[data-series-go]")) return closeSheet("go");
+      if (t.matches("[data-group-go]")) return closeSheet("group");
+      if (t.matches("[data-settings-save]")) return closeSheet("save");
+      if (t.matches("[data-more]")) { const l = root.querySelector("[data-more-list]"); l.hidden = !l.hidden; t.setAttribute("aria-expanded", String(!l.hidden)); t.textContent = l.hidden ? t.textContent.replace("▴", "▾") : t.textContent.replace("▾", "▴"); return; }
+      if (t.matches("[data-cancel-date]")) return setCancelled(true);
+      if (t.matches("[data-uncancel]")) return setCancelled(false);
+      if (t.matches("[data-group]")) return openGroup(state.editing);
       const act = t.dataset.act;
+      if (act === "settings") return openSettings();
       if (act === "prev") return go(-1);
       if (act === "next") return go(1);
       if (act === "today") { const d = todayIso(); state.year = Number(d.slice(0, 4)); state.month = Number(d.slice(5, 7)) - 1; state.picked = isPhone() ? d : ""; return render(); }
@@ -487,6 +742,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
     });
     root.addEventListener("submit", save);
     document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !root.querySelector("[data-sheet]").hidden) { closeSheet(false); return; }
       if (e.key === "Escape" && !root.querySelector("[data-form]").hidden) { closeForm(); return; }
       const inField = e.target.closest("input, textarea, select, [contenteditable]");
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !inField) { e.preventDefault(); undo(); }

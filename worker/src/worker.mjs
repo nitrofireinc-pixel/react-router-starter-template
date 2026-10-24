@@ -147,6 +147,7 @@ import {
   renderFundraisingCardFromCms,
   reorderFundraiserCards,
   runFundraiserCardCalendarSync,
+  syncCalendarEventToFundraiserCard,
   setFundraiserAlertEmails,
   setFundraiserCardStatus,
   updateFundraiserCard,
@@ -197,6 +198,20 @@ import {
   sanitizeClientDeviceSnapshot,
 } from './audit-device.mjs';
 import { applyWorkerSecurityHeaders } from './worker-security-headers.mjs';
+import {
+  applySeriesChange,
+  checkCaldevConflicts,
+  conflictSettingsToEntries,
+  createCaldevSeries,
+  deleteSeriesFrom,
+  getConflictSettings,
+  groupAsSeries,
+  parseConflictSettingsInput,
+  planSeriesChange,
+  putRowsBack,
+  seriesRows,
+  summarizeConflicts,
+} from './caldev-series.mjs';
 import {
   DEFAULT_ERROR_PAGES,
   DEFAULT_INSTAGRAM_HREF,
@@ -570,7 +585,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261024j';
+export const ASSET_VERSION = 'cms-p2-20261024k';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -7311,6 +7326,52 @@ async function logFundraiserCardAudit(env, ctx, request, {
   });
 }
 
+/** Plain-English label for the admin log (read by maybeAuditAdminApiResponse). */
+export function withEventLog(response, { label, meta } = {}) {
+  try {
+    response.headers.set('X-Event-Log', encodeURIComponent(JSON.stringify({ label: String(label || ''), meta: meta || {} })));
+  } catch {
+    // headers immutable: log falls back to the generic detail
+  }
+  return response;
+}
+
+export function overlapLog(conflicts, meta = {}, base = '') {
+  const n = conflicts.length;
+  const ids = [...new Set(conflicts.map((c) => c.existing?.id))].slice(0, 5);
+  return {
+    label: `${base ? `${base} · ` : ''}Saved with ${n} overlap${n === 1 ? '' : 's'}`,
+    meta: { ...meta, conflicts: n, conflict_ids: ids },
+  };
+}
+
+function caldevCheckFlags(url, payload = {}) {
+  return {
+    check: url.searchParams.get('check') === '1' || payload?.check === true,
+    force: url.searchParams.get('force') === '1' || payload?.force === true,
+  };
+}
+
+function caldevConflictResponse(conflicts, extra = {}) {
+  const summary = summarizeConflicts(conflicts);
+  return withEventLog(jsonResponse({ saved: false, ...extra, ...summary, all: summary.all.slice(0, 60) }), {
+    label: 'Overlap check (nothing saved)',
+    meta: { conflicts: summary.count, conflict_ids: summary.ids },
+  });
+}
+
+/** After a caldev save: Fundraising rows get their draft card (plan 2.19). Never fails the save. */
+async function caldevAfterSave(env, ctx, user, rows = []) {
+  for (const row of rows) {
+    if (!row || row.cancelled_at || String(row.track) !== 'fundraiser') continue;
+    try {
+      await syncCalendarEventToFundraiserCard(env, row, { actor: user });
+    } catch (error) {
+      console.warn('fundraiser card sync failed', error?.message || error);
+    }
+  }
+}
+
 async function syncFundraiserCardsFromCalendar(env, request, options = {}) {
   return runFundraiserCardCalendarSync(env, {
     sendEmail: (payload) => sendFundraiserAlert(env, payload),
@@ -13357,8 +13418,14 @@ async function routeApi(request, env, url, ctx = null) {
     const payload = await request.json().catch(() => ({}));
     const p = normalizeCaldevPayload(payload);
     if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
+    const flags = caldevCheckFlags(url, payload);
+    const conflicts = flags.check || flags.force ? await checkCaldevConflicts(env, [p]) : [];
+    if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts);
     const created = await insertCaldevEvent(env, p);
-    return jsonResponse(created, 201);
+    await caldevAfterSave(env, ctx, auth.user, [created]);
+    return withEventLog(jsonResponse(created, 201), conflicts.length && flags.force
+      ? overlapLog(conflicts, { id: created?.id }, 'Event added')
+      : { label: 'Event added', meta: { id: created?.id, title: created?.title, date: created?.start_date } });
   }
   if (url.pathname === '/api/admin/caldev/events/restore' && request.method === 'POST') {
     // Event manager Undo of a delete: re-inserts the row with its original id.
@@ -13369,8 +13436,14 @@ async function routeApi(request, env, url, ctx = null) {
     const p = normalizeCaldevPayload(payload);
     if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
     try {
-      const restored = await restoreCaldevEvent(env, { ...p, id: payload?.id });
-      return jsonResponse(restored, 201);
+      const restored = await restoreCaldevEvent(env, {
+        ...p,
+        id: payload?.id,
+        series_id: payload?.series_id ?? null,
+        series_rule: payload?.series_rule ?? null,
+        cancelled_at: payload?.cancelled_at || null,
+      });
+      return withEventLog(jsonResponse(restored, 201), { label: 'Change undone', meta: { id: restored?.id, undo: 'delete' } });
     } catch (error) {
       return jsonResponse({ detail: error?.message || 'Restore failed' }, 409);
     }
@@ -13414,13 +13487,143 @@ async function routeApi(request, env, url, ctx = null) {
     if (!existing) return jsonResponse({ detail: 'Event not found' }, 404);
     if (request.method === 'DELETE') {
       await deleteCaldevEvent(env, id);
-      return jsonResponse({ ok: true, id });
+      return withEventLog(jsonResponse({ ok: true, id }), { label: 'Event deleted', meta: { id, title: existing.title, date: existing.start_date } });
     }
     const payload = await request.json().catch(() => ({}));
     const p = normalizeCaldevPayload(payload, existing);
     if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
-    const updated = await updateCaldevEvent(env, id, p, existing);
-    return jsonResponse(updated);
+    const flags = caldevCheckFlags(url, payload);
+    const extras = {};
+    if (payload?.cancelled === true || payload?.cancelled === false) extras.cancelled = payload.cancelled;
+    if (payload?.detach) extras.detach = true;
+    const willCancel = extras.cancelled === true;
+    const conflicts = (flags.check || flags.force) && !willCancel
+      ? await checkCaldevConflicts(env, [{ ...p, id }], { ignoreIds: [id] })
+      : [];
+    if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts);
+    const updated = await updateCaldevEvent(env, id, { ...p, ...extras }, existing);
+    await caldevAfterSave(env, ctx, auth.user, [updated]);
+    let label = 'Event changed';
+    if (extras.cancelled === true && !existing.cancelled_at) label = 'Date cancelled';
+    else if (extras.cancelled === false && existing.cancelled_at) label = 'Date restored';
+    else if (extras.detach && existing.series_id != null) label = p.start_date !== existing.start_date ? 'Date moved' : 'Date removed from series';
+    else if (existing.series_id != null && p.start_date !== existing.start_date) label = 'Date moved';
+    const meta = { id, title: updated?.title, date: updated?.start_date, series_id: existing.series_id ?? null };
+    return withEventLog(jsonResponse(updated), conflicts.length && flags.force ? overlapLog(conflicts, meta, label) : { label, meta });
+  }
+  const caldevSeriesMatch = url.pathname.match(/^\/api\/admin\/caldev\/series(?:\/(\d+))?$/);
+  if (caldevSeriesMatch && ['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) {
+    const auth = await requireScheduleBoardAccess(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const seriesId = caldevSeriesMatch[1] ? Number(caldevSeriesMatch[1]) : null;
+    const today = easternTodayIso();
+    if (!seriesId && request.method === 'POST') {
+      // Create a closed series: one row per date, one batch.
+      const payload = await request.json().catch(() => ({}));
+      const base = normalizeCaldevPayload(payload.event || {});
+      if (!base.title) return jsonResponse({ detail: 'Title is required' }, 422);
+      const dates = Array.isArray(payload.dates) ? payload.dates : [];
+      if (!dates.length) return jsonResponse({ detail: 'Pick at least one date' }, 422);
+      if (dates.length > 120) return jsonResponse({ detail: 'A series can have at most 120 dates' }, 422);
+      const flags = caldevCheckFlags(url, payload);
+      const candidates = dates.map((d) => ({ ...base, start_date: d, end_date: '' }));
+      const conflicts = flags.check || flags.force ? await checkCaldevConflicts(env, candidates) : [];
+      if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts);
+      const made = await createCaldevSeries(env, payload.event || {}, dates, payload.rule || null);
+      await caldevAfterSave(env, ctx, auth.user, made.rows);
+      const label = `${made.rows.length} repeating events added`;
+      const meta = { series_id: made.series_id, count: made.rows.length, title: base.title };
+      return withEventLog(jsonResponse(made, 201), conflicts.length && flags.force ? overlapLog(conflicts, meta, label) : { label, meta });
+    }
+    if (!seriesId) return jsonResponse({ detail: 'Series id required' }, 400);
+    const rows = await seriesRows(env, seriesId);
+    if (!rows.length) return jsonResponse({ detail: 'Series not found' }, 404);
+    if (request.method === 'GET') {
+      const future = rows.filter((r) => !r.cancelled_at && r.start_date >= today);
+      return jsonResponse({ series_id: seriesId, rows, future_count: future.length, today });
+    }
+    if (request.method === 'DELETE') {
+      const deleted = await deleteSeriesFrom(env, seriesId, today);
+      return withEventLog(jsonResponse({ ok: true, series_id: seriesId, deleted }), {
+        label: 'Series changed',
+        meta: { series_id: seriesId, change: 'deleted from today', count: deleted.length },
+      });
+    }
+    // PUT: whole-series change, today onward, one batch. preview=1 writes nothing.
+    const payload = await request.json().catch(() => ({}));
+    const fields = {};
+    for (const key of ['title', 'description', 'location', 'who', 'track', 'start_time', 'end_time', 'all_day']) {
+      if (payload?.fields && payload.fields[key] !== undefined) fields[key] = payload.fields[key];
+    }
+    const shift = payload?.day_shift && Number.isInteger(Number(payload.day_shift.from)) && Number.isInteger(Number(payload.day_shift.to))
+      ? { from: Number(payload.day_shift.from), to: Number(payload.day_shift.to) } : null;
+    const plan = planSeriesChange(rows, fields, shift, today);
+    const preview = plan.map((item) => ({ id: item.id, old_date: item.old_date, new_date: item.new_date }));
+    const flags = caldevCheckFlags(url, payload);
+    const wantPreview = url.searchParams.get('preview') === '1' || payload?.preview === true;
+    const conflicts = flags.check || flags.force || wantPreview
+      ? await checkCaldevConflicts(env, plan.map((item) => ({ ...item.after, id: item.id })), { ignoreSeriesId: seriesId })
+      : [];
+    if (wantPreview) {
+      return withEventLog(jsonResponse({ preview, ...summarizeConflicts(conflicts), all: undefined, saved: false }), {
+        label: 'Series preview (nothing saved)', meta: { series_id: seriesId, count: preview.length },
+      });
+    }
+    if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts, { preview });
+    const updated = await applySeriesChange(env, plan);
+    await caldevAfterSave(env, ctx, auth.user, updated);
+    const meta = { series_id: seriesId, count: plan.length, fields: Object.keys(fields), day_shift: shift };
+    return withEventLog(jsonResponse({ ok: true, series_id: seriesId, before: plan.map((i) => i.before), rows: updated, preview }),
+      conflicts.length && flags.force ? overlapLog(conflicts, meta, 'Series changed') : { label: 'Series changed', meta });
+  }
+  if (url.pathname === '/api/admin/caldev/group-series' && request.method === 'POST') {
+    const auth = await requireScheduleBoardAccess(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const payload = await request.json().catch(() => ({}));
+    const result = await groupAsSeries(env, Array.isArray(payload.ids) ? payload.ids : []);
+    if (result.error) return jsonResponse({ detail: result.error }, 422);
+    return withEventLog(jsonResponse(result), {
+      label: 'Events grouped as series',
+      meta: { series_id: result.series_id, count: result.rows.length, ids: result.rows.map((r) => r.id).slice(0, 20) },
+    });
+  }
+  if (url.pathname === '/api/admin/caldev/put-back' && request.method === 'POST') {
+    // Undo for batch changes (series edit, series delete, grouping, cancel): rows go back exactly.
+    const auth = await requireScheduleBoardAccess(request, env);
+    if (auth.response) return auth.response;
+    await ensureCaldevSchema(env);
+    const payload = await request.json().catch(() => ({}));
+    const rows = await putRowsBack(env, Array.isArray(payload.rows) ? payload.rows : [], Array.isArray(payload.delete_ids) ? payload.delete_ids : []);
+    return withEventLog(jsonResponse({ ok: true, rows }), {
+      label: 'Change undone',
+      meta: { count: rows.length, deleted: (payload.delete_ids || []).length, undo: String(payload.undo || '').slice(0, 60) },
+    });
+  }
+  if (url.pathname === '/api/admin/caldev/overlap-settings' && ['GET', 'PUT'].includes(request.method)) {
+    const auth = await requireScheduleBoardAccess(request, env);
+    if (auth.response) return auth.response;
+    const canEdit = isSuperAdmin(auth.user) || hasPermission(auth.user, 'events:manage');
+    const current = await getConflictSettings(env);
+    if (request.method === 'GET') return jsonResponse({ settings: current, can_edit: canEdit });
+    if (!canEdit) return jsonResponse({ detail: 'Permission required: events:manage or Super Admin' }, 403);
+    const payload = await request.json().catch(() => ({}));
+    const parsed = parseConflictSettingsInput(payload, current);
+    if (parsed.error) return jsonResponse({ detail: parsed.error }, 422);
+    const before = conflictSettingsToEntries(current);
+    const after = conflictSettingsToEntries(parsed.settings);
+    const changes = {};
+    for (const [key, value] of Object.entries(after)) {
+      if (before[key] !== value) {
+        await setSiteContentValue(env, key, value);
+        changes[key] = { before: before[key], after: value };
+      }
+    }
+    return withEventLog(jsonResponse({ settings: parsed.settings, can_edit: true, changed: Object.keys(changes).length }), {
+      label: 'Overlap settings changed',
+      meta: { changes },
+    });
   }
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
     const auth = await requireLogin(request, env);

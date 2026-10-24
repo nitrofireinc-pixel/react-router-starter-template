@@ -6626,3 +6626,7 @@ body.cms-caldev-editor-open .admin-workspace{
 }
 .footer .footer-disclaimer{max-width:var(--max);margin:28px auto 0;padding:16px 0 0;border-top:1px solid rgba(215,227,243,.16);color:#9fb2c9;font-size:.78rem;line-height:1.55;text-align:center;overflow-wrap:break-word}
 @media(max-width:600px){.footer .footer-disclaimer{font-size:.74rem;margin-top:22px;text-align:left}}
+
+/* Cancelled calendar dates (event manager phase 2) */
+.is-cancelled .caldev-t, h3.is-cancelled .caldev-t { text-decoration: line-through; opacity: .7; }
+.caldev-cancelled-tag { font-style: normal; font-size: .75em; font-weight: 700; background: #5b6472; color: #fff; border-radius: 4px; padding: 0 .35em; margin-left: .25em; text-decoration: none; }

@@ -536,7 +536,7 @@ export async function syncCaldevMeetingToBoosters(env, caldevEvent) {
   if (!caldevEvent?.id) return caldevEvent;
   const isMeeting = normalizeCaldevTrack(caldevEvent.track) === 'meeting';
   const parts = isoToProductionDateParts(caldevEvent.start_date);
-  if (!isMeeting || !parts) {
+  if (!isMeeting || !parts || caldevEvent.cancelled_at) {
     await clearCaldevBoosterBridge(env, caldevEvent);
     return getCaldevEventById(env, caldevEvent.id);
   }
@@ -644,6 +644,7 @@ export async function listUpcomingCaldevEvents(env, {
     FROM caldev_events
     WHERE start_date != ''
       AND start_date >= ?
+      AND cancelled_at IS NULL
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
   `).bind(today, rowLimit).all();
@@ -658,6 +659,7 @@ export function caldevEventsFromDateStatement(env, { todayIso = '', limit = 80 }
     FROM caldev_events
     WHERE start_date != ''
       AND start_date >= ?
+      AND cancelled_at IS NULL
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
   `).bind(today, rowLimit);
@@ -682,8 +684,8 @@ export async function insertCaldevEvent(env, payload, options = {}) {
   const result = await env.DB.prepare(`
     INSERT INTO caldev_events (
       title, description, location, who, start_date, end_date, start_time, end_time,
-      track, all_day, source_event_id, booster_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      track, all_day, source_event_id, booster_event_id, series_id, series_rule
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     p.title,
     p.description,
@@ -699,6 +701,8 @@ export async function insertCaldevEvent(env, payload, options = {}) {
     payload?.booster_event_id != null && Number.isFinite(Number(payload.booster_event_id))
       ? Number(payload.booster_event_id)
       : null,
+    Number.isInteger(Number(payload?.series_id)) && Number(payload.series_id) > 0 ? Number(payload.series_id) : null,
+    payload?.series_rule ? String(payload.series_rule).slice(0, 2000) : null,
   ).run();
   let created = await getCaldevEventById(env, result.meta.last_row_id);
   if (syncBoosters) {
@@ -710,10 +714,17 @@ export async function insertCaldevEvent(env, payload, options = {}) {
 export async function updateCaldevEvent(env, id, payload, existing, options = {}) {
   const syncBoosters = options.syncBoosters !== false;
   const p = normalizeCaldevPayload(payload, existing);
+  // Cancelling (or "Just this date") detaches the row from its series.
+  let cancelledAfter = existing?.cancelled_at || null;
+  if (payload?.cancelled === true || payload?.cancelled === 1) cancelledAfter = cancelledAfter || new Date().toISOString();
+  if (payload?.cancelled === false || payload?.cancelled === 0) cancelledAfter = null;
+  let seriesAfter = existing?.series_id ?? null;
+  if (payload?.detach || (cancelledAfter && !existing?.cancelled_at)) seriesAfter = null;
   await env.DB.prepare(`
     UPDATE caldev_events SET
       title = ?, description = ?, location = ?, who = ?, start_date = ?, end_date = ?,
       start_time = ?, end_time = ?, track = ?, all_day = ?, source_event_id = ?,
+      series_id = ?, cancelled_at = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -728,6 +739,8 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
     p.track,
     p.all_day,
     p.source_event_id,
+    seriesAfter,
+    cancelledAfter,
     Number(id),
   ).run();
   let updated = await getCaldevEventById(env, id);
@@ -798,11 +811,16 @@ export async function restoreCaldevEvent(env, row, options = {}) {
   await env.DB.prepare(`
     INSERT INTO caldev_events (
       id, title, description, location, who, start_date, end_date, start_time, end_time,
-      track, all_day, source_event_id, booster_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      track, all_day, source_event_id, booster_event_id, series_id, series_rule, cancelled_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
   `).bind(id, p.title, p.description, p.location, p.who, p.start_date, p.end_date,
-    p.start_time, p.end_time, p.track, p.all_day, p.source_event_id).run();
+    p.start_time, p.end_time, p.track, p.all_day, p.source_event_id,
+    row.series_id == null ? null : Number(row.series_id),
+    row.series_rule == null ? null : String(row.series_rule),
+    row.cancelled_at || null).run();
   let restored = await getCaldevEventById(env, id);
   if (options.syncBoosters !== false) restored = await syncCaldevMeetingToBoosters(env, restored);
   return restored;
 }
+
+export const CALDEV_SELECT_COLUMNS = CALDEV_SELECT;

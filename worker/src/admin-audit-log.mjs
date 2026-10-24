@@ -160,6 +160,13 @@ export const MUTATING_ADMIN_API_ROUTES = Object.freeze([
   { method: 'POST', path: '/api/admin/caldev/notify-finished', logger: 'generic', action: 'change.events' },
   { method: 'PUT', path: '/api/admin/caldev/events/8', logger: 'generic', action: 'change.events' },
   { method: 'DELETE', path: '/api/admin/caldev/events/8', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/events/restore', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/series', logger: 'generic', action: 'change.events' },
+  { method: 'PUT', path: '/api/admin/caldev/series/3', logger: 'generic', action: 'change.events' },
+  { method: 'DELETE', path: '/api/admin/caldev/series/3', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/group-series', logger: 'generic', action: 'change.events' },
+  { method: 'POST', path: '/api/admin/caldev/put-back', logger: 'generic', action: 'change.events' },
+  { method: 'PUT', path: '/api/admin/caldev/overlap-settings', logger: 'generic', action: 'change.events' },
   { method: 'POST', path: '/api/admin/events', logger: 'generic', action: 'change.events' },
   { method: 'PUT', path: '/api/admin/events/8', logger: 'generic', action: 'change.events' },
   { method: 'DELETE', path: '/api/admin/events/8', logger: 'generic', action: 'change.events' },
@@ -2091,6 +2098,21 @@ export function requestClientIp(request) {
   ).split(',')[0].trim();
 }
 
+/** Event manager: plain-English label set by the worker in X-Event-Log (caldev routes only). */
+export function eventLogFromResponse(path, response) {
+  if (!/^\/api\/admin\/caldev\//.test(String(path || ''))) return null;
+  const raw = response?.headers?.get?.('X-Event-Log');
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw));
+    const label = String(parsed?.label || '').slice(0, 120);
+    if (!label) return null;
+    return { label, meta: parsed?.meta && typeof parsed.meta === 'object' ? parsed.meta : {} };
+  } catch {
+    return null;
+  }
+}
+
 export async function maybeAuditAdminApiResponse(env, {
   request,
   url,
@@ -2111,9 +2133,10 @@ export async function maybeAuditAdminApiResponse(env, {
   const category = visual?.category || auditCategoryFromPath(path);
   const action = visual?.action
     || (category === 'mail' && path.endsWith('/mail') ? 'mail.send' : `change.${category}`);
+  const eventLog = status < 400 ? eventLogFromResponse(path, response) : null;
   const detail = status >= 400
     ? `failed (${status})`
-    : (visual?.detail || 'saved');
+    : (visual?.detail || eventLog?.label || 'saved');
   const afterText = extractContentAfter(requestSummary);
   const beforeText = beforeSnapshot && typeof beforeSnapshot.content_before === 'string'
     ? beforeSnapshot.content_before
@@ -2151,6 +2174,7 @@ export async function maybeAuditAdminApiResponse(env, {
       files: requestSummary?.files || beforeSnapshot?.files || null,
       grants: beforeSnapshot?.grants || null,
       ...(visual ? { slug: visual.slug, kind: visual.kind } : {}),
+      ...(eventLog ? { event_log: eventLog } : {}),
       ...(beforeSnapshot?.photo ? { photo: beforeSnapshot.photo } : {}),
     },
   });

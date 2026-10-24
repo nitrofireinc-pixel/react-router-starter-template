@@ -361,10 +361,15 @@
     `;
   }
 
+  function cancelledTag(event) {
+    return event?.cancelled_at ? ' <em class="caldev-cancelled-tag">Cancelled</em>' : '';
+  }
+
   function eventChip(event) {
     const track = TRACK_MAP[event.track] || TRACK_MAP.other;
-    return `<button type="button" class="caldev-event-chip" style="--caldev-track:${track.color}"
-      data-caldev-open="${event.id}" title="${escapeHtml(event.title)}">${escapeHtml(event.title)}</button>`;
+    const off = event.cancelled_at ? ' is-cancelled' : '';
+    return `<button type="button" class="caldev-event-chip${off}" style="--caldev-track:${track.color}"
+      data-caldev-open="${event.id}" title="${escapeHtml(event.title)}${event.cancelled_at ? ' (Cancelled)' : ''}"><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</button>`;
   }
 
   function renderMonth() {
@@ -420,9 +425,9 @@
                   ? dayEvents.map((event) => {
                     const track = TRACK_MAP[event.track] || TRACK_MAP.other;
                     return `
-                      <button type="button" class="caldev-week-event" style="--caldev-track:${track.color}" data-caldev-open="${event.id}">
+                      <button type="button" class="caldev-week-event${event.cancelled_at ? ' is-cancelled' : ''}" style="--caldev-track:${track.color}" data-caldev-open="${event.id}">
                         <small>${escapeHtml(eventTimeLabel(event))}</small>
-                        <strong>${escapeHtml(event.title)}</strong>
+                        <strong><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</strong>
                       </button>
                     `;
                   }).join('')
@@ -464,10 +469,10 @@
             <ul>
               ${events.map((event) => `
                 <li>
-                  <article class="caldev-rundown-item" data-caldev-open="${event.id}" role="button" tabindex="0">
+                  <article class="caldev-rundown-item${event.cancelled_at ? ' is-cancelled' : ''}" data-caldev-open="${event.id}" role="button" tabindex="0">
                     ${trackChip(event.track)}
                     <span class="caldev-rundown-copy">
-                      <strong>${escapeHtml(event.title)}</strong>
+                      <strong><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</strong>
                       <small>${escapeHtml(eventTimeLabel(event))}${event.who ? ` · ${escapeHtml(event.who)}` : ''}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
                       ${event.description ? `<span>${formatDescHtml(event.description)}</span>` : ''}
                     </span>
@@ -490,7 +495,7 @@
         <div class="caldev-detail-panel">
           <button type="button" class="sponsor-flyin-close" data-caldev-close aria-label="Close">×</button>
           ${trackChip(event.track)}
-          <h3 id="caldev-detail-title">${escapeHtml(event.title)}</h3>
+          <h3 id="caldev-detail-title"${event.cancelled_at ? ' class="is-cancelled"' : ''}><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</h3>
           <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
           ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
           ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
