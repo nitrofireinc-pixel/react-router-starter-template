@@ -1140,7 +1140,7 @@
     if (!e.target.closest('.st-more')) { menu.hidden = true; $('[data-act="more"]').setAttribute('aria-expanded', 'false'); }
     const t = e.target.closest('[data-act],[data-mode],[data-device]'); if (!t || t.closest('[data-palette]')) return;
     if (t.dataset.mode) { setMode(t.dataset.mode); menu.hidden = true; return; }
-    if (t.dataset.device) { device = t.dataset.device; $$('[data-device]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.device === device))); sizeStage(); return; }
+    if (t.dataset.device) { menu.hidden = true; $('[data-act="more"]').setAttribute('aria-expanded', 'false'); device = t.dataset.device; $$('[data-device]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.device === device))); sizeStage(); return; }
     const act = t.dataset.act;
     if (act === 'more') { menu.hidden = !menu.hidden; t.setAttribute('aria-expanded', String(!menu.hidden)); return; }
     if (act === 'undo') return undo();
@@ -1153,7 +1153,7 @@
     if (act === 'apply-json') { try { layout = JSON.parse($('[data-json]').value); selected = null; changed(); $('[data-json-dialog]').close(); } catch { toast('That JSON could not be read.', true); } return; }
     if (act === 'migrate') { menu.hidden = true; if (!confirm('Rebuild this draft from the current page? You can undo.')) return; try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; selected = null; changed(); toast('Rebuilt from the current page'); } catch (er) { toast(er.message, true); } return; }
     if (act === 'discard') return discardAll();
-    if (act === 'grid-m') { menu.hidden = true; showGrid = !showGrid; drawOverlay(); return; }
+    if (act === 'grid-m') { menu.hidden = true; showGrid = !showGrid; const g = $('[data-act="grid"]'); if (g) g.setAttribute('aria-pressed', String(showGrid)); const n = $('[data-gridnote]'); if (n) n.textContent = showGrid ? 'Grid: 12 columns · snap on' : 'Grid hidden · snap on'; drawOverlay(); return; }
   });
   $('[data-editor]').addEventListener('change', async (e) => { try { await call(`${api}/editor`, 'POST', { editor: e.target.value }); await load(true); toast(`Live editor: ${e.target.value}`); } catch (er) { toast(er.message, true); } });
   $('[data-page-pick]').addEventListener('change', (e) => { if (e.target.value !== slug) window.location.href = `/admin/studio/${encodeURIComponent(e.target.value)}`; });
