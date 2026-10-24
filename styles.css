@@ -6624,3 +6624,5 @@ body.cms-caldev-editor-open .admin-workspace{
   .image-admin-shell #tab-site .site-settings-layout > .site-settings-form,
   .image-admin-shell #tab-site .site-settings-grid > .admin-card{grid-column:auto;grid-row:auto}
 }
+.footer .footer-disclaimer{max-width:var(--max);margin:28px auto 0;padding:16px 0 0;border-top:1px solid rgba(215,227,243,.16);color:#9fb2c9;font-size:.78rem;line-height:1.55;text-align:center;overflow-wrap:break-word}
+@media(max-width:600px){.footer .footer-disclaimer{font-size:.74rem;margin-top:22px;text-align:left}}

@@ -502,7 +502,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p1-20261023c';
+export const ASSET_VERSION = 'cms-p1-20261024a';
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -14159,7 +14159,7 @@ ${previewBanner}
 ${marqueeHtml}
 ${deadlineHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div><p class="footer-disclaimer">East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.</p></footer>
 ${isHomePage ? renderHomeStickySupport() : ''}
 ${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}

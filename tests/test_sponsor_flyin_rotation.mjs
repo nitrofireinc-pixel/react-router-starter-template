@@ -22,7 +22,7 @@ const S = { id: 2, name: 'Silver Co', level: 'Silver Sponsor', active: 1 };
 const B = { id: 3, name: 'Aire Serv', level: 'Bronze Sponsor', active: 1 };
 const H = { id: 4, name: 'Dominos', level: 'Honorable Mention', active: 1 };
 
-test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p1-20261023c'));
+test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p1-20261024a'));
 
 test('weights 2:1 give G S G', () => {
   assert.deepEqual([...buildSponsorFlyinRotation([G], [S], { gold: 2, silver: 1 }).map((s) => s.id)], [1, 2, 1]);
@@ -54,4 +54,10 @@ test('server weight normalization', () => {
   assert.equal(normalizeFlyinWeightValue('99', 2), 10);
   assert.equal(normalizeFlyinWeightValue('-3', 1), 0);
   assert.equal(normalizeFlyinWeightValue('x', 1), 1);
+});
+
+test('footer carries the independent-nonprofit disclaimer once', async () => {
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  const line = 'East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.';
+  assert.equal(w.split(`<p class="footer-disclaimer">${line}</p></footer>`).length, 2);
 });

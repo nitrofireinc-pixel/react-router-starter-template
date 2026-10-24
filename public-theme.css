@@ -1506,3 +1506,9 @@ html.nav-use-hamburger body.efhs-theme header.site-header nav .nav-add-home::aft
 html.nav-use-hamburger body.efhs-theme header.site-header #site-nav .nav-add-home::after{
   content:attr(title);
 }
+
+body.efhs-theme .footer .footer-disclaimer{
+  max-width:1240px;
+  color:rgba(215,227,243,.66);
+  letter-spacing:.01em;
+}
