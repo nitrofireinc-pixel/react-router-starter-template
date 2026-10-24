@@ -488,7 +488,7 @@
     if (!canLayout()) return;
     const [, , name, make, size] = def;
     const found = selected && findBlock(selected);
-    if (!found) { addAtEnd(def); return; }
+    if (!found) { addAtEnd(def); closeSheet(); requestAnimationFrame(() => requestAnimationFrame(revealSelected)); return; }
     const { section, block: ref } = found;
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
     if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
@@ -500,6 +500,8 @@
       if (section.nested) section.blocks = order; else { block.h = block.h || 1; renumberFlow(section, order); }
     }
     selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
+    // Add sheet only: close it so the new block is in view (Edit/History sheets never auto-close).
+    closeSheet(); requestAnimationFrame(() => requestAnimationFrame(revealSelected));
   }
   function startBlockDrag(ev, resize) {
     const found = findBlock(selected); if (!found || !canLayout()) return;
