@@ -142,18 +142,18 @@ for (const width of [1280, 980]) {
       assert.ok(closed.overflowX <= 0);
       assert.equal(await page.isVisible('.sn-top'), false);
       assert.equal(await page.isVisible('.sn-bottom'), false);
-      await page.click('[data-sn-fly-key="calendar"]');
+      await page.click('[data-sn-fly-key="money"]');
       await page.waitForTimeout(220);
       const open = await geom(page);
       assert.equal(open.sideVisible, true);
       assert.equal(open.side.x, 68);
       assert.equal(open.side.w, 260);
       assert.deepEqual(open.ws, closed.ws, 'page width never changes');
-      assert.equal(await page.getAttribute('[data-sn-fly-key="calendar"]', 'aria-expanded'), 'true');
+      assert.equal(await page.getAttribute('[data-sn-fly-key="money"]', 'aria-expanded'), 'true');
       const shown = await page.evaluate(() => [...document.querySelectorAll('#admin-sidebar [data-nav-item]')].filter((el) => el.offsetParent).map((el) => el.dataset.navItem));
-      assert.ok(shown.includes('events-manager') && !shown.includes('pages'), shown.join(','));
+      assert.ok(shown.includes('ledger') && !shown.includes('pages'), shown.join(','));
       // tooltip for another icon sits right of the flyout, never over it
-      await page.hover('[data-sn-fly-key="money"]');
+      await page.hover('[data-sn-fly-key="sponsors"]');
       const tip = await page.evaluate(() => { const el = document.querySelector('.sn-tip'); return el && !el.hidden ? Math.round(el.getBoundingClientRect().x) : null; });
       assert.ok(tip !== null && tip >= open.side.r, `tip x ${tip} vs flyout right ${open.side.r}`);
       // click outside closes
@@ -166,22 +166,22 @@ for (const width of [1280, 980]) {
 
 test('1280: keyboard - arrows move on the rail, Enter/→ opens and focuses first link, Esc closes back to icon', async (t) => {
   await withPage(t, 1280, 900, '/admin', async (page) => {
-    await page.focus('[data-sn-fly-key="website"]');
+    await page.focus('[data-sn-fly-key="money"]');
     await page.keyboard.press('ArrowDown');
-    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'calendar');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'sponsors');
     const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineWidth);
     assert.equal(ring, '3px');
     await page.keyboard.press('ArrowRight');
     await page.waitForTimeout(80);
-    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'calendar');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'sponsors');
     await page.keyboard.press('Escape');
     await page.waitForTimeout(220);
-    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'calendar');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'sponsors');
     assert.equal(await page.evaluate(() => document.body.classList.contains('sn-fly')), false);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(80);
     assert.equal(await page.evaluate(() => document.body.classList.contains('sn-fly')), true);
-    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'calendar');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'sponsors');
   });
   await withPage(t, 1280, 900, '/admin/visual/join', async (page) => {
     const x = await page.evaluate(() => Math.round(document.querySelector('.visual-editor-main').getBoundingClientRect().x));

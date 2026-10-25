@@ -158,6 +158,7 @@
   <div class="ev-show"><span class="ev-show-h">Show:</span><span data-chips></span><span class="ev-legend">↻ = repeating · <s>struck</s> = cancelled</span></div>
   <div class="ev-bar2-r">
     <button type="button" class="ev-link" data-act="settings">⚙ Overlap settings</button>
+    <a class="ev-link" href="/admin?tab=caldev" data-old-board title="Older Schedule Board: drag events to new dates and preview the IMPORTANT banners showing now">Schedule Board (drag · banner preview)</a>
     <button type="button" class="ev-link" data-act="undated" aria-expanded="false">Needs a date (<span data-undated-n>0</span>)</button>
     ${canNotify ? '<button type="button" class="ev-btn ev-finished" data-act="finished">✉ Finished: notify subscribers</button>' : ""}
   </div>

@@ -14408,14 +14408,14 @@ async function handleEventsManagerPage(request, env) {
   const nav = await loadAdminNavContext(env, user, { route: 'events-manager' }, { skipQueries: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Calendar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app sn-body" data-can-notify="${canNotifyCalendarSubscribers(user) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Calendar</span></a>
 <div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
 ${renderAdminNavFragment(nav)}
 <div class="ev-body">
 <main class="ev-main" id="ev-root" aria-label="Calendar events"><p class="ev-loading">Loading calendar…</p></main></div>
-<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-events.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-events.js?v=${ADMIN_NAV_VERSION}" defer></script></body></html>`;
   return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
@@ -14433,7 +14433,7 @@ async function handleFormsBuilderPage(request, env) {
   const nav = await loadAdminNavContext(env, user, { route: 'forms-builder' }, { skipQueries: true, formsAccessIds: accessIds });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Form Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app fb-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Form Builder</span></a>
 <div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>

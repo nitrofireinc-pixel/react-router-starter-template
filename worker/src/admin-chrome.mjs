@@ -8,7 +8,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav14d5';
+export const ADMIN_NAV_REV = 'nav14d6';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -121,9 +121,8 @@ export function buildAdminNavModel(options = {}) {
       icon: '📅',
       label: 'Calendar',
       items: [
-        item('events-manager', 'Events', '', '/admin/events-manager', { perm: 'caldev', attrs: 'data-nav-href="/admin/events-manager"', keywords: 'calendar rehearsal game concert' }),
-        item('caldev', 'Schedule Board', 'caldev', tabHref('caldev'), { keywords: 'calendar schedule' }),
-        item('banners', 'Important banners', 'caldev', tabHref('caldev'), { perm: 'caldev', attrs: 'data-nav-extra="deadline-banners"', keywords: 'deadline banner' }),
+        item('events-manager', 'Events', '', '/admin/events-manager', { perm: 'caldev', attrs: 'data-nav-href="/admin/events-manager"', keywords: 'calendar rehearsal game concert schedule board important deadline banner' }),
+        // Schedule Board (/admin?tab=caldev) stays reachable by URL and from a link inside Events.
       ],
     },
     {

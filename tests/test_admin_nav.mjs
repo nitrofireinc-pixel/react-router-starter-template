@@ -47,7 +47,7 @@ test('14d-1 flyout: flat section lists, plain section labels, no folding groups'
   // no accordions / chevrons
   assert.doesNotMatch(sidebar, /data-nav-group|admin-menu-parent|admin-menu-sub|aria-expanded/);
   const heads = [...sidebar.matchAll(/<h2 class="sn-head[^>]*>([^<]+)/g)].map((m) => m[1].trim().replace(/&amp;/g, '&'));
-  assert.deepEqual(heads, ['Website', 'Calendar', 'Money', 'Sponsors', 'Boosters', 'People', 'Photos & Social', 'Forms & Mail', 'Admin']);
+  assert.deepEqual(heads, ['Website', 'Money', 'Sponsors', 'Boosters', 'People', 'Photos & Social', 'Forms & Mail', 'Admin']);
   assert.match(sidebar, /Admin <span class="sn-admin-only">ADMIN ONLY<\/span>/);
   // current item
   assert.match(sidebar, /data-nav-item="dashboard"[^>]*aria-current="page"/);
@@ -65,7 +65,7 @@ test('14d-1 rail: Home, Find, one icon per section, account; current section gol
   const rail = railOf(full);
   assert.match(rail, /<nav class="sn-rail" aria-label="Admin" data-sn-rail>/);
   const keys = [...rail.matchAll(/data-sn-fly-key="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(keys, ['website', 'calendar', 'money', 'sponsors', 'boosters', 'people', 'photos', 'forms', 'admin', 'account']);
+  assert.deepEqual(keys, ['website', 'money', 'sponsors', 'boosters', 'people', 'photos', 'forms', 'admin', 'account']);
   assert.match(rail, /data-rail-item="dashboard"[^>]*aria-label="Home"/);
   assert.match(rail, /data-sn-launch[^>]*aria-label="Find a page or tool \(Ctrl K\)"/);
   assert.match(rail, /aria-expanded="false" aria-controls="admin-sidebar" aria-label="Admin \(ADMIN only\)"/);
@@ -88,15 +88,17 @@ test('admin-only items carry the red ADMIN pill', () => {
 test('Jamie (calendar only) sees Home, Calendar and Minutes only', () => {
   const sidebar = renderAdminSidebarHtml('test', navFor(jamie));
   const items = [...sidebar.matchAll(/data-nav-item="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(items, ['dashboard', 'events-manager', 'caldev', 'banners', 'minutes']);
+  assert.deepEqual(items, ['dashboard', 'events-manager', 'minutes']);
   const heads = [...sidebar.matchAll(/<h2 class="sn-head[^>]*>([^<]+)/g)].map((m) => m[1].trim());
-  assert.deepEqual(heads, ['Calendar']);
+  assert.deepEqual(heads, []);
+  assert.match(sidebar, /sn-section-direct" data-nav-section="calendar"/);
   // Boosters has one allowed item -> direct link, no heading
   assert.match(sidebar, /sn-section-direct" data-nav-section="boosters"/);
   assert.match(sidebar, /data-nav-item="minutes"[^>]*data-nav-section-label="Boosters"/);
   assert.doesNotMatch(sidebar, /sn-admin-pill|ADMIN ONLY/);
   const rail = railOf(sidebar);
-  assert.deepEqual([...rail.matchAll(/data-sn-fly-key="([^"]+)"/g)].map((m) => m[1]), ['calendar', 'account']);
+  assert.deepEqual([...rail.matchAll(/data-sn-fly-key="([^"]+)"/g)].map((m) => m[1]), ['account']);
+  assert.match(rail, /sn-rail-direct[^>]*href="\/admin\/events-manager"/);
   assert.match(rail, /sn-rail-direct[^>]*data-rail-item="minutes"[^>]*aria-label="Meeting Minutes"/);
   assert.doesNotMatch(rail, /sn-rail-lock|data-sn-dot/);
 });
