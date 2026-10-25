@@ -1,0 +1,39 @@
+/* Site Studio home (mockup 01-landing). Admin only. */
+.studio-home{--sh-navy:#0b2a5b;--sh-blue:#2f80d8;--sh-red:#c8121d;--sh-gold:#ffc61a;font-family:"Work Sans",system-ui,sans-serif}
+.sh-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.sh-head h1{margin:0;color:var(--sh-navy);font-family:Oswald,"Work Sans",sans-serif;font-size:clamp(1.8rem,3.4vw,2.6rem);letter-spacing:-.01em;line-height:1.1}
+.sh-head p{margin:4px 0 0;color:#64748b}
+.sh-actions{display:flex;gap:10px;flex-wrap:wrap}
+.sh-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:8px 16px;border-radius:10px;font-weight:800;text-decoration:none;font-size:.9rem;border:0}
+.sh-btn-new{background:var(--sh-red);color:#fff}.sh-btn-home{background:var(--sh-gold);color:#10233c}
+.sh-btn:focus-visible,.sh-tile:focus-visible{outline:3px solid var(--sh-gold);outline-offset:2px}
+.sh-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.sh-tile{position:relative;display:flex;flex-direction:column;gap:6px;min-height:118px;padding:18px;border-radius:14px;background:#fff;border:1px solid #e1e8f1;box-shadow:0 8px 24px rgba(15,34,58,.07);text-decoration:none;color:#10233c;transition:transform .15s,box-shadow .15s}
+.sh-tile:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(15,34,58,.12)}
+.sh-tile .sh-ico{font-size:1.9rem;line-height:1}
+.sh-tile b{font-family:Oswald,"Work Sans",sans-serif;font-size:1.25rem;font-weight:600;color:var(--sh-navy)}
+.sh-tile small{color:#64748b;font-size:.82rem;line-height:1.4}
+.sh-tile-feature{background:linear-gradient(135deg,#123a7a,var(--sh-blue));border-color:transparent}
+.sh-tile-feature b,.sh-tile-feature small{color:#fff}
+.sh-badge{position:absolute;top:10px;right:10px;padding:2px 8px;border-radius:999px;background:#cfe3fb;color:#0b2a5b;font-size:.68rem;font-weight:800;white-space:nowrap}
+.sh-badge-admin{background:#fde2e4;color:var(--sh-red)}
+.sh-tile .sh-badge + .sh-badge{top:32px}
+.sh-panels{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:16px;margin-top:18px}
+.sh-panel{background:#fff;border:1px solid #e1e8f1;border-radius:14px;padding:16px 18px;box-shadow:0 8px 24px rgba(15,34,58,.07)}
+.sh-panel[hidden]{display:none}.sh-panels:has(#sh-drafts[hidden]){grid-template-columns:1fr}
+.sh-panel h2{margin:0 0 10px;font-family:Oswald,"Work Sans",sans-serif;font-size:1.05rem;color:var(--sh-navy)}
+.sh-panel ul{list-style:none;margin:0;padding:0}
+.sh-panel li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2f7;font-size:.86rem;color:#10233c}
+.sh-panel li:last-child{border-bottom:0}
+.sh-dot{width:8px;height:8px;border-radius:50%;background:var(--sh-gold);flex:0 0 auto}
+.sh-panel li a{margin-left:auto;color:var(--sh-blue);font-weight:800;text-decoration:none;white-space:nowrap}
+.sh-muted{color:#64748b}
+.sh-all{margin-top:26px}.sh-all h2{font-family:Oswald,"Work Sans",sans-serif;color:var(--sh-navy);font-size:1.15rem;margin:0 0 12px}
+.sh-all .dashboard-cards{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sh-all .dash-card{min-height:0;padding:14px 16px;border-radius:12px;box-shadow:0 4px 14px rgba(15,34,58,.06)}
+.sh-all .dash-card span{margin-bottom:8px;font-size:.62rem;padding:3px 8px}
+.sh-all .dash-card b{font-size:1.02rem;margin-bottom:4px}.sh-all .dash-card small{font-size:.8rem}
+@media (max-width:1100px){.sh-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:820px){.sh-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.sh-panels{grid-template-columns:1fr}.sh-all .dashboard-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.sh-tiles{gap:10px}.sh-tile{min-height:104px;padding:14px}.sh-tile b{font-size:1.05rem}.sh-tile small{display:none}.sh-tile .sh-ico{font-size:1.5rem}.sh-actions{width:100%}.sh-btn{flex:1;justify-content:center}.sh-all .dashboard-cards{grid-template-columns:1fr}}
+.sh-head .btn.primary{min-height:40px;padding:8px 16px;border-radius:10px;background:#0b2a5b;font-size:.9rem;width:auto}@media (max-width:520px){.sh-head .btn.primary{flex:1;text-align:center}}

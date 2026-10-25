@@ -3959,12 +3959,75 @@ async function loadPages() {
   renderPagePermissionBoxes();
 }
 
+function studioGreeting(now = new Date()) {
+  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(now));
+  return h < 12 ? 'Good morning' : (h < 17 ? 'Good afternoon' : 'Good evening');
+}
+
+function studioDateLabel(iso, time) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const days = (d - new Date(new Date().toDateString())) / 86400000;
+  const label = days < 7
+    ? d.toLocaleDateString('en-US', { weekday: 'short' })
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (!time) return label;
+  const [hh, mm] = String(time).split(':').map(Number);
+  if (!Number.isFinite(hh)) return label;
+  return `${label} ${((hh + 11) % 12) + 1}${mm ? `:${String(mm).padStart(2, '0')}` : ''} ${hh < 12 ? 'AM' : 'PM'}`;
+}
+
+async function renderStudioHome() {
+  const actions = document.querySelector('#sh-actions');
+  if (actions) {
+    const btns = [];
+    if (typeof canManageSitePages === 'function' && canManageSitePages()) btns.push('<button type="button" class="sh-btn sh-btn-new" data-sh-new-page>＋ New page</button>');
+    if (canEditPage('home')) btns.push(`<a class="sh-btn sh-btn-home" href="${escapeAttr(visualEditorHref('home'))}">✏️ Edit Home page</a>`);
+    actions.innerHTML = btns.join('');
+    actions.querySelector('[data-sh-new-page]')?.addEventListener('click', async () => {
+      await activateTab('pages');
+      document.querySelector('#new-page')?.click();
+    });
+  }
+  const tilesEl = document.querySelector('#sh-tiles');
+  if (!tilesEl) return;
+  let data;
+  try {
+    data = await jsonFetch('/api/admin/studio-home');
+  } catch {
+    tilesEl.innerHTML = '<p class="sh-muted">Could not load the Studio home. Use All tools below.</p>';
+    return;
+  }
+  tilesEl.innerHTML = (data.tiles || []).map((t) => {
+    const badge = data.badges?.[t.key] ? `<span class="sh-badge">${escapeHtml(data.badges[t.key])}</span>` : '';
+    const admin = t.admin ? '<span class="sh-badge sh-badge-admin">Admin</span>' : '';
+    return `<a class="sh-tile${t.feature ? ' sh-tile-feature' : ''}" href="${escapeAttr(t.href)}" data-sh-tile="${escapeAttr(t.key)}">${badge || admin}${badge && admin ? admin : ''}<span class="sh-ico" aria-hidden="true">${escapeHtml(t.icon)}</span><b>${escapeHtml(t.title)}</b><small>${escapeHtml(t.copy)}</small></a>`;
+  }).join('');
+  const draftsBox = document.querySelector('#sh-drafts');
+  const draftsList = document.querySelector('#sh-drafts-list');
+  if (draftsBox && draftsList) {
+    const drafts = data.drafts || [];
+    draftsBox.hidden = !(data.tiles || []).some((t) => t.key === 'pages');
+    draftsList.innerHTML = drafts.length
+      ? drafts.map((d) => `<li><span class="sh-dot" aria-hidden="true"></span><span>${escapeHtml(d.title)} — draft${d.by ? ` by ${escapeHtml(d.by)}` : ''}</span><a href="${escapeAttr(d.href)}">Review →</a></li>`).join('')
+      : '<li class="sh-muted">No drafts waiting. Everything is published.</li>';
+  }
+  const coming = document.querySelector('#sh-coming-list');
+  if (coming) {
+    const ev = data.upcoming || [];
+    coming.innerHTML = ev.length
+      ? ev.map((e) => `<li><span aria-hidden="true">📅</span><span>${escapeHtml(studioDateLabel(e.date, e.time))} · ${escapeHtml(e.title)}</span></li>`).join('')
+      : '<li class="sh-muted">Nothing on the calendar yet.</li>';
+  }
+}
+
 function renderDashboard() {
   const dashboard = document.querySelector('#dashboard-cards');
   if (!dashboard) return;
   const displayName = state.me.user.display_name || state.me.user.username;
   const welcome = document.querySelector('#dashboard-welcome');
-  if (welcome) welcome.textContent = `Welcome back, ${displayName}`;
+  if (welcome) welcome.textContent = `${studioGreeting()}, ${String(displayName).trim().split(/\s+/)[0]}`;
+  renderStudioHome();
 
   const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260907`;
   const cards = [

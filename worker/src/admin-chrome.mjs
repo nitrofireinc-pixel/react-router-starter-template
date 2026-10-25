@@ -260,7 +260,7 @@ export function buildAdminNavModel(options = {}) {
     },
   ];
 
-  const dashboard = item('dashboard', 'Dashboard', 'dashboard', tabHref('dashboard'), {
+  const dashboard = item('dashboard', '🏠 Home', 'dashboard', tabHref('dashboard'), {
     hidden: isHiddenFlag(hide('dashboard')),
   });
 
