@@ -99,3 +99,18 @@ test('legacy Letterman definition converts with option values equal to labels', 
   const def = convertV1Definition(JSON.parse(legacy.definition_json || '{}'), [8]);
   for (const f of def.fields) for (const o of f.options || []) assert.equal(o.value, o.label);
 });
+
+test('empty intro/help/placeholder never render null or undefined (public + builder preview)', () => {
+  const def = normalizeDefinition({ title: 'T', intro: null, kicker: '', fields: [{ type: 'text', label: 'Name', help: null, placeholder: undefined }, { type: 'email', label: 'Email' }] });
+  const html = renderFormHtml({ id: 9, definition: def });
+  assert.doesNotMatch(html.replace(/<style>[\s\S]*?<\/style>/, ''), />\s*(null|undefined)\s*</);
+  assert.doesNotMatch(html, /="(null|undefined)"/);
+  const js = readFileSync(new URL('../admin-forms.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(js, /\.append\([^;]*: null, form\)/, 'DOM append() stringifies null to "null"');
+});
+
+test('phone admin editors use one document scroller that clears the bottom bar', () => {
+  const css = readFileSync(new URL('../admin-nav.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.ev-app\.sn-body \.ev-main\{overflow:visible/);
+  assert.match(css, /body\.ev-app\.sn-body \.fb-bar\{position:static;top:52px\}/);
+});

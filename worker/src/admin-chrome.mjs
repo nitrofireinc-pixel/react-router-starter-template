@@ -8,7 +8,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav14d3';
+export const ADMIN_NAV_REV = 'nav14d5';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }

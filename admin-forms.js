@@ -252,7 +252,7 @@
         else form.append(el('label', { class: f.width === 'full' ? 'full' : '' }, `${f.label}${f.required ? ' *' : ''}`, el('input', { type: { email: 'email', phone: 'tel', number: 'number', date: 'date' }[f.type] || 'text', placeholder: f.placeholder || null })));
       });
       form.append(el('div', { class: 'full inkind-form-actions' }, el('button', { class: 'btn primary', type: 'button', text: def.submit_label })));
-      wrap.append(el('h2', { text: def.title }), def.intro ? el('p', { text: def.intro }) : null, form);
+      wrap.append(...[el('h2', { text: def.title }), def.intro ? el('p', { text: def.intro }) : null, form].filter(Boolean));
       return wrap;
     }
     function inspector(f) {
