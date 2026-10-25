@@ -193,3 +193,9 @@ body.ev-focus .ev-top,body.ev-focus .ev-rail{display:none}
   .ev-sh-foot{flex-direction:column-reverse}
   .ev-sh-foot .ev-btn{width:100%;min-height:44px}
 }
+/* 701-760px: the 68px admin rail stays visible, so sheets start right of it. */
+@media (min-width:700px) and (max-width:760px){
+  body:has(.sn-rail) .ev-dialog,body:has(.sn-rail) .ev-sheet,body:has(.sn-rail) .ev-sheet-side{left:68px;width:auto}
+}
+/* Phone: the open event sheet covers the bottom bar instead of sitting under it. */
+body.ev-modal .sn-bottom{display:none}
