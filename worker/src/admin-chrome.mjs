@@ -7,8 +7,8 @@ const PAGE_LABELS = {
   'become-a-sponsor': 'Become a Sponsor',
 };
 
-/** Admin-only cache key for the 14c nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav14c1';
+/** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
+export const ADMIN_NAV_REV = 'nav14d1';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -30,18 +30,13 @@ function initials(name) {
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '•';
 }
 
-/** Top bar shown below 1100px: Menu button, logos, search, avatar. */
+/** Phone-only header (<700px): logos, "Site Studio", avatar. Menu/Find live in the bottom bar. */
 export function renderAdminChromeBar(options = {}) {
   const v = escapeAdminHtml(options.assetVersion || 'dev');
   const user = options.user || {};
   const name = String(user.display_name || user.username || '');
   return `<div class="admin-chrome-bar sn-top">
-<button type="button" class="admin-nav-toggle sn-menu-btn" aria-expanded="false" aria-controls="admin-sidebar">
-<span class="admin-nav-toggle-icon" aria-hidden="true"><span></span><span></span><span></span></span>
-<span class="admin-nav-toggle-label">Menu</span>
-</button>
-<a class="sn-top-brand" href="/admin" aria-label="Site Studio home"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="" width="30" height="30"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="" width="30" height="30"></a>
-<button type="button" class="sn-top-search" data-sn-launch aria-haspopup="dialog">${SEARCH_ICON}<span class="sn-top-search-text">Find a page or tool…</span><kbd>Ctrl K</kbd></button>
+<a class="sn-top-brand" href="/admin" aria-label="Site Studio home"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="" width="30" height="30"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="" width="30" height="30"><b>Site Studio</b></a>
 ${name ? `<span class="sn-avatar" title="${escapeAdminHtml(name)}" aria-hidden="true">${escapeAdminHtml(initials(name))}</span>` : ''}
 <form id="admin-mobile-logout-form" class="admin-chrome-logout" method="post" action="/admin/logout">
 <button class="admin-mobile-logout-btn" type="submit">Log Out</button>
@@ -114,6 +109,7 @@ export function buildAdminNavModel(options = {}) {
   const sections = [
     {
       key: 'website',
+      icon: '🌐',
       label: 'Website',
       items: [
         item('pages', 'Pages', 'pages', tabHref('pages'), { hidden: !pagesAllowed && !pages.length, keywords: 'edit page website' }),
@@ -122,6 +118,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'calendar',
+      icon: '📅',
       label: 'Calendar',
       items: [
         item('events-manager', 'Events', '', '/admin/events-manager', { perm: 'caldev', attrs: 'data-nav-href="/admin/events-manager"', keywords: 'calendar rehearsal game concert' }),
@@ -131,6 +128,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'money',
+      icon: '💵',
       label: 'Money',
       items: [
         item('fundraiser-cards', 'Fundraiser cards', 'fundraiser-cards', '/admin/fundraiser-cards', {
@@ -145,6 +143,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'sponsors',
+      icon: '🤝',
       label: 'Sponsors',
       items: [
         item('sponsors', 'Manage sponsors', 'sponsors', tabHref('sponsors'), { keywords: 'logos levels' }),
@@ -158,6 +157,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'boosters',
+      icon: '🏅',
       label: 'Boosters',
       items: [
         item('booster-members', 'Booster Members', 'booster-members', tabHref('booster-members')),
@@ -167,6 +167,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'people',
+      icon: '👥',
       label: 'People',
       items: [
         item('staff', 'Directors & Staff', 'staff', tabHref('staff')),
@@ -175,6 +176,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'photos',
+      icon: '🖼️',
       label: 'Photos & Social',
       items: [
         item('photos', 'Photos', 'photos', tabHref('photos')),
@@ -183,6 +185,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'forms',
+      icon: '📋',
       label: 'Forms & Mail',
       items: [
         item('forms-builder', 'Forms (sign-ups)', '', '/admin/forms-builder', { perm: 'forms-builder', attrs: 'data-nav-href="/admin/forms-builder"', keywords: 'form builder sign up' }),
@@ -200,6 +203,7 @@ export function buildAdminNavModel(options = {}) {
     },
     {
       key: 'admin',
+      icon: '🛡️',
       label: 'Admin',
       adminOnly: true,
       items: [
@@ -299,6 +303,72 @@ export function listAdminNavTargets(options = {}) {
     }));
 }
 
+const RAIL_HOME_ICON = '🏠';
+const RAIL_FIND_ICON = '🔎';
+
+function sectionOf(model, key) {
+  return model.sections.find((section) => !section.hidden && section.visible.some((entry) => entry.key === key)) || null;
+}
+
+function railEntryAttrs(entry) {
+  const tab = entry.tab ? ` data-rail-tab="${escapeAdminHtml(entry.tab)}"` : '';
+  return ` href="${escapeAdminHtml(entry.href || '#')}" data-rail-item="${escapeAdminHtml(entry.key)}"${tab}`;
+}
+
+/** 14d-1 icon rail (>=700px): Home, Find, one icon per allowed section, account. */
+export function renderAdminRailHtml(assetVersion = 'dev', options = {}, model = buildAdminNavModel(options)) {
+  const v = escapeAdminHtml(String(assetVersion || 'dev'));
+  const user = options.user || {};
+  const name = String(user.display_name || user.username || '');
+  const currentSection = sectionOf(model, model.currentKey);
+  const homeCurrent = model.currentKey === 'dashboard';
+  const tip = (label) => `<span class="sn-rail-name">${escapeAdminHtml(label)}</span>`;
+  const rows = [];
+  rows.push(`<li><a class="sn-rail-btn${homeCurrent ? ' sn-rail-current' : ''}"${railEntryAttrs(model.dashboard)} aria-label="Home" data-sn-tip="Home"${homeCurrent ? ' aria-current="page"' : ''}><span class="sn-rail-ico" aria-hidden="true">${RAIL_HOME_ICON}</span>${tip('Home')}</a></li>`);
+  rows.push(`<li><button type="button" class="sn-rail-btn" data-sn-launch aria-haspopup="dialog" aria-label="Find a page or tool (Ctrl K)" aria-keyshortcuts="Control+K" data-sn-tip="Find · Ctrl K"><span class="sn-rail-ico" aria-hidden="true">${RAIL_FIND_ICON}</span>${tip('Find')}</button></li>`);
+  for (const section of model.sections) {
+    if (section.hidden) continue;
+    const isCurrent = currentSection === section;
+    const cur = isCurrent ? ' sn-rail-current' : '';
+    const label = section.adminOnly ? `${section.label} (ADMIN only)` : section.label;
+    const lock = section.adminOnly ? '<span class="sn-rail-lock" aria-hidden="true">🔒</span>' : '';
+    const dotOn = section.key === 'forms' && Number(options.formsNewCount || 0) > 0;
+    const dot = section.key === 'forms' ? `<span class="sn-dot" data-sn-dot="forms"${dotOn ? '' : ' hidden'}></span>` : '';
+    const ico = `<span class="sn-rail-ico" aria-hidden="true">${section.icon || '•'}</span>${lock}${dot}`;
+    if (section.direct) {
+      const only = section.visible[0];
+      const onlyCurrent = only.key === model.currentKey;
+      rows.push(`<li><a class="sn-rail-btn sn-rail-direct${onlyCurrent ? ' sn-rail-current' : ''}"${railEntryAttrs(only)} data-rail-section="${section.key}" aria-label="${escapeAdminHtml(only.label)}" data-sn-tip="${escapeAdminHtml(only.label)}"${onlyCurrent ? ' aria-current="page"' : ''}>${ico}${tip(only.label)}</a></li>`);
+    } else {
+      rows.push(`<li><button type="button" class="sn-rail-btn${cur}" data-sn-fly-key="${section.key}" data-rail-section="${section.key}" aria-expanded="false" aria-controls="admin-sidebar" aria-label="${escapeAdminHtml(label)}" data-sn-tip="${escapeAdminHtml(label)}">${ico}${tip(section.label)}</button></li>`);
+    }
+  }
+  const me = name
+    ? `<button type="button" class="sn-rail-btn sn-rail-me" data-sn-fly-key="account" aria-expanded="false" aria-controls="admin-sidebar" aria-label="Account: ${escapeAdminHtml(name)}" data-sn-tip="${escapeAdminHtml(name)}"><span class="sn-avatar" aria-hidden="true">${escapeAdminHtml(initials(name))}</span></button>`
+    : `<button type="button" class="sn-rail-btn sn-rail-me" data-sn-fly-key="account" aria-expanded="false" aria-controls="admin-sidebar" aria-label="Account" data-sn-tip="Account"><span class="sn-rail-ico" aria-hidden="true">👤</span></button>`;
+  return `<nav class="sn-rail" aria-label="Admin" data-sn-rail>
+<a class="sn-rail-logo" href="/admin" aria-label="Site Studio home" data-sn-tip="Site Studio"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="" width="40" height="22"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="" width="26" height="26"></a>
+<ul class="sn-rail-list">${rows.join('')}</ul>
+${me}
+</nav>`;
+}
+
+/** Phone (<700px) thumb bar: Home · current section · Find · Menu sheet. */
+export function renderAdminBottomBarHtml(options = {}, model = buildAdminNavModel(options)) {
+  const homeCurrent = model.currentKey === 'dashboard';
+  const visible = model.sections.filter((section) => !section.hidden);
+  const section = sectionOf(model, model.currentKey) || visible[0] || null;
+  const curSlot = section
+    ? `<button type="button" class="sn-bb-btn${homeCurrent ? '' : ' sn-bb-current'}" data-sn-sheet-section="${section.key}" aria-controls="admin-sidebar" aria-label="${escapeAdminHtml(section.label)} menu"><span class="sn-bb-ico" aria-hidden="true">${section.icon || '•'}</span><span class="sn-bb-txt">${escapeAdminHtml(section.label.split(' ')[0])}</span></button>`
+    : '';
+  return `<nav class="sn-bottom" aria-label="Admin shortcuts">
+<a class="sn-bb-btn${homeCurrent ? ' sn-bb-current' : ''}"${railEntryAttrs(model.dashboard)}${homeCurrent ? ' aria-current="page"' : ''}><span class="sn-bb-ico" aria-hidden="true">${RAIL_HOME_ICON}</span><span class="sn-bb-txt">Home</span></a>
+${curSlot}
+<button type="button" class="sn-bb-btn" data-sn-launch aria-haspopup="dialog"><span class="sn-bb-ico" aria-hidden="true">${RAIL_FIND_ICON}</span><span class="sn-bb-txt">Find</span></button>
+<button type="button" class="sn-bb-btn admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar"><span class="sn-bb-ico" aria-hidden="true">☰</span><span class="sn-bb-txt admin-nav-toggle-label">Menu</span></button>
+</nav>`;
+}
+
 export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
   const v = escapeAdminHtml(String(assetVersion || 'dev'));
   const model = buildAdminNavModel(options);
@@ -312,8 +382,10 @@ export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
     ? `<div class="sn-page-index" data-sn-pages hidden>${model.pageIndex.map((page) => `<a href="${escapeAdminHtml(page.href)}" data-sn-page="${escapeAdminHtml(page.slug)}">${escapeAdminHtml(page.label)}</a>`).join('')}</div>`
     : '';
 
-  return `<aside id="admin-sidebar" class="sn-side" data-admin-nav-v2 data-admin-nav-flat aria-label="Site Studio menu">
+  return `${renderAdminRailHtml(assetVersion, options, model)}
+<aside id="admin-sidebar" class="sn-side" data-admin-nav-v2 data-admin-nav-flat aria-label="Site Studio menu">
 ${renderAdminSidebarClose()}
+<button type="button" class="sn-fly-esc" data-sn-fly-close aria-label="Close panel">Esc ×</button>
 <a class="sn-brand" href="/admin"><span class="sn-logos"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="East Forsyth Band eagle logo" width="34" height="34"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="East Forsyth Blue Regiment logo" width="34" height="34"></span><span class="sn-brand-text"><b>Site Studio</b><small>EFHS BAND</small></span></a>
 <div class="admin-nav-search sn-search"><label class="sn-search-box">${SEARCH_ICON}<span class="sr-only">Find a page or tool</span><input type="search" data-admin-nav-search placeholder="Find a page…" autocomplete="off" aria-keyshortcuts="Control+K /"></label><kbd class="sn-kbd" aria-hidden="true">Ctrl K</kbd></div>
 <nav class="admin-menu sn-nav" aria-label="Site Studio navigation">
@@ -329,5 +401,6 @@ ${userBlock}
 <button class="admin-logout" type="submit">Log out</button>
 </form></div>
 </div>
-</aside>`;
+</aside>
+${renderAdminBottomBarHtml(options, model)}`;
 }

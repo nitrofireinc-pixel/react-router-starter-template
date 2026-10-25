@@ -1,14 +1,17 @@
-/* Site Studio admin nav, option 14c (plan 2.22): light flat sidebar + Ctrl+K launcher.
- * Desktop (>=1100px): sidebar always visible. Below 1100px: top bar + slide-over drawer.
- * Phone (<=600px): the drawer is a full-screen Menu with Close first.
+/* Site Studio admin nav, option 14d-1 (plan 2.22a): 68px icon rail + 260px flat section flyout.
+ * >=700px: the rail is always visible; clicking an icon opens that section's flyout over the page
+ * (the page never changes width). Esc / click outside closes it.
+ * Phone (<700px): bottom bar (Home · current section · Find · Menu); Menu opens the full flat list as a sheet.
  * The launcher filters only menu items + page titles already in the HTML (no network). */
 (() => {
-  const OVERLAY_MQ = '(max-width: 1099px)';
-  const PHONE_MQ = '(max-width: 600px)';
+  const OVERLAY_MQ = '(max-width: 699px)';
+  const PHONE_MQ = '(max-width: 699px)';
   const TRANSITION_MS = 200;
   const FOCUSABLE = 'a[href]:not([hidden]), button:not([disabled]):not([hidden]), input:not([disabled]):not([type="hidden"]), [tabindex]:not([tabindex="-1"])';
   let lastFocus = null;
   let launcher = null;
+  let flyBtn = null;
+  let tipEl = null;
 
   const mq = (query) => window.matchMedia(query).matches;
   const isOverlay = () => mq(OVERLAY_MQ);
@@ -243,6 +246,7 @@
     if (!launcher) launcher = buildLauncher();
     if (!launcher.wrap.hidden) { launcher.input.focus(); return; }
     if (document.body.classList.contains('admin-nav-open') && isOverlay()) setOpen(false);
+    if (isFlyOpen()) closeFly();
     launcher.returnFocus = document.activeElement;
     launcher.wrap.hidden = false;
     document.body.classList.add('sn-launch-open');
@@ -301,12 +305,147 @@
         if (el === pick) el.setAttribute('aria-current', 'page');
         else { el.removeAttribute('aria-current'); el.classList.remove('active'); }
       });
+      const secKey = pick.dataset.navItem === 'dashboard' ? '' : (pick.closest('.sn-section')?.dataset.navSection || '');
+      document.querySelectorAll('[data-sn-rail] .sn-rail-btn, .sn-bottom .sn-bb-btn').forEach((b) => {
+        const on = b.dataset.railItem === pick.dataset.navItem || (secKey && b.dataset.railSection === secKey && !b.dataset.railItem) || (secKey && b.dataset.railItem && b.dataset.railSection === secKey);
+        if (b.closest('.sn-bottom')) {
+          if (b.dataset.railItem || b.dataset.snSheetSection) b.classList.toggle('sn-bb-current', b.dataset.railItem ? b.dataset.railItem === pick.dataset.navItem : Boolean(secKey));
+        } else b.classList.toggle('sn-rail-current', Boolean(on));
+      });
     };
     const obs = new MutationObserver(() => { obs.disconnect(); sync(); items.forEach((el) => obs.observe(el, { attributes: true, attributeFilter: ['class'] })); });
     items.forEach((el) => obs.observe(el, { attributes: true, attributeFilter: ['class'] }));
   }
 
+  /* ---------- 14d-1 rail + flyout ---------- */
+  const railEl = () => document.querySelector('[data-sn-rail]');
+  const isFlyOpen = () => document.body.classList.contains('sn-fly');
+
+  function openFly(key, btn, { focusFirst = false } = {}) {
+    const sidebar = sidebarEl();
+    if (!sidebar || isOverlay()) return;
+    sidebar.dataset.snFly = key;
+    sidebar.querySelectorAll('.sn-section').forEach((sec) => sec.classList.toggle('sn-fly-on', sec.dataset.navSection === key));
+    sidebar.classList.toggle('sn-fly-account', key === 'account');
+    sidebar.removeAttribute('inert');
+    const label = btn?.dataset.snTip || key;
+    sidebar.setAttribute('aria-label', `${label} menu`);
+    document.querySelectorAll('[data-sn-fly-key]').forEach((b) => b.setAttribute('aria-expanded', String(b === btn)));
+    document.querySelectorAll('.sn-rail-btn.sn-rail-open').forEach((b) => b.classList.remove('sn-rail-open'));
+    btn?.classList.add('sn-rail-open');
+    flyBtn = btn || null;
+    document.body.classList.add('sn-fly');
+    hideTip();
+    if (focusFirst) {
+      const first = key === 'account'
+        ? sidebar.querySelector('.sn-foot button')
+        : sidebar.querySelector(`.sn-section[data-nav-section="${key}"] [data-nav-item]`);
+      window.setTimeout(() => first?.focus(), 0);
+    }
+  }
+
+  function closeFly({ returnFocus = false } = {}) {
+    const sidebar = sidebarEl();
+    if (!isFlyOpen()) return;
+    document.body.classList.remove('sn-fly');
+    if (sidebar) {
+      delete sidebar.dataset.snFly;
+      sidebar.classList.remove('sn-fly-account');
+      sidebar.querySelectorAll('.sn-fly-on').forEach((sec) => sec.classList.remove('sn-fly-on'));
+      sidebar.setAttribute('aria-label', 'Site Studio menu');
+    }
+    document.querySelectorAll('[data-sn-fly-key]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+    document.querySelectorAll('.sn-rail-open').forEach((b) => b.classList.remove('sn-rail-open'));
+    const back = flyBtn;
+    flyBtn = null;
+    if (returnFocus) back?.focus();
+  }
+
+  /* One fixed tooltip, placed right of the rail - or right of the flyout when one is open - so it never covers the panel. */
+  function showTip(btn) {
+    if (isOverlay() || !btn?.dataset.snTip) return;
+    if (!tipEl) {
+      tipEl = document.createElement('div');
+      tipEl.className = 'sn-tip';
+      tipEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(tipEl);
+    }
+    if (btn.classList.contains('sn-rail-open')) { hideTip(); return; }
+    const rect = btn.getBoundingClientRect();
+    const rail = railEl()?.getBoundingClientRect();
+    const panel = isFlyOpen() ? sidebarEl()?.getBoundingClientRect() : null;
+    const left = Math.max(rail ? rail.right : rect.right, panel ? panel.right : 0) + 8;
+    tipEl.textContent = btn.dataset.snTip;
+    tipEl.style.left = `${left}px`;
+    tipEl.style.top = `${rect.top + rect.height / 2}px`;
+    tipEl.hidden = false;
+  }
+  function hideTip() { if (tipEl) tipEl.hidden = true; }
+
+  function initRail(sidebar) {
+    const rail = railEl();
+    if (!rail) return;
+    const buttons = () => [...rail.querySelectorAll('.sn-rail-logo, .sn-rail-btn')];
+    rail.addEventListener('click', (event) => {
+      const link = event.target.closest('a[data-rail-tab]');
+      if (link) {
+        const item = sidebar.querySelector(`.admin-menu [data-tab="${link.dataset.railTab}"]`);
+        if (item && document.getElementById(`tab-${link.dataset.railTab}`)) { event.preventDefault(); closeFly(); item.click(); return; }
+      }
+      const btn = event.target.closest('[data-sn-fly-key]');
+      if (!btn) return;
+      event.stopPropagation();
+      if (btn.classList.contains('sn-rail-open')) closeFly();
+      else openFly(btn.dataset.snFlyKey, btn, { focusFirst: event.detail === 0 });
+    });
+    rail.addEventListener('keydown', (event) => {
+      const list = buttons();
+      const idx = list.indexOf(document.activeElement);
+      if (idx < 0) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const next = list[(idx + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length];
+        next.focus();
+      } else if (event.key === 'ArrowRight' && document.activeElement.dataset.snFlyKey) {
+        event.preventDefault();
+        openFly(document.activeElement.dataset.snFlyKey, document.activeElement, { focusFirst: true });
+      } else if (event.key === 'Home') { event.preventDefault(); list[0].focus(); }
+      else if (event.key === 'End') { event.preventDefault(); list[list.length - 1].focus(); }
+    });
+    rail.addEventListener('mouseover', (event) => { const b = event.target.closest('[data-sn-tip]'); if (b) showTip(b); });
+    rail.addEventListener('mouseleave', hideTip);
+    rail.addEventListener('focusin', (event) => { const b = event.target.closest('[data-sn-tip]'); if (b && b.matches(':focus-visible')) showTip(b); });
+    rail.addEventListener('focusout', hideTip);
+    sidebar.addEventListener('keydown', (event) => {
+      if (!isFlyOpen()) return;
+      if (event.key === 'ArrowLeft' && !isTypingTarget(event.target)) { event.preventDefault(); closeFly({ returnFocus: true }); return; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const links = focusables(sidebar).filter((el) => el.matches('[data-nav-item], .sn-foot button'));
+        const i = links.indexOf(document.activeElement);
+        if (i < 0) return;
+        event.preventDefault();
+        links[(i + (event.key === 'ArrowDown' ? 1 : -1) + links.length) % links.length].focus();
+      }
+    });
+    sidebar.querySelector('[data-sn-fly-close]')?.addEventListener('click', () => closeFly({ returnFocus: true }));
+    document.addEventListener('pointerdown', (event) => {
+      if (!isFlyOpen()) return;
+      if (sidebar.contains(event.target) || rail.contains(event.target)) return;
+      closeFly();
+    }, true);
+    document.addEventListener('focusin', (event) => {
+      if (!isFlyOpen()) return;
+      if (sidebar.contains(event.target) || rail.contains(event.target) || event.target.closest?.('.sn-launch')) return;
+      closeFly();
+    });
+    window.addEventListener('resize', hideTip);
+    window.addEventListener('scroll', hideTip, true);
+  }
+
   function setBadge(key, count) {
+    const sectionKey = key.split('-')[0];
+    const dot = document.querySelector(`[data-sn-dot="${sectionKey}"]`);
+    if (dot) dot.hidden = !(Number(count) > 0);
     const badge = document.querySelector(`[data-sn-badge="${key}"]`);
     if (!badge) return;
     const n = Number(count) || 0;
@@ -330,10 +469,15 @@
     document.querySelector('[data-admin-nav-close]')?.addEventListener('click', () => setOpen(false));
     document.querySelector('[data-admin-nav-backdrop]')?.addEventListener('click', () => setOpen(false));
     document.querySelectorAll('[data-sn-launch]').forEach((btn) => btn.addEventListener('click', () => {
-      if (isPhone()) setOpen(true, { focus: 'search' });
-      else openLauncher();
+      openLauncher();
     }));
 
+    document.querySelectorAll('[data-sn-sheet-section]').forEach((btn) => btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setOpen(true);
+      const sec = sidebar.querySelector(`.sn-section[data-nav-section="${btn.dataset.snSheetSection}"]`);
+      window.setTimeout(() => sec?.scrollIntoView?.({ block: 'start' }), reducedMotion() ? 0 : 60);
+    }));
     sidebar.addEventListener('keydown', (event) => {
       if (isOverlay() && document.body.classList.contains('admin-nav-open')) trapTab(event, sidebar);
     });
@@ -349,17 +493,26 @@
         openLauncher();
         return;
       }
+      if (key === 'Escape' && isFlyOpen() && (!launcher || launcher.wrap.hidden)) {
+        event.preventDefault();
+        closeFly({ returnFocus: true });
+        return;
+      }
       if (key === 'Escape' && isOverlay() && document.body.classList.contains('admin-nav-open') && (!launcher || launcher.wrap.hidden)) {
         setOpen(false);
       }
     });
     sidebar.addEventListener('click', (event) => {
-      if (!isOverlay()) return;
+      if (!isOverlay()) {
+        if (event.target.closest('.sn-nav a[href]')) window.setTimeout(() => closeFly(), 0);
+        return;
+      }
       const target = event.target.closest('a[href]');
       if (target && target.closest('.sn-nav')) window.setTimeout(() => setOpen(false), 0);
     });
 
     initNavSearch(sidebar);
+    initRail(sidebar);
     wireAdminNavLinks(sidebar);
     syncCurrent(sidebar);
     if (isStandaloneAdminPage()) {
@@ -383,7 +536,7 @@
         if (!anyActive) sidebar.querySelector(`[data-nav-item][href="${window.location.pathname}"]`)?.classList.add('active');
       });
     }
-    window.matchMedia(OVERLAY_MQ).addEventListener('change', () => setOpen(false));
+    window.matchMedia(OVERLAY_MQ).addEventListener('change', () => { closeFly(); hideTip(); setOpen(false); });
   }
 
   window.efhsAdminNav = {
@@ -398,6 +551,9 @@
     openLauncher,
     closeLauncher,
     setBadge,
+    openFly(key) { openFly(key, document.querySelector(`[data-sn-fly-key="${key}"]`)); },
+    closeFly,
+    isFlyOpen,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

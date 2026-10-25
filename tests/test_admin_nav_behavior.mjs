@@ -119,93 +119,121 @@ async function withPage(t, width, height, path, fn) {
   }
 }
 
-test('1280: light sidebar is always visible at 250px and the workspace sits beside it', async (t) => {
-  await withPage(t, 1280, 900, '/admin', async (page) => {
-    const m = await page.evaluate(() => {
-      const side = document.getElementById('admin-sidebar').getBoundingClientRect();
-      const ws = document.querySelector('.admin-workspace').getBoundingClientRect();
-      return {
-        sideW: Math.round(side.width), sideX: side.x, wsX: Math.round(ws.x),
-        bg: getComputedStyle(document.getElementById('admin-sidebar')).backgroundColor,
-        topDisplay: getComputedStyle(document.querySelector('.sn-top')).display,
-        overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      };
+const geom = (page) => page.evaluate(() => {
+  const r = (el) => { const b = el.getBoundingClientRect(); return { x: Math.round(b.x), w: Math.round(b.width), r: Math.round(b.right) }; };
+  const side = document.getElementById('admin-sidebar');
+  return {
+    rail: r(document.querySelector('.sn-rail')),
+    side: r(side),
+    sideVisible: getComputedStyle(side).visibility === 'visible',
+    ws: r(document.querySelector('.admin-workspace, .visual-editor-main')),
+    overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  };
+});
+
+for (const width of [1280, 980]) {
+  test(`${width}: 68px rail always visible; icon opens a 260px flyout over the page without shrinking it`, async (t) => {
+    await withPage(t, width, 900, '/admin', async (page) => {
+      const closed = await geom(page);
+      assert.equal(closed.rail.w, 68);
+      assert.equal(closed.rail.x, 0);
+      assert.equal(closed.sideVisible, false);
+      assert.ok(closed.ws.x >= 68, `workspace x ${closed.ws.x}`);
+      assert.ok(closed.overflowX <= 0);
+      assert.equal(await page.isVisible('.sn-top'), false);
+      assert.equal(await page.isVisible('.sn-bottom'), false);
+      await page.click('[data-sn-fly-key="calendar"]');
+      await page.waitForTimeout(220);
+      const open = await geom(page);
+      assert.equal(open.sideVisible, true);
+      assert.equal(open.side.x, 68);
+      assert.equal(open.side.w, 260);
+      assert.deepEqual(open.ws, closed.ws, 'page width never changes');
+      assert.equal(await page.getAttribute('[data-sn-fly-key="calendar"]', 'aria-expanded'), 'true');
+      const shown = await page.evaluate(() => [...document.querySelectorAll('#admin-sidebar [data-nav-item]')].filter((el) => el.offsetParent).map((el) => el.dataset.navItem));
+      assert.ok(shown.includes('events-manager') && !shown.includes('pages'), shown.join(','));
+      // tooltip for another icon sits right of the flyout, never over it
+      await page.hover('[data-sn-fly-key="money"]');
+      const tip = await page.evaluate(() => { const el = document.querySelector('.sn-tip'); return el && !el.hidden ? Math.round(el.getBoundingClientRect().x) : null; });
+      assert.ok(tip !== null && tip >= open.side.r, `tip x ${tip} vs flyout right ${open.side.r}`);
+      // click outside closes
+      await page.mouse.click(width - 40, 600);
+      await page.waitForTimeout(220);
+      assert.equal((await geom(page)).sideVisible, false);
     });
-    assert.equal(m.sideW, 250);
-    assert.equal(m.sideX, 0);
-    assert.ok(m.wsX >= 250, `workspace x ${m.wsX}`);
-    assert.equal(m.bg, 'rgb(255, 255, 255)');
-    assert.equal(m.topDisplay, 'none');
-    assert.ok(m.overflowX <= 0);
+  });
+}
+
+test('1280: keyboard - arrows move on the rail, Enter/→ opens and focuses first link, Esc closes back to icon', async (t) => {
+  await withPage(t, 1280, 900, '/admin', async (page) => {
+    await page.focus('[data-sn-fly-key="website"]');
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'calendar');
+    const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineWidth);
+    assert.equal(ring, '3px');
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(80);
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'calendar');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(220);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.snFlyKey), 'calendar');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('sn-fly')), false);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(80);
+    assert.equal(await page.evaluate(() => document.body.classList.contains('sn-fly')), true);
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.sn-section')?.dataset.navSection), 'calendar');
   });
   await withPage(t, 1280, 900, '/admin/visual/join', async (page) => {
     const x = await page.evaluate(() => Math.round(document.querySelector('.visual-editor-main').getBoundingClientRect().x));
-    assert.ok(x >= 250, `visual main x ${x}`);
-  });
-});
-
-test('980: Menu opens a slide-over drawer, Close gets focus, Esc closes and returns focus', async (t) => {
-  await withPage(t, 980, 1000, '/admin', async (page) => {
-    assert.equal(await page.isVisible('#admin-sidebar .sn-item'), false);
-    await page.click('.admin-nav-toggle');
-    await page.waitForTimeout(260);
-    await waitForFocusInSidebar(page);
-    const open = await page.evaluate(() => ({
-      focus: document.activeElement.matches('[data-admin-nav-close]'),
-      role: document.getElementById('admin-sidebar').getAttribute('role'),
-      backdrop: !document.querySelector('[data-admin-nav-backdrop]').hidden,
-    }));
-    assert.deepEqual(open, { focus: true, role: 'dialog', backdrop: true });
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(260);
-    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('admin-nav-toggle')), true);
-    assert.equal(await page.isVisible('#admin-sidebar .sn-item'), false);
+    assert.ok(x >= 68, `visual main x ${x}`);
   });
 });
 
 test('Ctrl+K opens the quick search; arrows + Enter pick, Esc returns focus', async (t) => {
   await withPage(t, 1280, 900, '/admin', async (page) => {
-    await page.focus('.sn-brand');
+    await page.focus('.sn-rail-logo');
     await page.keyboard.press('Control+k');
     await page.waitForSelector('.sn-launch:not([hidden])');
-    const before = await page.evaluate(() => ({
-      role: document.querySelector('.sn-launch-box, .sn-launch [role="dialog"]')?.getAttribute('role') || document.querySelector('.sn-launch').getAttribute('role'),
-      focused: document.activeElement.getAttribute('role'),
-    }));
-    assert.equal(before.focused, 'combobox');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('role')), 'combobox');
     await page.keyboard.type('minu');
-    const first = await page.evaluate(() => {
-      const li = document.querySelector('#sn-launch-list [role="option"]');
-      return li ? li.textContent : '';
-    });
+    const first = await page.evaluate(() => document.querySelector('#sn-launch-list [role="option"]')?.textContent || '');
     assert.match(first, /Meeting Minutes[\s\S]*Boosters/);
-    await page.keyboard.type('zzzz');
     await page.keyboard.press('Control+a');
     await page.keyboard.type('fundrai');
     const labels = await page.evaluate(() => [...document.querySelectorAll('#sn-launch-list [role="option"]')].map((li) => li.textContent));
     assert.ok(labels.some((l) => /Fundraising/.test(l)), labels.join('|'));
     await page.keyboard.press('Escape');
     await page.waitForSelector('.sn-launch', { state: 'hidden' });
-    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('sn-brand')), true);
+    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('sn-rail-logo')), true);
   });
 });
 
-test('390: Menu is full-screen with Close first and 44px targets', async (t) => {
+test('390: bottom bar (Home, section, Find, Menu); Menu sheet has Close first and 44px targets', async (t) => {
   await withPage(t, 390, 844, '/admin', async (page) => {
+    assert.equal(await page.isVisible('.sn-rail'), false);
+    const bb = await page.evaluate(() => [...document.querySelectorAll('.sn-bottom .sn-bb-btn')].map((el) => ({ t: el.textContent.trim(), h: el.getBoundingClientRect().height })));
+    assert.equal(bb.length, 4);
+    assert.ok(bb.every((b) => b.h >= 44));
     await page.click('.admin-nav-toggle');
     await page.waitForTimeout(260);
     const m = await page.evaluate(() => {
       const side = document.getElementById('admin-sidebar');
       const r = side.getBoundingClientRect();
       const first = side.querySelector('a,button,input');
-      const small = [...side.querySelectorAll('.sn-item')].filter((el) => el.getBoundingClientRect().height < 44).length;
+      const small = [...side.querySelectorAll('.sn-item')].filter((el) => el.offsetParent && el.getBoundingClientRect().height < 44).length;
       return { w: Math.round(r.width), x: Math.round(r.x), firstClose: first.matches('[data-admin-nav-close]'), small,
-        overflowX: side.scrollWidth - side.clientWidth };
+        items: [...side.querySelectorAll('[data-nav-item]')].filter((el) => el.offsetParent).length,
+        overflowX: side.scrollWidth - side.clientWidth, focusClose: document.activeElement.matches('[data-admin-nav-close]') };
     });
     assert.equal(m.w, 390);
     assert.equal(m.x, 0);
     assert.equal(m.firstClose, true);
+    assert.equal(m.focusClose, true);
     assert.equal(m.small, 0);
+    assert.ok(m.items > 20, `full list ${m.items}`);
     assert.ok(m.overflowX <= 0);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(260);
+    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('admin-nav-toggle')), true);
   });
 });
