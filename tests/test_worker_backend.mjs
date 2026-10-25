@@ -68,7 +68,7 @@ test('production deploy refuses untracked files in the assets dir', () => {
 
   const clean = mkdtempSync(join(tmpdir(), 'efhs-public-'));
   writeFileSync(join(clean, 'styles.css'), 'ok');
-  writeFileSync(join(clean, 'admin-visual.js'), 'tracked on this branch');
+  writeFileSync(join(clean, 'admin-nav.js'), 'tracked on this branch');
   const allowed = spawnSync(process.execPath, [join(root, 'worker/scripts/check-worker-public.mjs')], {
     cwd: root,
     encoding: 'utf8',
@@ -303,45 +303,7 @@ test('sanitizeRichHtml preserves body photo width and float for CMS editing', ()
   assert.match(html, /width: 280px/);
 });
 
-test('CMS Fundraising page editor can insert and upload body photos', () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
-  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
-  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
-  assert.match(workerSrc, /data-rich-insert-photo/);
-  assert.match(workerSrc, /canEditPage\(auth\.user, 'fundraising'\)/);
-  assert.match(adminSrc, /function insertPhotoIntoPageBody/);
-  assert.match(adminSrc, /function showPagePhotoToast/);
-  assert.match(adminSrc, /function uploadAndInsertPagePhoto/);
-  assert.match(adminSrc, /data-rich-insert-photo/);
-  assert.match(adminSrc, /sortOrder: -600/);
-  assert.match(styles, /\.admin-page-photo-toast/);
-  assert.match(styles, /\.cms-photo-resize-handles/);
-});
 
-test('CMS Home Band information card is one rich editor with lists and photos', () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
-  const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
-  const styles = readFileSync(join(root, 'styles.css'), 'utf8');
-  assert.match(adminSrc, /querySelectorAll\('\.hero-card'\)/);
-  assert.match(adminSrc, /cms-home-hero-card/);
-  assert.match(adminSrc, /dataset\.cmsHomeField = 'hero-card'/);
-  assert.match(adminSrc, /el\.closest\('\.hero-card, \.cms-edit-field'\)/);
-  assert.match(adminSrc, /inHeroCard \? 'cms-body-photo-block' : 'cms-body-photo-left'/);
-  assert.match(adminSrc, /selectedImg\.setAttribute\('src', url\)/);
-  assert.match(adminSrc, /#admin-page-photo-toast/);
-  assert.match(adminSrc, /function isHomeHeroBrandMarkSrc/);
-  assert.match(adminSrc, /function restoreHomeHeroCardUploadSrc/);
-  assert.match(adminSrc, /function sanitizeHomeHeroPasteHtml/);
-  assert.match(workerSrc, /data-rich="insertUnorderedList"/);
-  assert.match(workerSrc, /• List/);
-  assert.match(workerSrc, /add or remove bullets/);
-  assert.match(styles, /\.page-preview \.hero-card\.cms-edit-rich/);
-  assert.match(styles, /\.hero-card img\.cms-body-photo-block/);
-  const assetHtml = sanitizeRichHtml('<p><img src="/assets/efhs-blue-regiment-mark.png" alt="Mark"></p>');
-  assert.match(assetHtml, /src="\/assets\/efhs-blue-regiment-mark\.png"/);
-});
 
 test('generateStructuredPageHtml preserves body photo inserts', () => {
   const html = generateStructuredPageHtml({
@@ -608,7 +570,6 @@ test('homepage calendar highlights fill from Schedule Board upcoming rows', () =
   assert.match(workerSrc, /url\.searchParams\.get\('upcoming'\) === '1'/);
   assert.match(workerSrc, /listUpcomingCaldevEvents/);
   assert.doesNotMatch(workerSrc, /seedCaldevFromProduction[\s\S]{0,200}upcoming/);
-  assert.match(adminSrc, /Managed in Schedule Board/);
 });
 
 test('sortPhotosByRecent orders by created_at then id', () => {
@@ -3060,7 +3021,6 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(workerSrc, /total_pages/);
   assert.match(workerSrc, /25 entries per page/);
   assert.match(workerSrc, /security-log-month/);
-  assert.match(workerSrc, /page\.edit\.open/);
   assert.match(workerSrc, /view and print only/i);
   assert.doesNotMatch(workerSrc, /minutes-view-modal/);
   // Security log must never appear as a grantable GLOBAL_PERMISSIONS scope.

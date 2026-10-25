@@ -348,14 +348,14 @@ ${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-s
       .then((data) => {
         if (!Array.isArray(data) || sitePagesSet) return;
         const canManage = data.some((p) => p.can_manage);
-        const isVisual = (slug) => !['in-kind', 'letterman-jacket'].includes(slug);
+        const isVisual = (slug) => slug !== 'in-kind'; // In-Kind is the only classic (settings-only) page
         const pages = data.map((p) => {
           const slug = String(p.slug || '').toLowerCase();
           const label = String(p.title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim() || slug;
           return {
             slug, label, hasDraft: !!p.has_draft, editor: p.editor,
-            editHref: isVisual(slug) ? `/admin/studio/${encodeURIComponent(slug)}` : `/admin?tab=pages&page=${encodeURIComponent(slug)}`,
-            settingsHref: canManage ? `/admin?tab=pages&page=${encodeURIComponent(slug)}` : '',
+            editHref: isVisual(slug) ? `/admin/studio/${encodeURIComponent(slug)}` : `/admin?tab=pages&settings=${encodeURIComponent(slug)}`,
+            settingsHref: canManage ? `/admin?tab=pages&settings=${encodeURIComponent(slug)}` : '',
           };
         });
         setPages(pages, { canAdd: canManage });

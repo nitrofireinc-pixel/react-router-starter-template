@@ -9,7 +9,6 @@ import {
   renderAdminSidebarHtml,
 } from '../worker/src/admin-chrome.mjs';
 import { renderFundraiserCardsAdminHtml } from '../worker/src/fundraiser-cards.mjs';
-import { renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
 import worker, { adminSidebarAllows, ASSET_VERSION, resetDbInitCache } from '../worker/src/worker.mjs';
 import { DEFAULT_CMS_PAGES } from '../worker/src/default-pages.mjs';
 
@@ -76,25 +75,21 @@ function createEnv() {
   };
 }
 
-test('flat sidebar is identical on /admin, visual, and fundraiser-cards', () => {
+test('flat sidebar is identical on /admin and fundraiser-cards', () => {
   const opts = navOptions();
   const admin = renderAdminSidebarHtml(ASSET_VERSION, { ...opts, current: { route: 'admin' } });
-  const visual = renderVisualEditorHtml(ASSET_VERSION, { ...opts, slug: 'fundraising', title: 'Fundraising', path: '/fundraising.html', active: 1 });
   const cards = renderFundraiserCardsAdminHtml(ASSET_VERSION, { ...opts, current: { route: 'fundraiser-cards' } });
   assert.match(admin, /data-admin-nav-v2/);
   assert.match(admin, /data-admin-nav-search/);
   assert.match(admin, /admin-role-pill/);
   assert.match(admin, /Fundraiser cards/);
   assert.match(admin, /admin-nav-badge sn-badge" aria-label="1 drafts/);
-  assert.equal(navCore(admin), navCore(visual));
   assert.equal(navCore(admin), navCore(cards));
 });
 
 test('current screen gets aria-current="page"; page titles stay in the launcher index only', () => {
   const cards = renderFundraiserCardsAdminHtml(ASSET_VERSION, navOptions({ route: 'fundraiser-cards' }));
-  const visual = renderVisualEditorHtml(ASSET_VERSION, {
-    ...navOptions({ route: 'visual', slug: 'fundraising' }), slug: 'fundraising', title: 'Fundraising', path: '/fundraising.html', active: 1,
-  });
+  const visual = renderAdminSidebarHtml(ASSET_VERSION, navOptions({ route: 'visual', slug: 'fundraising' }));
   const sponsorsVisual = renderAdminSidebarHtml(ASSET_VERSION, navOptions({ route: 'visual', slug: 'sponsors' }));
   assert.match(cards, /data-nav-item="fundraiser-cards"[^>]*aria-current="page"/);
   assert.match(visual, /data-nav-item="pages"[^>]*aria-current="page"/);

@@ -1,4 +1,6 @@
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set([]); // every page opens in Site Studio
+// CLASSIC EDITOR (In-Kind only): every other page opens in Site Studio. In-Kind is code-rendered
+// (logo uploads, PDF, ledger) and only has a page-settings screen.
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['in-kind']);
 const DEFAULT_HIDDEN_TABS = new Set(['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log']);
 const PAGE_LABELS = {
   home: 'Home',
@@ -70,7 +72,7 @@ export function sidebarPageLabel(page = {}) {
 export function pageEditorHref(slug) {
   const key = String(slug || '').trim().toLowerCase();
   if (isVisualEditorPageSlug(key)) return visualEditorHref(key);
-  return `/admin?tab=pages&page=${encodeURIComponent(key)}`;
+  return `/admin?tab=pages&settings=${encodeURIComponent(key)}`;
 }
 
 function tabHref(tab, extra = '') {

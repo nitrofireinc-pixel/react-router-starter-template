@@ -17,7 +17,7 @@ import {
   sanitizePageBlock,
   sanitizePageBlockList,
 } from '../worker/src/page-blocks.mjs';
-import { ensureFundraisingVisualSlot, renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
+import { ensureFundraisingVisualSlot } from '../worker/src/visual-page-editor.mjs';
 import { renderAdminSidebarHtml } from '../worker/src/admin-chrome.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,18 +102,10 @@ test('fundraising visual drafts get a cards slot when missing', () => {
   assert.match(html, /data-fundraising-cards/);
   assert.match(html, /data-visual-locked="fundraiser"/);
   assert.equal(ensureFundraisingVisualSlot(html), html);
-  const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
-  assert.match(visualJs, /function ensureFundraisingSlotHtml/);
-  assert.match(visualJs, /fundraising-cards fundraising-card-list/);
-  assert.match(visualJs, /ff-facts/);
   assert.match(html, /fundraising-cards fundraising-card-list/);
 });
 
-test('fundraising visual editor has add hero card and sidebar page settings', () => {
-  const editor = renderVisualEditorHtml('test', { slug: 'fundraising', title: 'Fundraising', canLayout: true });
-  assert.match(editor, /data-visual-add-callout/);
-  assert.match(editor, /data-visual-add-hero>\+ Add hero card/);
-  assert.doesNotMatch(renderVisualEditorHtml('test', { slug: 'join', canLayout: true }), /data-visual-add-hero/);
+test('sidebar page settings stay on the Pages list gear', () => {
   const sidebar = renderAdminSidebarHtml('test', { allow: (tab) => tab === 'page-settings' || tab === 'pages' });
   // 14c dropped the sidebar page-settings submenu; settings stay on the Pages list gear.
   assert.doesNotMatch(sidebar, /data-page-settings-menu/);

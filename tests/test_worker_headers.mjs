@@ -10,7 +10,6 @@ import worker, {
   WORKER_SECURITY_HEADERS,
   resetDbInitCache,
 } from '../worker/src/worker.mjs';
-import { renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -136,10 +135,6 @@ test('Worker HTML, admin, API, and uploads responses carry the security headers'
 test('every Worker-rendered CSS/JS reference carries the asset version param', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const visualSrc = readFileSync(join(root, 'worker/src/visual-page-editor.mjs'), 'utf8');
-  const page = renderVisualEditorHtml(ASSET_VERSION);
-  for (const ref of localCssJsRefs(page)) {
-    assert.match(ref, /[?&]v=/, `unversioned editor HTML ref ${ref}`);
-  }
   const hrefSrc = /(?:href|src)=["'](\/[^"']+\.(?:css|js|mjs))["']/g;
   for (const src of [workerSrc, visualSrc]) {
     for (const match of src.matchAll(hrefSrc)) {
@@ -147,16 +142,6 @@ test('every Worker-rendered CSS/JS reference carries the asset version param', (
     }
   }
   assert.equal(ASSET_VERSION, 'cms-p2-20261024l');
-});
-
-test('admin-visual canvas stylesheets append the public asset version', () => {
-  const editorJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
-  assert.match(editorJs, /function versionedAsset\(/);
-  assert.match(editorJs, /versionedAsset\('\/styles\.css'\)/);
-  assert.match(editorJs, /versionedAsset\('\/public-theme\.css'\)/);
-  assert.match(editorJs, /versionedAsset\('\/home-redesign\.css'\)/);
-  assert.match(editorJs, /versionedAsset\('\/admin-visual\.css'\)/);
-  assert.doesNotMatch(editorJs, /styles:\s*\[[\s\S]*?['"]\/styles\.css['"]\s*,/);
 });
 
 test('_headers keeps immutable for versioned CSS/JS and 1-day cache for images; push-sw detaches Cache-Control', () => {

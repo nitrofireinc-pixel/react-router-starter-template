@@ -409,13 +409,13 @@ test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
   assert.match(joinSample, /#ih1\{/);
 });
 
-test('Phase 0 old Pages editor cannot overwrite visual-managed page bodies', () => {
-  assert.match(workerSrc, /isVisualEditorSlug\(existing\.slug\)/);
-  assert.match(workerSrc, /Use the visual editor for this page/);
+test('Phase 3 Pages settings cannot overwrite page bodies; only In-Kind is classic', () => {
+  assert.match(workerSrc, /export const CLASSIC_EDITOR_SLUGS = new Set\(\['in-kind'\]\)/);
+  assert.match(workerSrc, /Page content is edited in Site Studio/);
   assert.match(workerSrc, /page\.body_html = existing\.body_html/);
-  assert.match(workerSrc, /function isVisualPilotSlug|isVisualPilotSlug,/);
   assert.match(adminSrc, /isVisualEditorPageSlug/);
-  assert.match(adminSrc, /Open the visual editor/);
+  assert.match(adminSrc, /Open in Studio/);
+  assert.doesNotMatch(adminSrc, /function buildEditablePagePreview|function bindPageVisualEditor/);
 });
 
 const SVG_STYLE_XSS = '<svg><style>color: red<img src=x onerror=alert(1)></style></svg>';
@@ -638,7 +638,7 @@ function createWorkerTestEnv({
   };
 }
 
-test('Pages API fetch handler keeps visual page bodies and saves Home', async () => {
+test('Pages API fetch handler keeps page bodies and saves Home settings', async () => {
   resetDbInitCache();
   const env = createWorkerTestEnv({
     pages: {
@@ -654,7 +654,7 @@ test('Pages API fetch handler keeps visual page bodies and saves Home', async ()
   }), env, {});
   assert.equal(joinRes.status, 409, await joinRes.clone().text());
   const joinBody = await joinRes.json();
-  assert.match(String(joinBody.detail || ''), /Use the visual editor for this page/);
+  assert.match(String(joinBody.detail || ''), /Page content is edited in Site Studio/);
 
   const saveRes = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/home', {
     method: 'PUT',
@@ -663,14 +663,19 @@ test('Pages API fetch handler keeps visual page bodies and saves Home', async ()
       title: 'Home',
       slug: 'home',
       path: '/',
-      body_html: '<section><p>Updated home</p></section>',
       active: true,
     }),
   }), env, {});
   assert.equal(saveRes.status, 200, await saveRes.clone().text());
   const saved = await saveRes.json();
   assert.equal(saved.slug, 'home');
-  assert.match(String(saved.body_html || ''), /Updated home/);
+  assert.match(String(saved.body_html || ''), /Home/);
+  const homeBody = await worker.fetch(new Request('https://efhsband.org/api/admin/pages/home', {
+    method: 'PUT',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Home', slug: 'home', path: '/', body_html: '<p>x</p>', active: true }),
+  }), env, {});
+  assert.equal(homeBody.status, 409);
 });
 
 test('inactive CMS pages reject matching public form POSTs with Coming soon', async () => {

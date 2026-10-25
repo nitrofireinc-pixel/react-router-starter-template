@@ -45,17 +45,12 @@ import worker, {
 import {
   canEditVisualLayout,
   canEditVisualPage,
-  renderVisualEditorHtml,
   resetVisualPagesSchemaCache,
-  restoreVisualVersion,
-  saveVisualPage,
 } from '../worker/src/visual-page-editor.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
 const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
-const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
-const visualCss = readFileSync(join(root, 'admin-visual.css'), 'utf8');
 const styles = readFileSync(join(root, 'styles.css'), 'utf8');
 const migration = readFileSync(join(root, 'migrations/2026-10-04.3.sql'), 'utf8');
 
@@ -211,163 +206,9 @@ test('visualStructureSignature ignores text, links, images, list items, and card
   assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(added));
 });
 
-test('content-only visual save 403s style-block CSS changes as layout', async () => {
-  resetVisualPagesSchemaCache();
-  const styled = `${BASE_HTML}<style data-visual-css>#hero{display:block}</style>`;
-  const { env, count } = createVisualEnv(styled);
-  const copy = styled.replace('Intro', 'Welcome sponsors');
-  const saved = await saveVisualPage(env, {
-    slug: 'sponsors',
-    html: copy,
-    action: 'draft',
-    user: { id: 8, display_name: 'Jamie' },
-    allowStructure: false,
-  });
-  assert.match(saved.draft_html, /Welcome sponsors/);
-  const afterCopy = count();
 
-  const hidden = styled.replace('#hero{display:block}', '#hero{display:none}');
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: hidden,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => {
-      assert.equal(error.status, 403);
-      assert.equal(error.code, 'layout_required');
-      assert.match(error.message, /layout:sponsors/);
-      return true;
-    },
-  );
-  assert.ok(count() - afterCopy <= 3, `style reject used ${count() - afterCopy} queries`);
-  assert.equal(visualStyleSignature(styled), visualStyleSignature(copy));
-  assert.notEqual(visualStyleSignature(styled), visualStyleSignature(hidden));
-});
 
-test('content-only visual save 403s inline style, class, and hidden on a block', async () => {
-  resetVisualPagesSchemaCache();
-  const { env } = createVisualEnv();
-  const hiddenStyle = BASE_HTML.replace(
-    '<section class="page-hero" data-visual-block="hero">',
-    '<section class="page-hero" data-visual-block="hero" style="display:none">',
-  );
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: hiddenStyle,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => {
-      assert.equal(error.status, 403);
-      assert.equal(error.code, 'layout_required');
-      return true;
-    },
-  );
-  const hiddenAttr = BASE_HTML.replace(
-    'data-visual-block="hero"',
-    'data-visual-block="hero" hidden',
-  );
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: hiddenAttr,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => error.status === 403 && error.code === 'layout_required',
-  );
-  const classed = BASE_HTML.replace('class="page-hero"', 'class="page-hero is-hidden"');
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: classed,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => error.status === 403 && error.code === 'layout_required',
-  );
-  assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(hiddenStyle));
-  assert.notEqual(visualStructureSignature(BASE_HTML), visualStructureSignature(hiddenAttr));
-});
 
-test('content-only visual save 403s hidden style on an inner paragraph or span', async () => {
-  resetVisualPagesSchemaCache();
-  const { env } = createVisualEnv();
-  const hiddenP = BASE_HTML.replace('<p>Intro</p>', '<p style="display:none">Intro</p>');
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: hiddenP,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => error.status === 403 && error.code === 'layout_required',
-  );
-  const hiddenSpan = BASE_HTML.replace('<p>Intro</p>', '<p><span style="display:none">Intro</span></p>');
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: hiddenSpan,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => error.status === 403 && error.code === 'layout_required',
-  );
-  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenP), /style is not allowed on <p>/i);
-  assert.match(contentOnlyHtmlViolation(BASE_HTML, hiddenSpan), /span|style/i);
-  assert.equal(contentOnlyHtmlViolation(BASE_HTML, BASE_HTML.replace('Intro', 'Welcome')), null);
-});
-
-test('content-only visual save 403s onclick, data-*, iframe, script, style, and javascript: links', async () => {
-  resetVisualPagesSchemaCache();
-  const { env, versions } = createVisualEnv();
-  const cases = [
-    [BASE_HTML.replace('<p>Intro</p>', '<p onclick="alert(1)">Intro</p>'), /onclick/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b onclick="alert(1)">x</b></p>'), /onclick/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p onmouseover="alert(1)">Intro</p>'), /onmouseover/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p data-x="1">Intro</p>'), /data-x/i],
-    [`${BASE_HTML}<iframe src="/x"></iframe>`, /iframe/i],
-    [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
-    [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript&colon;alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#x6a;avascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;&#9;avascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b style="color:red">x</b></p>'), /style/i],
-    [`${BASE_HTML}<svg onload="alert(1)"></svg>`, /svg|onload/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><img src="/uploads/a.jpg" alt="x" onerror="alert(1)"></p>'), /onerror/i],
-  ];
-  for (const [html, detail] of cases) {
-    assert.match(
-      contentOnlyForbiddenHtmlViolation(BASE_HTML, html) || contentOnlyHtmlViolation(BASE_HTML, html) || '',
-      detail,
-    );
-    await assert.rejects(
-      () => saveVisualPage(env, {
-        slug: 'sponsors',
-        html,
-        action: 'draft',
-        user: { id: 8, display_name: 'Jamie' },
-        allowStructure: false,
-      }),
-      (error) => {
-        assert.equal(error.status, 403);
-        assert.match(error.message, detail);
-        return true;
-      },
-    );
-  }
-  assert.equal(versions.length, 0);
-});
 
 function createJoinDraftPutEnv(html = BASE_HTML) {
   const editor = {
@@ -435,141 +276,10 @@ function createJoinDraftPutEnv(html = BASE_HTML) {
   return { env, editor, visual: () => visual, versions };
 }
 
-test('content-only join draft PUT 403s raw XSS constructs and stores none of them', async () => {
-  resetDbInitCache();
-  resetVisualPagesSchemaCache();
-  const { env, editor, visual, versions } = createJoinDraftPutEnv();
-  const cookie = `efband_session=${await makeSession({ id: editor.id, username: editor.username }, env)}`;
-  const cases = [
-    [BASE_HTML.replace('<p>Intro</p>', '<p onclick="alert(1)">Intro</p>'), /onclick/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b onclick="alert(1)">x</b></p>'), /onclick/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p onmouseover="alert(1)">Intro</p>'), /onmouseover/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p data-x="1">Intro</p>'), /data-x/i],
-    [`${BASE_HTML}<iframe src="/x"></iframe>`, /iframe/i],
-    [`${BASE_HTML}<script>alert(1)</script>`, /script/i],
-    [`${BASE_HTML}<style>p{color:red}</style>`, /style/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="javascript&colon;alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#x6a;avascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><a href="&#106;&#9;avascript:alert(1)">Intro</a></p>'), /javascript/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p>Intro <b style="color:red">x</b></p>'), /style/i],
-    [`${BASE_HTML}<svg onload="alert(1)"></svg>`, /svg|onload/i],
-    [BASE_HTML.replace('<p>Intro</p>', '<p><img src="/uploads/a.jpg" alt="x" onerror="alert(1)"></p>'), /onerror/i],
-  ];
-  assert.match(workerSrc, /html: rawHtml/);
-  assert.match(workerSrc, /extractEditableJoinHtml\(raw\.html/);
-  for (const [html, detail] of cases) {
-    const response = await worker.fetch(new Request('https://efhsband.org/api/admin/visual-pages/join', {
-      method: 'PUT',
-      headers: { cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'draft', html }),
-    }), env, { waitUntil() {} });
-    assert.equal(response.status, 403, html);
-    const payload = await response.json();
-    assert.match(payload.detail, detail);
-    assert.doesNotMatch(visual().draft_html, /onclick|onmouseover|onerror|onload|javascript:|iframe|data-x/i);
-  }
-  const allowed = await worker.fetch(new Request('https://efhsband.org/api/admin/visual-pages/join', {
-    method: 'PUT',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      action: 'draft',
-      html: BASE_HTML.replace('<p>Intro</p>', '<p>Intro <a href="https://example.com/join" target="_blank">Join</a></p>'),
-    }),
-  }), env, { waitUntil() {} });
-  assert.equal(allowed.status, 200);
-  const saved = await allowed.json();
-  assert.match(saved.draft_html, /target="_blank"/);
-  assert.match(saved.draft_html, /rel="noopener noreferrer"/);
-  assert.equal(versions.length, 1);
-});
 
-test('content-only save allows target=_blank when the server adds rel=noopener noreferrer', async () => {
-  resetVisualPagesSchemaCache();
-  const { env } = createVisualEnv();
-  const withBlank = BASE_HTML.replace(
-    '<p>Intro</p>',
-    '<p>Intro <a href="https://example.com/join" target="_blank">Join</a></p>',
-  );
-  assert.equal(contentOnlyHtmlViolation(BASE_HTML, withBlank), null);
-  const saved = await saveVisualPage(env, {
-    slug: 'sponsors',
-    html: withBlank,
-    action: 'draft',
-    user: { id: 8, display_name: 'Jamie' },
-    allowStructure: false,
-  });
-  assert.match(saved.draft_html, /target="_blank"/);
-  assert.match(saved.draft_html, /rel="noopener noreferrer"/);
-  assert.doesNotMatch(saved.draft_html, /onclick|javascript:|onerror|onload/i);
-});
 
-test('content-only save accepts a plain https link next to an existing classed link', async () => {
-  resetVisualPagesSchemaCache();
-  const baseline = BASE_HTML.replace('<p>Intro</p>', '<p>Intro <a class="btn" href="/x">Here</a></p>');
-  const { env } = createVisualEnv(baseline);
-  const added = baseline.replace(
-    '<p>Intro <a class="btn" href="/x">Here</a></p>',
-    '<p>Intro <a href="https://example.com/join">Join</a> <a class="btn" href="/x">Here</a></p>',
-  );
-  assert.equal(contentOnlyHtmlViolation(baseline, added), null);
-  const saved = await saveVisualPage(env, {
-    slug: 'sponsors',
-    html: added,
-    action: 'draft',
-    user: { id: 8, display_name: 'Jamie' },
-    allowStructure: false,
-  });
-  assert.match(saved.draft_html, /https:\/\/example.com\/join/);
-});
 
-test('content-only visual save accepts copy edits and 403s a structural save', async () => {
-  resetVisualPagesSchemaCache();
-  const { env, count } = createVisualEnv();
-  const copy = BASE_HTML.replace('Intro', 'Welcome sponsors').replace('<li>One</li>', '<li>One</li><li>Two</li>');
-  const saved = await saveVisualPage(env, {
-    slug: 'sponsors',
-    html: copy,
-    action: 'draft',
-    user: { id: 8, display_name: 'Jamie' },
-    allowStructure: false,
-  });
-  assert.match(saved.draft_html, /Welcome sponsors/);
-  const afterCopy = count();
 
-  const added = `${BASE_HTML}<section class="content" data-visual-block="extra"><p>New block</p></section>`;
-  await assert.rejects(
-    () => saveVisualPage(env, {
-      slug: 'sponsors',
-      html: added,
-      action: 'draft',
-      user: { id: 8, display_name: 'Jamie' },
-      allowStructure: false,
-    }),
-    (error) => {
-      assert.equal(error.status, 403);
-      assert.equal(error.code, 'layout_required');
-      assert.match(error.message, /new <section> is not allowed|layout:sponsors|data-visual-block/);
-      return true;
-    },
-  );
-  assert.ok(count() - afterCopy <= 3, `structure reject used ${count() - afterCopy} queries`);
-});
-
-test('content-only restore of a different section structure is rejected', async () => {
-  resetVisualPagesSchemaCache();
-  const { env, versions } = createVisualEnv();
-  versions.push({
-    id: 9,
-    slug: 'sponsors',
-    kind: 'draft',
-    html: `${BASE_HTML}<section class="content" data-visual-block="extra"><p>Old layout</p></section>`,
-  });
-  await assert.rejects(
-    () => restoreVisualVersion(env, 9, { id: 8 }, 'sponsors', { allowStructure: false }),
-    (error) => error.status === 403 && error.code === 'layout_required',
-  );
-});
 
 test('ensemble body content stays editable; added sections need layout:ensembles', () => {
   const existing = [
@@ -675,26 +385,6 @@ test('Users form and visual editor hide layout for content-only users', () => {
   assert.match(styles, /\.page-grant-table/);
   assert.match(styles, /\.user-grant-group/);
 
-  const editor = renderVisualEditorHtml('test', {
-    slug: 'sponsors',
-    canLayout: false,
-    canSettings: false,
-  });
-  assert.match(editor, /visual-content-only/);
-  assert.match(editor, /data-can-layout="0"/);
-  assert.match(editor, /data-can-settings="0"/);
-  assert.doesNotMatch(editor, /data-visual-add>/);
-  assert.doesNotMatch(editor, /data-visual-history>/);
-  assert.match(visualJs, /draggable: canLayout/);
-  assert.match(visualJs, /copyable: canLayout/);
-  assert.match(visualJs, /removable: canLayout/);
-  assert.match(visualJs, /if \(canLayout\) \{\s*toolbar\.push\(tool\('tlb-move'/);
-  assert.match(visualJs, /if \(canLayout\) \{\s*toolbar\.push\(tool\('tlb-delete'/);
-  assert.match(visualJs, /then edit the text/);
-  assert.match(visualJs, /styleManager: canLayout \? \{ appendTo: '#visual-gjs-sink' \}/);
-  assert.doesNotMatch(editor, /data-visual-style-editor/);
-  assert.match(renderVisualEditorHtml('test', { slug: 'sponsors', canLayout: true }), /data-visual-style-editor/);
-  assert.match(visualCss, /\.visual-content-only #visual-gjs-sink/);
   assert.match(adminJs, /#new-user[\s\S]*syncPageGrantCovered/);
   assert.match(adminJs, /User saved\.[\s\S]*syncPageGrantCovered/);
   assert.match(adminJs, /const securityLogSelectFilters/);
@@ -702,8 +392,6 @@ test('Users form and visual editor hide layout for content-only users', () => {
 });
 
 test('Worker APIs return layout_required and minutes audit actions without double-logging', () => {
-  assert.match(workerSrc, /allowStructure: canEditPageLayout\(auth\.user, slug\)/);
-  assert.match(workerSrc, /can_layout: canEditVisualLayout/);
   assert.match(workerSrc, /code: 'layout_required'/);
   assert.match(workerSrc, /Permission required: layout:ensembles/);
   assert.match(workerSrc, /SELECT slug FROM cms_pages/);

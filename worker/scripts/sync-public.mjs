@@ -48,8 +48,6 @@ for (const name of [
   'admin-forms.js',
   'admin-forms.css',
   'form-studio.js',
-  'admin-visual.js',
-  'admin-visual.css',
   'admin-fundraiser-cards.js',
   'admin-fundraiser-cards.css',
   'badge-creator.js',

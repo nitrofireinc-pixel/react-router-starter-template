@@ -551,7 +551,7 @@ export const LIVE_SOURCES = {
   'site:hero_title': { label: 'Site Settings (hero headline)', admin: '/admin?tab=site', limit: false },
   'site:hero_subtitle': { label: 'Site Settings (hero subtitle)', admin: '/admin?tab=site', limit: false },
   instagram: { label: 'Site Settings (social links)', admin: '/admin?tab=site', limit: false },
-  'fundraising-cards': { label: 'Fundraiser cards', admin: '/admin?tab=fundraiser-cards', limit: false },
+  'fundraising-cards': { label: 'Fundraiser cards', admin: '/admin/fundraiser-cards', limit: false },
   'booster-meetings': { label: 'Calendar (booster meetings)', admin: '/admin?tab=caldev', limit: false },
   'booster-members': { label: 'Booster Members', admin: '/admin?tab=booster-members', limit: false },
   sponsors: { label: 'Sponsors', admin: '/admin?tab=sponsors', limit: false },

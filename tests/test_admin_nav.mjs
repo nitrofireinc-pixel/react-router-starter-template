@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import { renderFundraiserCardsAdminHtml } from '../worker/src/fundraiser-cards.mjs';
-import { renderVisualEditorHtml } from '../worker/src/visual-page-editor.mjs';
 import {
   ADMIN_NAV_REV,
   adminNavAssetVersion,
@@ -111,14 +110,6 @@ test('assets use an admin-only cache key; public ASSET_VERSION untouched', () =>
   assert.match(workerSrc, /admin-nav\.js\?v=\$\{ADMIN_NAV_VERSION\}/);
   assert.match(workerSrc, /renderAdminSidebarHtml\(ASSET_VERSION, \{/);
 
-  const editor = renderVisualEditorHtml(ASSET_VERSION);
-  assert.match(editor, /admin-nav-toggle/);
-  assert.match(editor, /data-sn-rail/);
-  assert.match(editor, /id="admin-sidebar"/);
-  assert.match(editor, /class="visual-editor-main"/);
-  assert.match(editor, new RegExp(`admin-nav\\.css\\?v=${ADMIN_NAV_VERSION}`));
-  assert.match(editor, new RegExp(`admin-nav\\.js\\?v=${ADMIN_NAV_VERSION}`));
-  assert.match(editor, /visual-editor-body sn-body/);
 
   const cardsAdmin = renderFundraiserCardsAdminHtml(ASSET_VERSION);
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
@@ -150,8 +141,6 @@ test('nav script: 700px rail/flyout + sheet, Ctrl K + / launcher with combobox/l
   assert.match(js, /if \(key === 'website'\) loadSitePages\(\)/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /efhsAdminNav\?\.isOverlay/);
-  const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');
-  assert.match(visualJs, /efhs-admin-nav-change/);
 });
 
 test('nav CSS: 68px rail + 260px flyout, gold current edge, 3px gold focus, 44px phone targets, reduced motion', () => {
