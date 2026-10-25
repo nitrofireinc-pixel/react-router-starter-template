@@ -699,6 +699,20 @@ export function stripHomeHeroLogoLockup(html) {
   return String(html || '').replace(/<div\b[^>]*\blogo-lockup\b[^>]*>[\s\S]*?<\/div>\s*/gi, '');
 }
 
+/**
+ * The static fallback card in the other-funds slot carries a "Fundraiser · <date>"
+ * pill. Read the date from the calendar; hide the pill when nothing is upcoming.
+ */
+function refreshOtherFundsLabel(html, event) {
+  const short = event ? String(formatHomeEventWhen(event).short || '').replace(/^[A-Za-z]{3},\s*/, '') : '';
+  return String(html).replace(
+    /(data-home-slot="other-funds"[^>]*>[\s\S]*?)<div class="fc-top"><span class="pill pill-light">Fundraiser[^<]*<\/span><\/div>/,
+    (m, pre) => (short
+      ? `${pre}<div class="fc-top"><span class="pill pill-light">Fundraiser · ${escapeHtml(short)}</span></div>`
+      : pre),
+  );
+}
+
 /** Item limit a Studio live block set on a slot (data-limit), or null. */
 function slotLimit(html, name) {
   const open = new RegExp(`<[a-z0-9]+\\b[^>]*\\bdata-home-slot="${name}"[^>]*>`, 'i').exec(String(html || ''));
@@ -724,6 +738,7 @@ export function fillLiveSlots(html, data = {}) {
   }
   const others = limitList(schedule.fundraisers.slice(1), slotLimit(next, 'other-funds')).map(renderOtherFundraiserCard).join('');
   if (others) next = replaceSlot(next, 'other-funds', others);
+  else next = refreshOtherFundsLabel(next, schedule.nextFundraiser);
   if (schedule.display.length) {
     next = replaceSlot(next, 'events', limitList(schedule.display, slotLimit(next, 'events')).map(renderHomeEventArticle).join(''));
   }
