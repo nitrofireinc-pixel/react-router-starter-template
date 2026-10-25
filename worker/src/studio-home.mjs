@@ -86,7 +86,7 @@ export async function loadStudioHome(env, { perms = {}, canEditSlug = () => fals
     sql ? safe(env.DB.prepare(sql).bind(today, weekEnd, since).first(), {}) : Promise.resolve({}),
     perms.pages ? safe(env.DB.prepare(
       `SELECT d.slug, d.updated_at, COALESCE(NULLIF(u.display_name, ''), u.username, '') AS by_name, p.title
-       FROM page_drafts d LEFT JOIN users u ON u.id = d.updated_by LEFT JOIN cms_pages p ON p.slug = d.slug
+       FROM page_drafts d JOIN cms_pages p ON p.slug = d.slug LEFT JOIN users u ON u.id = d.updated_by
        ORDER BY d.updated_at DESC LIMIT 20`).all(), { results: [] }) : Promise.resolve({ results: [] }),
     safe(env.DB.prepare(
       `SELECT id, title, start_date, start_time, all_day FROM caldev_events

@@ -8,7 +8,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav14d6';
+export const ADMIN_NAV_REV = 'nav15p';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -206,7 +206,8 @@ export function buildAdminNavModel(options = {}) {
       label: 'Admin',
       adminOnly: true,
       items: [
-        item('users', 'Users', 'users', tabHref('users'), { admin: true, keywords: 'people permissions' }),
+        item('people', 'People & Access', '', '/admin/people', { perm: 'people', admin: true, attrs: 'data-nav-href="/admin/people"', keywords: 'people users staff boosters roles permissions lock unlock login access directors committee' }),
+        item('users', 'Users (classic)', 'users', tabHref('users'), { admin: true, keywords: 'people permissions' }),
         item('site', 'Site Settings', 'site', tabHref('site'), { admin: true }),
         item('security-log', 'Security Log', 'security-log', tabHref('security-log'), { admin: true }),
       ],
@@ -244,6 +245,7 @@ function resolveCurrentKey(current = {}, items) {
   const tab = String(current.tab || '').trim().toLowerCase();
   if (route === 'fundraiser-cards' || tab === 'fundraiser-cards') return 'fundraiser-cards';
   if (route === 'events-manager') return 'events-manager';
+  if (route === 'people') return 'people';
   if (route === 'forms-builder') return current.view === 'subs' ? 'forms-subs' : 'forms-builder';
   if (route === 'visual' && slug) {
     if (slug === 'sponsors') return 'sponsors-page';

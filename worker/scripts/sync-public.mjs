@@ -43,6 +43,8 @@ for (const name of [
   'admin-studio.css',
   'admin-events.js',
   'admin-events.css',
+  'admin-people.js',
+  'admin-people.css',
   'admin-forms.js',
   'admin-forms.css',
   'form-studio.js',

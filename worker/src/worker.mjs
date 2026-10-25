@@ -254,6 +254,7 @@ import {
   stripVisualLockedLabels,
 } from './visual-page-editor.mjs';
 import { MINUTES_UPLOAD_MAX_BYTES, MINUTES_UPLOAD_MAX_LABEL, sniffMinutesFile, getMinutesFile, listMinutesFileIds, saveMinutesFile, deleteMinutesFile } from './minutes-files.mjs';
+import { canManagePeople, checkPersonChange, checkLockChange, normalizeGroupFields, planPeopleMigration, serializePerson, PERSON_COLUMNS, DEFAULT_ROLE_PRESETS, LOCKED_LOGIN_MESSAGE } from './people.mjs';
 import { checkPasswordRule, getAccountLock, lockStatus, recordAccountFailure, clearAccountFailures, unlockAccount, listAccountLocks } from './account-lock.mjs';
 import { handleStudioApi, loadStudioLiveHtml, comingSoonLayout, ensureStudioSchema, serveStudioUpload, replaceElementInner } from './studio.mjs';
 import {
@@ -770,6 +771,20 @@ export function isSuperAdmin(user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
 }
 
+/** New "Admin" site role (stored as 'site_admin'): Super Admin minus Security Log, Super Admin changes, themes and logo. */
+export function isSiteAdminOrAbove(user) {
+  return isSuperAdmin(user) || String(user?.role || '').trim().toLowerCase() === 'site_admin';
+}
+
+export function isSiteAdminRole(user) {
+  return String(user?.role || '').trim().toLowerCase() === 'site_admin';
+}
+
+/** Themes and the logo stay Super Admin only when the actor is the new Admin role. */
+export function canChangeThemesAndLogo(user) {
+  return isSuperAdmin(user) || (!isSiteAdminRole(user) && hasPermission(user, 'site'));
+}
+
 const PRIVILEGED_PERMISSIONS = new Set(['all']);
 
 /** Page slug, path, nav order, and home flag are Site Admin / Super Admin only. */
@@ -820,10 +835,11 @@ export function sanitizeAssignablePermissions(actor, permissions) {
   const parsed = parsePermissions(permissions);
   if (isSuperAdmin(actor)) return parsed;
   const held = actorHeldPermissionKeys(actor);
-  const holdsAll = held.has('all');
+  const siteAdmin = isSiteAdminRole(actor);
+  const holdsAll = held.has('all') || siteAdmin;
   return parsed.filter((item) => {
     const key = permissionKey(item);
-    if (!key || key === 'all' || key === 'users') return false;
+    if (!key || key === 'all' || (key === 'users' && !siteAdmin)) return false;
     return holdsAll || held.has(key);
   });
 }
@@ -833,15 +849,19 @@ export function assertSafeUserPrivilegeGrant(actor, payload = {}) {
   if (String(payload.role || '').trim().toLowerCase() === 'admin') {
     return { ok: false, status: 403, detail: 'Only Super Admins can assign the Super Admin role' };
   }
+  if (String(payload.role || '').trim().toLowerCase() === 'site_admin' && !isSiteAdminRole(actor)) {
+    return { ok: false, status: 403, detail: 'Only an Admin or Super Admin can assign the Admin role' };
+  }
   const requested = parsePermissions(payload.permissions);
   const held = actorHeldPermissionKeys(actor);
-  const holdsAll = held.has('all');
+  const siteAdmin = isSiteAdminRole(actor);
+  const holdsAll = held.has('all') || siteAdmin;
   for (const item of requested) {
     const key = permissionKey(item);
     if (key === 'all' || requestedPrivilegedPermissions([item]).length) {
       return { ok: false, status: 403, detail: 'Only Super Admins can grant all-access' };
     }
-    if (key === 'users') {
+    if (key === 'users' && !siteAdmin) {
       return { ok: false, status: 403, detail: 'You cannot grant the Users permission' };
     }
     if (key && !holdsAll && !held.has(key)) {
@@ -915,7 +935,7 @@ export function hasPermission(user, scope) {
   if (['security-log', 'security', 'audit', 'audit-log', 'admin-audit'].includes(normalized)) {
     return canAccessSecurityLog(user);
   }
-  if (isSuperAdmin(user)) return true;
+  if (isSuperAdmin(user) || isSiteAdminRole(user)) return true;
   const permissions = parsePermissions(user.permissions);
   return permissions.includes(scope) || permissions.includes('all');
 }
@@ -2120,9 +2140,11 @@ async function inspectSessionCookie(request, env) {
       };
     }
     try {
-      const user = data.uid
+      let user = data.uid
         ? await getUserById(env, Number(data.uid))
         : await getUserByUsername(env, data.u);
+      // Locked or profile-only people are signed out everywhere (plan 2.24a).
+      if (user && (Number(user.locked || 0) === 1 || Number(user.can_login ?? 1) === 0)) user = null;
       return {
         user,
         expired: false,
@@ -8098,7 +8120,13 @@ async function loadPublicChromeReads(env, today, ctx) {
 async function getUserByUsername(env, username) {
   const normalized = String(username || '').trim();
   if (!normalized) return null;
-  const direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(normalized).first();
+  let direct;
+  try {
+    direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, can_login, locked FROM users WHERE username = ?').bind(normalized).first();
+  } catch (error) {
+    if (!/no such column/i.test(String(error?.message || error))) throw error;
+    direct = await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE username = ?').bind(normalized).first();
+  }
   if (direct) return direct;
   // Bootstrap alias: allow "admin" (or the configured bootstrap username) to reach the
   // active site administrator even after the account was renamed to an email address.
@@ -8110,7 +8138,13 @@ async function getUserByUsername(env, username) {
 }
 
 async function getUserById(env, id) {
-  return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE id = ? AND active = 1').bind(id).first();
+  // users.locked = 1 (manual or needs-unlock) and can_login = 0 sign the person out everywhere (plan 2.24a).
+  try {
+    return await env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active, can_login, locked FROM users WHERE id = ? AND active = 1 AND locked = 0 AND can_login = 1').bind(id).first();
+  } catch (error) {
+    if (!/no such column/i.test(String(error?.message || error))) throw error;
+    return env.DB.prepare('SELECT id, username, display_name, password_hash, role, permissions, active FROM users WHERE id = ? AND active = 1').bind(id).first();
+  }
 }
 
 function publicUser(user) {
@@ -8155,7 +8189,7 @@ export function studioHomePermissions(user, { formsAccessIds = [] } = {}) {
   const anyPage = isSuperAdmin(user) || perms.includes('all') || perms.some((p) => p === 'pages' || p.startsWith('page:') || p.startsWith('layout:'));
   return {
     pages: anyPage,
-    themes: hasPermission(user, 'site'),
+    themes: canChangeThemesAndLogo(user),
     calendar: canAccessScheduleBoard(user),
     sponsors: hasPermission(user, 'sponsors') || canEditPageContent(user, 'sponsors'),
     fundraisers: canEditFundraiserCards(user, fundraiserPerms()),
@@ -8211,7 +8245,7 @@ export function adminSidebarAllows(user, tab) {
     case 'mail':
       return !isScheduleOnlyUser(user);
     case 'themes':
-      return hasPermission(user, 'site');
+      return canChangeThemesAndLogo(user);
     case 'forms-builder':
       return canAccessFormsPage(user);
     case 'staff':
@@ -8240,6 +8274,8 @@ export function adminSidebarAllows(user, tab) {
       return canAccessCheckout(user);
     case 'users':
       return hasPermission(user, 'users');
+    case 'people':
+      return canManagePeople(user);
     case 'caldev':
       return canAccessScheduleBoard(user);
     case 'security-log':
@@ -11449,6 +11485,10 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
     const payload = await request.json();
+    if (!canChangeThemesAndLogo(auth.user)) {
+      // The Admin role (site_admin) can't change themes or the logo (plan 2.24).
+      for (const key of ['holiday_theme', 'studio_theme', 'holiday_theme_mode', 'logo_url']) delete payload[key];
+    }
     if (payload.maintenance_mode !== undefined) {
       const site = await getSite(env);
       const previous = isMaintenanceMode(site);
@@ -11727,6 +11767,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/logo' && request.method === 'POST') {
     const auth = await requirePermission(request, env, 'site');
     if (auth.response) return auth.response;
+    if (!canChangeThemesAndLogo(auth.user)) return jsonResponse({ detail: 'Only a Super Admin can change the logo' }, 403);
     const form = await request.formData();
     try {
       const stored = await storeImageUpload(env, form.get('file'), 'Site logo', 'Logo', -1000);
@@ -11824,9 +11865,10 @@ async function routeApi(request, env, url, ctx = null) {
     const privilege = assertSafeUserPrivilegeGrant(auth.user, payload);
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
     const wantsAdmin = payload.role === 'admin' && isSuperAdmin(auth.user);
+    const createRole = wantsAdmin ? 'admin' : (payload.role === 'site_admin' && isSiteAdminOrAbove(auth.user) ? 'site_admin' : 'editor');
     try {
       const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
-      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), wantsAdmin ? 'admin' : 'editor', JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
+      const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active) VALUES (?, ?, ?, ?, ?, ?)').bind(username, displayName, await hashPassword(password), createRole, JSON.stringify(normalizePageGrants(sanitizeAssignablePermissions(auth.user, payload.permissions), slugs)), payload.active === false ? 0 : 1).run();
       const created = await env.DB.prepare('SELECT id, username, display_name, role, permissions, active, last_login_at FROM users WHERE id = ?').bind(result.meta.last_row_id).first();
       const afterGrants = permissionListFromValue(created?.permissions);
       await recordAuditActorName(env, created);
@@ -11881,9 +11923,14 @@ async function routeApi(request, env, url, ctx = null) {
       : assertSafeUserPrivilegeGrant(auth.user, nextPayload);
     if (!privilege.ok) return jsonResponse({ detail: privilege.detail }, privilege.status);
     const wantsAdmin = nextPayload.role === 'admin' && isSuperAdmin(auth.user);
+    const wantsSiteAdmin = nextPayload.role === 'site_admin' && isSiteAdminOrAbove(auth.user);
     const role = Number(auth.user.id) === id && !isSuperAdmin(auth.user)
-      ? (existing.role === 'admin' ? 'admin' : 'editor')
-      : (wantsAdmin ? 'admin' : 'editor');
+      ? (['admin', 'site_admin'].includes(existing.role) ? existing.role : 'editor')
+      : (wantsAdmin ? 'admin' : (wantsSiteAdmin ? 'site_admin' : 'editor'));
+    if (existing.role === 'admin' && role !== 'admin' || nextPayload.active === false && existing.role === 'admin') {
+      const supers = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1").first();
+      if (Number(supers?.n || 0) <= 1) return jsonResponse({ detail: 'This is the last active Super Admin' }, 409);
+    }
     const slugs = ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
     const permissions = JSON.stringify(
       Number(auth.user.id) === id && !isSuperAdmin(auth.user)
@@ -11964,6 +12011,16 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse({ ok: true });
   }
 
+  if (url.pathname.startsWith('/api/admin/people')) {
+    const peopleResponse = await handlePeopleApi(request, env, url, ctx);
+    if (peopleResponse) return peopleResponse;
+  }
+  const lockMatch = url.pathname.match(/^\/api\/admin\/users\/(\d+)\/lock$/);
+  if (lockMatch && request.method === 'POST') {
+    const auth = await requireLogin(request, env);
+    if (auth.response) return auth.response;
+    return handlePersonLockChange(request, env, ctx, auth, Number(lockMatch[1]), true);
+  }
   if (url.pathname === '/api/admin/users/locks' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
@@ -11974,9 +12031,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (unlockMatch && request.method === 'POST') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    if (!isSuperAdmin(auth.user)) return jsonResponse({ detail: 'Only the Super Admin can unlock accounts' }, 403);
-    await unlockAccount(env, Number(unlockMatch[1]));
-    return jsonResponse({ ok: true });
+    return handlePersonLockChange(request, env, ctx, auth, Number(unlockMatch[1]), false);
   }
   if (url.pathname.startsWith('/api/admin/studio/')) {
     const studioResponse = await handleStudioApi(request, env, url, {
@@ -14102,6 +14157,8 @@ function renderLoginHtml(nextPath = '/admin') {
   );
 }
 
+const LOCKED_LOGIN_HTML = `<p class='error login-locked' role='alert' style='display:flex;gap:10px;align-items:center;background:#fdecee;border:1px solid #f3b6bf;border-radius:10px;padding:12px;color:#8a0c22;font-weight:700'><svg width='28' height='32' viewBox='0 0 28 32' aria-hidden='true' style='flex:none'><path d='M7 14V9a7 7 0 0114 0v5' fill='none' stroke='#c8102e' stroke-width='3.5'/><rect x='2' y='13' width='24' height='18' rx='4' fill='#c8102e'/><circle cx='14' cy='21' r='2.6' fill='#fff'/></svg><span>${LOCKED_LOGIN_MESSAGE}</span></p>`;
+
 async function handleLogin(request, env, ctx = null) {
   try {
     await initDb(env);
@@ -14152,27 +14209,20 @@ async function handleLogin(request, env, ctx = null) {
     console.error('login_d1_unavailable', String(error?.message || error));
     return d1UnavailableHtml('/admin/login');
   }
-  const accountLock = user ? lockStatus(await getAccountLock(env, user.id)) : { locked: false };
-  if (accountLock.locked) {
-    const lockedResponse = applyAuthCookies(
-      htmlResponse(
-        renderLoginHtml(nextPath).replace('</form>', accountLock.reset_required
-          ? "<p class='error'>This account is locked. Ask the Super Admin to unlock it.</p></form>"
-          : "<p class='error'>This account is locked for 30 minutes after 3 failed sign-ins.</p></form>"),
-        429,
-      ),
-      { token: '', maxAge: 0 },
-    );
-    await maybeLogAccessDenial(env, { request, url: requestUrl, response: lockedResponse, actor: { username }, ctx, deviceClient });
-    return lockedResponse;
-  }
-  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
+  // Q75: a wrong password always gets the normal message (and counts toward the auto-lock),
+  // so strangers can't tell which accounts exist. Profile-only people (can_login = 0) can't sign in.
+  if (!user || !user.active || Number(user.can_login ?? 1) === 0 || !(await verifyPassword(password, user.password_hash))) {
     const nextLock = registerLoginFailure(username, ip);
     let lockedNow = Boolean(nextLock.locked);
     if (user) {
       try {
         const acct = await recordAccountFailure(env, user.id, { ip, city: request.cf?.city || '', region: request.cf?.regionCode || '' });
-        if (acct.locked) lockedNow = true;
+        // Q75: never reveal the account lock on a wrong password; only the anonymous
+        // per-name/IP throttle (same for unknown names) can say "too many".
+        if (acct.reset_required) {
+          // Mirror needs-unlock locks onto users.locked so open sessions end (2.24a).
+          await env.DB.prepare('UPDATE users SET locked = 1 WHERE id = ?').bind(user.id).run().catch(() => {});
+        }
       } catch (error) {
         console.error('account_lock_write_failed', String(error?.message || error));
       }
@@ -14195,6 +14245,18 @@ async function handleLogin(request, env, ctx = null) {
       deviceClient,
     });
     return failedResponse;
+  }
+  // Correct password: only now say the account is locked (Q75), with the red padlock.
+  const accountLock = Number(user.locked || 0) === 1
+    ? { locked: true }
+    : lockStatus(await getAccountLock(env, user.id));
+  if (accountLock.locked) {
+    const lockedResponse = applyAuthCookies(
+      htmlResponse(renderLoginHtml(nextPath).replace('</form>', `${LOCKED_LOGIN_HTML}</form>`), 403),
+      { token: '', maxAge: 0 },
+    );
+    await maybeLogAccessDenial(env, { request, url: requestUrl, response: lockedResponse, actor: { username }, ctx, deviceClient });
+    return lockedResponse;
   }
   try {
     await env.DB.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
@@ -14392,6 +14454,304 @@ async function handleFundraiserCardsPage(request, env, ctx = null, preloaded = {
     alertEmails: await getFundraiserAlertEmails(env),
     ...nav,
   })), user);
+}
+
+// ---- People & Access (plan 2.24 / 2.24a) ----------------------------------
+function peopleSameOrigin(request, url) {
+  const origin = request.headers.get('origin');
+  if (origin) {
+    try { return new URL(origin).host === url.host; } catch { return false; }
+  }
+  return request.headers.get('sec-fetch-site') !== 'cross-site';
+}
+
+async function peopleAudit(env, ctx, request, auth, action, detail, meta = {}) {
+  const url = new URL(request.url);
+  await enqueueAdminAudit(env, ctx, {
+    action,
+    category: 'users',
+    method: request.method,
+    path: url.pathname,
+    status: 200,
+    ...auditRequestForensics(request, auth.user, auth.session),
+    summary: buildAuditSummary({ action, method: request.method, path: url.pathname, status: 200, actorUsername: auth.user.username, detail }),
+    meta,
+  });
+}
+
+async function countActiveSuperAdmins(env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1").first();
+  return Number(row?.n || 0);
+}
+
+async function loadRolePresets(env) {
+  const presets = JSON.parse(JSON.stringify(DEFAULT_ROLE_PRESETS));
+  try {
+    const rows = await env.DB.prepare('SELECT role, permissions, login_default FROM role_presets').all();
+    for (const row of rows.results || []) {
+      presets[row.role] = { permissions: parsePermissions(row.permissions), login_default: Number(row.login_default) === 1 ? 1 : 0 };
+    }
+  } catch { /* table missing before migration: defaults */ }
+  return presets;
+}
+
+function personDiff(before, after) {
+  const keys = ['display_name', 'role', 'permissions', 'active', 'person_group', 'group_role', 'can_login', 'card_title', 'card_bio', 'card_photo_id', 'card_show', 'card_order', 'committee_label', 'email', 'locked'];
+  const out = {};
+  for (const key of keys) {
+    const a = before ? JSON.stringify(before[key] ?? null) : 'null';
+    const b = JSON.stringify(after[key] ?? null);
+    if (a !== b) out[key] = { before: before ? before[key] ?? null : null, after: after[key] ?? null };
+  }
+  return out;
+}
+
+async function handlePersonLockChange(request, env, ctx, auth, targetId, locking) {
+  const url = new URL(request.url);
+  if (!peopleSameOrigin(request, url)) return jsonResponse({ detail: 'Cross-site request blocked' }, 403);
+  let target;
+  try {
+    target = await env.DB.prepare('SELECT id, username, display_name, role, active, locked FROM users WHERE id = ?').bind(targetId).first();
+  } catch {
+    target = await env.DB.prepare('SELECT id, username, display_name, role, active FROM users WHERE id = ?').bind(targetId).first();
+  }
+  if (!target) return jsonResponse({ detail: 'Person not found' }, 404);
+  const rule = checkLockChange(auth.user, target, { activeSuperAdmins: await countActiveSuperAdmins(env), locking });
+  if (!rule.ok) return jsonResponse({ detail: rule.detail }, rule.status);
+  const prior = await getAccountLock(env, targetId);
+  const now = new Date().toISOString();
+  if (locking) {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO login_attempts (key, fails, locked_at, lock_until, lock_reason, updated_at) VALUES (?, 0, ?, NULL, 'manual', ?)
+        ON CONFLICT(key) DO UPDATE SET prev_locked_at = COALESCE(login_attempts.locked_at, login_attempts.prev_locked_at), locked_at = excluded.locked_at, lock_until = NULL, lock_reason = 'manual', updated_at = excluded.updated_at`).bind(`u:${targetId}`, now, now),
+      env.DB.prepare('UPDATE users SET locked = 1 WHERE id = ?').bind(targetId),
+    ]);
+  } else {
+    await unlockAccount(env, targetId);
+    await env.DB.prepare('UPDATE users SET locked = 0 WHERE id = ?').bind(targetId).run().catch(() => {});
+  }
+  await peopleAudit(env, ctx, request, auth, locking ? 'people.lock' : 'people.unlock', target.username, {
+    target_user_id: targetId,
+    target_username: target.username,
+    reason: locking ? 'manual' : 'unlock',
+    prior_lock_reason: prior?.lock_reason || null,
+    prior_fails: Number(prior?.fails || 0),
+    locked: { before: Number(target.locked || 0) === 1 || lockStatus(prior).locked, after: locking },
+  });
+  return jsonResponse({ ok: true, locked: locking });
+}
+
+async function handlePeopleApi(request, env, url, ctx) {
+  const auth = await requireLogin(request, env);
+  if (auth.response) return auth.response;
+  if (!canManagePeople(auth.user)) return jsonResponse({ detail: 'Permission required: People & Access' }, 403);
+  if (request.method !== 'GET' && !peopleSameOrigin(request, url)) return jsonResponse({ detail: 'Cross-site request blocked' }, 403);
+  const path = url.pathname.replace(/\/+$/, '');
+  const slugs = async () => ((await env.DB.prepare('SELECT slug FROM cms_pages').all()).results || []).map((row) => row.slug);
+
+  if (path === '/api/admin/people' && request.method === 'GET') {
+    let rows;
+    try {
+      rows = (await env.DB.prepare(`SELECT ${PERSON_COLUMNS} FROM users ORDER BY person_group DESC, card_order, display_name LIMIT 200`).all()).results || [];
+    } catch (error) {
+      return jsonResponse({ detail: 'People & Access needs the s5-people migration on this database', error: 'schema' }, 503);
+    }
+    const locks = await env.DB.prepare("SELECT key, locked_at, lock_until, lock_reason FROM login_attempts WHERE key LIKE 'u:%'").all().catch(() => ({ results: [] }));
+    const lockById = new Map((locks.results || []).map((row) => [Number(row.key.slice(2)), { ...lockStatus(row), lock_reason: row.lock_reason }]));
+    const review = await env.DB.prepare('SELECT id, name, staff_id, booster_id, user_id, resolved FROM people_migration_review WHERE resolved IS NULL OR resolved = \'\' ORDER BY id').all().catch(() => ({ results: [] }));
+    return jsonResponse({
+      me: { id: auth.user.id, role: String(auth.user.role || 'editor'), permissions: parsePermissions(auth.user.permissions) },
+      people: rows.map((row) => serializePerson(row, lockById.get(Number(row.id)))),
+      presets: await loadRolePresets(env),
+      permissions: GLOBAL_PERMISSIONS,
+      active_super_admins: rows.filter((row) => row.role === 'admin' && Number(row.active) === 1).length,
+      review: review.results || [],
+      people_source: (await getSiteContentValue(env, 'people_source').catch(() => '')) || 'legacy',
+      invites: 'deferred',
+    });
+  }
+
+  if ((path === '/api/admin/people' && request.method === 'POST') || (/^\/api\/admin\/people\/\d+$/.test(path) && request.method === 'PUT')) {
+    const id = request.method === 'PUT' ? Number(path.split('/').pop()) : null;
+    const payload = await request.json().catch(() => ({}));
+    const existing = id ? await env.DB.prepare(`SELECT ${PERSON_COLUMNS}, password_hash FROM users WHERE id = ?`).bind(id).first() : null;
+    if (id && !existing) return jsonResponse({ detail: 'Person not found' }, 404);
+    const group = normalizeGroupFields(payload);
+    if (!group.ok) return jsonResponse({ detail: group.detail }, 422);
+    const displayName = String(payload.display_name || '').trim().slice(0, 120);
+    if (!displayName) return jsonResponse({ detail: 'Name is required' }, 422);
+    const email = String(payload.email || '').trim().slice(0, 200);
+    if (email && !isValidEmail(email)) return jsonResponse({ detail: 'Email looks wrong' }, 422);
+    const next = {
+      display_name: displayName,
+      role: String(payload.role || 'editor').trim().toLowerCase(),
+      permissions: parsePermissions(payload.permissions),
+      active: payload.active === false ? 0 : 1,
+      can_login: payload.can_login ? 1 : 0,
+      locked: existing ? Number(existing.locked) : 0,
+      ...group,
+      card_title: String(payload.card_title || '').trim().slice(0, 120),
+      card_bio: String(payload.card_bio || '').slice(0, 4000),
+      card_photo_id: String(payload.card_photo_id || '').trim().slice(0, 400),
+      card_show: payload.card_show ? 1 : 0,
+      card_order: Math.max(0, Math.min(999, Number(payload.card_order || 0) || 0)),
+      email,
+    };
+    if (next.group_role === 'committee' && !existing) { next.can_login = payload.can_login && isSiteAdminOrAbove(auth.user) ? 1 : 0; }
+    if (!next.can_login) next.role = existing && existing.role === 'admin' ? existing.role : (next.role === 'admin' ? 'editor' : next.role);
+    if (next.card_photo_id && next.card_photo_id !== String(existing?.card_photo_id || '') && !/^\/(assets|uploads|media|photos|api\/photos)\//.test(next.card_photo_id)) {
+      return jsonResponse({ detail: 'Pick a photo from the site photo library' }, 422);
+    }
+    const rule = checkPersonChange(auth.user, existing, next, { activeSuperAdmins: await countActiveSuperAdmins(env), allowedPermissions: GLOBAL_PERMISSIONS });
+    if (!rule.ok) return jsonResponse({ detail: rule.detail }, rule.status);
+    next.permissions = normalizePageGrants(next.permissions, await slugs());
+    // Login details: a profile-only row needs a real username and password before login turns on.
+    const wantsUsername = String(payload.username || '').trim();
+    const password = String(payload.password || '');
+    const hasRealUsername = existing && !String(existing.username).startsWith('profile-');
+    let username = existing ? existing.username : `profile-${crypto.randomUUID()}`;
+    if (wantsUsername && wantsUsername !== (hasRealUsername ? existing.username : '')) username = wantsUsername.slice(0, 120);
+    if (next.can_login && String(username).startsWith('profile-')) return jsonResponse({ detail: 'Add a username and password to turn on login' }, 422);
+    if (password) {
+      const rulePw = checkPasswordRule(password);
+      if (!rulePw.ok) return jsonResponse({ detail: rulePw.detail, checks: rulePw.checks }, 422);
+    }
+    if (next.can_login && !password && (!existing || Number(existing.can_login) !== 1) && (!existing || !hasRealUsername)) {
+      return jsonResponse({ detail: 'Set a password to turn on login' }, 422);
+    }
+    const passwordHash = password ? await hashPassword(password) : (existing ? existing.password_hash : await hashPassword(crypto.randomUUID() + crypto.randomUUID()));
+    const cols = [username, next.display_name, passwordHash, next.role, JSON.stringify(next.permissions), next.active, next.person_group, next.group_role, next.can_login, next.card_title, next.card_bio, next.card_photo_id, next.card_show, next.card_order, next.committee_label, next.email];
+    let savedId = id;
+    try {
+      if (existing) {
+        await env.DB.prepare('UPDATE users SET username = ?, display_name = ?, password_hash = ?, role = ?, permissions = ?, active = ?, person_group = ?, group_role = ?, can_login = ?, card_title = ?, card_bio = ?, card_photo_id = ?, card_show = ?, card_order = ?, committee_label = ?, email = ? WHERE id = ?').bind(...cols, id).run();
+      } else {
+        const result = await env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active, person_group, group_role, can_login, card_title, card_bio, card_photo_id, card_show, card_order, committee_label, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(...cols).run();
+        savedId = result.meta.last_row_id;
+      }
+    } catch (error) {
+      if (/UNIQUE/i.test(String(error?.message || error))) return jsonResponse({ detail: 'That username is taken' }, 409);
+      throw error;
+    }
+    const saved = await env.DB.prepare(`SELECT ${PERSON_COLUMNS} FROM users WHERE id = ?`).bind(savedId).first();
+    const before = existing ? serializePerson(existing) : null;
+    const after = serializePerson(saved);
+    const diff = personDiff(before, after);
+    await peopleAudit(env, ctx, request, auth, existing ? 'people.update' : 'people.create', after.display_name, {
+      target_user_id: savedId, diff, password_changed: Boolean(password),
+    });
+    if (diff.role || diff.permissions) {
+      await peopleAudit(env, ctx, request, auth, 'people.role', after.display_name, { target_user_id: savedId, role: diff.role || null, grants: diff.permissions || null });
+    }
+    if (diff.can_login && after.can_login && after.group_role === 'committee') {
+      await peopleAudit(env, ctx, request, auth, 'people.login_enable', after.display_name, { target_user_id: savedId });
+    }
+    return jsonResponse(after);
+  }
+
+  const lockMatch = path.match(/^\/api\/admin\/people\/(\d+)\/(lock|unlock)$/);
+  if (lockMatch && request.method === 'POST') return handlePersonLockChange(request, env, ctx, auth, Number(lockMatch[1]), lockMatch[2] === 'lock');
+
+  if (path === '/api/admin/people/presets' && request.method === 'PUT') {
+    if (!isSuperAdmin(auth.user)) return jsonResponse({ detail: 'Only a Super Admin can change role defaults' }, 403);
+    const payload = await request.json().catch(() => ({}));
+    const before = await loadRolePresets(env);
+    const stmts = [];
+    const after = {};
+    for (const role of Object.keys(DEFAULT_ROLE_PRESETS)) {
+      if (!payload[role]) continue;
+      const perms = parsePermissions(payload[role].permissions).filter((key) => GLOBAL_PERMISSIONS.includes(key) && key !== 'users');
+      const login = role === 'committee' ? 0 : (payload[role].login_default ? 1 : 0);
+      after[role] = { permissions: perms, login_default: login };
+      stmts.push(env.DB.prepare('INSERT INTO role_presets (role, permissions, login_default, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(role) DO UPDATE SET permissions = excluded.permissions, login_default = excluded.login_default, updated_by = excluded.updated_by, updated_at = excluded.updated_at').bind(role, JSON.stringify(perms), login, auth.user.id, new Date().toISOString()));
+    }
+    if (stmts.length) await env.DB.batch(stmts);
+    await peopleAudit(env, ctx, request, auth, 'people.preset', `${stmts.length} role defaults`, { before, after });
+    return jsonResponse({ ok: true, presets: await loadRolePresets(env) });
+  }
+
+  if (path === '/api/admin/people/migrate' && request.method === 'POST') {
+    if (!isSiteAdminOrAbove(auth.user)) return jsonResponse({ detail: 'Only an Admin or Super Admin can run the move' }, 403);
+    const payload = await request.json().catch(() => ({}));
+    const users = (await env.DB.prepare(`SELECT ${PERSON_COLUMNS} FROM users`).all()).results || [];
+    const staff = (await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM staff_members ORDER BY sort_order, id').all()).results || [];
+    const boosters = (await env.DB.prepare('SELECT id, name, role, bio, photo_url, sort_order, active FROM booster_members ORDER BY sort_order, id').all()).results || [];
+    const openReview = ((await env.DB.prepare('SELECT staff_id, booster_id FROM people_migration_review').all()).results || []);
+    const plan = planPeopleMigration({ users, staff, boosters });
+    const seen = new Set(openReview.map((r) => `${r.staff_id}|${r.booster_id}`));
+    plan.review = plan.review.filter((r) => !seen.has(`${r.staff_id}|${r.booster_id}`));
+    if (payload.dry_run !== false) return jsonResponse({ dry_run: true, ...plan });
+    const stmts = [];
+    for (const action of plan.actions) {
+      const f = action.fields;
+      if (action.type === 'link') {
+        stmts.push(env.DB.prepare('UPDATE users SET person_group = ?, group_role = ?, committee_label = ?, card_title = ?, card_bio = ?, card_photo_id = ?, card_show = ?, card_order = ?, legacy_source = ? WHERE id = ? AND legacy_source = \'\'').bind(f.person_group, f.group_role, f.committee_label, f.card_title, f.card_bio, f.card_photo_id, f.card_show, f.card_order, f.legacy_source, action.user_id));
+      } else {
+        stmts.push(env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active, person_group, group_role, can_login, card_title, card_bio, card_photo_id, card_show, card_order, committee_label, legacy_source) VALUES (?, ?, ?, \'editor\', \'[]\', 1, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)').bind(`profile-${crypto.randomUUID()}`, action.name, await hashPassword(crypto.randomUUID() + crypto.randomUUID()), f.person_group, f.group_role, f.card_title, f.card_bio, f.card_photo_id, f.card_show, f.card_order, f.committee_label, f.legacy_source));
+      }
+    }
+    for (const r of plan.review) {
+      stmts.push(env.DB.prepare('INSERT INTO people_migration_review (name, staff_id, booster_id, user_id, resolved) VALUES (?, ?, ?, ?, NULL)').bind(r.name, r.staff_id, r.booster_id, r.user_id));
+    }
+    if (stmts.length) await env.DB.batch(stmts);
+    await peopleAudit(env, ctx, request, auth, 'people.migrate.summary', `${plan.actions.length} moved, ${plan.review.length} need a decision`, {
+      linked: plan.actions.filter((a) => a.type === 'link').length,
+      inserted: plan.actions.filter((a) => a.type === 'insert').length,
+      review: plan.review.length,
+    });
+    return jsonResponse({ dry_run: false, ...plan });
+  }
+
+  const reviewMatch = path.match(/^\/api\/admin\/people\/review\/(\d+)$/);
+  if (reviewMatch && request.method === 'POST') {
+    if (!isSiteAdminOrAbove(auth.user)) return jsonResponse({ detail: 'Only an Admin or Super Admin can decide' }, 403);
+    const payload = await request.json().catch(() => ({}));
+    const keep = String(payload.keep || '');
+    if (!['staff', 'boosters'].includes(keep)) return jsonResponse({ detail: 'Pick Keep Staff or Keep Boosters' }, 422);
+    const row = await env.DB.prepare('SELECT * FROM people_migration_review WHERE id = ? AND (resolved IS NULL OR resolved = \'\')').bind(Number(reviewMatch[1])).first();
+    if (!row) return jsonResponse({ detail: 'Already decided' }, 404);
+    const legacyId = keep === 'staff' ? row.staff_id : row.booster_id;
+    if (!legacyId) return jsonResponse({ detail: 'That list has no card for this person' }, 422);
+    const card = await env.DB.prepare(`SELECT id, name, role, bio, photo_url, sort_order, active FROM ${keep === 'staff' ? 'staff_members' : 'booster_members'} WHERE id = ?`).bind(legacyId).first();
+    if (!card) return jsonResponse({ detail: 'Old card not found' }, 404);
+    const plan = planPeopleMigration({ users: row.user_id ? [(await env.DB.prepare(`SELECT ${PERSON_COLUMNS} FROM users WHERE id = ?`).bind(row.user_id).first())].filter(Boolean) : [], staff: keep === 'staff' ? [card] : [], boosters: keep === 'boosters' ? [card] : [] });
+    const action = plan.actions[0];
+    if (!action) return jsonResponse({ detail: 'Nothing to move' }, 409);
+    const f = action.fields;
+    const stmts = [action.type === 'link'
+      ? env.DB.prepare('UPDATE users SET person_group = ?, group_role = ?, committee_label = ?, card_title = ?, card_bio = ?, card_photo_id = ?, card_show = ?, card_order = ?, legacy_source = ? WHERE id = ?').bind(f.person_group, f.group_role, f.committee_label, f.card_title, f.card_bio, f.card_photo_id, f.card_show, f.card_order, f.legacy_source, action.user_id)
+      : env.DB.prepare('INSERT INTO users (username, display_name, password_hash, role, permissions, active, person_group, group_role, can_login, card_title, card_bio, card_photo_id, card_show, card_order, committee_label, legacy_source) VALUES (?, ?, ?, \'editor\', \'[]\', 1, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)').bind(`profile-${crypto.randomUUID()}`, card.name, await hashPassword(crypto.randomUUID()), f.person_group, f.group_role, f.card_title, f.card_bio, f.card_photo_id, f.card_show, f.card_order, f.committee_label, f.legacy_source),
+    env.DB.prepare('UPDATE people_migration_review SET resolved = ? WHERE id = ?').bind(`keep:${keep}`, row.id)];
+    await env.DB.batch(stmts);
+    await peopleAudit(env, ctx, request, auth, 'people.migrate.decide', `${card.name}: keep ${keep}`, { review_id: row.id, keep });
+    return jsonResponse({ ok: true });
+  }
+  return null;
+}
+
+async function handlePeoplePage(request, env) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/people');
+  const user = session.user;
+  if (!user) return redirect('/admin/login?next=/admin/people');
+  if (!canManagePeople(user)) {
+    return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: People & Access' });
+  }
+  const roleLabel = isSuperAdmin(user) ? ' · Super Admin' : (isSiteAdminRole(user) ? ' · Admin' : '');
+  const who = `${String(user.display_name || user.username || '').trim()}${roleLabel}`;
+  const nav = await loadAdminNavContext(env, user, { route: 'people' }, { skipQueries: true });
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · People &amp; Access</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-people.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<body class="ev-app pp-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-site-admin="${isSiteAdminOrAbove(user) ? '1' : ''}">
+<header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · People &amp; Access</span></a>
+<div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
+${renderAdminNavFragment(nav)}
+<div class="ev-body">
+<main class="ev-main pp-main" id="pp-root" aria-label="People and Access"><p class="ev-loading">Loading people…</p></main></div>
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-people.js?v=${ADMIN_NAV_VERSION}" defer></script></body></html>`;
+  return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
 // Event manager (plan 2.20): full-page Studio-look month calendar over caldev_events.
@@ -15366,6 +15726,9 @@ async function dispatchWorker(request, env, ctx) {
     }
     if (url.pathname === '/admin/events-manager' || url.pathname === '/admin/events-manager/') {
       return handleEventsManagerPage(request, env);
+    }
+    if (url.pathname === '/admin/people' || url.pathname === '/admin/people/') {
+      return handlePeoplePage(request, env);
     }
     const studioEditorMatch = url.pathname.match(/^\/admin\/studio\/([a-z0-9-]+)\/?$/);
     if (studioEditorMatch) return handleStudioEditorPage(request, env, studioEditorMatch[1]);

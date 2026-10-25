@@ -271,6 +271,7 @@
   body.ev-app.sn-body{display:block}
   body.ev-app.sn-body .ev-body{display:block;min-height:0}
   body.ev-app.sn-body .ev-main{overflow:visible;height:auto;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  body.ev-app.sn-body .ev-fab{bottom:calc(80px + env(safe-area-inset-bottom))}
   body.ev-app.sn-body .fb-main{min-height:0;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
   body.ev-app.sn-body .fb-bar{position:static;top:52px}
   body.ev-app.sn-body .fb-grid{min-height:0}

@@ -78,7 +78,7 @@ test('14d-1 rail: Home, Find, one icon per section, account; current section gol
 test('admin-only items carry the red ADMIN pill', () => {
   const model = buildAdminNavModel(navFor(admin));
   const tagged = model.items.filter((item) => item.admin && !item.hidden).map((item) => item.key);
-  assert.deepEqual(tagged, ['themes', 'users', 'site', 'security-log']);
+  assert.deepEqual(tagged, ['themes', 'people', 'users', 'site', 'security-log']);
   const sidebar = renderAdminSidebarHtml('test', navFor(admin));
   for (const key of tagged) {
     assert.match(sidebar, new RegExp(`data-nav-item="${key}"[^>]*>[^]*?sn-admin-pill`));
