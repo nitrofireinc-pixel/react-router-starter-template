@@ -10,7 +10,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav15x';
+export const ADMIN_NAV_REV = 'nav15y';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -262,6 +262,20 @@ function resolveCurrentKey(current = {}, items) {
   return '';
 }
 
+const NAV_ITEM_ICONS = {
+  dashboard: '🏠', pages: '📄', themes: '🎨', 'events-manager': '📅', 'fundraiser-cards': '🎟️', ledger: '📒', checkout: '💳',
+  sponsors: '🤝', 'sponsors-page': '📰', 'become-a-sponsor': '⭐', 'booster-members': '🏅', minutes: '📝', 'badge-creator': '🪪',
+  staff: '🎓', ensembles: '🎺', photos: '🖼️', social: '📣', 'forms-builder': '🧩', 'forms-subs': '📥', forms: '🗂️', mail: '✉️',
+  contact: '📞', people: '👥', users: '👤', site: '⚙️', 'security-log': '🔐',
+};
+/** Page tile icon by slug (shared shape with admin-nav.js pageIcon). */
+export function sitePageIcon(slug = '') {
+  const s = String(slug).toLowerCase();
+  const map = [['home', '🏠'], ['calendar', '📅'], ['gallery', '🖼️'], ['contact', '✉️'], ['director', '🎓'], ['staff', '🎓'], ['become', '⭐'], ['sponsor', '🤝'], ['booster', '🏅'], ['resource', '📚'], ['fundrais', '💰'], ['ensemble', '🎺'], ['join', '🥁'], ['volunteer', '🙋'], ['in-kind', '🎁'], ['letterman', '🧥'], ['coming', '⏳']];
+  const hit = map.find(([k]) => s.includes(k));
+  return hit ? hit[1] : '📄';
+}
+
 function renderNavItem(entry, currentKey, sectionLabel = '', extraClass = '') {
   if (entry.hidden) return '';
   const isCurrent = entry.key === currentKey;
@@ -276,16 +290,17 @@ function renderNavItem(entry, currentKey, sectionLabel = '', extraClass = '') {
   const section = sectionLabel ? ` data-nav-section-label="${escapeAdminHtml(sectionLabel)}"` : '';
   const kw = entry.keywords ? ` data-nav-keywords="${escapeAdminHtml(entry.keywords)}"` : '';
   const adminAttr = entry.admin ? ' data-nav-admin="1"' : '';
-  return `<a class="admin-nav-item sn-item${extraClass}${isCurrent ? ' active' : ''}" href="${escapeAdminHtml(href)}" data-nav-item="${escapeAdminHtml(entry.key)}"${tabAttr}${extra}${section}${kw}${adminAttr}${currentAttr}><span class="sn-label">${escapeAdminHtml(entry.label)}</span>${adminPill}${badge}</a>`;
+  const ico = `<span class="sn-tile-ico" aria-hidden="true">${NAV_ITEM_ICONS[entry.key] || '•'}</span>`;
+  return `<a class="admin-nav-item sn-item${extraClass}${isCurrent ? ' active' : ''}" href="${escapeAdminHtml(href)}" data-nav-item="${escapeAdminHtml(entry.key)}"${tabAttr}${extra}${section}${kw}${adminAttr}${currentAttr}>${ico}<span class="sn-label">${escapeAdminHtml(entry.label)}</span>${adminPill}${badge}</a>`;
 }
 
 function renderSitePagesMount(pageIndex = []) {
-  const rows = pageIndex.map((page) => `<li class="sn-page-row"><a class="sn-page-edit" href="${escapeAdminHtml(page.href)}" data-sn-page-edit="${escapeAdminHtml(page.slug)}">${escapeAdminHtml(page.label)}</a></li>`).join('');
+  // Icon tiles (14d-3): tap opens Studio; the small ⋯ (added by admin-nav.js when allowed) opens settings.
+  const rows = pageIndex.map((page) => `<li class="sn-page-row"><a class="sn-page-edit" href="${escapeAdminHtml(page.href)}" data-sn-page-edit="${escapeAdminHtml(page.slug)}"><span class="sn-tile-ico" aria-hidden="true">${sitePageIcon(page.slug)}</span><span class="sn-page-name">${escapeAdminHtml(page.label)}</span></a></li>`).join('');
   return `<div class="sn-site-pages" data-sn-site-pages>
 <p class="sn-sub">Pages</p>
 <ul class="sn-page-list" data-sn-pages-list>${rows}</ul>
 <p class="sn-pages-loading" data-sn-pages-loading${rows ? ' hidden' : ''}>Loading pages…</p>
-<a class="sn-pages-all" href="/admin?tab=pages" data-sn-pages-all>See all / Add page</a>
 </div>`;
 }
 
@@ -300,7 +315,7 @@ function renderSection(section, currentKey, pageIndex = []) {
   const headId = `sn-h-${section.key}`;
   return `<div class="sn-section" data-nav-section="${section.key}" role="group" aria-labelledby="${headId}">
 <h2 class="sn-head admin-menu-label" id="${headId}">${escapeAdminHtml(section.label)}${tag}</h2>
-${section.visible.map((entry) => renderNavItem(entry, currentKey, section.label)).join('')}
+<div class="sn-tiles">${section.visible.map((entry) => renderNavItem(entry, currentKey, section.label)).join('')}${section.key === 'website' && section.visible.some((entry) => entry.key === 'pages') ? '<a class="sn-item sn-pages-all" href="/admin?tab=pages&amp;new=1" data-sn-pages-all hidden><span class="sn-tile-ico" aria-hidden="true">➕</span><span class="sn-label">Add page</span></a>' : ''}</div>
 ${section.key === 'website' && section.visible.some((entry) => entry.key === 'pages') ? renderSitePagesMount(pageIndex) : ''}
 </div>`;
 }

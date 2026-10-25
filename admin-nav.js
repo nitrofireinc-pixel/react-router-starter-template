@@ -324,6 +324,13 @@
   let sitePagesLoading = false;
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // pages: [{ slug, label, editHref, settingsHref, editor, hasDraft }]; opts.canAdd shows "Add page".
+  // Same map as admin-chrome.mjs sitePageIcon.
+  function pageIcon(slug = '') {
+    const s = String(slug).toLowerCase();
+    const map = [['home', '🏠'], ['calendar', '📅'], ['gallery', '🖼️'], ['contact', '✉️'], ['director', '🎓'], ['staff', '🎓'], ['become', '⭐'], ['sponsor', '🤝'], ['booster', '🏅'], ['resource', '📚'], ['fundrais', '💰'], ['ensemble', '🎺'], ['join', '🥁'], ['volunteer', '🙋'], ['in-kind', '🎁'], ['letterman', '🧥'], ['coming', '⏳']];
+    const hit = map.find(([k]) => s.includes(k));
+    return hit ? hit[1] : '📄';
+  }
   function setPages(pages = [], opts = {}) {
     sitePagesSet = true;
     document.querySelectorAll('[data-sn-site-pages]').forEach((box) => {
@@ -332,13 +339,12 @@
       if (loading) { loading.hidden = pages.length > 0; loading.textContent = 'No pages you can edit yet.'; }
       if (list) {
         list.innerHTML = pages.map((p) => `<li class="sn-page-row">
-<a class="sn-page-edit" href="${esc(p.editHref)}" data-sn-page-edit="${esc(p.slug)}"><span class="sn-page-name">${esc(p.label)}</span>${p.hasDraft ? '<span class="sn-page-draft">Draft</span>' : ''}</a>
-${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-sn-page-settings="${esc(p.slug)}" aria-label="Page settings: ${esc(p.label)}" title="Page settings">⚙</a>` : ''}
+<a class="sn-page-edit" href="${esc(p.editHref)}" data-sn-page-edit="${esc(p.slug)}"><span class="sn-tile-ico" aria-hidden="true">${pageIcon(p.slug)}</span><span class="sn-page-name">${esc(p.label)}</span>${p.slug === 'in-kind' ? '<span class="sn-page-draft sn-page-classic">Settings</span>' : (p.hasDraft ? '<span class="sn-page-draft">Draft</span>' : '')}</a>
+${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-sn-page-settings="${esc(p.slug)}" aria-label="Page settings: ${esc(p.label)}" title="Page settings">⋯</a>` : ''}
 </li>`).join('');
       }
-      const all = box.querySelector('[data-sn-pages-all]');
-      if (all) all.textContent = opts.canAdd ? 'See all / Add page' : 'See all pages';
     });
+    document.querySelectorAll('[data-sn-pages-all]').forEach((el) => { el.hidden = !opts.canAdd; });
   }
   function loadSitePages() {
     // Only on screens where admin.js did not hand us the list; one admin-only read, on demand.

@@ -132,7 +132,7 @@ const geom = (page) => page.evaluate(() => {
 });
 
 for (const width of [1280, 980]) {
-  test(`${width}: 68px rail always visible; icon opens a 260px flyout over the page without shrinking it`, async (t) => {
+  test(`${width}: 68px rail always visible; icon opens a tile flyout (440px, 520px at >=1200) over the page without shrinking it`, async (t) => {
     await withPage(t, width, 900, '/admin', async (page) => {
       const closed = await geom(page);
       assert.equal(closed.rail.w, 68);
@@ -147,7 +147,7 @@ for (const width of [1280, 980]) {
       const open = await geom(page);
       assert.equal(open.sideVisible, true);
       assert.equal(open.side.x, 68);
-      assert.equal(open.side.w, 260);
+      assert.equal(open.side.w, width >= 1200 ? 520 : 440);
       assert.deepEqual(open.ws, closed.ws, 'page width never changes');
       assert.equal(await page.getAttribute('[data-sn-fly-key="money"]', 'aria-expanded'), 'true');
       const shown = await page.evaluate(() => [...document.querySelectorAll('#admin-sidebar [data-nav-item]')].filter((el) => el.offsetParent).map((el) => el.dataset.navItem));

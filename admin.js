@@ -2294,6 +2294,8 @@ function showAllowedPanels() {
   activateTab(startTab);
   const settingsPage = new URLSearchParams(window.location.search).get('settings') || new URLSearchParams(window.location.search).get('page');
   if (startTab === 'pages' && settingsPage) editPage(settingsPage);
+  // Nav "Add page" tile: /admin?tab=pages&new=1 opens the existing New page dialog.
+  else if (startTab === 'pages' && new URLSearchParams(window.location.search).get('new') === '1' && canManageSitePages()) document.querySelector('#new-page')?.click();
 }
 
 function bindAdminNavToggle() {

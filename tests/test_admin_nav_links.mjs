@@ -98,10 +98,10 @@ test('current screen gets aria-current="page"; page titles stay in the launcher 
   const events = renderAdminSidebarHtml(ASSET_VERSION, { ...navOptions({ route: 'events-manager' }), pages: [] });
   assert.match(events, /data-nav-item="events-manager"[^>]*aria-current="page"/);
   assert.doesNotMatch(events, /data-sn-pages hidden/);
-  // Website flyout always carries the page list mount (+ See all / Add page); filled from pageIndex or lazily.
-  assert.match(events, /data-nav-section="website"[\s\S]*data-sn-site-pages[\s\S]*data-sn-pages-loading>[\s\S]*href="\/admin\?tab=pages" data-sn-pages-all>See all \/ Add page/);
-  assert.match(visual, /data-sn-pages-list><li class="sn-page-row"><a class="sn-page-edit" href="[^"]+" data-sn-page-edit=/);
-  assert.match(visual, /data-sn-page-edit="fundraising">Fundraising</);
+  // Website flyout: icon tiles (Pages, Themes, Add page) + page tile mount; filled from pageIndex or lazily.
+  assert.match(events, /data-nav-section="website"[\s\S]*<div class="sn-tiles">[\s\S]*href="\/admin\?tab=pages&amp;new=1" data-sn-pages-all hidden>[\s\S]*Add page[\s\S]*data-sn-site-pages[\s\S]*data-sn-pages-loading>/);
+  assert.match(visual, /data-sn-pages-list><li class="sn-page-row"><a class="sn-page-edit" href="[^"]+" data-sn-page-edit="[^"]+"><span class="sn-tile-ico"/);
+  assert.match(visual, /data-sn-page-edit="fundraising"><span class="sn-tile-ico" aria-hidden="true">💰<\/span><span class="sn-page-name">Fundraising</);
 });
 
 test('event manager and Form Builder use the shared sidebar without extra queries', () => {

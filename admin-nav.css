@@ -195,11 +195,11 @@
   body.admin-nav-scroll-lock{overflow:hidden}
   /* More sheet (14d-2): icon grid of the other rail sections; a tile opens that section's flyout list. */
   #admin-sidebar[data-sn-sheet="grid"] .sn-more{display:grid!important}
-  .sn-more{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+  .sn-more{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
   .sn-more-tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:6px;min-height:84px;padding:12px 2px 8px;border:0;border-radius:12px;background:#f3f6fa;color:var(--sn-ink);text-decoration:none;text-align:center;font:600 12px/1.2 "Work Sans",system-ui,sans-serif;cursor:pointer}
   .sn-more-tile:focus-visible{outline:3px solid var(--sn-gold);outline-offset:1px}
   .sn-more-ico{font-size:24px;line-height:1}
-  .sn-more-txt{overflow-wrap:anywhere}
+  .sn-more-txt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:normal;word-break:normal;hyphens:auto;max-width:100%}
   .sn-more-lock{position:absolute;top:5px;right:7px;font-size:10px}
   .sn-more-tile .sn-dot{position:absolute;top:9px;right:18px}
   .sn-more-tile[hidden]{display:none}
@@ -239,19 +239,7 @@
   .sn-launch-foot{display:none}
 }
 
-/* ---------- Website flyout/sheet page list ---------- */
-.sn-site-pages{margin:8px 0 4px;padding-top:8px;border-top:1px solid rgba(0,33,66,.1)}
-.sn-site-pages .sn-sub{margin:0 12px 4px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5b6b7c}
-.sn-page-list{list-style:none;margin:0;padding:0;max-height:min(52vh,460px);overflow:auto}
-.sn-page-row{display:flex;align-items:center;gap:2px;margin:0 6px}
-.sn-page-edit{flex:1;min-width:0;display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:8px;color:inherit;text-decoration:none;font-size:14px}
-.sn-page-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sn-page-edit:hover,.sn-page-edit:focus-visible,.sn-page-gear:hover,.sn-page-gear:focus-visible{background:rgba(0,33,66,.07)}
-.sn-page-draft{flex:none;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fff1c2;color:#7a5200}
-.sn-page-gear{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:8px;color:#5b6b7c;text-decoration:none;font-size:16px}
-.sn-pages-all{display:block;margin:6px 12px 2px;font-size:13px;font-weight:700;color:#0b4f8a}
-.sn-pages-loading{margin:4px 12px;font-size:13px;color:#5b6b7c}
-
+/* Website page tiles: see 14d-3 block below */
 /* ---------- Pages screen list ---------- */
 .page-list-card{background:#fff;border:1px solid rgba(0,33,66,.12);border-radius:14px;padding:14px 16px;margin:0 0 18px}
 .page-list-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:8px}
@@ -277,10 +265,7 @@
   .page-list{grid-template-columns:minmax(0,1fr)}
   .page-list-row{flex-wrap:wrap}
   .page-list-actions{margin-left:auto}
-  .sn-page-list{max-height:none;overflow:visible}
   .page-list-card{padding:12px}
-  .sn-page-edit{padding:10px 8px}
-  .sn-page-gear{width:40px;height:40px}
 }
 
 /* fix2: phones use one document scroller so both ends clear the sticky top bar and fixed bottom bar */
@@ -317,3 +302,41 @@
 #tab-users .admin-row{flex-wrap:wrap;min-width:0}
 #tab-users .admin-row>div:first-child{min-width:0;flex:1 1 200px}
 #tab-users .row-actions{min-width:0;max-width:100%;flex-wrap:wrap}
+
+/* ---------- 14d-3: icon tiles at every width (section items + site pages) ---------- */
+.sn-tiles,.sn-side .sn-page-list{display:grid;grid-template-columns:repeat(var(--sn-cols,3),minmax(0,1fr));gap:8px;list-style:none;margin:0;padding:0}
+.sn-tiles .sn-item,.sn-page-row .sn-page-edit{
+  position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;
+  min-height:84px;padding:12px 4px 8px;border:0;border-radius:12px;background:#f3f6fa;
+  color:var(--sn-ink);text-decoration:none;text-align:center;font:600 12px/1.2 "Work Sans",system-ui,sans-serif;min-width:0;
+}
+.sn-tiles .sn-item[hidden]{display:none}
+.sn-tiles .sn-item:hover,.sn-page-row .sn-page-edit:hover{background:#e9eef6}
+.sn-tiles .sn-item.active,.sn-tiles .sn-item[aria-current="page"]{background:var(--sn-gold-bg);box-shadow:inset 0 3px 0 var(--sn-gold);font-weight:700}
+.sn-tile-ico{font-size:24px;line-height:1}
+.sn-tiles .sn-label,.sn-page-name{flex:none;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:normal;word-break:normal;hyphens:auto;max-width:100%}
+.sn-tiles .sn-admin-pill{position:absolute;top:5px;right:5px;font-size:0;padding:0;border:0;background:none}
+.sn-tiles .sn-admin-pill::after{content:"🔒";font-size:10px}
+.sn-tiles .sn-badge{position:absolute;top:5px;right:5px}
+.sn-tiles .sn-badge[hidden]{display:none}
+.sn-site-pages{margin-top:4px}
+.sn-site-pages .sn-sub{margin:12px 2px 6px;font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--sn-mut)}
+.sn-page-row{position:relative;min-width:0}
+.sn-page-row .sn-page-edit{height:100%}
+.sn-page-draft{font:800 9px/1 "Work Sans",system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#8a5a00;background:#ffe9a8;border-radius:6px;padding:2px 5px}
+.sn-page-gear{position:absolute;top:2px;right:2px;width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#5a6b85;font-weight:900;text-decoration:none;font-size:15px}
+.sn-page-gear:hover{background:#dfe6f0}
+.sn-pages-loading{margin:6px 2px;color:var(--sn-mut);font-size:13px}
+@media (min-width:700px){
+  /* desktop flyout: a tile panel, 4 per row */
+  #admin-sidebar{--sn-cols:4}
+  body.sn-fly #admin-sidebar:not(.sn-fly-account){width:440px}
+}
+@media (min-width:1200px){
+  body.sn-fly #admin-sidebar:not(.sn-fly-account){width:520px}
+  .sn-tiles .sn-item{min-height:84px}
+}
+@media (max-width:699px){
+  #admin-sidebar{--sn-cols:3}
+  .sn-tiles .sn-item{min-height:84px}
+}
