@@ -1883,6 +1883,13 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
       }
     }
     await savePageSeoFields(form, payload.slug || original);
+    // New pages get blocks (Form, Image, Text, Button...) in Studio, not in this classic form.
+    if (!original && !isHomeSave && payload.slug && isVisualEditorPageSlug(payload.slug)) {
+      if (status) status.textContent = 'Page created. Opening Studio so you can add blocks…';
+      capturePageBaseline();
+      window.location.assign(`/admin/studio/${encodeURIComponent(String(payload.slug).trim().toLowerCase())}?new=1`);
+      return true;
+    }
     if (status) status.textContent = 'Page saved. Public site updated.';
     if (form.elements.original_slug) form.elements.original_slug.value = payload.slug || original || '';
     capturePageBaseline();
@@ -8424,7 +8431,7 @@ function bindForms() {
       if (form.elements[key]) form.elements[key].value = DEFAULT_SPONSOR_TIER_FIELDS[key] || '';
     }
     form.elements.active.checked = true;
-    document.querySelector('[data-page-editor-title]').textContent = 'Create a new page';
+    document.querySelector('[data-page-editor-title]').textContent = 'Create a new page · save to open it in Studio and add blocks';
     showPageEditorChrome(true);
     syncPreviewFromForm();
     await activateTab('pages');

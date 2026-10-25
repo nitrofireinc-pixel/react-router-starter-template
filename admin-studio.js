@@ -479,6 +479,7 @@
     const [, , name, make, size] = def;
     const found = selected && findBlock(selected);
     let section = found?.section || [...layout.sections].reverse().find((s) => !s.raw) || layout.sections[layout.sections.length - 1];
+    if (!section) { section = { id: 'main', variant: 'content', blocks: [] }; layout.sections.push(section); }
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
     if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
     else if (isGrid(section)) { block.y = Math.max(0, ...section.blocks.map((b) => b.y + b.h)); block.w = Math.min(12, size.w); section.blocks.push(block); }
@@ -787,7 +788,7 @@
   function renderPalette() {
     const host = $('[data-palette]'); host.innerHTML = '';
     const lay = canLayout();
-    $('[data-left-sub]').textContent = lay ? 'Drag onto the page' : 'You can change words, links and pictures. Adding blocks needs the “can also change layout” permission.';
+    $('[data-left-sub]').textContent = lay ? (isMobile() ? 'Tap a block to add it below the selected one (or at the end of the page)' : 'Drag onto the page') : 'You can change words, links and pictures. Adding blocks needs the “can also change layout” permission.';
     for (const [group, items] of PALETTE) {
       host.append(el('div', { class: 'st-group', text: group }));
       const tiles = el('div', { class: 'st-tiles' });
@@ -1202,6 +1203,7 @@
     setMode(mode); renderJson(); updateChrome();
     if (!$('[data-history-panel]').hidden) renderHistory();
     firstRender = firstRender || !canvasDoc; await renderCanvas(); makeEditable();
+    if (!reload && new URLSearchParams(location.search).has('new')) { if (isMobile() && canLayout()) openSheet('add'); history.replaceState(null, '', location.pathname + location.hash); }
   }
   window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, get sheet() { return sheet; }, get pick() { return pick && { id: pick.id, k: pick.k }; }, get dirty() { return isDirty(); }, select: (id) => { selected = id; afterSelect(); } };
   load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });

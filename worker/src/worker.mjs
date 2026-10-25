@@ -591,7 +591,7 @@ export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 export const ASSET_VERSION = 'cms-p2-20261024l';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
-export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home2`;
+export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home3`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
@@ -14474,11 +14474,11 @@ async function handleStudioEditorPage(request, env, slug) {
 <section class="st-center" data-center><div class="st-stage" data-stage data-device="desktop"><iframe title="Page canvas" data-canvas></iframe></div></section>
 <aside class="st-right" id="st-right" aria-label="Settings"><button type="button" class="st-sheet-x" data-close-sheet aria-label="Close">✕</button><button type="button" class="st-rail-title" data-panel-toggle="right" aria-label="Expand settings" title="Expand settings"><span aria-hidden="true">‹</span><span class="st-rail-txt">Settings</span></button><div data-inspector></div></aside>
 <aside class="st-history" data-history-panel hidden aria-label="History"><div class="st-hist-head"><h2>History</h2><button type="button" class="st-ib" data-act="history" aria-label="Close history">✕</button></div><p class="st-sub">Last 3 published versions. Every version is kept.</p><ol data-history></ol></aside></main>
-<nav class="st-bottom" aria-label="Editor actions"><button type="button" data-sheet="add"><span aria-hidden="true">➕</span>Add</button><button type="button" data-sheet="edit"><span aria-hidden="true">⚙️</span>Edit</button><button type="button" data-act="preview"><span aria-hidden="true">👁️</span>Preview</button><button type="button" data-sheet="history"><span aria-hidden="true">🕘</span>History</button></nav>
+<nav class="st-bottom" aria-label="Editor actions"><button type="button" data-sheet="add" aria-label="Add block"><span aria-hidden="true">➕</span>Add block</button><button type="button" data-sheet="edit"><span aria-hidden="true">⚙️</span>Edit</button><button type="button" data-act="preview"><span aria-hidden="true">👁️</span>Preview</button><button type="button" data-sheet="history"><span aria-hidden="true">🕘</span>History</button></nav>
 <div class="st-scrim" data-scrim></div>
 <dialog class="st-dialog" data-json-dialog><form method="dialog"><h2>Layout JSON</h2><textarea data-json rows="24" spellcheck="false"></textarea><div class="st-row"><button type="button" class="st-btn" data-act="apply-json">Apply JSON</button><button class="st-btn">Close</button></div></form></dialog>
 <div class="st-toast" data-toast role="status" aria-live="polite"></div>
-<script src="/admin-studio.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+<script src="/admin-studio.js?v=${ASSET_VERSION}-st3b" defer></script></body></html>`;
   return htmlResponse(shell);
 }
 

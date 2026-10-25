@@ -224,3 +224,14 @@ test('studio mobile: long-press / Move tap picks a block up; vertical touch drag
   assert.match(js, /'data-pick-cancel': '', text: 'Cancel'/);
   assert.match(js, /pushed down so nothing overlaps/);
 });
+
+test('phones: new pages open Studio with the Add block sheet; adding works on an empty layout', async () => {
+  const { readFileSync } = await import('node:fs');
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const admin = readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  assert.match(js, /if \(!section\) \{ section = \{ id: 'main'/);
+  assert.match(js, /has\('new'\)\) \{ if \(isMobile\(\) && canLayout\(\)\) openSheet\('add'\)/);
+  assert.match(admin, /\/admin\/studio\/\$\{encodeURIComponent\(String\(payload\.slug\)/);
+  assert.match(w, /data-sheet="add" aria-label="Add block"><span aria-hidden="true">➕<\/span>Add block</);
+});
