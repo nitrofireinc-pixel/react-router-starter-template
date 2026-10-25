@@ -1,3 +1,5 @@
+import { handleFormStudioApi, composeMail as composeFormStudioMail } from './form-studio-api.mjs';
+import { fillFormBlocks, purgeOldSubmissions, drainMailQueue, recheckLinks, FORM_STUDIO_CSS } from './form-studio.mjs';
 import { renderSeoHead, renderRobotsTxt, renderSitemapXml, normalizePageSeo, SEO_PAGE_DEFAULTS } from './seo.mjs';
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 import {
@@ -581,7 +583,7 @@ export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising', 'director'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -712,7 +714,7 @@ export function normalizeStaticPath(pathname) {
 
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
-  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'caldev.js', 'site-content.js',
+  'admin.js', 'admin-caldev.js', 'admin-visual.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'admin-forms.js', 'admin-forms.css', 'form-studio.js', 'caldev.js', 'site-content.js',
   'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
@@ -9481,6 +9483,45 @@ function d1UnavailableHtml(path = '/') {
   });
 }
 
+function formStudioDeps(env, ctx) {
+  const fromEmail = () => String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
+  const siteTitle = async (e) => { const site = await getSite(e).catch(() => ({})); return String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band'; };
+  const deps = {
+    jsonResponse, requireFormsAccess, requireLogin, isSuperAdmin, hasPermission, siteTitle,
+    listUsers: listCmsFormUsers,
+    clientIp: requestClientIp,
+    userEmail: (u) => (isValidEmail(u?.username) ? String(u.username).trim().toLowerCase() : ''),
+    recipientEmails: async (e, ids) => {
+      const want = new Set(ids.map(Number));
+      return (await listCmsFormUsers(e)).filter((u) => want.has(Number(u.id)) && u.can_email).map((u) => u.email).slice(0, 3);
+    },
+    sendMail: async (e, msg) => {
+      const title = await siteTitle(e);
+      if (!isValidEmail(fromEmail())) throw new Error('CONTACT_FROM_EMAIL must be a valid sender address');
+      return sendViaResend(e, { ...msg, fromEmail: fromEmail(), fromName: String(e.CONTACT_FROM_NAME || SPONSOR_INVOICE_FROM_NAME || title).trim() });
+    },
+    audit: (request, user, { action, detail, meta, status, ctx: c }) => {
+      const path = (() => { try { return new URL(request.url).pathname; } catch { return '/api/admin/forms-v2'; } })();
+      const method = String(request?.method || 'POST').toUpperCase();
+      return enqueueAdminAudit(env, c || ctx, {
+        request, action, category: action === 'change.admin' ? 'admin' : 'forms', method, path, status,
+        actor_user_id: user?.id, actor_username: user?.username, ip: requestClientIp(request), user_agent: request.headers.get('user-agent') || '',
+        summary: buildAuditSummary({ action, method, path, status, actorUsername: user?.username, detail }),
+        meta: meta || {},
+      });
+    },
+    spamAudit: (request, title, reason, c) => enqueueAdminAudit(env, c || ctx, {
+      request, action: 'change.forms', category: 'forms', method: 'POST', path: new URL(request.url).pathname, status: 200,
+      ip: requestClientIp(request), user_agent: request.headers.get('user-agent') || '',
+      summary: `A ${title} sign-up was blocked (${reason}).`, meta: { reason },
+    }),
+    notice: (userId, text, link = '') => env.DB.prepare('INSERT INTO studio_notices (user_id, text, link) VALUES (?, ?, ?)').bind(userId, text, link).run(),
+    invalidatePages: async () => {},
+  };
+  deps.composeMail = (e, def, data, kind, subId) => composeFormStudioMail(e, deps, def, data, kind, subId);
+  return deps;
+}
+
 async function handleApi(request, env, url, ctx = null) {
   try {
     await initDb(env);
@@ -9695,6 +9736,10 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
   const fundraiserCardsResponse = await routeFundraiserCardsApi(request, env, url, ctx);
   if (fundraiserCardsResponse) return fundraiserCardsResponse;
+  if (url.pathname.startsWith('/api/forms-v2/') || url.pathname.startsWith('/api/admin/forms-v2') || url.pathname.startsWith('/api/admin/link-reviews') || url.pathname.startsWith('/api/admin/studio-notices')) {
+    const formStudioResponse = await handleFormStudioApi(request, env, url, ctx, formStudioDeps(env, ctx));
+    if (formStudioResponse) return formStudioResponse;
+  }
   // Security log rows are immutable. POST is allowed only for genesis and
   // export session start/complete (those write additional sealed rows).
   if (isSecurityLogPath(url.pathname) && request.method !== 'GET') {
@@ -10726,7 +10771,7 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/forms' && request.method === 'POST') {
     const auth = await requireFormsAccess(request, env);
     if (auth.response) return auth.response;
-    const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM cms_forms').first();
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM cms_forms WHERE slug NOT LIKE 'fb-%'").first();
     if (Number(count?.count || 0) >= MAX_CMS_FORMS) {
       return jsonResponse({ detail: `You can create up to ${MAX_CMS_FORMS} forms.` }, 422);
     }
@@ -11897,6 +11942,7 @@ async function routeApi(request, env, url, ctx = null) {
         mark: PUBLIC_BRAND_MARK,
       }),
       decorateLive: async (html, slug) => {
+        if (html && html.includes('data-cms-form-v2=')) html = await fillFormBlocks(env, html, { assetVersion: ASSET_VERSION }).catch(() => html);
         if (!/data-home-slot|data-photo-gallery|data-site-field|#instagram/.test(html)) return html;
         const today = new Date().toISOString().slice(0, 10);
         const reads = await loadPublicCmsReads(env, { path: '/', today, isHome: true, needsEvents: true, needsBoosters: true, needsPhotos: true });
@@ -14302,6 +14348,36 @@ async function handleEventsManagerPage(request, env) {
   return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
+async function handleFormsBuilderPage(request, env) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/forms-builder');
+  const user = session.user;
+  if (!user) return redirect('/admin/login?next=/admin/forms-builder');
+  const accessIds = await getFormsAccessUserIds(env);
+  if (!canAccessFormsPage(user, accessIds)) {
+    return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: forms' });
+  }
+  const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
+  const rail = [
+    ['🏠', 'Staff menu', '/admin'],
+    ['📄', 'Pages', '/admin?tab=pages'],
+    ['📋', 'Form Builder', '/admin/forms-builder', true],
+    ['📅', 'Calendar events', '/admin/events-manager'],
+    ['⚙️', 'Site settings', '/admin?tab=site'],
+  ].map(([i, t, h, cur]) => `<a href="${h}" title="${t}" aria-label="${t}"${cur ? ' aria-current="page"' : ''}><span aria-hidden="true">${i}</span></a>`).join('');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Form Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style></head>
+<body class="ev-app fb-app" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
+<header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Form Builder</span></a>
+<div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
+<div class="ev-body"><nav class="ev-rail" aria-label="Staff areas">${rail}</nav>
+<main class="ev-main fb-main" id="fb-root" aria-label="Form Builder"><p class="ev-loading">Loading forms…</p></main></div>
+<script src="/admin-forms.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+  return attachLoginHintIfNeeded(request, htmlResponse(html), user);
+}
+
 async function handleStudioEditorPage(request, env, slug) {
   await initDb(env);
   const session = await inspectSessionCookie(request, env);
@@ -14491,6 +14567,7 @@ function isHiddenPublicNavPage(page = {}) {
   return page.slug === 'become-a-sponsor'
     || page.slug === 'in-kind'
     || page.slug === 'letterman-jacket'
+    || page.slug === 'letterman-jacket-v2'
     || page.slug === 'coming-soon'
     || page.slug === 'join'
     || page.slug === 'volunteer'
@@ -14994,7 +15071,8 @@ async function serveStaticOrCms(request, env, url, ctx) {
         && !isDeliberateComingSoonPage(page)
         && canPreviewUnpublishedCmsPage(user, page);
       const livePage = previewUnpublished ? { ...page, active: 1 } : publicCmsPageForRender(page);
-      const studioHtml = await cachedPublicRead(`studio-html:${path}:${page.updated_at || ''}:${page.editor || ''}`, () => loadStudioLiveHtml(env, path), { ctx });
+      const studioHtmlRaw = await cachedPublicRead(`studio-html:${path}:${page.updated_at || ''}:${page.editor || ''}`, () => loadStudioLiveHtml(env, path), { ctx });
+      const studioHtml = studioHtmlRaw && studioHtmlRaw.includes('data-cms-form-v2=') ? await fillFormBlocks(env, studioHtmlRaw, { turnstileSiteKey: String(env.TURNSTILE_SITE_KEY || ''), assetVersion: ASSET_VERSION }).catch(() => studioHtmlRaw) : studioHtmlRaw;
       if (studioHtml && isPublicCmsPageActive(page)) livePage.studio_html = studioHtml;
       const pageIsLive = isPublicCmsPageActive(page) || previewUnpublished;
       const isHome = pageIsLive && (Boolean(page.is_home) || page.slug === 'home');
@@ -15217,6 +15295,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
       return handleFundraiserCardsPage(request, env, ctx);
     }
+    if (url.pathname === '/admin/forms-builder' || url.pathname === '/admin/forms-builder/') {
+      return handleFormsBuilderPage(request, env);
+    }
     if (url.pathname === '/admin/events-manager' || url.pathname === '/admin/events-manager/') {
       return handleEventsManagerPage(request, env);
     }
@@ -15233,6 +15314,31 @@ async function dispatchWorker(request, env, ctx) {
 
 export default {
   async scheduled(event, env, ctx) {
+    if (event?.cron === '40 */6 * * *') {
+      try {
+        const opened = openD1Session(new Request('https://efhsband.org/cron/links'), env);
+        attachD1QueryCounter(opened.env, createD1QueryBudget());
+        const r = await recheckLinks(opened.env);
+        if (r.wentBad?.length || r.sbUnavailable) {
+          await enqueueAdminAudit(opened.env, ctx, { action: 'change.admin', category: 'admin', method: 'CRON', path: '/cron/link-recheck', status: 200,
+            summary: `Scheduled link check: ${r.checked} checked, ${r.wentBad?.length || 0} went bad and were disabled${r.sbUnavailable ? '; Safe Browsing unavailable, links left pending review' : ''}.`, meta: { checked: r.checked, went_bad: (r.wentBad || []).map((x) => x.url), sb_unavailable: Boolean(r.sbUnavailable) } });
+        }
+        console.log('link_recheck_cron', r);
+      } catch (error) { console.error('link_recheck_cron_failed', String(error?.message || error)); }
+      return;
+    }
+    try {
+      const opened = openD1Session(new Request('https://efhsband.org/cron/forms'), env);
+      attachD1QueryCounter(opened.env, createD1QueryBudget());
+      await initDb(opened.env);
+      const purged = await purgeOldSubmissions(opened.env);
+      const mail = await drainMailQueue(opened.env, formStudioDeps(opened.env, ctx));
+      if (purged) {
+        await enqueueAdminAudit(opened.env, ctx, { action: 'change.forms', category: 'forms', method: 'CRON', path: '/cron/forms-purge', status: 200,
+          summary: `Nightly clean-up removed ${purged} form sign-ups older than 18 months.`, meta: { deleted: purged } });
+      }
+      console.log('forms_nightly_cron', { purged, mail });
+    } catch (error) { console.error('forms_nightly_cron_failed', String(error?.message || error)); }
     try {
       const request = new Request('https://efhsband.org/api/admin/fundraiser-cards/sync', { method: 'POST' });
       const opened = openD1Session(request, env);
@@ -15825,7 +15931,7 @@ __ADMIN_SIDEBAR__
   <nav id="security-log-pager" class="security-log-pager" aria-label="Security log pages" hidden></nav>
 </div>
 </section>
-<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (upload + write; edit own for 10 days)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
+<section id="tab-users" class="cms-panel"><div class="panel-head"><div><p class="kicker">Administration</p><h1>User Management</h1><p>Invite a new editor, then assign global and page-level permissions.</p></div></div><div class="editor-layout"><div class="admin-card"><h2>Team Members</h2><div id="users-list" class="admin-list"></div></div><form id="user-form" class="admin-card stack"><h2>Invite New User</h2><input type="hidden" name="id"><label>Email / Username<input name="username" type="text" required autocomplete="username" placeholder="editor@example.com"></label><label>Display name<input name="display_name" required placeholder="Full name"></label><label>Temporary password <small>required for new users (min 8 chars), optional when editing</small><input name="password" type="password" autocomplete="new-password" minlength="8"></label><label>Role<select name="role"><option value="editor">Editor</option><option value="admin">Super Admin - all permissions</option></select></label><label class="checkline"><input name="active" type="checkbox" checked> Active</label><fieldset class="user-grant-group"><legend>Page layout</legend><label class="checkline"><input type="checkbox" name="permissions" value="pages" data-pages-grant> All pages: layout + Add Page + page settings</label><label class="checkline"><input type="checkbox" name="permissions" value="site"> Site settings, home text, logo, footer</label></fieldset><fieldset class="user-grant-group"><legend>Content managers</legend><label class="checkline"><input type="checkbox" name="permissions" value="sponsors"> Manage sponsors</label><label class="checkline"><input type="checkbox" name="permissions" value="staff"> Directors &amp; staff list</label><label class="checkline"><input type="checkbox" name="permissions" value="events"> Calendar events (own)</label><label class="checkline"><input type="checkbox" name="permissions" value="events:manage"> Manage all calendar events</label><label class="checkline"><input type="checkbox" name="permissions" value="boosters"> Booster members</label><label class="checkline"><input type="checkbox" name="permissions" value="minutes:edit"> Meeting Minutes (upload + write; edit own for 10 days)</label><label class="checkline"><input type="checkbox" name="permissions" value="badges"> Badge Creator</label><label class="checkline"><input type="checkbox" name="permissions" value="photos"> Photos</label><label class="checkline"><input type="checkbox" name="permissions" value="contact"> Contact form topics</label><label class="checkline"><input type="checkbox" name="permissions" value="forms"> Forms</label><label class="checkline"><input type="checkbox" name="permissions" value="fundraising"> Fundraising manager (future)</label></fieldset><fieldset class="user-grant-group"><legend>Officers &amp; admin</legend><label class="checkline"><input type="checkbox" name="permissions" value="treasurer"> Treasurer</label><label class="checkline"><input type="checkbox" name="permissions" value="president"> President</label><label class="checkline"><input type="checkbox" name="permissions" value="vice-president"> Vice President</label><label class="checkline"><input type="checkbox" name="permissions" value="director"> Director (can delete form sign-ups early)</label><label class="checkline"><input type="checkbox" name="permissions" value="mail"> Send staff email</label><label class="checkline"><input type="checkbox" name="permissions" value="users"> Manage users</label></fieldset><fieldset class="user-grant-group"><legend>Page access</legend><p class="muted page-grant-note">Edit content is text, photos, links and list items. Change layout adds, removes or moves sections. Ticking layout also ticks content.</p><div id="page-permission-boxes"></div></fieldset><button class="btn primary">Send Invite / Save User</button><button class="btn outline" type="button" id="new-user">New user</button><p class="status" id="user-status"></p></form></div></section>
 <section id="tab-events" class="cms-panel"><div class="panel-head"><div><p class="kicker">Program</p><h1>Calendar Events</h1><p>All CMS users can browse events by month. Optional repeats expand into dated calendar rows for matching weekdays in selected months; exceptions skip specific dates. Repeating events stay on the calendar only (not Boosters). Past events stay here for reference but are hidden from the public Calendar. The public page shows up to 5 upcoming events and does not display the year. Adding or editing events still requires calendar event permission.</p></div><div class="panel-actions"><button class="btn outline" type="button" id="edit-calendar-page" hidden>Edit Calendar page</button><button class="btn outline" type="button" id="new-event">New event</button></div></div><p id="events-view-only-note" class="muted" hidden>You can browse calendar events. Ask a Super Admin for Calendar Events permission to create or edit.</p><div class="editor-layout" id="events-editor-layout"><form id="event-form" class="admin-card stack"><input type="hidden" name="event_id" value=""><p class="status" id="event-status"></p><label>Month<select name="date_label" required><option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug" selected>Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option><option value="Spring">Spring</option><option value="Summer">Summer</option><option value="Fall">Fall</option><option value="Winter">Winter</option><option value="TBD">TBD</option></select></label><label>Day / detail<select name="date_detail" required><option value="TBD">TBD</option><option value="01" selected>01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="MON">MON</option><option value="TUE">TUE</option><option value="WED">WED</option><option value="THU">THU</option><option value="FRI">FRI</option><option value="SAT">SAT</option><option value="SUN">SUN</option></select></label><label class="full form-rich-label"><span>Title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="Event title" aria-label="Event title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label"><span>Description</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="description" data-rich-mode="block" data-placeholder="Event details" aria-label="Event description"></div><input type="hidden" name="description" required></label><label>Year<input name="event_year" type="number" min="2000" max="2100" value="2026" required></label>
 <fieldset class="event-repeat" data-event-repeat>
   <legend>Repeat</legend>

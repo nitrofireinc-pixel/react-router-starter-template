@@ -61,7 +61,8 @@ export function formPathFromSlug(slug) {
 }
 
 export function isReservedFormSlug(slug) {
-  return RESERVED_FORM_SLUGS.has(String(slug || '').trim().toLowerCase());
+  const key = String(slug || '').trim().toLowerCase();
+  return RESERVED_FORM_SLUGS.has(key) || key.startsWith('fb-');
 }
 
 function uniqueFieldId(preferred, used) {
@@ -223,7 +224,7 @@ export function parseFormRecord(row) {
 
 export async function listCmsFormsSummary(env) {
   const rows = await env.DB.prepare(
-    'SELECT id, slug, path, title, page_id, updated_at FROM cms_forms ORDER BY datetime(updated_at) DESC, id DESC',
+    "SELECT id, slug, path, title, page_id, updated_at FROM cms_forms WHERE slug NOT LIKE 'fb-%' ORDER BY datetime(updated_at) DESC, id DESC",
   ).all();
   return rows.results || [];
 }
@@ -231,6 +232,8 @@ export async function listCmsFormsSummary(env) {
 export async function getFormBySlug(env, slug, { allowCache = true } = {}) {
   const key = String(slug || '').trim();
   if (!key) return null;
+  // Form Builder (v2) rows use fb- slugs and are served by /api/forms-v2 only.
+  if (key.startsWith('fb-')) return null;
   if (allowCache) {
     const hit = formBySlugCache.get(key);
     if (hit && Date.now() - hit.at < FORM_CACHE_MS) return hit.record;
@@ -241,6 +244,7 @@ export async function getFormBySlug(env, slug, { allowCache = true } = {}) {
 
 export async function getFormById(env, id) {
   const row = await env.DB.prepare('SELECT * FROM cms_forms WHERE id = ?').bind(Number(id)).first();
+  if (row && String(row.slug || '').startsWith('fb-')) return null;
   return parseFormRecord(row);
 }
 

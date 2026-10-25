@@ -52,7 +52,7 @@ database_name = "efhsband-dev-db"
 database_id = "e71387af-9198-48e6-b6e9-72729866bdae"
 
 [triggers]
-crons = ["20 11 * * *"]
+crons = ["20 11 * * *", "40 */6 * * *"]
 
 [[r2_buckets]]
 binding = "FILES"

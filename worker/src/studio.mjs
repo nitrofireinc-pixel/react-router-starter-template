@@ -13,7 +13,7 @@ export const GRID_COLUMNS = 12;
 export const GRID_ROW_UNIT = 40;
 export const GRID_GAP = 16;
 export const MAX_LAYOUT_BYTES = 200_000;
-export const BLOCK_TYPES = ['heading', 'text', 'button', 'image', 'logos', 'spacer', 'divider', 'html', 'card', 'el', 'group', 'live'];
+export const BLOCK_TYPES = ['heading', 'text', 'button', 'image', 'logos', 'spacer', 'divider', 'html', 'card', 'el', 'group', 'live', 'form'];
 export const CARD_CHILD_TYPES = ['heading', 'text', 'button', 'image', 'divider', 'html'];
 export const SECTION_WRAPS = ['page-title', 'wrap', 'none'];
 export const SECTION_ATTRS = ['data-cms-layout', 'data-cms-block', 'id'];
@@ -228,6 +228,7 @@ function validateBlockProps(block, bw, errors, htmlOk) {
     if (!Array.isArray(p.items) || !p.items.length) errors.push(`${bw}: logos need items`);
     else p.items.forEach((item, ii) => { if (!safeSrc(item?.src) || typeof item?.alt !== 'string') errors.push(`${bw}: logo ${ii} needs a safe src and alt`); });
   }
+  if (block.type === 'form' && !(Number.isInteger(Number(p.form_id)) && Number(p.form_id) > 0)) errors.push(`${bw}: pick a form`);
   if (block.type === 'html') {
     if (typeof p.html !== 'string') errors.push(`${bw}: html string required`);
     else if (!htmlOk(block)) errors.push(`${bw}: html blocks are Super Admin only`);
@@ -364,6 +365,8 @@ function blockInner(block, ctx = {}) {
       return '<hr>';
     case 'html':
       return String(p.html || '');
+    case 'form':
+      return `<div class="studio-form-block" data-cms-form-v2="${Number(p.form_id) || 0}"></div>`;
     case 'el':
     case 'group':
     case 'live':

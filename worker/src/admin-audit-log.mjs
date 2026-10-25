@@ -487,6 +487,8 @@ export function shouldAuditAdminApiRequest(pathname = '', method = '') {
   if (path === '/api/admin/password') return false;
   if (path === '/api/admin/users' || path.startsWith('/api/admin/users/')) return false;
   if (path === '/api/admin/maintenance') return false;
+  // Form Builder and link review write explicit change.forms / change.admin rows.
+  if (path.startsWith('/api/admin/forms-v2') || path.startsWith('/api/admin/link-reviews') || path.startsWith('/api/admin/studio-notices')) return false;
   if (path === '/api/admin/fundraiser-cards' || path.startsWith('/api/admin/fundraiser-cards/')) return false;
   return isMutatingHttpMethod(method);
 }
