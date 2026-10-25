@@ -15492,8 +15492,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/in-kind' || url.pathname === '/in-kind/') {
       return Response.redirect(new URL('/in-kind.html', url.origin).toString(), 302);
     }
-    if (url.pathname === '/letterman-jacket' || url.pathname === '/letterman-jacket/') {
-      return Response.redirect(new URL('/letterman-jacket.html', url.origin).toString(), 302);
+    if (/^\/letterman-jacket(-v2)?(\/|\.html)?$/.test(url.pathname)) {
+      // Letterman sign-up retired 2026-10-25: send visitors to the homepage.
+      return Response.redirect(new URL('/', url.origin).toString(), 301);
     }
     if (url.pathname === '/donate' || url.pathname === '/donate/') {
       const target = new URL('/sponsors.html', url.origin);
