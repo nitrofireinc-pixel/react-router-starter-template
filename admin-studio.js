@@ -11,7 +11,7 @@
   const COLS = 12; const GAP = 16; const ROW = 40; const DESK = 1180; const PHONE = 390;
   const uid = (p = 'b') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const rich = (t) => ({ paragraphs: [[{ text: t }]] });
-  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML', el: 'Element', group: 'Container', live: 'Live data' };
+  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML', el: 'Element', group: 'Container', live: 'Live data', form: 'Form' };
   const TREE = new Set(['el', 'group', 'live']);
   const liveMake = (source, limit) => () => ({ type: 'live', props: { source, html: (state?.live_templates || {})[source] || '', ...(limit ? { limit } : {}) } });
   // [key, icon, label, make(), {w,h}, flags]
@@ -36,6 +36,7 @@
       ['menulink', '🧭', 'Menu link', () => ({ type: 'button', props: { label: 'Calendar', href: '/calendar.html', style: 'secondary' } }), { w: 3, h: 1 }],
     ]],
     ['Form bits', [
+      ['form', '📋', 'Form', () => ({ type: 'form', props: { form_id: (window.__fsForms || [])[0]?.id || 0 } }), { w: 12, h: 10 }],
       ['dropdown', '⬇️', 'Dropdown', null, null, 'soon'],
       ['radio', '⚪', 'Radio', null, null, 'soon'],
       ['checkbox', '☑️', 'Checkbox', null, null, 'soon'],
@@ -868,6 +869,19 @@
     if (b.type === 'group') {
       host.append(el('p', { class: 'st-note', text: `A container from the original design with ${(p.children || []).length} parts. Click a part inside it to edit, move or resize it.` }));
       if (isAdmin()) host.append(el('div', { class: 'st-adv' }, field('Opening tag (Super Admin)', p.open, (v) => { p.open = v; }, { code: true })));
+    }
+    if (b.type === 'form') {
+      const sel = el('select', { 'aria-label': 'Which form', 'data-form-pick': '' });
+      const fill = (forms) => {
+        sel.replaceChildren(el('option', { value: '0', text: forms.length ? 'Pick a form' : 'No forms yet' }), ...forms.map((f) => el('option', { value: String(f.id), text: f.title })));
+        sel.value = String(p.form_id || 0);
+      };
+      fill(window.__fsForms || []);
+      if (!window.__fsForms) fetch('/api/admin/forms-v2', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { forms: [] })).then((d) => { window.__fsForms = d.forms || []; fill(window.__fsForms); }).catch(() => {});
+      sel.addEventListener('change', () => { p.form_id = Number(sel.value) || 0; changed(); });
+      host.append(el('label', { class: 'st-field' }, 'Which form', sel));
+      host.append(el('p', { class: 'st-note', text: 'The fields are edited in the Form Builder. Here you can move or resize the form, or pick a different one.' }));
+      host.append(el('p', {}, el('a', { class: 'st-linkbtn', href: p.form_id ? `/admin/forms-builder#/edit/${p.form_id}` : '/admin/forms-builder', target: '_blank', rel: 'noopener', 'data-form-edit-link': '', text: 'Edit in Form Builder ↗' })));
     }
     if (b.type === 'live') {
       const info = liveInfo(b);
