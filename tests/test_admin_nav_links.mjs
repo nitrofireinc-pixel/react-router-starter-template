@@ -102,7 +102,11 @@ test('current screen gets aria-current="page"; page titles stay in the launcher 
   assert.match(visual, /<div class="sn-page-index" data-sn-pages hidden>[\s\S]*data-sn-page="fundraising">Fundraising</);
   const events = renderAdminSidebarHtml(ASSET_VERSION, { ...navOptions({ route: 'events-manager' }), pages: [] });
   assert.match(events, /data-nav-item="events-manager"[^>]*aria-current="page"/);
-  assert.doesNotMatch(events, /data-sn-pages/);
+  assert.doesNotMatch(events, /data-sn-pages hidden/);
+  // Website flyout always carries the page list mount (+ See all / Add page); filled from pageIndex or lazily.
+  assert.match(events, /data-nav-section="website"[\s\S]*data-sn-site-pages[\s\S]*data-sn-pages-loading>[\s\S]*href="\/admin\?tab=pages" data-sn-pages-all>See all \/ Add page/);
+  assert.match(visual, /data-sn-pages-list><li class="sn-page-row"><a class="sn-page-edit" href="[^"]+" data-sn-page-edit=/);
+  assert.match(visual, /data-sn-page-edit="fundraising">Fundraising</);
 });
 
 test('event manager and Form Builder use the shared sidebar without extra queries', () => {

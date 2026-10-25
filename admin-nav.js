@@ -55,6 +55,7 @@
     if (!sidebar) return;
     const overlay = isOverlay();
     const next = overlay ? Boolean(open) : true;
+    if (overlay && next) loadSitePages();
     const body = document.body;
     body.classList.toggle('admin-nav-open', next);
     body.classList.toggle('admin-nav-closed', !next);
@@ -317,6 +318,52 @@
     items.forEach((el) => obs.observe(el, { attributes: true, attributeFilter: ['class'] }));
   }
 
+  /* ---------- Website flyout page list ---------- */
+  let sitePagesSet = false;
+  let sitePagesLoading = false;
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // pages: [{ slug, label, editHref, settingsHref, editor, hasDraft }]; opts.canAdd shows "Add page".
+  function setPages(pages = [], opts = {}) {
+    sitePagesSet = true;
+    document.querySelectorAll('[data-sn-site-pages]').forEach((box) => {
+      const list = box.querySelector('[data-sn-pages-list]');
+      const loading = box.querySelector('[data-sn-pages-loading]');
+      if (loading) { loading.hidden = pages.length > 0; loading.textContent = 'No pages you can edit yet.'; }
+      if (list) {
+        list.innerHTML = pages.map((p) => `<li class="sn-page-row">
+<a class="sn-page-edit" href="${esc(p.editHref)}" data-sn-page-edit="${esc(p.slug)}"><span class="sn-page-name">${esc(p.label)}</span>${p.hasDraft ? '<span class="sn-page-draft">Draft</span>' : ''}</a>
+${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-sn-page-settings="${esc(p.slug)}" aria-label="Page settings: ${esc(p.label)}" title="Page settings">⚙</a>` : ''}
+</li>`).join('');
+      }
+      const all = box.querySelector('[data-sn-pages-all]');
+      if (all) all.textContent = opts.canAdd ? 'See all / Add page' : 'See all pages';
+    });
+  }
+  function loadSitePages() {
+    // Only on screens where admin.js did not hand us the list; one admin-only read, on demand.
+    if (sitePagesSet || sitePagesLoading || !document.querySelector('[data-sn-site-pages]')) return;
+    sitePagesLoading = true;
+    window.fetch('/api/admin/pages', { credentials: 'same-origin', headers: { accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!Array.isArray(data) || sitePagesSet) return;
+        const canManage = data.some((p) => p.can_manage);
+        const isVisual = (slug) => !['in-kind', 'letterman-jacket'].includes(slug);
+        const pages = data.map((p) => {
+          const slug = String(p.slug || '').toLowerCase();
+          const label = String(p.title || '').replace(/\s*\|\s*East Forsyth Band$/i, '').trim() || slug;
+          return {
+            slug, label, hasDraft: !!p.has_draft, editor: p.editor,
+            editHref: isVisual(slug) ? `/admin/studio/${encodeURIComponent(slug)}` : `/admin?tab=pages&page=${encodeURIComponent(slug)}`,
+            settingsHref: canManage ? `/admin?tab=pages&page=${encodeURIComponent(slug)}` : '',
+          };
+        });
+        setPages(pages, { canAdd: canManage });
+      })
+      .catch(() => {})
+      .finally(() => { sitePagesLoading = false; });
+  }
+
   /* ---------- 14d-1 rail + flyout ---------- */
   const railEl = () => document.querySelector('[data-sn-rail]');
   const isFlyOpen = () => document.body.classList.contains('sn-fly');
@@ -325,6 +372,7 @@
     const sidebar = sidebarEl();
     if (!sidebar || isOverlay()) return;
     sidebar.dataset.snFly = key;
+    if (key === 'website') loadSitePages();
     sidebar.querySelectorAll('.sn-section').forEach((sec) => sec.classList.toggle('sn-fly-on', sec.dataset.navSection === key));
     sidebar.classList.toggle('sn-fly-account', key === 'account');
     sidebar.removeAttribute('inert');
@@ -554,6 +602,7 @@
     openFly(key) { openFly(key, document.querySelector(`[data-sn-fly-key="${key}"]`)); },
     closeFly,
     isFlyOpen,
+    setPages,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

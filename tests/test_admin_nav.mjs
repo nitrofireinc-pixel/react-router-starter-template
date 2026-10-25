@@ -142,7 +142,10 @@ test('nav script: 700px rail/flyout + sheet, Ctrl K + / launcher with combobox/l
   assert.match(js, /efhs-admin-nav-change/);
   assert.match(js, /function isStandaloneAdminPage/);
   assert.match(js, /function wireAdminNavLinks/);
-  assert.doesNotMatch(js, /fetch\(/, 'launcher must not hit the network');
+  // Only network read: the Website flyout page list on screens where admin.js did not supply it.
+  assert.deepEqual(js.match(/fetch\([^,)]*/g), ["fetch('/api/admin/pages'"], 'launcher must not hit the network');
+  assert.match(js, /function setPages/);
+  assert.match(js, /if \(key === 'website'\) loadSitePages\(\)/);
   const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
   assert.match(adminJs, /efhsAdminNav\?\.isOverlay/);
   const visualJs = readFileSync(join(root, 'admin-visual.js'), 'utf8');

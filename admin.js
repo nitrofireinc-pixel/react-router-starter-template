@@ -3267,37 +3267,86 @@ function bindBoostersMenu() {
   });
 }
 
-function renderPageShortcuts() {
-  const mount = document.querySelector('#admin-page-shortcuts');
-  const label = document.querySelector('[data-page-shortcuts-label]');
-  if (!mount) return;
-  const pages = editablePages();
-  if (label) label.hidden = !pages.length;
+const PAGE_GEAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>';
+
+function pageListEntries() {
   const siteAdmin = canManageSitePages();
-  mount.innerHTML = pages.map((page) => {
-    const name = escapeHtml(pageShortcutLabel(page));
-    const slug = escapeAttr(page.slug);
-    const settings = siteAdmin && page.slug !== 'fundraising'
-      ? `<a class="admin-page-settings" href="#pages" data-page-settings="${slug}" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.1 12.9a7.5 7.5 0 0 0 .1-.9 7.5 7.5 0 0 0-.1-.9l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7 7 0 0 0-1.6-.9l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7 7 0 0 0-1.6.9l-2.4-1a.5.5 0 0 0-.6.2L2.7 9.9a.5.5 0 0 0 .1.6l2 1.6a7.5 7.5 0 0 0-.1.9 7.5 7.5 0 0 0 .1.9l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1a7 7 0 0 0 1.6.9l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7 7 0 0 0 1.6-.9l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg></a>`
-      : '';
-    if (isVisualEditorPageSlug(page.slug) && page.visual_editor !== false) {
-      const cards = page.slug === 'fundraising'
-        ? `<div class="admin-page-row admin-page-row-sub"><a class="admin-page-edit" href="/admin/fundraiser-cards">Fundraiser cards</a></div>`
-        : '';
-      return `<div class="admin-page-row"><a class="admin-page-edit" href="${visualEditorHref(page.slug)}">${name}</a>${settings}</div>${cards}`;
-    }
-    return `<div class="admin-page-row"><button type="button" data-edit-shortcut="${slug}">${name}</button>${settings}</div>`;
-  }).join('');
-  mount.querySelectorAll('[data-edit-shortcut]').forEach((button) => {
-    button.onclick = () => editPage(button.dataset.editShortcut);
-  });
-  mount.querySelectorAll('[data-page-settings]').forEach((link) => {
-    link.onclick = (event) => {
-      event.preventDefault();
-      editPage(link.dataset.pageSettings);
+  return editablePages().map((page) => {
+    const slug = String(page.slug || '');
+    // v2 (Studio) pages always edit in Studio; legacy forms (In-Kind, old Letterman) keep the classic editor.
+    const visual = (isVisualEditorPageSlug(slug) && page.visual_editor !== false) || (page.editor === 'v2' && isVisualEditorPageSlug(slug));
+    const settingsHref = `/admin?tab=pages&page=${encodeURIComponent(slug)}`;
+    return {
+      page,
+      slug,
+      label: pageShortcutLabel(page),
+      visual,
+      editor: page.editor === 'v2' ? 'v2' : 'legacy',
+      hasDraft: Boolean(page.has_draft),
+      active: page.active !== false && page.active !== 0,
+      editHref: visual ? visualEditorHref(slug) : settingsHref,
+      settingsHref: siteAdmin ? settingsHref : '',
     };
   });
 }
+
+function renderPageShortcuts() {
+  // 14d-1 removed the old sidebar list; pages now live on the Pages screen and in the Website flyout/sheet.
+  const entries = pageListEntries();
+  const siteAdmin = canManageSitePages();
+  const list = document.querySelector('#page-list');
+  const note = document.querySelector('[data-page-list-note]');
+  if (note) {
+    note.textContent = entries.length
+      ? (siteAdmin ? 'Edit in Studio opens the page editor. The gear opens Page settings (title, slug, SEO, visibility).' : 'Pages you have permission to edit.')
+      : 'No pages are assigned to you yet.';
+  }
+  if (list) {
+    list.innerHTML = entries.map((e) => {
+      const slug = escapeAttr(e.slug);
+      const chips = [
+        `<span class="page-chip page-chip-${e.editor}" title="${e.editor === 'v2' ? 'Built with Studio blocks' : 'Classic page'}">${e.editor === 'v2' ? 'v2' : 'Legacy'}</span>`,
+        e.hasDraft ? '<span class="page-chip page-chip-draft">Draft</span>' : '',
+        e.active ? '' : '<span class="page-chip page-chip-off">Hidden</span>',
+      ].join('');
+      const edit = e.visual
+        ? `<a class="btn primary small" href="${escapeAttr(e.editHref)}">Edit in Studio</a>`
+        : `<button class="btn primary small" type="button" data-edit-shortcut="${slug}">Edit</button>`;
+      const gear = e.settingsHref
+        ? `<a class="page-list-gear admin-page-settings" href="${escapeAttr(e.settingsHref)}" data-page-settings="${slug}" aria-label="Page settings: ${escapeAttr(e.label)}" title="Page settings">${PAGE_GEAR_SVG}</a>`
+        : '';
+      const extra = e.slug === 'fundraising' ? '<a class="page-list-extra" href="/admin/fundraiser-cards">Fundraiser cards</a>' : '';
+      return `<li class="page-list-row" data-page-row="${slug}"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(e.label)}</strong><code class="page-list-slug">/${escapeHtml(e.slug)}</code><span class="page-list-chips">${chips}</span>${extra}</div><div class="page-list-actions">${edit}${gear}</div></li>`;
+    }).join('');
+    list.querySelectorAll('[data-edit-shortcut]').forEach((button) => {
+      button.onclick = () => editPage(button.dataset.editShortcut);
+    });
+    list.querySelectorAll('[data-page-settings]').forEach((link) => {
+      link.onclick = (event) => {
+        event.preventDefault();
+        editPage(link.dataset.pageSettings);
+      };
+    });
+  }
+  const newPage = document.querySelector('#new-page');
+  if (newPage) newPage.hidden = !siteAdmin;
+  window.efhsAdminNav?.setPages?.(entries.map((e) => ({
+    slug: e.slug, label: e.label, editHref: e.editHref, settingsHref: e.settingsHref, editor: e.editor, hasDraft: e.hasDraft,
+  })), { canAdd: siteAdmin });
+}
+
+// Website flyout/sheet page rows: on /admin, open settings in place instead of reloading.
+document.addEventListener('click', (event) => {
+  const link = event.target.closest?.('[data-sn-page-settings], [data-sn-page-edit]');
+  if (!link || event.metaKey || event.ctrlKey || event.shiftKey) return;
+  const slug = link.dataset.snPageSettings || link.dataset.snPageEdit;
+  const href = link.getAttribute('href') || '';
+  if (!slug || !href.startsWith('/admin?tab=pages')) return;
+  event.preventDefault();
+  window.efhsAdminNav?.closeFly?.();
+  window.efhsAdminNav?.close?.();
+  editPage(slug);
+});
 
 function showAllowedPanels() {
   const displayName = state.me.user.display_name || state.me.user.username;

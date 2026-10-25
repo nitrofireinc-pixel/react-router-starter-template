@@ -8,7 +8,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav14d2';
+export const ADMIN_NAV_REV = 'nav14d3';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -216,7 +216,8 @@ export function buildAdminNavModel(options = {}) {
   for (const section of sections) {
     section.visible = section.items.filter((entry) => !entry.hidden);
     section.hidden = section.visible.length === 0;
-    section.direct = section.visible.length === 1;
+    // Website always opens its flyout when Pages is allowed: the page list lives there.
+    section.direct = section.visible.length === 1 && !(section.key === 'website' && section.visible[0].key === 'pages');
   }
 
   const dashboard = item('dashboard', 'Home', 'dashboard', tabHref('dashboard'), { hidden: false });
@@ -275,7 +276,17 @@ function renderNavItem(entry, currentKey, sectionLabel = '', extraClass = '') {
   return `<a class="admin-nav-item sn-item${extraClass}${isCurrent ? ' active' : ''}" href="${escapeAdminHtml(href)}" data-nav-item="${escapeAdminHtml(entry.key)}"${tabAttr}${extra}${section}${kw}${adminAttr}${currentAttr}><span class="sn-label">${escapeAdminHtml(entry.label)}</span>${adminPill}${badge}</a>`;
 }
 
-function renderSection(section, currentKey) {
+function renderSitePagesMount(pageIndex = []) {
+  const rows = pageIndex.map((page) => `<li class="sn-page-row"><a class="sn-page-edit" href="${escapeAdminHtml(page.href)}" data-sn-page-edit="${escapeAdminHtml(page.slug)}">${escapeAdminHtml(page.label)}</a></li>`).join('');
+  return `<div class="sn-site-pages" data-sn-site-pages>
+<p class="sn-sub">Pages</p>
+<ul class="sn-page-list" data-sn-pages-list>${rows}</ul>
+<p class="sn-pages-loading" data-sn-pages-loading${rows ? ' hidden' : ''}>Loading pages…</p>
+<a class="sn-pages-all" href="/admin?tab=pages" data-sn-pages-all>See all / Add page</a>
+</div>`;
+}
+
+function renderSection(section, currentKey, pageIndex = []) {
   if (section.hidden) return '';
   if (section.direct) {
     // A section with exactly one allowed item becomes a direct link (plan 2.22).
@@ -287,6 +298,7 @@ function renderSection(section, currentKey) {
   return `<div class="sn-section" data-nav-section="${section.key}" role="group" aria-labelledby="${headId}">
 <h2 class="sn-head admin-menu-label" id="${headId}">${escapeAdminHtml(section.label)}${tag}</h2>
 ${section.visible.map((entry) => renderNavItem(entry, currentKey, section.label)).join('')}
+${section.key === 'website' && section.visible.some((entry) => entry.key === 'pages') ? renderSitePagesMount(pageIndex) : ''}
 </div>`;
 }
 
@@ -390,7 +402,7 @@ ${renderAdminSidebarClose()}
 <div class="admin-nav-search sn-search"><label class="sn-search-box">${SEARCH_ICON}<span class="sr-only">Find a page or tool</span><input type="search" data-admin-nav-search placeholder="Find a page…" autocomplete="off" aria-keyshortcuts="Control+K /"></label><kbd class="sn-kbd" aria-hidden="true">Ctrl K</kbd></div>
 <nav class="admin-menu sn-nav" aria-label="Site Studio navigation">
 ${renderNavItem(model.dashboard, model.currentKey, '', ' sn-home')}
-${model.sections.map((section) => renderSection(section, model.currentKey)).join('')}
+${model.sections.map((section) => renderSection(section, model.currentKey, model.pageIndex)).join('')}
 <p class="sn-empty" data-sn-empty hidden>No matches. Press Enter to search everything.</p>
 </nav>
 ${pageIndex}
