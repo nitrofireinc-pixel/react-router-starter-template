@@ -1,7 +1,8 @@
 /* Site Studio admin nav, option 14d-1 (plan 2.22a): 68px icon rail + 260px flat section flyout.
  * >=700px: the rail is always visible; clicking an icon opens that section's flyout over the page
  * (the page never changes width). Esc / click outside closes it.
- * Phone (<700px): bottom bar (Home · current section · Find · Menu); Menu opens the full flat list as a sheet.
+ * Phone (<700px): bottom bar (Home · current section · Find · More); More opens an icon grid of the other
+ * sections, and a tile opens that section's list (like the desktop flyout). Typing in Find shows all matches.
  * The launcher filters only menu items + page titles already in the HTML (no network). */
 (() => {
   const OVERLAY_MQ = '(max-width: 699px)';
@@ -69,7 +70,7 @@
         sidebar.removeAttribute('inert');
         sidebar.setAttribute('role', 'dialog');
         sidebar.setAttribute('aria-modal', 'true');
-        sidebar.setAttribute('aria-label', 'Menu');
+        sidebar.setAttribute('aria-label', 'More');
       } else {
         sidebar.setAttribute('inert', '');
         sidebar.removeAttribute('role');
@@ -364,6 +365,23 @@ ${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-s
       .finally(() => { sitePagesLoading = false; });
   }
 
+  /* ---------- 14d-2 phone More sheet ---------- */
+  function setSheet(mode, key = '') {
+    const sidebar = sidebarEl();
+    if (!sidebar) return;
+    if (!isOverlay()) { delete sidebar.dataset.snSheet; return; }
+    sidebar.dataset.snSheet = mode;
+    const barKey = document.querySelector('.sn-bottom [data-sn-sheet-section]')?.dataset.snSheetSection || '';
+    sidebar.querySelectorAll('[data-sn-more-key]').forEach((tile) => { tile.hidden = tile.dataset.snMoreKey === barKey; });
+    sidebar.querySelectorAll('.sn-section').forEach((sec) => sec.classList.toggle('sn-fly-on', mode === 'section' && sec.dataset.navSection === key));
+    if (mode === 'section' && key === 'website') loadSitePages();
+    if (mode === 'grid') {
+      const search = sidebar.querySelector('[data-admin-nav-search]');
+      if (search && search.value) { search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true })); sidebar.dataset.snSheet = 'grid'; }
+    }
+    sidebar.scrollTop = 0;
+  }
+
   /* ---------- 14d-1 rail + flyout ---------- */
   const railEl = () => document.querySelector('[data-sn-rail]');
   const isFlyOpen = () => document.body.classList.contains('sn-fly');
@@ -512,7 +530,20 @@ ${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-s
     setOpen(false);
     toggle?.addEventListener('click', (event) => {
       event.stopPropagation();
-      setOpen(!document.body.classList.contains('admin-nav-open'));
+      const opening = !document.body.classList.contains('admin-nav-open');
+      if (opening) setSheet('grid');
+      setOpen(opening);
+    });
+    sidebar.querySelectorAll('[data-sn-more-key]').forEach((tile) => tile.addEventListener('click', (event) => {
+      if (tile.tagName === 'A') return; // direct section: plain link
+      event.preventDefault();
+      setSheet(tile.dataset.snMoreKey === 'account' ? 'account' : 'section', tile.dataset.snMoreKey);
+    }));
+    sidebar.querySelector('[data-sn-more-back]')?.addEventListener('click', () => setSheet('grid'));
+    sidebar.querySelector('[data-admin-nav-search]')?.addEventListener('input', (event) => {
+      if (!isOverlay()) return;
+      if (String(event.target.value || '').trim()) setSheet('search');
+      else if (sidebar.dataset.snSheet === 'search') setSheet('grid');
     });
     document.querySelector('[data-admin-nav-close]')?.addEventListener('click', () => setOpen(false));
     document.querySelector('[data-admin-nav-backdrop]')?.addEventListener('click', () => setOpen(false));
@@ -522,9 +553,8 @@ ${p.settingsHref ? `<a class="sn-page-gear" href="${esc(p.settingsHref)}" data-s
 
     document.querySelectorAll('[data-sn-sheet-section]').forEach((btn) => btn.addEventListener('click', (event) => {
       event.stopPropagation();
+      setSheet('section', btn.dataset.snSheetSection);
       setOpen(true);
-      const sec = sidebar.querySelector(`.sn-section[data-nav-section="${btn.dataset.snSheetSection}"]`);
-      window.setTimeout(() => sec?.scrollIntoView?.({ block: 'start' }), reducedMotion() ? 0 : 60);
     }));
     sidebar.addEventListener('keydown', (event) => {
       if (isOverlay() && document.body.classList.contains('admin-nav-open')) trapTab(event, sidebar);

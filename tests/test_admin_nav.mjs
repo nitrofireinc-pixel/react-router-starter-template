@@ -32,7 +32,7 @@ test('14d-1 flyout: flat section lists, plain section labels, no folding groups'
   assert.doesNotMatch(chrome, /admin-nav-toggle/);
   const bottom = bottomOf(full);
   assert.match(bottom, /class="sn-bb-btn admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar"/);
-  assert.match(bottom, /admin-nav-toggle-label">Menu</);
+  assert.match(bottom, /admin-nav-toggle-label">More</);
   assert.match(bottom, /data-sn-launch/);
   assert.match(sidebar, /data-sn-fly-close/);
   assert.match(renderAdminSidebarBackdrop(), /data-admin-nav-backdrop/);
@@ -157,4 +157,11 @@ test('nav CSS: 68px rail + 260px flyout, gold current edge, 3px gold focus, 44px
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
   assert.match(syncSrc, /'admin-nav\.js'/);
   assert.match(syncSrc, /'admin-nav\.css'/);
+});
+
+test('14d-2 phone More sheet: icon grid tiles for sections plus Account, back button', async () => {
+  const html = renderAdminSidebarHtml('test', navFor(admin, { current: { route: 'admin' } }));
+  assert.match(html, /class="sn-more" data-sn-more/);
+  for (const key of ['website', 'calendar', 'money', 'account']) assert.match(html, new RegExp(`data-sn-more-key="${key}"`));
+  assert.match(html, /data-sn-more-back>‹ More</);
 });

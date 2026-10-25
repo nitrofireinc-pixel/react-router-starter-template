@@ -208,7 +208,7 @@ test('Ctrl+K opens the quick search; arrows + Enter pick, Esc returns focus', as
   });
 });
 
-test('390: bottom bar (Home, section, Find, Menu); Menu sheet has Close first and 44px targets', async (t) => {
+test('390: bottom bar (Home, section, Find, More); More sheet = icon grid, Close first, 44px targets', async (t) => {
   await withPage(t, 390, 844, '/admin', async (page) => {
     assert.equal(await page.isVisible('.sn-rail'), false);
     const bb = await page.evaluate(() => [...document.querySelectorAll('.sn-bottom .sn-bb-btn')].map((el) => ({ t: el.textContent.trim(), h: el.getBoundingClientRect().height })));
@@ -223,6 +223,8 @@ test('390: bottom bar (Home, section, Find, Menu); Menu sheet has Close first an
       const small = [...side.querySelectorAll('.sn-item')].filter((el) => el.offsetParent && el.getBoundingClientRect().height < 44).length;
       return { w: Math.round(r.width), x: Math.round(r.x), firstClose: first.matches('[data-admin-nav-close]'), small,
         items: [...side.querySelectorAll('[data-nav-item]')].filter((el) => el.offsetParent).length,
+        tiles: [...side.querySelectorAll('[data-sn-more-key]')].filter((el) => el.offsetParent).length,
+        tileMinH: Math.min(...[...side.querySelectorAll('[data-sn-more-key]')].filter((el) => el.offsetParent).map((el) => el.getBoundingClientRect().height)),
         overflowX: side.scrollWidth - side.clientWidth, focusClose: document.activeElement.matches('[data-admin-nav-close]') };
     });
     assert.equal(m.w, 390);
@@ -230,7 +232,9 @@ test('390: bottom bar (Home, section, Find, Menu); Menu sheet has Close first an
     assert.equal(m.firstClose, true);
     assert.equal(m.focusClose, true);
     assert.equal(m.small, 0);
-    assert.ok(m.items > 20, `full list ${m.items}`);
+    assert.equal(m.items, 0, 'grid hides the long list');
+    assert.ok(m.tiles >= 8, `tiles ${m.tiles}`);
+    assert.ok(m.tileMinH >= 44);
     assert.ok(m.overflowX <= 0);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(260);

@@ -10,7 +10,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav15u';
+export const ADMIN_NAV_REV = 'nav15w';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -368,7 +368,7 @@ ${me}
 </nav>`;
 }
 
-/** Phone (<700px) thumb bar: Home · current section · Find · Menu sheet. */
+/** Phone (<700px) thumb bar: Home · current section · Find · More (icon grid of the other sections). */
 export function renderAdminBottomBarHtml(options = {}, model = buildAdminNavModel(options)) {
   const homeCurrent = model.currentKey === 'dashboard';
   const visible = model.sections.filter((section) => !section.hidden);
@@ -380,8 +380,29 @@ export function renderAdminBottomBarHtml(options = {}, model = buildAdminNavMode
 <a class="sn-bb-btn${homeCurrent ? ' sn-bb-current' : ''}"${railEntryAttrs(model.dashboard)}${homeCurrent ? ' aria-current="page"' : ''}><span class="sn-bb-ico" aria-hidden="true">${RAIL_HOME_ICON}</span><span class="sn-bb-txt">Home</span></a>
 ${curSlot}
 <button type="button" class="sn-bb-btn" data-sn-launch aria-haspopup="dialog"><span class="sn-bb-ico" aria-hidden="true">${RAIL_FIND_ICON}</span><span class="sn-bb-txt">Find</span></button>
-<button type="button" class="sn-bb-btn admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar"><span class="sn-bb-ico" aria-hidden="true">☰</span><span class="sn-bb-txt admin-nav-toggle-label">Menu</span></button>
+<button type="button" class="sn-bb-btn admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar"><span class="sn-bb-ico" aria-hidden="true">•••</span><span class="sn-bb-txt admin-nav-toggle-label">More</span></button>
 </nav>`;
+}
+
+/** Phone "More" sheet: one tile per rail section (the bottom bar's own section is hidden by JS). */
+function renderMoreGridHtml(model, options = {}) {
+  const tiles = [];
+  for (const section of model.sections) {
+    if (section.hidden) continue;
+    const lock = section.adminOnly ? '<span class="sn-more-lock" aria-hidden="true">🔒</span>' : '';
+    const dotOn = section.key === 'forms' && Number(options.formsNewCount || 0) > 0;
+    const dot = section.key === 'forms' ? `<span class="sn-dot" data-sn-dot="forms"${dotOn ? '' : ' hidden'}></span>` : '';
+    const inner = `<span class="sn-more-ico" aria-hidden="true">${section.icon || '•'}</span>${lock}${dot}<span class="sn-more-txt">${escapeAdminHtml(section.label)}</span>`;
+    if (section.direct) {
+      const only = section.visible[0];
+      tiles.push(`<a class="sn-more-tile" href="${escapeAdminHtml(only.href || '#')}" data-sn-more-key="${section.key}">${inner}</a>`);
+    } else {
+      tiles.push(`<button type="button" class="sn-more-tile" data-sn-more-key="${section.key}" aria-label="${escapeAdminHtml(section.label)}">${inner}</button>`);
+    }
+  }
+  tiles.push('<button type="button" class="sn-more-tile" data-sn-more-key="account" aria-label="Account"><span class="sn-more-ico" aria-hidden="true">👤</span><span class="sn-more-txt">Account</span></button>');
+  return `<div class="sn-more" data-sn-more role="group" aria-label="More sections">${tiles.join('')}</div>
+<button type="button" class="sn-more-back" data-sn-more-back>‹ More</button>`;
 }
 
 export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
@@ -403,6 +424,7 @@ ${renderAdminSidebarClose()}
 <button type="button" class="sn-fly-esc" data-sn-fly-close aria-label="Close panel">Esc ×</button>
 <a class="sn-brand" href="/admin"><span class="sn-logos"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="East Forsyth Band eagle logo" width="34" height="34"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="East Forsyth Blue Regiment logo" width="34" height="34"></span><span class="sn-brand-text"><b>Site Studio</b><small>EFHS BAND</small></span></a>
 <div class="admin-nav-search sn-search"><label class="sn-search-box">${SEARCH_ICON}<span class="sr-only">Find a page or tool</span><input type="search" data-admin-nav-search placeholder="Find a page…" autocomplete="off" aria-keyshortcuts="Control+K /"></label><kbd class="sn-kbd" aria-hidden="true">Ctrl K</kbd></div>
+${renderMoreGridHtml(model, options)}
 <nav class="admin-menu sn-nav" aria-label="Site Studio navigation">
 ${renderNavItem(model.dashboard, model.currentKey, '', ' sn-home')}
 ${model.sections.map((section) => renderSection(section, model.currentKey, model.pageIndex)).join('')}

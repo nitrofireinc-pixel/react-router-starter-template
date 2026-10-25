@@ -191,6 +191,22 @@
   .sn-search-box{min-height:46px;padding-right:10px}
   .sn-search .sn-kbd{display:none}
   body.admin-nav-scroll-lock{overflow:hidden}
+  /* More sheet (14d-2): icon grid of the other rail sections; a tile opens that section's flyout list. */
+  #admin-sidebar[data-sn-sheet="grid"] .sn-more{display:grid}
+  .sn-more{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+  .sn-more-tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:6px;min-height:84px;padding:12px 2px 8px;border:0;border-radius:12px;background:#f3f6fa;color:var(--sn-ink);text-decoration:none;text-align:center;font:600 12px/1.2 "Work Sans",system-ui,sans-serif;cursor:pointer}
+  .sn-more-tile:focus-visible{outline:3px solid var(--sn-gold);outline-offset:1px}
+  .sn-more-ico{font-size:24px;line-height:1}
+  .sn-more-txt{overflow-wrap:anywhere}
+  .sn-more-lock{position:absolute;top:5px;right:7px;font-size:10px}
+  .sn-more-tile .sn-dot{position:absolute;top:9px;right:18px}
+  .sn-more-tile[hidden]{display:none}
+  .sn-more-back{display:none;align-self:flex-start;min-height:40px;padding:0 6px;border:0;background:none;color:#0b5bd3;font:700 15px "Work Sans",system-ui,sans-serif;cursor:pointer}
+  #admin-sidebar[data-sn-sheet="section"] .sn-more-back,#admin-sidebar[data-sn-sheet="account"] .sn-more-back{display:inline-flex;align-items:center}
+  #admin-sidebar[data-sn-sheet="grid"] .sn-nav,#admin-sidebar[data-sn-sheet="grid"] .sn-foot,#admin-sidebar[data-sn-sheet="account"] .sn-nav{display:none!important}
+  #admin-sidebar[data-sn-sheet="section"] .sn-foot{display:none!important}
+  #admin-sidebar[data-sn-sheet="section"] .sn-nav .sn-home,#admin-sidebar[data-sn-sheet="section"] .sn-nav .sn-section:not(.sn-fly-on){display:none!important}
+  #admin-sidebar[data-sn-sheet="section"] .sn-nav .sn-section{margin-top:4px}
 }
 
 @media (prefers-reduced-motion:reduce){
