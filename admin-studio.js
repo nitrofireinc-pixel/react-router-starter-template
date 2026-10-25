@@ -36,7 +36,7 @@
       ['menulink', '🧭', 'Menu link', () => ({ type: 'button', props: { label: 'Calendar', href: '/calendar.html', style: 'secondary' } }), { w: 3, h: 1 }],
     ]],
     ['Form bits', [
-      ['form', '📋', 'Form', () => ({ type: 'form', props: { form_id: (window.__fsForms || [])[0]?.id || 0 } }), { w: 12, h: 10 }],
+      ['form', '📋', 'Form', () => ({ type: 'form', props: { form_id: 0 } }), { w: 12, h: 10 }],
       ['dropdown', '⬇️', 'Dropdown', null, null, 'soon'],
       ['radio', '⚪', 'Radio', null, null, 'soon'],
       ['checkbox', '☑️', 'Checkbox', null, null, 'soon'],
@@ -253,9 +253,37 @@
       $('main', canvasDoc).innerHTML = html;
       canvasDoc.defaultView.scrollTo(0, y);
     }
-    buildIndex(); sizeStage(); drawOverlay(); makeEditable();
+    buildIndex(); wireFormPickers(); sizeStage(); drawOverlay(); makeEditable();
     if (scrollToSel && selected && isMobile()) { scrollToSel = false; revealSelected(); }
     if (scrollToSel && selected) { scrollToSel = false; const r = docRect(index.blocks.get(selected) || []); const w = canvasDoc.defaultView; if (r && (r.top < w.scrollY || r.top + Math.min(r.height, 200) > w.scrollY + w.innerHeight)) { w.scrollTo(0, Math.max(0, r.top - 120)); drawOverlay(); } }
+  }
+  // Unpicked Form blocks render a "Choose a form" card in the canvas only.
+  function loadForms() {
+    if (window.__fsForms) return Promise.resolve(window.__fsForms);
+    return fetch('/api/admin/forms-v2', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { forms: [] })).then((d) => (window.__fsForms = d.forms || [])).catch(() => []);
+  }
+  function wireFormPickers() {
+    const sels = [...canvasDoc.querySelectorAll('[data-form-pick-canvas]')];
+    if (!sels.length) return;
+    const fill = (forms) => sels.forEach((sel) => {
+      const doc = sel.ownerDocument;
+      const opt = (v, t) => { const o = doc.createElement('option'); o.value = v; o.textContent = t; return o; };
+      sel.replaceChildren(opt('0', forms.length ? 'Choose a form…' : 'No forms yet – make one in the Form Builder'), ...forms.map((f) => opt(String(f.id), f.title)));
+    });
+    fill(window.__fsForms || []);
+    if (!window.__fsForms) loadForms().then(fill);
+    sels.forEach((sel) => {
+      ['pointerdown', 'touchstart', 'mousedown'].forEach((t) => sel.addEventListener(t, (e) => e.stopPropagation()));
+      sel.addEventListener('change', () => {
+        const id = sel.closest('[data-sc-block]')?.dataset.scBlock; const f = id && findBlock(id);
+        const v = Number(sel.value) || 0; if (!f || !v) return;
+        f.block.props = { ...(f.block.props || {}), form_id: v }; selected = id; changed(); toast('Form added');
+      });
+    });
+    canvasDoc.querySelectorAll('[data-form-builder-link]').forEach((a) => {
+      ['pointerdown', 'touchstart', 'mousedown'].forEach((t) => a.addEventListener(t, (e) => e.stopPropagation()));
+      a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); window.open('/admin/forms-builder', '_blank', 'noopener'); });
+    });
   }
   function buildIndex() {
     index = { blocks: new Map(), sections: new Map(), kids: new Map() };

@@ -215,7 +215,7 @@ export function lockedHtmlById(layout) {
   return map;
 }
 
-function validateBlockProps(block, bw, errors, htmlOk) {
+function validateBlockProps(block, bw, errors, htmlOk, draft = false) {
   const p = block.props || {};
   if (p.field != null && !FIELD_RE.test(String(p.field))) errors.push(`${bw}: bad field name`);
   if (p.className != null && !CLASS_RE.test(String(p.className))) errors.push(`${bw}: bad class name`);
@@ -228,7 +228,7 @@ function validateBlockProps(block, bw, errors, htmlOk) {
     if (!Array.isArray(p.items) || !p.items.length) errors.push(`${bw}: logos need items`);
     else p.items.forEach((item, ii) => { if (!safeSrc(item?.src) || typeof item?.alt !== 'string') errors.push(`${bw}: logo ${ii} needs a safe src and alt`); });
   }
-  if (block.type === 'form' && !(Number.isInteger(Number(p.form_id)) && Number(p.form_id) > 0)) errors.push(`${bw}: pick a form`);
+  if (block.type === 'form' && !draft && !(Number.isInteger(Number(p.form_id)) && Number(p.form_id) > 0)) errors.push(FORM_UNPICKED_MSG);
   if (block.type === 'html') {
     if (typeof p.html !== 'string') errors.push(`${bw}: html string required`);
     else if (!htmlOk(block)) errors.push(`${bw}: html blocks are Super Admin only`);
@@ -241,7 +241,9 @@ function validateBlockProps(block, bw, errors, htmlOk) {
  * Super Admins; others may keep a locked html block exactly as it was in
  * `baseline` (migrated legacy markup) but may not add or change one.
  */
-export function validateLayout(layout, { allowHtml = false, baseline = null } = {}) {
+export const FORM_UNPICKED_MSG = 'This form block needs a form picked before saving';
+
+export function validateLayout(layout, { allowHtml = false, baseline = null, draft = false } = {}) {
   const errors = [];
   if (!layout || typeof layout !== 'object') return { ok: false, errors: ['layout must be an object'] };
   if (layout.version !== 1) errors.push('layout.version must be 1');
@@ -283,7 +285,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
       placed.push(block);
       if (block.mobile && typeof block.mobile !== 'object') errors.push(`${bw}: mobile must be an object`);
       if (block.look != null) errors.push(...validateLook(block.look, bw));
-      validateBlockProps(block, bw, errors, htmlOk);
+      validateBlockProps(block, bw, errors, htmlOk, draft);
       if (TREE_TYPES.has(block.type)) validateTreeBlock(block, bw, errors, { allowHtml, base, takeId });
       if (block.type === 'card') {
         const kids = block.props?.children;
@@ -292,7 +294,7 @@ export function validateLayout(layout, { allowHtml = false, baseline = null } = 
           const kw = `${bw} child ${kid?.id || ki}`;
           takeId(kid, kw);
           if (!CARD_CHILD_TYPES.includes(kid?.type)) { errors.push(`${kw}: ${kid?.type} cannot go inside a card`); return; }
-          validateBlockProps(kid, kw, errors, htmlOk);
+          validateBlockProps(kid, kw, errors, htmlOk, draft);
         });
       }
     });
@@ -365,8 +367,12 @@ function blockInner(block, ctx = {}) {
       return '<hr>';
     case 'html':
       return String(p.html || '');
-    case 'form':
-      return `<div class="studio-form-block" data-cms-form-v2="${Number(p.form_id) || 0}"></div>`;
+    case 'form': {
+      const fid = Number(p.form_id);
+      if (Number.isInteger(fid) && fid > 0) return `<div class="studio-form-block" data-cms-form-v2="${fid}"></div>`;
+      // Unpicked: nothing on the public page; a placeholder card only in the editor canvas.
+      return ctx.annotate ? FORM_PLACEHOLDER_HTML : '';
+    }
     case 'el':
     case 'group':
     case 'live':
@@ -409,6 +415,12 @@ function wrapInner(section, inner) {
  * migrated page matches the old page byte for byte. Grid sections use the
  * 12-column Studio grid.
  */
+const FORM_PLACEHOLDER_HTML = '<div class="studio-form-block studio-form-pick" data-form-unpicked style="border:2px dashed #2f7de1;border-radius:14px;background:#f3f8ff;padding:18px;text-align:center;font-family:system-ui,sans-serif;color:#0b2a5b">'
+  + '<div style="font-size:28px" aria-hidden="true">📋</div><strong style="display:block;font-size:18px;margin:4px 0">Choose a form</strong>'
+  + '<p style="margin:0 0 10px;font-size:14px;color:#41557a">This block shows nothing on the public page until a form is picked.</p>'
+  + '<select data-form-pick-canvas aria-label="Choose a form" style="font:inherit;font-size:16px;padding:8px 10px;border-radius:10px;border:1px solid #9fb4d6;max-width:100%"><option value="0">Choose a form…</option></select>'
+  + '<p style="margin:10px 0 0;font-size:14px"><a href="/admin/forms-builder" data-form-builder-link target="_blank" rel="noopener" style="color:#1d5fbf;font-weight:600">Open the Form Builder ↗</a></p></div>';
+
 export function renderLayout(layout, ctx = {}) {
   let usesGrid = false;
   // ctx.annotate (editor canvas only, never published): comment markers around
@@ -1010,8 +1022,8 @@ export async function handleStudioApi(request, env, url, deps) {
   const body = action === 'upload' ? {} : await request.json().catch(() => ({}));
   const baselineP = currentBaseline(env, slug, page.live_version_id);
 
-  const checkLayout = async (layout) => {
-    const result = validateLayout(layout, { allowHtml: admin, baseline: await baselineP });
+  const checkLayout = async (layout, { draft = false } = {}) => {
+    const result = validateLayout(layout, { allowHtml: admin, baseline: await baselineP, draft });
     if (!result.ok) return jsonResponse({ detail: 'Layout is not valid', errors: result.errors }, 422);
     if (!canLayout) {
       const baseline = await baselineP;
@@ -1023,7 +1035,7 @@ export async function handleStudioApi(request, env, url, deps) {
   };
 
   if (action === 'render') {
-    const result = validateLayout(body.layout, { allowHtml: admin, baseline: await baselineP });
+    const result = validateLayout(body.layout, { allowHtml: admin, baseline: await baselineP, draft: true });
     if (!result.ok) return jsonResponse({ detail: 'Layout is not valid', errors: result.errors }, 422);
     let html = renderLayout(body.layout, { ...renderCtx, annotate: Boolean(body.annotate) });
     // Editor canvas: show live data blocks filled with today's data.
@@ -1039,7 +1051,7 @@ export async function handleStudioApi(request, env, url, deps) {
     return jsonResponse({ layout, identical: html === legacy, legacy_bytes: legacy.length });
   }
   if (action === 'draft') {
-    const bad = await checkLayout(body.layout);
+    const bad = await checkLayout(body.layout, { draft: true });
     if (bad) return bad;
     await env.DB.prepare(
       `INSERT INTO page_drafts (slug, layout_json, base_version_id, updated_by, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)

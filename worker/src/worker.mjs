@@ -14455,7 +14455,7 @@ async function handleStudioEditorPage(request, env, slug) {
   const starter = slug === 'coming-soon' ? comingSoonLayout({ mark: PUBLIC_BRAND_MARK }) : null;
   const shell = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio: ${escapeHtml(slug)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}"></head>
+<link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}-st6"></head>
 <body class="studio-app st-lc st-rc" data-slug="${escapeAttr(slug)}" data-mode="simple">
 <script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script>
 <header class="st-top"><a class="st-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Page Editor</span></a>
@@ -14478,7 +14478,7 @@ async function handleStudioEditorPage(request, env, slug) {
 <div class="st-scrim" data-scrim></div>
 <dialog class="st-dialog" data-json-dialog><form method="dialog"><h2>Layout JSON</h2><textarea data-json rows="24" spellcheck="false"></textarea><div class="st-row"><button type="button" class="st-btn" data-act="apply-json">Apply JSON</button><button class="st-btn">Close</button></div></form></dialog>
 <div class="st-toast" data-toast role="status" aria-live="polite"></div>
-<script src="/admin-studio.js?v=${ASSET_VERSION}-st3b" defer></script></body></html>`;
+<script src="/admin-studio.js?v=${ASSET_VERSION}-st6" defer></script></body></html>`;
   return htmlResponse(shell);
 }
 

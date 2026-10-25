@@ -235,3 +235,25 @@ test('phones: new pages open Studio with the Add block sheet; adding works on an
   assert.match(admin, /\/admin\/studio\/\$\{encodeURIComponent\(String\(payload\.slug\)/);
   assert.match(w, /data-sheet="add" aria-label="Add block"><span aria-hidden="true">➕<\/span>Add block</);
 });
+
+test('form block unpicked: plain message, draft ok, public renders nothing, editor shows placeholder', () => {
+  const lay = { version: 1, sections: [{ id: 's2', blocks: [{ id: 'b1', type: 'form', x: 0, y: 0, w: 12, h: 10, props: { form_id: 0 } }] }] };
+  const strict = validateLayout(lay);
+  assert.equal(strict.ok, false);
+  assert.deepEqual(strict.errors, ['This form block needs a form picked before saving']);
+  assert.ok(!strict.errors.join(' ').includes('section s2'));
+  assert.equal(validateLayout(lay, { draft: true }).ok, true);
+  const pub = renderLayout(lay);
+  assert.ok(!pub.includes('studio-form-block'));
+  assert.ok(!pub.includes('Choose a form'));
+  const ed = renderLayout(lay, { annotate: true });
+  assert.match(ed, /data-form-unpicked/);
+  assert.match(ed, /Choose a form/);
+  assert.match(ed, /data-form-pick-canvas/);
+  assert.match(ed, /href="\/admin\/forms-builder"/);
+  const picked = { version: 1, sections: [{ id: 's2', blocks: [{ ...lay.sections[0].blocks[0], props: { form_id: 7 } }] }] };
+  assert.equal(validateLayout(picked).ok, true);
+  assert.match(renderLayout(picked), /data-cms-form-v2="7"/);
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  assert.match(js, /function wireFormPickers\(\)/);
+});
