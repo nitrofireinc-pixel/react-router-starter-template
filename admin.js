@@ -406,6 +406,14 @@ const DEFAULT_SPONSOR_TIER_FIELDS = {
 const SPONSOR_TIER_FIELD_KEYS = Object.keys(DEFAULT_SPONSOR_TIER_FIELDS);
 const SPONSOR_TIER_BENEFIT_KEYS = ['bronze_benefits', 'silver_benefits', 'gold_benefits'];
 
+function isSiteAdminUser(user = state.me?.user) {
+  return String(user?.role || '').trim().toLowerCase() === 'site_admin';
+}
+
+function classicRoleLabel(user) {
+  return isSuperAdmin(user) ? 'SUPER ADMIN' : (isSiteAdminUser(user) ? 'ADMIN' : 'EDITOR');
+}
+
 function isSuperAdmin(user = state.me?.user) {
   return String(user?.role || '').trim().toLowerCase() === 'admin';
 }
@@ -4221,10 +4229,10 @@ function renderPagePermissionBoxes() {
       <tbody>
         ${pages.map((page) => `
           <tr>
-            <td>${escapeHtml(page.title || page.slug)}</td>
+            <td class="pg-name">${escapeHtml(page.title || page.slug)}</td>
             <td><code>${escapeHtml(page.slug)}</code></td>
-            <td><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}" data-content-slug="${escapeHtml(page.slug)}" aria-label="Edit content: ${escapeHtml(page.title || page.slug)}"></td>
-            <td><input type="checkbox" name="permissions" value="layout:${escapeHtml(page.slug)}" data-layout-slug="${escapeHtml(page.slug)}" aria-label="Change layout: ${escapeHtml(page.title || page.slug)}"></td>
+            <td class="pg-cb"><label class="pg-cbl"><input type="checkbox" name="permissions" value="page:${escapeHtml(page.slug)}" data-content-slug="${escapeHtml(page.slug)}" aria-label="Edit content: ${escapeHtml(page.title || page.slug)}"><span class="pg-cb-t" aria-hidden="true">Edit content</span></label></td>
+            <td class="pg-cb"><label class="pg-cbl"><input type="checkbox" name="permissions" value="layout:${escapeHtml(page.slug)}" data-layout-slug="${escapeHtml(page.slug)}" aria-label="Change layout: ${escapeHtml(page.title || page.slug)}"><span class="pg-cb-t" aria-hidden="true">Change layout</span></label></td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -5795,6 +5803,7 @@ async function loadUsers() {
   if (roleSelect) {
     [...roleSelect.options].forEach((option) => {
       if (option.value === 'admin') option.hidden = !isSuperAdmin();
+      if (option.value === 'site_admin') option.hidden = !isSuperAdmin() && !isSiteAdminUser();
     });
     if (!isSuperAdmin() && roleSelect.value === 'admin') roleSelect.value = 'editor';
   }
@@ -5802,11 +5811,11 @@ async function loadUsers() {
     ? state.users.map(user => {
       const editable = canEditManagedUser(user);
       const actions = editable
-        ? `<div class="row-actions"><button type="button" data-edit-user="${user.id}">Edit</button>${Number(user.id) !== Number(state.me.user.id) ? `<button type="button" data-delete-user="${user.id}">Delete</button>` : ''}</div>`
+        ? `<div class="row-actions"><a class="btn outline" href="/admin/people?edit=${Number(user.id)}">Edit in People &amp; Access</a><button type="button" data-edit-user="${user.id}">Classic edit</button>${Number(user.id) !== Number(state.me.user.id) ? `<button type="button" data-delete-user="${user.id}">Delete</button>` : ''}</div>`
         : '<div class="row-actions"><span class="muted">View only</span></div>';
       return `
     <article class="admin-row user-admin-row">
-      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${isSuperAdmin(user) ? 'SUPER ADMIN' : 'EDITOR'}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small><small class="user-last-login">${escapeHtml(formatUserLastLoginLabel(user.last_login_at))}</small>${userLockBadge(user)}</div>
+      <div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${classicRoleLabel(user)}</span><small>${user.active ? 'Active' : 'Disabled'} · ${escapeHtml((user.permissions || []).join(', ') || (isSuperAdmin(user) ? 'all permissions' : 'no permissions'))}</small><small class="user-last-login">${escapeHtml(formatUserLastLoginLabel(user.last_login_at))}</small>${userLockBadge(user)}</div>
       ${actions}
     </article>`;
     }).join('')

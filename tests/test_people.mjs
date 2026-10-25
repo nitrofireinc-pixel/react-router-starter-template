@@ -81,3 +81,32 @@ test('people: login checks the password before showing the locked message', () =
   assert.match(src, /people\.unlock/);
   assert.match(src, /case 'themes':\n\s+return canChangeThemesAndLogo\(user\);/);
 });
+
+test('people: Assistant Director role (staff) without Director-only powers', () => {
+  const n = normalizeGroupFields({ person_group: 'staff', group_role: 'assistant-director' });
+  assert.equal(n.ok !== false, true);
+  assert.equal(mapLegacyRole('staff', 'Assistant Director'), 'assistant-director');
+  assert.equal(mapLegacyRole('staff', 'Director of Bands'), 'director');
+  const ad = DEFAULT_ROLE_PRESETS['assistant-director'];
+  assert.ok(ad && ad.login_default === 1);
+  assert.ok(!ad.permissions.includes('director'));
+  for (const k of ['staff', 'events', 'forms', 'mail', 'photos']) assert.ok(ad.permissions.includes(k));
+});
+
+test('classic users screen offers Admin (site_admin) and links to People & Access', () => {
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  assert.match(w, /<select name="role"><option value="editor">Editor<\/option><option value="site_admin">Admin<\/option>/);
+  const a = readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+  assert.match(a, /\/admin\/people\?edit=/);
+  assert.match(a, /option\.value === 'site_admin'/);
+});
+
+test('classic page-access table stacks on phones and fieldsets cannot widen the card', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const js = await readFile(new URL('../admin.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../admin-nav.css', import.meta.url), 'utf8');
+  assert.match(js, /class="pg-cbl"><input type="checkbox" name="permissions" value="page:/);
+  assert.match(js, /pg-cb-t" aria-hidden="true">Change layout</);
+  assert.match(css, /\.cms-panel fieldset\{min-width:0/);
+  assert.match(css, /@media \(max-width:640px\)\{\s*\.page-grant-table thead\{display:none\}/);
+});

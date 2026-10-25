@@ -11,7 +11,7 @@ from playwright.async_api import async_playwright
 
 PUBLIC = ['/', '/calendar', '/contact', '/boosters', '/directors', '/ensembles', '/gallery', '/sponsors',
           '/become-a-sponsor', '/fundraising', '/in-kind', '/letterman-jacket', '/qr.html']
-WIDTHS = [1280, 980, 734, 390]
+WIDTHS = [1280, 980, 734, 478, 390]
 OVERFLOW_JS = r'''(sel) => {
   const vw = innerWidth, out = [];
   const scope = sel ? document.querySelector(sel) : document.body;
@@ -29,9 +29,83 @@ OVERFLOW_JS = r'''(sel) => {
     }
     if (clipped) continue;
     if (r.right > box.right + 2 || r.left < box.left - 2) {
-      out.push((el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '')) + ` [${Math.round(r.left)}..${Math.round(r.right)} vs ${Math.round(box.left)}..${Math.round(box.right)}]`);
+      out.push((el.tagName.toLowerCase() + (el.getAttribute('id') ? '#' + el.getAttribute('id') : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '')) + ` [${Math.round(r.left)}..${Math.round(r.right)} vs ${Math.round(box.left)}..${Math.round(box.right)}]`);
       if (out.length >= 8) break;
     }
+  }
+  // Second pass: an element poking out of its own card. The pass above skips anything with a clipping
+  // ancestor (and only compares to the viewport), so a table cut off by a card with overflow:hidden, or a
+  // button hanging past a card edge, used to pass silently.
+  const CARD = '.admin-card,.cms-panel,.card,.panel,.pp-sheet,.pp-card,.sh-sheet,.ev-dialog,.ev-sheet,fieldset,form,[role=dialog],dialog';
+  const seen = new Set();
+  for (const el of scope.querySelectorAll('*')) {
+    if (out.length >= 12) break;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.position === 'fixed' || cs.position === 'absolute') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 2 || r.height <= 2) continue;
+    if (cs.animationName !== 'none') continue;
+    if (el.matches('dialog,[role=dialog],[class*=-dialog]')) continue;   // a dialog may be wider than the panel that hosts it
+    let card = null, scroller = false;
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      const pc = getComputedStyle(p);
+      if (pc.animationName !== 'none') { scroller = true; break; }   // marquee tracks move on purpose
+      if (/(auto|scroll)/.test(pc.overflowX)) { scroller = true; break; }   // intentional horizontal scroller
+      if (p.matches(CARD) || /(hidden|clip)/.test(pc.overflowX)) { card = p; break; }
+    }
+    if (scroller || !card) continue;
+    const c = card.getBoundingClientRect();
+    if (c.width <= 2) continue;
+    if (r.right > c.right + 2 || r.left < c.left - 2) {
+      const key = card.tagName + card.className;
+      if (seen.has(key + el.tagName)) continue; seen.add(key + el.tagName);
+      const nm = (e) => e.tagName.toLowerCase() + (e.getAttribute('id') ? '#' + e.getAttribute('id') : '') + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+      out.push(`${nm(el)} outside card ${nm(card)} [${Math.round(r.left)}..${Math.round(r.right)} vs ${Math.round(c.left)}..${Math.round(c.right)}]`);
+    }
+  }
+  // Third pass: every interactive control must be fully reachable. Flag a button/input/select/link that is
+  // cut off by any clipping ancestor (overflow hidden/clip, or an auto/scroll box narrower than it that the
+  // page itself cannot scroll to), or that sits outside the viewport horizontally.
+  const CTRL = 'button,input:not([type=hidden]),select,textarea,a[href],[role=button],[role=checkbox],label';
+  let nctrl = 0;
+  for (const el of scope.querySelectorAll(CTRL)) {
+    if (nctrl >= 10) break;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || el.closest('[hidden],[aria-hidden=true]')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) continue;               // sr-only / visually-hidden inputs
+    if (el.matches('input') && (cs.opacity === '0' || cs.clip !== 'auto' && cs.clip)) continue;
+    const nm = (e) => e.tagName.toLowerCase() + (e.getAttribute('id') ? '#' + e.getAttribute('id') : '') + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '') + (e.name ? `[name=${e.name}]` : '') + (e.value && e.type === 'checkbox' ? `[value=${e.value}]` : '');
+    // Skip closed off-canvas panels (drawer/sheet/menu parked fully off-screen) and animated tracks (marquees).
+    let parked = false;
+    for (let p = el; p && p !== document.body; p = p.parentElement) {
+      const pc = getComputedStyle(p), pr = p.getBoundingClientRect();
+      if (pc.animationName !== 'none' && p !== el) { parked = true; break; }
+      if ((pc.transform !== 'none' || pc.position === 'fixed') && (pr.right <= 1 || pr.left >= vw - 1)) { parked = true; break; }
+    }
+    if (parked) continue;
+    let bad = '';
+    let inScroller = false;
+    for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+      const pc = getComputedStyle(p);
+      if (/(auto|scroll)/.test(pc.overflowX) && p.scrollWidth > p.clientWidth) { inScroller = true; break; }
+    }
+    if (!inScroller && (r.left < -1 || r.right > vw + 1)) bad = `outside viewport [${Math.round(r.left)}..${Math.round(r.right)} vs 0..${vw}]`;
+    for (let p = el.parentElement; !bad && p && p !== document.documentElement; p = p.parentElement) {
+      const pc = getComputedStyle(p);
+      if (cs.position === 'fixed') break;   // fixed controls escape ancestor clipping
+      if (/(hidden|clip|auto|scroll)/.test(pc.overflowX)) {
+        const c = p.getBoundingClientRect();
+        if (/(auto|scroll)/.test(pc.overflowX) && p.scrollWidth > p.clientWidth) break;
+        if (r.left < c.left - 1 || r.right > c.right + 1) {
+          const scrollable = /(auto|scroll)/.test(pc.overflowX) && p.scrollWidth > p.clientWidth;
+          if (scrollable) break;   // reachable by scrolling this box; outer boxes clip the scroller, not the control
+          bad = `clipped by ${nm(p)} (overflow-x:${pc.overflowX}) [${Math.round(r.left)}..${Math.round(r.right)} vs ${Math.round(c.left)}..${Math.round(c.right)}]`;
+        }
+      }
+      if (pc.position === 'fixed') break;   // nothing above a fixed box can clip it
+    }
+    if (bad) { out.push(`CONTROL ${nm(el)} ${bad}`); nctrl++; }
   }
   return {page: !sel && document.documentElement.scrollWidth > vw + 1, items: out};
 }'''
@@ -135,6 +209,11 @@ class Sweep:
             await self.modal(page, where, width, lambda: page.locator('[data-act=add]').first.click(), '.pp-sheet', 'person add')
             sel = '.pp-table tr[data-id]' if width > 760 else '.pp-card'
             await self.modal(page, where, width, lambda: page.locator(sel).first.click(), '.pp-sheet', 'person edit')
+        if 'tab=users' in where:
+            # Open a filled-in classic user editor (view only, never saved) so its page-access table is laid out.
+            async def edit_user():
+                await page.locator('[data-edit-user]').first.click()
+            await self.modal(page, where, width, edit_user, '#user-form', 'classic user edit', closer='#user-form [data-cancel], #user-form .cancel', optional='[data-edit-user]')
         if where == '/admin':
             for i in range(3):
                 async def open_sheet(i=i):

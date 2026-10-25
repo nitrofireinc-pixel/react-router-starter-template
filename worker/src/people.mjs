@@ -4,11 +4,11 @@
 
 export const PEOPLE_GROUPS = ['', 'staff', 'boosters'];
 export const GROUP_ROLES = {
-  staff: ['director', 'staff'],
+  staff: ['director', 'assistant-director', 'staff'],
   boosters: ['president', 'vice-president', 'secretary', 'treasurer', 'committee'],
 };
 export const GROUP_ROLE_LABELS = {
-  director: 'Director', staff: 'Staff', president: 'President', 'vice-president': 'Vice President',
+  director: 'Director', 'assistant-director': 'Assistant Director', staff: 'Staff', president: 'President', 'vice-president': 'Vice President',
   secretary: 'Secretary', treasurer: 'Treasurer', committee: 'Committee',
 };
 export const SITE_ROLES = ['editor', 'site_admin', 'admin'];
@@ -17,6 +17,8 @@ export const SITE_ROLE_LABELS = { editor: 'Editor', site_admin: 'Admin', admin: 
 /** Approved default ticks (Q68, mockup 16a-role-matrix). Saved per person as an explicit list. */
 export const DEFAULT_ROLE_PRESETS = {
   director: { permissions: ['director', 'staff', 'events', 'forms', 'mail', 'photos'], login_default: 1 },
+  // Like Director minus the Director-only powers (e.g. deleting sign-ups early via the 'director' tick).
+  'assistant-director': { permissions: ['staff', 'events', 'forms', 'mail', 'photos'], login_default: 1 },
   staff: { permissions: ['staff', 'events', 'photos'], login_default: 1 },
   president: { permissions: ['boosters', 'events', 'forms', 'minutes:edit', 'fundraising', 'sponsors', 'mail', 'president'], login_default: 1 },
   'vice-president': { permissions: ['boosters', 'events', 'minutes:edit', 'fundraising', 'mail', 'vice-president'], login_default: 1 },
@@ -120,6 +122,7 @@ export function checkLockChange(actor, target, { activeSuperAdmins = 0, locking 
 export function mapLegacyRole(group, text) {
   const t = lc(text);
   if (group === 'staff') {
+    if (/assistant|asst|associate/.test(t) && /director/.test(t)) return 'assistant-director';
     if (/director/.test(t)) return 'director';
     return 'staff';
   }

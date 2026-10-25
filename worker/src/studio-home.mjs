@@ -10,7 +10,7 @@ export const STUDIO_HOME_TILES = [
   { key: 'fundraisers', icon: '🎟️', title: 'Fundraisers', copy: 'Cards for current fundraisers.', href: '/admin/fundraiser-cards' },
   { key: 'minutes', icon: '📝', title: 'Meeting minutes', copy: 'Booster meeting minutes by date.', href: '/admin?tab=minutes' },
   { key: 'photos', icon: '🖼️', title: 'Photos', copy: "The band's own photo library.", href: '/admin?tab=photos' },
-  { key: 'users', icon: '👥', title: 'Users', copy: 'Who can edit what.', href: '/admin?tab=users', admin: true },
+  { key: 'users', icon: '👥', title: 'People & Access', copy: 'Who can edit what.', href: '/admin/people', admin: true },
   { key: 'forms', icon: '📋', title: 'Forms', copy: 'Build sign-up forms and read Submitted forms.', href: '/admin/forms-builder' },
 ];
 

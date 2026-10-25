@@ -7,7 +7,7 @@
   var ME = Number(body.dataset.me || 0);
   var IS_SUPER = body.dataset.super === "1";
   var IS_ADMIN = body.dataset.siteAdmin === "1";
-  var ROLES = { staff: [["director", "Director"], ["staff", "Staff"]], boosters: [["president", "President"], ["vice-president", "Vice President"], ["secretary", "Secretary"], ["treasurer", "Treasurer"], ["committee", "Committee"]] };
+  var ROLES = { staff: [["director", "Director"], ["assistant-director", "Assistant Director"], ["staff", "Staff"]], boosters: [["president", "President"], ["vice-president", "Vice President"], ["secretary", "Secretary"], ["treasurer", "Treasurer"], ["committee", "Committee"]] };
   var SITE = { editor: "Editor", site_admin: "Admin", admin: "Super Admin" };
   var PERM_LABEL = { site: "Site settings", pages: "Pages", sponsors: "Sponsors", treasurer: "Treasurer", president: "President", "vice-president": "Vice President", staff: "Staff cards", boosters: "Booster cards", users: "People & Access", mail: "Mail", events: "Events", forms: "Forms", photos: "Photos", fundraising: "Fundraising", "minutes:edit": "Minutes", caldev: "Calendar", director: "Director" };
   var state = { data: null, filter: "all", q: "" };
@@ -219,5 +219,10 @@
   function load() {
     return api("/api/admin/people").then(function (d) { state.data = d; render(); }).catch(function (er) { root.innerHTML = '<p class="pp-empty">' + esc(er.message) + "</p>"; });
   }
-  load();
+  load().then(function () {
+    var want = Number(new URLSearchParams(location.search).get("edit") || 0);
+    var list = state.data && (state.data.people || []);
+    var hit = want && list.filter(function (x) { return Number(x.id) === want; })[0];
+    if (hit) openSheet(hit);
+  });
 })();

@@ -277,3 +277,23 @@
   body.ev-app.sn-body .fb-grid{min-height:0}
   body.sn-body{scroll-padding-top:60px;scroll-padding-bottom:calc(76px + env(safe-area-inset-bottom))}
 }
+
+/* Classic Users editor: fieldsets default to min-width:min-content, so the page-access table pushed the form past its card. */
+.cms-panel fieldset{min-width:0;max-width:100%}
+.cms-panel form .btn,.cms-panel form button{max-width:100%}
+.page-grant-table .pg-cb-t{display:none}
+@media (max-width:640px){
+  .page-grant-table thead{display:none}
+  .page-grant-table,.page-grant-table tbody{display:block;width:100%}
+  .page-grant-table tr{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;padding:10px 0;border-bottom:1px solid #d5deea}
+  .page-grant-table td{display:block;border:0;padding:0;min-width:0;overflow-wrap:anywhere}
+  .page-grant-table td.pg-name{grid-column:1/-1;font-weight:700}
+  .page-grant-table td:nth-child(2){grid-column:1/-1;font-size:.82rem;color:#64748b}
+  .page-grant-table td.pg-cb{display:flex;align-items:center;gap:8px;padding-top:6px}
+  .page-grant-table .pg-cbl{display:inline-flex;align-items:center;gap:8px;min-height:32px}
+  .page-grant-table .pg-cb-t{display:inline;font-size:.85rem}
+}
+/* Classic Users list: the two edit buttons must wrap inside the card, never hang past its edge. */
+#tab-users .admin-row{flex-wrap:wrap;min-width:0}
+#tab-users .admin-row>div:first-child{min-width:0;flex:1 1 200px}
+#tab-users .row-actions{min-width:0;max-width:100%;flex-wrap:wrap}
