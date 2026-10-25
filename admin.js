@@ -4191,6 +4191,10 @@ function editPage(slug, { skipGuard = false } = {}) {
     if (isVisualEditorPageSlug(page.slug)) {
       visualHint.hidden = false;
       visualHint.innerHTML = `Page text is edited in the visual editor. This screen is for title, address, menu, and Active. <a href="${visualEditorHref(page.slug)}">Open the visual editor</a>`;
+    } else if (page.slug === 'letterman-jacket' || page.slug === 'in-kind') {
+      visualHint.hidden = false;
+      const v2 = page.slug === 'letterman-jacket' && state.pages.some(item => item.slug === 'letterman-jacket-v2');
+      visualHint.innerHTML = `This is the live order form page. Its form is built by the site, so it stays in this editor until its Studio version is switched on.${v2 ? ' <a href="/admin/visual/letterman-jacket-v2">Open Letterman Jacket v2 in Studio</a>' : ''}`;
     } else {
       visualHint.hidden = true;
       visualHint.textContent = '';
