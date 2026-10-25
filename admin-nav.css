@@ -282,6 +282,8 @@
 .cms-panel fieldset{min-width:0;max-width:100%}
 .cms-panel form .btn,.cms-panel form button{max-width:100%}
 .page-grant-table .pg-cb-t{display:none}
+.page-grant-table{width:100%;max-width:100%;table-layout:fixed}
+.page-grant-table th,.page-grant-table td{overflow-wrap:anywhere;hyphens:auto}
 @media (max-width:640px){
   .page-grant-table thead{display:none}
   .page-grant-table,.page-grant-table tbody{display:block;width:100%}

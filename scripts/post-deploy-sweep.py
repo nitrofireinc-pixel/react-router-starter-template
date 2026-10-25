@@ -12,6 +12,12 @@ from playwright.async_api import async_playwright
 PUBLIC = ['/', '/calendar', '/contact', '/boosters', '/directors', '/ensembles', '/gallery', '/sponsors',
           '/become-a-sponsor', '/fundraising', '/in-kind', '/letterman-jacket', '/qr.html']
 WIDTHS = [1280, 980, 734, 478, 390]
+
+def redact(text):
+    # Never log cookies, auth headers or tokens (Playwright call logs echo request headers).
+    text = re.sub(r'(?im)^\s*-\s*(cookie|set-cookie|authorization|cf-access[\w-]*|x-[\w-]*token[\w-]*)\s*:.*$', r'    - \1: [REDACTED]', str(text))
+    text = re.sub(r'(?i)(efband_session|session|token|key|secret|password)=([^;&\s"]+)', r'\1=[REDACTED]', text)
+    return text
 OVERFLOW_JS = r'''(sel) => {
   const vw = innerWidth, out = [];
   const scope = sel ? document.querySelector(sel) : document.body;
@@ -127,6 +133,7 @@ class Sweep:
         self.a = args; self.base = args.base.rstrip('/'); self.fails = []; self.checked = 0
         self.host = urllib.parse.urlparse(self.base).hostname; self.versions = {}; self.links = {}
     def fail(self, kind, where, width, detail):
+        detail = redact(detail)
         self.fails.append({'kind': kind, 'where': where, 'width': width, 'detail': detail})
     async def shot(self, page, name):
         os.makedirs(self.a.out, exist_ok=True)
