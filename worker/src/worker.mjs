@@ -7927,6 +7927,14 @@ function mapCmsPage(page) {
   };
 }
 
+// Retired pages (cms_pages.retired_at set) stay in the DB but are hidden from admin tiles and lists.
+async function getRetiredPageSlugs(env) {
+  try {
+    const rows = await env.DB.prepare('SELECT slug FROM cms_pages WHERE retired_at IS NOT NULL').all();
+    return new Set((rows.results || []).map((row) => row.slug));
+  } catch { return new Set(); /* column not added yet */ }
+}
+
 async function getPages(env, includeInactive = false) {
   const where = includeInactive ? '' : 'WHERE active = 1';
   const rows = await env.DB.prepare(`SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages ${where} ORDER BY nav_order, id`).all();
@@ -10797,7 +10805,8 @@ async function routeApi(request, env, url, ctx = null) {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
     const formsAccessIds = await getFormsAccessUserIds(env);
-    const catalog = await getPages(env, true);
+    const retiredSlugs = await getRetiredPageSlugs(env);
+    const catalog = (await getPages(env, true)).filter((page) => !retiredSlugs.has(page.slug));
     return jsonResponse({
       user: publicUser(auth.user),
       permissions: GLOBAL_PERMISSIONS,
@@ -12088,7 +12097,8 @@ async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/api/admin/pages' && request.method === 'GET') {
     const auth = await requireLogin(request, env);
     if (auth.response) return auth.response;
-    const pages = await getPages(env, true);
+    const retiredSlugs = await getRetiredPageSlugs(env);
+    const pages = (await getPages(env, true)).filter((page) => !retiredSlugs.has(page.slug));
     const canSee = (page) => (
       hasPermission(auth.user, 'pages')
       || canEditPage(auth.user, page.slug)
