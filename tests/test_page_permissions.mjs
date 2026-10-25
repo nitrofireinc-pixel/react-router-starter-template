@@ -656,8 +656,8 @@ test('server sidebar hide uses allow(); content-only users keep Minutes visible'
   assert.match(html, /data-tab="dashboard"/);
   assert.match(html, /data-tab="minutes"/);
   assert.match(html, /data-tab="users"/);
-  assert.doesNotMatch(html, /data-tab="security-log"(?! hidden)/);
-  assert.match(html, /data-tab="ledger" hidden/);
+  assert.doesNotMatch(html, /data-tab="security-log"/);
+  assert.doesNotMatch(html, /data-tab="ledger"/);
   assert.equal(allow('minutes'), true);
   assert.equal(allow('sponsors-page'), true);
   assert.equal(allow('ensembles'), false);
@@ -746,15 +746,14 @@ test('Badge Creator is badges-or-admin only and hidden without the grant', () =>
   const allow = (tab) => adminSidebarAllows(noBadge, tab);
   const html = renderAdminSidebarHtml('test', { user: noBadge, allow });
   assert.equal(allow('badge-creator'), false);
-  assert.match(html, /data-tab="badge-creator" hidden/);
-  assert.match(html, /data-boosters-menu/);
-  assert.doesNotMatch(html, /data-boosters-menu hidden/);
+  assert.doesNotMatch(html, /data-tab="badge-creator"/);
+  assert.match(html, /data-nav-section="boosters"/);
 
   const emptyBoosters = renderAdminSidebarHtml('test', {
     allow: (tab) => tab !== 'booster-members' && tab !== 'minutes' && tab !== 'badge-creator',
   });
-  assert.match(emptyBoosters, /data-boosters-menu hidden/);
-  assert.match(emptyBoosters, /data-tab="badge-creator" hidden/);
+  assert.doesNotMatch(emptyBoosters, /data-nav-section="boosters"/);
+  assert.doesNotMatch(emptyBoosters, /data-tab="badge-creator"/);
 
   assert.match(workerSrc, /value="badges"> Badge Creator/);
   assert.match(workerSrc, /'badges'/);

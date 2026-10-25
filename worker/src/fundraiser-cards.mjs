@@ -5,7 +5,7 @@ import {
   isHomeFundraiserEvent,
   renderFundraisingCardFromCms,
 } from './home-redesign.mjs';
-import { renderAdminChromeBar, renderAdminSidebarBackdrop, renderAdminSidebarHtml } from './admin-chrome.mjs';
+import { adminNavAssetVersion, renderAdminChromeBar, renderAdminSidebarBackdrop, renderAdminSidebarHtml } from './admin-chrome.mjs';
 import { repairSilentAuctionDescription } from './page-blocks.mjs';
 
 export const FUNDRAISER_ALERT_EMAILS_KEY = 'fundraiser_alert_emails';
@@ -837,12 +837,12 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
   <link rel="stylesheet" href="/styles.css?v=${v}">
   <link rel="stylesheet" href="/public-theme.css?v=${v}">
   <link rel="stylesheet" href="/home-redesign.css?v=${v}">
-  <link rel="stylesheet" href="/admin-nav.css?v=${v}">
+  <link rel="stylesheet" href="/admin-nav.css?v=${adminNavAssetVersion(v)}">
   <link rel="stylesheet" href="/admin-fundraiser-cards.css?v=${v}">
 </head>
-<body class="admin-body fc-admin-body" data-can-publish="${canPublish}">
+<body class="admin-body fc-admin-body sn-body" data-can-publish="${canPublish}">
 <main class="admin-shell cms-shell image-admin-shell">
-  ${renderAdminChromeBar()}
+  ${renderAdminChromeBar({ assetVersion: v, user: options.user })}
   ${renderAdminSidebarBackdrop()}
   ${renderAdminSidebarHtml(v, options)}
   <section class="admin-workspace">
@@ -962,7 +962,7 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
   </div>
   </section>
 </main>
-  <script src="/admin-nav.js?v=${v}"></script>
+  <script src="/admin-nav.js?v=${adminNavAssetVersion(v)}"></script>
   <script src="/admin-fundraiser-cards.js?v=${v}"></script>
 </body>
 </html>`;

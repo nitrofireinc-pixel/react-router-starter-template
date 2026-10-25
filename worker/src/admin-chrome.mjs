@@ -7,12 +7,42 @@ const PAGE_LABELS = {
   'become-a-sponsor': 'Become a Sponsor',
 };
 
-export function renderAdminChromeBar() {
-  return `<div class="admin-chrome-bar">
-<button type="button" class="admin-nav-toggle" aria-expanded="false" aria-controls="admin-sidebar">
+/** Admin-only cache key for the 14c nav assets; public ASSET_VERSION stays untouched. */
+export const ADMIN_NAV_REV = 'nav14c1';
+export function adminNavAssetVersion(assetVersion = 'dev') {
+  return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
+}
+
+const SEARCH_ICON = '<svg class="sn-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+
+export function escapeAdminHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+function initials(name) {
+  const parts = String(name || '').replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '•';
+}
+
+/** Top bar shown below 1100px: Menu button, logos, search, avatar. */
+export function renderAdminChromeBar(options = {}) {
+  const v = escapeAdminHtml(options.assetVersion || 'dev');
+  const user = options.user || {};
+  const name = String(user.display_name || user.username || '');
+  return `<div class="admin-chrome-bar sn-top">
+<button type="button" class="admin-nav-toggle sn-menu-btn" aria-expanded="false" aria-controls="admin-sidebar">
 <span class="admin-nav-toggle-icon" aria-hidden="true"><span></span><span></span><span></span></span>
 <span class="admin-nav-toggle-label">Menu</span>
 </button>
+<a class="sn-top-brand" href="/admin" aria-label="Site Studio home"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="" width="30" height="30"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="" width="30" height="30"></a>
+<button type="button" class="sn-top-search" data-sn-launch aria-haspopup="dialog">${SEARCH_ICON}<span class="sn-top-search-text">Find a page or tool…</span><kbd>Ctrl K</kbd></button>
+${name ? `<span class="sn-avatar" title="${escapeAdminHtml(name)}" aria-hidden="true">${escapeAdminHtml(initials(name))}</span>` : ''}
 <form id="admin-mobile-logout-form" class="admin-chrome-logout" method="post" action="/admin/logout">
 <button class="admin-mobile-logout-btn" type="submit">Log Out</button>
 </form>
@@ -24,17 +54,7 @@ export function renderAdminSidebarBackdrop() {
 }
 
 export function renderAdminSidebarClose() {
-  return '<button type="button" class="admin-sidebar-close" data-admin-nav-close aria-label="Close menu"><span aria-hidden="true">×</span></button>';
-}
-
-export function escapeAdminHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[ch]));
+  return '<button type="button" class="admin-sidebar-close sn-close" data-admin-nav-close aria-label="Close menu"><span aria-hidden="true">×</span><span class="sn-close-text">Close</span></button>';
 }
 
 export function isVisualEditorPageSlug(slug) {
@@ -58,23 +78,17 @@ export function pageEditorHref(slug) {
   return `/admin?tab=pages&page=${encodeURIComponent(key)}`;
 }
 
-function hideFlag(tab, allow, filtered) {
-  if (filtered) return allow(tab) ? '' : ' hidden';
-  return DEFAULT_HIDDEN_TABS.has(tab) ? ' hidden' : '';
-}
-
-function isHiddenFlag(flag) {
-  return String(flag || '').includes('hidden');
-}
-
 function tabHref(tab, extra = '') {
   return `/admin?tab=${encodeURIComponent(tab)}${extra}`;
 }
 
+/**
+ * Plan 2.22 / mockup 14c: flat sections, short names, at most one level.
+ * Every item is permission-filtered on the server; admin-only items carry admin:true.
+ */
 export function buildAdminNavModel(options = {}) {
   const filtered = typeof options.allow === 'function';
-  const allow = filtered ? options.allow : () => true;
-  const hide = (tab) => hideFlag(tab, allow, filtered);
+  const allow = filtered ? options.allow : (tab) => !DEFAULT_HIDDEN_TABS.has(tab);
   const pages = Array.isArray(options.pages) ? options.pages : [];
   const draftCount = Number(options.fundraiserDraftCount || 0) || 0;
   const current = options.current?.route
@@ -82,302 +96,238 @@ export function buildAdminNavModel(options = {}) {
     : (options.slug
       ? { route: 'visual', slug: options.slug, ...options.current }
       : (options.current || {}));
-  const showPageSettings = filtered ? allow('page-settings') : false;
-
-  const pageItems = pages.map((page) => {
-    const slug = String(page.slug || '').trim().toLowerCase();
-    const href = pageEditorHref(slug);
-    return {
-      kind: 'page',
-      key: `page:${slug}`,
-      label: sidebarPageLabel(page),
-      slug,
-      href,
-      tab: isVisualEditorPageSlug(slug) ? '' : 'pages',
-      hidden: false,
-      attrs: `data-page-slug="${escapeAdminHtml(slug)}" data-page-nav="${escapeAdminHtml(slug)}" data-nav-href="${escapeAdminHtml(href)}"`,
-    };
-  });
-  if (showPageSettings) {
-    pageItems.push({
-      kind: 'page-settings',
-      key: 'page-settings',
-      label: '⚙ Page settings',
-      href: '/admin?tab=pages&page=fundraising',
-      tab: 'pages',
-      hidden: false,
-      attrs: 'data-page-settings-link="fundraising" data-page-settings="fundraising" data-nav-href="/admin?tab=pages&page=fundraising"',
-    });
-  }
 
   const item = (key, label, tab, href, extra = {}) => ({
-    kind: extra.kind || 'tab',
     key,
     label,
     tab: tab || '',
     href: href || (tab ? tabHref(tab) : ''),
-    hidden: extra.hidden ?? isHiddenFlag(hide(tab || key)),
+    hidden: extra.hidden ?? !allow(extra.perm || tab || key),
     badge: extra.badge || 0,
+    badgeLabel: extra.badgeLabel || '',
+    admin: Boolean(extra.admin),
     attrs: extra.attrs || '',
+    keywords: extra.keywords || '',
   });
 
-  const calendarChildren = [
-    item(
-      allow('caldev') || !filtered ? 'caldev' : 'events',
-      'Events & Schedule Board',
-      allow('caldev') || (!filtered && !DEFAULT_HIDDEN_TABS.has('caldev')) ? 'caldev' : 'events',
-      allow('caldev') || !filtered ? tabHref('caldev') : tabHref('events'),
-      { hidden: isHiddenFlag(hide('caldev')) && isHiddenFlag(hide('events')) },
-    ),
-    item('banners', 'Important banners', 'caldev', tabHref('caldev'), {
-      hidden: isHiddenFlag(hide('caldev')),
-      attrs: 'data-nav-extra="deadline-banners"',
-    }),
-  ];
-
-  const fundraisingChildren = [
-    item('fundraiser-cards', 'Fundraiser cards', 'fundraiser-cards', '/admin/fundraiser-cards', {
-      hidden: filtered ? !allow('fundraiser-cards') : false,
-      badge: draftCount,
-      attrs: 'data-nav-href="/admin/fundraiser-cards"',
-    }),
-    item('ledger', 'Donations ledger', 'ledger', tabHref('ledger')),
-    item('checkout', 'Checkout', 'checkout', tabHref('checkout')),
-  ];
-
-  const sponsorChildren = [
-    item('sponsors', 'Manage sponsors', 'sponsors', tabHref('sponsors')),
-    item('sponsors-page', 'Sponsors page', '', visualEditorHref('sponsors'), {
-      hidden: isHiddenFlag(hide('sponsors-page')),
-      attrs: `data-sponsor-nav="sponsors-page" data-page-slug="sponsors" data-nav-href="${visualEditorHref('sponsors')}"`,
-    }),
-    item('become-a-sponsor', 'Become a Sponsor', '', visualEditorHref('become-a-sponsor'), {
-      hidden: isHiddenFlag(hide('become-a-sponsor')),
-      attrs: `data-sponsor-nav="become-a-sponsor" data-page-slug="become-a-sponsor" data-nav-href="${visualEditorHref('become-a-sponsor')}"`,
-    }),
-  ];
-
-  const boosterChildren = [
-    item('booster-members', 'Booster Members', 'booster-members', tabHref('booster-members')),
-    item('minutes', 'Meeting Minutes', 'minutes', tabHref('minutes')),
-    item('badge-creator', 'Badge Creator', 'badge-creator', tabHref('badge-creator')),
-  ];
-
-  const peopleChildren = [
-    item('staff', 'Directors & Staff', 'staff', tabHref('staff')),
-    item('ensembles', 'Ensembles', 'ensembles', tabHref('ensembles')),
-  ];
-
-  const photoChildren = [
-    item('photos', 'Photos', 'photos', tabHref('photos')),
-    item('social', 'Social Media', 'social', tabHref('social')),
-  ];
-
-  const messageChildren = [
-    item('mail', 'Staff Email', 'mail', tabHref('mail')),
-    item('contact', 'Contact Form', 'contact', tabHref('contact')),
-    item('forms', 'Forms', 'forms', tabHref('forms')),
-  ];
-
-  const adminChildren = [
-    item('users', 'Users', 'users', tabHref('users')),
-    item('site', 'Site Settings', 'site', tabHref('site')),
-    item('security-log', 'Security Log', 'security-log', tabHref('security-log')),
-  ];
-
-  const groupHidden = (children) => children.every((child) => child.hidden);
-
-  const groups = [
+  const pagesAllowed = filtered ? allow('pages') : true;
+  const sections = [
     {
-      key: 'pages',
-      label: 'Pages',
-      section: 'website',
-      hidden: !pageItems.length,
-      children: pageItems,
-      attrs: 'data-pages-group',
+      key: 'website',
+      label: 'Website',
+      items: [
+        item('pages', 'Pages', 'pages', tabHref('pages'), { hidden: !pagesAllowed && !pages.length, keywords: 'edit page website' }),
+        item('themes', 'Themes', '', '/admin?tab=site#studio-theme', { perm: 'themes', admin: true, attrs: 'data-nav-href="/admin?tab=site#studio-theme"', keywords: 'colors fonts buttons' }),
+      ],
     },
     {
       key: 'calendar',
       label: 'Calendar',
-      section: 'content',
-      hidden: groupHidden(calendarChildren),
-      children: calendarChildren,
+      items: [
+        item('events-manager', 'Events', '', '/admin/events-manager', { perm: 'caldev', attrs: 'data-nav-href="/admin/events-manager"', keywords: 'calendar rehearsal game concert' }),
+        item('caldev', 'Schedule Board', 'caldev', tabHref('caldev'), { keywords: 'calendar schedule' }),
+        item('banners', 'Important banners', 'caldev', tabHref('caldev'), { perm: 'caldev', attrs: 'data-nav-extra="deadline-banners"', keywords: 'deadline banner' }),
+      ],
     },
     {
-      key: 'fundraising',
-      label: 'Fundraising',
-      section: 'content',
-      hidden: groupHidden(fundraisingChildren),
-      children: fundraisingChildren,
+      key: 'money',
+      label: 'Money',
+      items: [
+        item('fundraiser-cards', 'Fundraiser cards', 'fundraiser-cards', '/admin/fundraiser-cards', {
+          badge: draftCount,
+          badgeLabel: `${draftCount} drafts awaiting approval`,
+          attrs: 'data-nav-href="/admin/fundraiser-cards"',
+          keywords: 'fundraising',
+        }),
+        item('ledger', 'Donations ledger', 'ledger', tabHref('ledger'), { keywords: 'donations money' }),
+        item('checkout', 'Checkout', 'checkout', tabHref('checkout'), { keywords: 'payments' }),
+      ],
     },
     {
       key: 'sponsors',
       label: 'Sponsors',
-      section: 'content',
-      hidden: groupHidden(sponsorChildren),
-      children: sponsorChildren,
-      attrs: `data-sponsors-menu${groupHidden(sponsorChildren) ? ' hidden' : ''}`,
-      toggleAttrs: 'data-sponsors-toggle',
-      subAttrs: 'data-sponsors-sub',
+      items: [
+        item('sponsors', 'Manage sponsors', 'sponsors', tabHref('sponsors'), { keywords: 'logos levels' }),
+        item('sponsors-page', 'Sponsors page', '', visualEditorHref('sponsors'), {
+          attrs: `data-sponsor-nav="sponsors-page" data-page-slug="sponsors" data-nav-href="${visualEditorHref('sponsors')}"`,
+        }),
+        item('become-a-sponsor', 'Become a Sponsor', '', visualEditorHref('become-a-sponsor'), {
+          attrs: `data-sponsor-nav="become-a-sponsor" data-page-slug="become-a-sponsor" data-nav-href="${visualEditorHref('become-a-sponsor')}"`,
+        }),
+      ],
     },
     {
       key: 'boosters',
-      label: 'Band Boosters',
-      section: 'content',
-      hidden: groupHidden(boosterChildren),
-      children: boosterChildren,
-      attrs: `data-boosters-menu${groupHidden(boosterChildren) ? ' hidden' : ''}`,
-      toggleAttrs: 'data-boosters-toggle',
-      subAttrs: 'data-boosters-sub',
+      label: 'Boosters',
+      items: [
+        item('booster-members', 'Booster Members', 'booster-members', tabHref('booster-members')),
+        item('minutes', 'Meeting Minutes', 'minutes', tabHref('minutes'), { keywords: 'minutes meeting' }),
+        item('badge-creator', 'Badge Creator', 'badge-creator', tabHref('badge-creator')),
+      ],
     },
     {
       key: 'people',
       label: 'People',
-      section: 'content',
-      hidden: groupHidden(peopleChildren),
-      children: peopleChildren,
+      items: [
+        item('staff', 'Directors & Staff', 'staff', tabHref('staff')),
+        item('ensembles', 'Ensembles', 'ensembles', tabHref('ensembles')),
+      ],
     },
     {
       key: 'photos',
       label: 'Photos & Social',
-      section: 'content',
-      hidden: groupHidden(photoChildren),
-      children: photoChildren,
+      items: [
+        item('photos', 'Photos', 'photos', tabHref('photos')),
+        item('social', 'Social Media', 'social', tabHref('social')),
+      ],
     },
     {
-      key: 'messages',
-      label: 'Messages & Forms',
-      section: 'content',
-      hidden: groupHidden(messageChildren),
-      children: messageChildren,
+      key: 'forms',
+      label: 'Forms & Mail',
+      items: [
+        item('forms-builder', 'Forms (sign-ups)', '', '/admin/forms-builder', { perm: 'forms-builder', attrs: 'data-nav-href="/admin/forms-builder"', keywords: 'form builder sign up' }),
+        item('forms-subs', 'Submitted forms', '', '/admin/forms-builder#/subs', {
+          perm: 'forms-builder',
+          badge: Number(options.formsNewCount || 0) || 0,
+          badgeLabel: `${Number(options.formsNewCount || 0) || 0} new submissions`,
+          attrs: 'data-nav-href="/admin/forms-builder#/subs"',
+          keywords: 'responses submissions',
+        }),
+        item('forms', 'Older forms', 'forms', tabHref('forms')),
+        item('mail', 'Staff Email', 'mail', tabHref('mail'), { keywords: 'email' }),
+        item('contact', 'Contact Form', 'contact', tabHref('contact')),
+      ],
     },
     {
       key: 'admin',
       label: 'Admin',
-      section: 'admin',
-      hidden: groupHidden(adminChildren),
-      children: adminChildren,
+      adminOnly: true,
+      items: [
+        item('users', 'Users', 'users', tabHref('users'), { admin: true, keywords: 'people permissions' }),
+        item('site', 'Site Settings', 'site', tabHref('site'), { admin: true }),
+        item('security-log', 'Security Log', 'security-log', tabHref('security-log'), { admin: true }),
+      ],
     },
   ];
+  for (const section of sections) {
+    section.visible = section.items.filter((entry) => !entry.hidden);
+    section.hidden = section.visible.length === 0;
+    section.direct = section.visible.length === 1;
+  }
 
-  const dashboard = item('dashboard', '🏠 Home', 'dashboard', tabHref('dashboard'), {
-    hidden: isHiddenFlag(hide('dashboard')),
+  const dashboard = item('dashboard', 'Home', 'dashboard', tabHref('dashboard'), { hidden: false });
+  const pageIndex = pages.map((page) => {
+    const slug = String(page.slug || '').trim().toLowerCase();
+    return { key: `page:${slug}`, slug, label: sidebarPageLabel(page), href: pageEditorHref(slug) };
   });
-
-  const currentKey = resolveCurrentKey(current, groups, dashboard);
+  const all = [dashboard, ...sections.flatMap((section) => section.items)];
+  const currentKey = resolveCurrentKey(current, all);
   return {
     dashboard,
-    groups,
+    sections,
+    groups: sections,
     pages,
-    showPageSettings,
+    pageIndex,
     currentKey,
-    hide,
     filtered,
-    items: [dashboard, ...groups.flatMap((group) => group.children)],
+    items: all,
   };
 }
 
-function resolveCurrentKey(current = {}, groups, dashboard) {
+function resolveCurrentKey(current = {}, items) {
   const route = String(current.route || '');
   const slug = String(current.slug || current.page || '').trim().toLowerCase();
   const tab = String(current.tab || '').trim().toLowerCase();
   if (route === 'fundraiser-cards' || tab === 'fundraiser-cards') return 'fundraiser-cards';
-  if (route === 'visual' && slug) return `page:${slug}`;
-  if (tab === 'pages' && slug === 'fundraising') return 'page-settings';
-  if (tab) {
-    const match = groups.flatMap((group) => group.children).find((child) => child.tab === tab);
-    if (match) return match.key;
-    if (tab === dashboard.tab) return dashboard.key;
+  if (route === 'events-manager') return 'events-manager';
+  if (route === 'forms-builder') return current.view === 'subs' ? 'forms-subs' : 'forms-builder';
+  if (route === 'visual' && slug) {
+    if (slug === 'sponsors') return 'sponsors-page';
+    if (slug === 'become-a-sponsor') return 'become-a-sponsor';
+    return 'pages';
   }
-  if (route === 'admin' || !route) return dashboard.key;
+  if (tab) {
+    const match = items.find((child) => child.tab === tab && !child.hidden);
+    if (match) return match.key;
+  }
+  if (route === 'admin' || !route) return 'dashboard';
   return '';
 }
 
-function renderNavItem(entry, currentKey) {
-  const hidden = entry.hidden ? ' hidden' : '';
-  const active = entry.key === currentKey ? ' active' : '';
+function renderNavItem(entry, currentKey, sectionLabel = '', extraClass = '') {
+  if (entry.hidden) return '';
+  const isCurrent = entry.key === currentKey;
   const tabAttr = entry.tab ? ` data-tab="${escapeAdminHtml(entry.tab)}"` : '';
   const href = entry.href || '#';
   const badge = Number(entry.badge) > 0
-    ? `<span class="admin-nav-badge" aria-label="${Number(entry.badge)} drafts awaiting approval">${Number(entry.badge)}</span>`
-    : '';
-  const currentAttr = entry.key === currentKey ? ' data-nav-current="1"' : '';
+    ? `<span class="admin-nav-badge sn-badge" aria-label="${escapeAdminHtml(entry.badgeLabel)}">${Number(entry.badge)}</span>`
+    : `<span class="admin-nav-badge sn-badge" data-sn-badge="${escapeAdminHtml(entry.key)}" hidden></span>`;
+  const adminPill = entry.admin ? '<span class="sn-admin-pill" aria-label="Admin only">ADMIN</span>' : '';
   const extra = entry.attrs ? ` ${entry.attrs}` : '';
-  return `<a class="admin-nav-item${active}" href="${escapeAdminHtml(href)}" data-nav-item="${escapeAdminHtml(entry.key)}"${tabAttr}${hidden}${extra}${currentAttr}>${escapeAdminHtml(entry.label)}${badge}</a>`;
+  const currentAttr = isCurrent ? ' aria-current="page" data-nav-current="1"' : '';
+  const section = sectionLabel ? ` data-nav-section-label="${escapeAdminHtml(sectionLabel)}"` : '';
+  const kw = entry.keywords ? ` data-nav-keywords="${escapeAdminHtml(entry.keywords)}"` : '';
+  const adminAttr = entry.admin ? ' data-nav-admin="1"' : '';
+  return `<a class="admin-nav-item sn-item${extraClass}${isCurrent ? ' active' : ''}" href="${escapeAdminHtml(href)}" data-nav-item="${escapeAdminHtml(entry.key)}"${tabAttr}${extra}${section}${kw}${adminAttr}${currentAttr}><span class="sn-label">${escapeAdminHtml(entry.label)}</span>${adminPill}${badge}</a>`;
 }
 
-function renderGroup(group, currentKey) {
-  const hidden = group.hidden ? ' hidden' : '';
-  const currentInGroup = group.children.some((child) => child.key === currentKey && !child.hidden);
-  const expanded = currentInGroup ? 'true' : 'false';
-  const subHidden = currentInGroup ? '' : ' hidden';
-  const items = group.children.map((child) => renderNavItem(child, currentKey)).join('');
-  const extra = group.key === 'pages'
-    ? `<p class="admin-menu-label" data-page-shortcuts-label${group.children.some((child) => child.kind === 'page') ? '' : ' hidden'}>Pages</p><div id="admin-page-shortcuts" class="admin-page-shortcuts">${
-      group.children.filter((child) => child.kind === 'page').map((child) => {
-        const current = child.key === currentKey;
-        return `<div class="admin-page-row"><a class="admin-page-edit${current ? ' active' : ''}" href="${escapeAdminHtml(child.href)}" data-page-slug="${escapeAdminHtml(child.slug)}" data-page-nav="${escapeAdminHtml(child.slug)}" data-nav-href="${escapeAdminHtml(child.href)}"${current ? ' data-nav-current="1"' : ''}>${escapeAdminHtml(child.label)}</a></div>`;
-      }).join('')
-    }</div>${
-      group.children.filter((child) => child.kind === 'page-settings').map((child) => {
-        const current = child.key === currentKey;
-        return `<div class="admin-menu-group" data-page-settings-menu><button type="button" class="admin-menu-parent admin-nav-item${current ? ' active' : ''}" data-page-settings-toggle aria-expanded="${current ? 'true' : 'false'}">⚙ Page settings</button><div class="admin-menu-sub" data-page-settings-sub${current ? '' : ' hidden'}><a class="admin-nav-item${current ? ' active' : ''}" href="${escapeAdminHtml(child.href)}" data-page-settings-link="fundraising" data-page-settings="fundraising" data-nav-href="${escapeAdminHtml(child.href)}" data-nav-item="page-settings-fundraising"${current ? ' data-nav-current="1"' : ''}>Fundraising</a></div></div>`;
-      }).join('')
-    }`
-    : items;
-  return `<div class="admin-menu-group" data-nav-group="${group.key}" ${group.attrs || ''}${hidden}>
-<button type="button" class="admin-menu-parent" data-nav-group-toggle="${group.key}" ${group.toggleAttrs || ''} aria-expanded="${expanded}">${escapeAdminHtml(group.label)}</button>
-<div class="admin-menu-sub" data-nav-group-sub="${group.key}" ${group.subAttrs || ''}${subHidden}>${extra}</div>
+function renderSection(section, currentKey) {
+  if (section.hidden) return '';
+  if (section.direct) {
+    // A section with exactly one allowed item becomes a direct link (plan 2.22).
+    const only = { ...section.visible[0] };
+    return `<div class="sn-section sn-section-direct" data-nav-section="${section.key}">${renderNavItem({ ...only, label: only.label }, currentKey, section.label, ' sn-direct')}</div>`;
+  }
+  const tag = section.adminOnly ? ' <span class="sn-admin-only">ADMIN ONLY</span>' : '';
+  const headId = `sn-h-${section.key}`;
+  return `<div class="sn-section" data-nav-section="${section.key}" role="group" aria-labelledby="${headId}">
+<h2 class="sn-head admin-menu-label" id="${headId}">${escapeAdminHtml(section.label)}${tag}</h2>
+${section.visible.map((entry) => renderNavItem(entry, currentKey, section.label)).join('')}
 </div>`;
 }
 
 export function listAdminNavTargets(options = {}) {
   const model = buildAdminNavModel(options);
-  return [model.dashboard, ...model.groups.flatMap((group) => group.children)]
-    .filter((item) => !item.hidden)
-    .map((item) => ({
-      key: item.key,
-      label: item.label,
-      href: item.href,
-      tab: item.tab || '',
+  return model.items
+    .filter((entry) => !entry.hidden)
+    .map((entry) => ({
+      key: entry.key,
+      label: entry.label,
+      href: entry.href,
+      tab: entry.tab || '',
+      admin: entry.admin,
     }));
 }
 
 export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
-  const v = String(assetVersion || 'dev');
+  const v = escapeAdminHtml(String(assetVersion || 'dev'));
   const model = buildAdminNavModel(options);
   const user = options.user || {};
   const displayName = escapeAdminHtml(user.display_name || user.username || '');
   const roleLabel = escapeAdminHtml(options.roleLabel || (user.role === 'admin' ? 'Super Admin' : displayName ? 'Editor' : ''));
-  const websiteGroups = model.groups.filter((group) => group.section === 'website');
-  const contentGroups = model.groups.filter((group) => group.section === 'content');
-  const adminGroups = model.groups.filter((group) => group.section === 'admin');
-  const websiteHidden = websiteGroups.every((group) => group.hidden) ? ' hidden' : '';
-  const contentHidden = contentGroups.every((group) => group.hidden) ? ' hidden' : '';
-  const adminHidden = adminGroups.every((group) => group.hidden) ? ' hidden' : '';
   const userBlock = displayName
-    ? `<div id="current-user" class="admin-user"><div class="admin-user-row"><b>${displayName}</b>${roleLabel ? `<span class="admin-role-pill">${roleLabel}</span>` : ''}</div></div>`
-    : '<div id="current-user" class="admin-user"></div>';
+    ? `<div id="current-user" class="admin-user sn-user"><span class="sn-avatar" aria-hidden="true">${escapeAdminHtml(initials(user.display_name || user.username))}</span><div class="admin-user-row"><b>${displayName}</b>${roleLabel ? `<span class="admin-role-pill">${roleLabel}</span>` : ''}</div></div>`
+    : '<div id="current-user" class="admin-user sn-user"></div>';
+  const pageIndex = model.pageIndex.length
+    ? `<div class="sn-page-index" data-sn-pages hidden>${model.pageIndex.map((page) => `<a href="${escapeAdminHtml(page.href)}" data-sn-page="${escapeAdminHtml(page.slug)}">${escapeAdminHtml(page.label)}</a>`).join('')}</div>`
+    : '';
 
-  return `<aside id="admin-sidebar" class="admin-sidebar" data-admin-nav-v2 aria-label="CMS sidebar">
+  return `<aside id="admin-sidebar" class="sn-side" data-admin-nav-v2 data-admin-nav-flat aria-label="Site Studio menu">
 ${renderAdminSidebarClose()}
-<div class="admin-brand"><img class="admin-brand-mark" src="/assets/efhs-admin-mark.png?v=${escapeAdminHtml(v)}" alt="East Forsyth Band eagle logo"><div><b>EFHS Band</b><small>Admin CMS</small></div></div>
-${userBlock}
-<label class="admin-nav-search"><span class="sr-only">Find a page or tool</span><input type="search" data-admin-nav-search placeholder="Find a page or tool…" autocomplete="off"></label>
-<nav class="admin-tabs admin-menu" aria-label="CMS navigation">
-${renderNavItem(model.dashboard, model.currentKey)}
-<p class="admin-menu-label" data-nav-section="website"${websiteHidden}>Website</p>
-${websiteGroups.map((group) => renderGroup(group, model.currentKey)).join('')}
-<p class="admin-menu-label" data-nav-section="content"${contentHidden}>Content</p>
-${contentGroups.map((group) => renderGroup(group, model.currentKey)).join('')}
-<p class="admin-menu-label" data-nav-section="admin"${adminHidden}>Admin</p>
-${adminGroups.map((group) => renderGroup(group, model.currentKey)).join('')}
+<a class="sn-brand" href="/admin"><span class="sn-logos"><img src="/assets/efhs-admin-mark.png?v=${v}" alt="East Forsyth Band eagle logo" width="34" height="34"><img src="/assets/efhs-blue-regiment-mark.png?v=${v}" alt="East Forsyth Blue Regiment logo" width="34" height="34"></span><span class="sn-brand-text"><b>Site Studio</b><small>EFHS BAND</small></span></a>
+<div class="admin-nav-search sn-search"><label class="sn-search-box">${SEARCH_ICON}<span class="sr-only">Find a page or tool</span><input type="search" data-admin-nav-search placeholder="Find a page…" autocomplete="off" aria-keyshortcuts="Control+K /"></label><kbd class="sn-kbd" aria-hidden="true">Ctrl K</kbd></div>
+<nav class="admin-menu sn-nav" aria-label="Site Studio navigation">
+${renderNavItem(model.dashboard, model.currentKey, '', ' sn-home')}
+${model.sections.map((section) => renderSection(section, model.currentKey)).join('')}
+<p class="sn-empty" data-sn-empty hidden>No matches. Press Enter to search everything.</p>
 </nav>
-<div class="admin-sidebar-footer">
-<button type="button" class="admin-change-password" data-open-password>Change password</button>
+${pageIndex}
+<div class="admin-sidebar-footer sn-foot">
+${userBlock}
+<div class="sn-foot-actions"><button type="button" class="admin-change-password" data-open-password>Change password</button>
 <form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout">
 <button class="admin-logout" type="submit">Log out</button>
-</form>
+</form></div>
 </div>
 </aside>`;
 }

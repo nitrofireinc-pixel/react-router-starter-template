@@ -8,6 +8,7 @@ import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
+  adminNavAssetVersion,
 } from './admin-chrome.mjs';
 import {
   contentOnlyForbiddenHtmlViolation,
@@ -965,11 +966,11 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Editing ${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css?v=${v}">
-  <link rel="stylesheet" href="/admin-nav.css?v=${v}">
+  <link rel="stylesheet" href="/admin-nav.css?v=${adminNavAssetVersion(v)}">
   <link rel="stylesheet" href="/admin-visual.css?v=${v}">
 </head>
-<body class="visual-editor-body${canLayout ? '' : ' visual-content-only'}" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}" data-can-layout="${canLayout ? '1' : '0'}" data-can-settings="${canSettings ? '1' : '0'}">
-  ${renderAdminChromeBar()}
+<body class="visual-editor-body sn-body${canLayout ? '' : ' visual-content-only'}" data-visual-slug="${escapeAttr(slug)}" data-visual-path="${escapeAttr(path)}" data-visual-active="${pageActive ? '1' : '0'}" data-can-layout="${canLayout ? '1' : '0'}" data-can-settings="${canSettings ? '1' : '0'}">
+  ${renderAdminChromeBar({ assetVersion: v, user: options.user })}
   ${renderAdminSidebarBackdrop()}
   ${renderAdminSidebarHtml(v, options)}
   <div class="visual-phone-gate" data-visual-phone-gate>
@@ -1048,7 +1049,7 @@ export function renderVisualEditorHtml(assetVersion = 'dev', options = {}) {
     </div>
   </div>
   ${styleSink}
-  <script src="/admin-nav.js?v=${v}"></script>
+  <script src="/admin-nav.js?v=${adminNavAssetVersion(v)}"></script>
   <script src="/vendor/grapesjs/grapes.min.js?v=${v}"></script>
   <script src="/admin-visual.js?v=${v}"></script>
 </body>

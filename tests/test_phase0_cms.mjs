@@ -169,7 +169,7 @@ test('Phase 0.6 calendar or events permission opens Schedule Board, not the lega
   assert.match(adminSrc, /button\.dataset\.tab === 'events'/);
   const chromeSrc = readFileSync(join(root, 'worker/src/admin-chrome.mjs'), 'utf8');
   assert.match(chromeSrc, /DEFAULT_HIDDEN_TABS = new Set\(\['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log'\]\)/);
-  assert.match(chromeSrc, /Events & Schedule Board/);
+  assert.match(chromeSrc, /'Schedule Board'/);
   assert.match(workerSrc, /canNotifyCalendarSubscribers\(auth\.user\)/);
   assert.doesNotMatch(adminSrc, /\['Calendar Events'/);
 });

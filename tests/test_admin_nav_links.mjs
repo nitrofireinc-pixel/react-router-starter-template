@@ -18,11 +18,7 @@ const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
 
 const SUPER_ADMIN = { id: 1, role: 'admin', username: 'agent@efhsband.org', display_name: 'Trevor', permissions: [] };
 const PAGES = DEFAULT_CMS_PAGES.map((page) => ({
-  slug: page.slug,
-  path: page.path,
-  title: page.title,
-  nav_order: page.nav_order,
-  active: page.active,
+  slug: page.slug, path: page.path, title: page.title, nav_order: page.nav_order, active: page.active,
 }));
 
 function navOptions(current = {}) {
@@ -37,21 +33,17 @@ function navOptions(current = {}) {
 }
 
 function navCore(html) {
-  const start = html.indexOf('class="admin-tabs admin-menu"');
+  const start = html.indexOf('class="admin-menu sn-nav"');
   const end = html.indexOf('admin-sidebar-footer');
   assert.ok(start > 0 && end > start, 'sidebar nav markers');
   return html.slice(start, end)
     .replace(/ active/g, '')
-    .replace(/ data-nav-current="[^"]*"/g, '')
-    .replace(/aria-expanded="[^"]*"/g, 'aria-expanded="*"')
-    .replace(/data-nav-group-sub="([^"]+)"\s*(hidden)?/g, 'data-nav-group-sub="$1"');
+    .replace(/ aria-current="page" data-nav-current="1"/g, '');
 }
 
 function knownAdminTabs() {
   const tabs = new Set();
-  for (const match of workerSrc.matchAll(/id="tab-([a-z0-9-]+)"/g)) {
-    tabs.add(match[1]);
-  }
+  for (const match of workerSrc.matchAll(/id="tab-([a-z0-9-]+)"/g)) tabs.add(match[1]);
   return tabs;
 }
 
@@ -79,20 +71,12 @@ function createEnv() {
     getBookmark() { return 'bookmark'; },
   };
   return {
-    DB: {
-      withSession() { return session; },
-      prepare: session.prepare,
-      batch: session.batch,
-    },
+    DB: { withSession() { return session; }, prepare: session.prepare, batch: session.batch },
     ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } },
   };
 }
 
-function openGroupKeys(html) {
-  return [...html.matchAll(/data-nav-group-toggle="([^"]+)"[^>]*aria-expanded="true"/g)].map((match) => match[1]);
-}
-
-test('reorganized sidebar is identical on /admin, visual, and fundraiser-cards', () => {
+test('flat sidebar is identical on /admin, visual, and fundraiser-cards', () => {
   const opts = navOptions();
   const admin = renderAdminSidebarHtml(ASSET_VERSION, { ...opts, current: { route: 'admin' } });
   const visual = renderVisualEditorHtml(ASSET_VERSION, { ...opts, slug: 'fundraising', title: 'Fundraising', path: '/fundraising.html', active: 1 });
@@ -101,32 +85,41 @@ test('reorganized sidebar is identical on /admin, visual, and fundraiser-cards',
   assert.match(admin, /data-admin-nav-search/);
   assert.match(admin, /admin-role-pill/);
   assert.match(admin, /Fundraiser cards/);
-  assert.match(admin, /admin-nav-badge/);
+  assert.match(admin, /admin-nav-badge sn-badge" aria-label="1 drafts/);
   assert.equal(navCore(admin), navCore(visual));
   assert.equal(navCore(admin), navCore(cards));
 });
 
-test('only the current screen group starts open', () => {
+test('current screen gets aria-current="page"; page titles stay in the launcher index only', () => {
   const cards = renderFundraiserCardsAdminHtml(ASSET_VERSION, navOptions({ route: 'fundraiser-cards' }));
   const visual = renderVisualEditorHtml(ASSET_VERSION, {
-    ...navOptions({ route: 'visual', slug: 'fundraising' }),
-    slug: 'fundraising',
-    title: 'Fundraising',
-    path: '/fundraising.html',
-    active: 1,
+    ...navOptions({ route: 'visual', slug: 'fundraising' }), slug: 'fundraising', title: 'Fundraising', path: '/fundraising.html', active: 1,
   });
-  const admin = renderAdminSidebarHtml(ASSET_VERSION, navOptions({ route: 'admin' }));
-  assert.deepEqual(openGroupKeys(cards), ['fundraising']);
-  assert.deepEqual(openGroupKeys(visual), ['pages']);
-  assert.deepEqual(openGroupKeys(admin), []);
-  assert.match(visual, /admin-page-edit active[^>]*>Fundraising</);
-  assert.match(cards, /class="admin-nav-item active"[^>]*data-nav-item="fundraiser-cards"/);
+  const sponsorsVisual = renderAdminSidebarHtml(ASSET_VERSION, navOptions({ route: 'visual', slug: 'sponsors' }));
+  assert.match(cards, /data-nav-item="fundraiser-cards"[^>]*aria-current="page"/);
+  assert.match(visual, /data-nav-item="pages"[^>]*aria-current="page"/);
+  assert.match(sponsorsVisual, /data-nav-item="sponsors-page"[^>]*aria-current="page"/);
+  assert.match(visual, /<div class="sn-page-index" data-sn-pages hidden>[\s\S]*data-sn-page="fundraising">Fundraising</);
+  const events = renderAdminSidebarHtml(ASSET_VERSION, { ...navOptions({ route: 'events-manager' }), pages: [] });
+  assert.match(events, /data-nav-item="events-manager"[^>]*aria-current="page"/);
+  assert.doesNotMatch(events, /data-sn-pages/);
+});
+
+test('event manager and Form Builder use the shared sidebar without extra queries', () => {
+  for (const fn of ['handleEventsManagerPage', 'handleFormsBuilderPage']) {
+    const start = workerSrc.indexOf(`async function ${fn}(`);
+    const body = workerSrc.slice(start, workerSrc.indexOf('\nasync function ', start + 10));
+    assert.match(body, /loadAdminNavContext\(env, user, \{ route: '[a-z-]+' \}, \{ skipQueries: true/);
+    assert.match(body, /renderAdminNavFragment\(nav\)/);
+    assert.doesNotMatch(body, /ev-rail/);
+    assert.match(body, /admin-nav\.js\?v=\$\{ADMIN_NAV_VERSION\}/);
+  }
 });
 
 test('every Super Admin sidebar item has a working tab or admin URL', async () => {
   const tabs = knownAdminTabs();
   const targets = listAdminNavTargets(navOptions({ route: 'admin' }));
-  assert.ok(targets.length >= 12, `expected a full Super Admin menu, got ${targets.length}`);
+  assert.ok(targets.length >= 20, `expected a full Super Admin menu, got ${targets.length}`);
 
   resetDbInitCache();
   const env = createEnv();
@@ -137,14 +130,6 @@ test('every Super Admin sidebar item has a working tab or admin URL', async () =
     assert.ok(href.startsWith('/admin'), `${item.label} missing admin href`);
     if (item.tab && item.tab !== 'fundraiser-cards' && item.tab !== 'pages') {
       assert.ok(tabs.has(item.tab), `${item.label} missing #tab-${item.tab}`);
-    }
-    if (href.startsWith('/admin/visual/')) {
-      const slug = decodeURIComponent(href.slice('/admin/visual/'.length));
-      assert.ok(/^[a-z0-9-]+$/.test(slug), `${item.label} bad visual slug`);
-      assert.match(workerSrc, /VISUAL_EDITOR_PATH_PREFIX/);
-    }
-    if (href === '/admin/fundraiser-cards') {
-      assert.match(workerSrc, /pathname === '\/admin\/fundraiser-cards'/);
     }
     const url = new URL(href, 'https://efhsband-dev.example');
     const response = await worker.fetch(new Request(url), env, ctx);

@@ -260,6 +260,7 @@ import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
+  adminNavAssetVersion,
 } from './admin-chrome.mjs';
 import {
   sanitizeCmsPageHtml as sanitizeCmsPageHtmlAllowlist,
@@ -591,6 +592,8 @@ export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
 export const ASSET_VERSION = 'cms-p2-20261024l';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home1`;
+/** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
+export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
 export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
@@ -8191,13 +8194,26 @@ export function userPageCapabilities(user, slugs = []) {
   };
 }
 
+/** Mirrors admin.js isScheduleBoardOnlyUser: calendar-only editors skip Staff Email. */
+export function isScheduleOnlyUser(user) {
+  if (!user || isSuperAdmin(user) || !canAccessScheduleBoard(user)) return false;
+  const perms = parsePermissions(user.permissions).map((item) => String(item).trim().toLowerCase());
+  if (!perms.length) return false;
+  return perms.every((item) => item === 'events' || item === 'events:manage' || item === 'calendar');
+}
+
 export function adminSidebarAllows(user, tab) {
   if (!user) return true;
   switch (String(tab || '')) {
     case 'dashboard':
-    case 'mail':
     case 'minutes':
       return true;
+    case 'mail':
+      return !isScheduleOnlyUser(user);
+    case 'themes':
+      return hasPermission(user, 'site');
+    case 'forms-builder':
+      return canAccessFormsPage(user);
     case 'staff':
       return hasPermission(user, 'staff') || canEditPageContent(user, 'directors');
     case 'ensembles':
@@ -14207,9 +14223,17 @@ async function handleLogin(request, env, ctx = null) {
   });
 }
 
-async function loadAdminNavContext(env, user, current = {}) {
+async function loadAdminNavContext(env, user, current = {}, extra = {}) {
   let pages = [];
   let fundraiserDraftCount = 0;
+  const formsAccessIds = Array.isArray(extra.formsAccessIds) ? extra.formsAccessIds : [];
+  const allow = (tab) => (tab === 'forms-builder' || tab === 'forms'
+    ? canAccessFormsPage(user, formsAccessIds)
+    : adminSidebarAllows(user, tab));
+  if (extra.skipQueries) {
+    // Event manager / Form Builder: no extra D1 reads for the menu (free-plan rule).
+    return { user, allow, pages, fundraiserDraftCount, current, roleLabel: isSuperAdmin(user) ? 'Super Admin' : 'Editor' };
+  }
   try {
     const rows = await env.DB.prepare(
       'SELECT slug, path, title, nav_order, active FROM cms_pages ORDER BY nav_order, id',
@@ -14235,12 +14259,18 @@ async function loadAdminNavContext(env, user, current = {}) {
   }
   return {
     user,
-    allow: (tab) => adminSidebarAllows(user, tab),
+    allow,
     pages,
     fundraiserDraftCount,
     current,
     roleLabel: isSuperAdmin(user) ? 'Super Admin' : 'Editor',
   };
+}
+
+function renderAdminNavFragment(nav) {
+  return `${renderAdminChromeBar({ assetVersion: ASSET_VERSION, user: nav.user })}
+${renderAdminSidebarBackdrop()}
+${renderAdminSidebarHtml(ASSET_VERSION, nav)}`;
 }
 
 function renderAdminAppHtml(user, nav = {}) {
@@ -14356,24 +14386,17 @@ async function handleEventsManagerPage(request, env) {
     return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: calendar or events' });
   }
   const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
-  const rail = [
-    ['🏠', 'Staff menu', '/admin'],
-    ['📄', 'Pages', '/admin?tab=pages'],
-    ['📅', 'Calendar events', '/admin/events-manager', true],
-    ['💰', 'Fundraiser cards', '/admin/fundraiser-cards'],
-    ['🤝', 'Sponsors', '/admin?tab=sponsors'],
-    ['👥', 'Boosters', '/admin?tab=booster-members'],
-    ['⚙️', 'Site settings', '/admin?tab=site'],
-  ].map(([i, t, h, cur]) => `<a href="${h}" title="${t}" aria-label="${t}"${cur ? ' aria-current="page"' : ''}><span aria-hidden="true">${i}</span></a>`).join('');
+  const nav = await loadAdminNavContext(env, user, { route: 'events-manager' }, { skipQueries: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Calendar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"></head>
-<body class="ev-app" data-can-notify="${canNotifyCalendarSubscribers(user) ? '1' : ''}">
+<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<body class="ev-app sn-body" data-can-notify="${canNotifyCalendarSubscribers(user) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Calendar</span></a>
 <div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
-<div class="ev-body"><nav class="ev-rail" aria-label="Staff areas">${rail}</nav>
+${renderAdminNavFragment(nav)}
+<div class="ev-body">
 <main class="ev-main" id="ev-root" aria-label="Calendar events"><p class="ev-loading">Loading calendar…</p></main></div>
-<script src="/admin-events.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-events.js?v=${ASSET_VERSION}" defer></script></body></html>`;
   return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
@@ -14388,22 +14411,17 @@ async function handleFormsBuilderPage(request, env) {
     return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: forms' });
   }
   const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
-  const rail = [
-    ['🏠', 'Staff menu', '/admin'],
-    ['📄', 'Pages', '/admin?tab=pages'],
-    ['📋', 'Form Builder', '/admin/forms-builder', true],
-    ['📅', 'Calendar events', '/admin/events-manager'],
-    ['⚙️', 'Site settings', '/admin?tab=site'],
-  ].map(([i, t, h, cur]) => `<a href="${h}" title="${t}" aria-label="${t}"${cur ? ' aria-current="page"' : ''}><span aria-hidden="true">${i}</span></a>`).join('');
+  const nav = await loadAdminNavContext(env, user, { route: 'forms-builder' }, { skipQueries: true, formsAccessIds: accessIds });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Form Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style></head>
-<body class="ev-app fb-app" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
+<link rel="stylesheet" href="/admin-events.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<body class="ev-app fb-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Form Builder</span></a>
 <div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
-<div class="ev-body"><nav class="ev-rail" aria-label="Staff areas">${rail}</nav>
+${renderAdminNavFragment(nav)}
+<div class="ev-body">
 <main class="ev-main fb-main" id="fb-root" aria-label="Form Builder"><p class="ev-loading">Loading forms…</p></main></div>
-<script src="/admin-forms.js?v=${ASSET_VERSION}" defer></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-forms.js?v=${ADMIN_NAV_VERSION}" defer></script></body></html>`;
   return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
@@ -15432,8 +15450,8 @@ export default {
 
 const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="device" value="" autocomplete="off"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script><script>(function(){try{var field=document.querySelector("input[name=device]");if(!field)return;var fill=function(){try{field.value=JSON.stringify({screen:[screen.width||0,screen.height||0],dpr:window.devicePixelRatio||1,viewport:[window.innerWidth||0,window.innerHeight||0],tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),language:navigator.language||"",platform:navigator.platform||""});}catch(e){}};fill();var form=field.form;if(form)form.addEventListener("submit",fill);}catch(e){}})();</script></body></html>`;
 
-const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-home.css?v=${ADMIN_HOME_VERSION}"></head><body class="admin-body"><main class="admin-shell cms-shell image-admin-shell">
-${renderAdminChromeBar()}
+const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-home.css?v=${ADMIN_HOME_VERSION}"></head><body class="admin-body sn-body"><main class="admin-shell cms-shell image-admin-shell">
+${renderAdminChromeBar({ assetVersion: ASSET_VERSION })}
 ${renderAdminSidebarBackdrop()}
 __ADMIN_SIDEBAR__
 <section class="admin-workspace">
@@ -16022,7 +16040,7 @@ __ADMIN_SIDEBAR__
     </div>
   </form>
 </dialog>
-<script src="/admin-nav.js?v=${ASSET_VERSION}"></script><script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ASSET_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ADMIN_HOME_VERSION}"></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}"></script><script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ASSET_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ADMIN_HOME_VERSION}"></script></body></html>`;
 
 function withSeoRobotsHeader(response, url) {
   const path = url.pathname || '';

@@ -327,6 +327,7 @@
   // ---------------- Submitted forms ----------------
   async function submissions(formId, subId) {
     const menu = await api('/api/admin/forms-v2/submitted');
+    window.efhsAdminNav?.setBadge?.('forms-subs', (menu.forms || []).reduce((n, f) => n + (Number(f.new_count) || 0), 0));
     if (!formId) {
       put(topNav('subs'), el('section', { class: 'fb-page' }, el('h1', { text: 'Submitted forms' }),
         el('p', { class: 'fb-muted', text: 'Sign-ups are kept for 18 months, then removed automatically each night.' }),
