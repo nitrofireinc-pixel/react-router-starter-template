@@ -15502,6 +15502,10 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/in-kind' || url.pathname === '/in-kind/') {
       return Response.redirect(new URL('/in-kind.html', url.origin).toString(), 302);
     }
+    if (url.pathname === '/favicon.ico') {
+      // Browsers probe /favicon.ico; point it at the icon the pages already use.
+      return Response.redirect(new URL('/assets/efhs-logo.png', url.origin).toString(), 301);
+    }
     if (/^\/letterman-jacket(-v2)?(\/|\.html)?$/.test(url.pathname)) {
       // Letterman sign-up retired 2026-10-25: send visitors to the homepage.
       return Response.redirect(new URL('/', url.origin).toString(), 301);
