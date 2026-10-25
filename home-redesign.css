@@ -1352,3 +1352,4 @@ body.efhs-theme .fundraising-hero-card,
 
 
 
+@media (max-width:760px){body.home-page{padding-bottom:calc(67px + env(safe-area-inset-bottom))}}
