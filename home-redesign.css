@@ -1353,3 +1353,5 @@ body.efhs-theme .fundraising-hero-card,
 
 
 @media (max-width:760px){body.home-page{padding-bottom:calc(67px + env(safe-area-inset-bottom))}}
+@media (max-width:760px){body.home-page.ss-reveal-armed .sticky-support{transform:translateY(100%);opacity:0;visibility:hidden;pointer-events:none;transition:transform .25s ease,opacity .25s ease,visibility 0s linear .25s}body.home-page.ss-reveal-armed .sticky-support.is-revealed{transform:none;opacity:1;visibility:visible;pointer-events:auto;transition:transform .25s ease,opacity .25s ease,visibility 0s}}
+@media (max-width:760px) and (prefers-reduced-motion:reduce){body.home-page.ss-reveal-armed .sticky-support{transition:none}}

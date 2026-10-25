@@ -1219,3 +1219,20 @@ function syncAddToHomeButtonState(button) {
     watchStickyStack();
   });
 })();
+
+// Home (phones): keep the sticky Join/Support bar hidden until the visitor scrolls past the hero.
+(function () {
+  function initStickySupportReveal() {
+    var bar = document.querySelector('body.home-page .sticky-support');
+    var hero = document.querySelector('body.home-page .hero');
+    if (!bar || !hero || !('IntersectionObserver' in window)) return;
+    document.body.classList.add('ss-reveal-armed');
+    var obs = new IntersectionObserver(function (entries) {
+      var pastHero = !entries[0].isIntersecting;
+      bar.classList.toggle('is-revealed', pastHero);
+    });
+    obs.observe(hero);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initStickySupportReveal);
+  else initStickySupportReveal();
+})();
