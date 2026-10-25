@@ -7738,6 +7738,8 @@ function renderPublicPageBody(page, sponsors = [], staff = [], boosterMembers = 
   if (page.studio_html && !isHomeSlug && extras.home && page.body_html.includes('data-home-slot')) {
     page = { ...page, body_html: fillLiveSlots(page.body_html, extras.home) };
   }
+  // Studio-published form pages: the page is the Studio HTML (form blocks already filled).
+  if (page.studio_html && (page.slug === 'letterman-jacket' || page.slug === 'in-kind')) return page.body_html;
   if (page.slug === 'sponsors') return renderSponsorPageBody(page, sponsors);
   if (page.slug === 'become-a-sponsor') return renderBecomeSponsorPageBody(page);
   if (page.slug === 'in-kind') return renderInKindPageBody(page);

@@ -278,4 +278,8 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--base', required=True); ap.add_argument('--cookies'); ap.add_argument('--out', default='sweep-out')
     ap.add_argument('--expect-version', help='ADMIN_NAV_VERSION the build should serve')
-    sys.exit(asyncio.run(Sweep(ap.parse_args()).run()))
+    ap.add_argument('--widths', help='comma list, e.g. 390,1024,1280')
+    a = ap.parse_args()
+    if a.widths:
+        WIDTHS[:] = [int(x) for x in a.widths.split(',')]
+    sys.exit(asyncio.run(Sweep(a).run()))

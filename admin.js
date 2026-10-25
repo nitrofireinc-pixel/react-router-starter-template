@@ -3153,7 +3153,7 @@ function pageShortcutLabel(page) {
 const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket']);
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['in-kind', 'letterman-jacket']);
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set([]); // every page opens in Site Studio
 
 function isVisualEditorPageSlug(slug) {
   const key = String(slug || '').trim().toLowerCase();
@@ -3161,7 +3161,7 @@ function isVisualEditorPageSlug(slug) {
 }
 
 function visualEditorHref(slug) {
-  return `/admin/visual/${encodeURIComponent(String(slug || '').trim().toLowerCase())}`;
+  return `/admin/studio/${encodeURIComponent(String(slug || '').trim().toLowerCase())}`;
 }
 
 function isFormMakerPage(page) {

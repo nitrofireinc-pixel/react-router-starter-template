@@ -1,4 +1,4 @@
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['home', 'in-kind', 'letterman-jacket']);
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set([]); // every page opens in Site Studio
 const DEFAULT_HIDDEN_TABS = new Set(['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log']);
 const PAGE_LABELS = {
   home: 'Home',
@@ -8,7 +8,7 @@ const PAGE_LABELS = {
 };
 
 /** Admin-only cache key for the 14d-1 nav assets; public ASSET_VERSION stays untouched. */
-export const ADMIN_NAV_REV = 'nav15s';
+export const ADMIN_NAV_REV = 'nav15t';
 export function adminNavAssetVersion(assetVersion = 'dev') {
   return `${String(assetVersion || 'dev')}-${ADMIN_NAV_REV}`;
 }
@@ -58,7 +58,7 @@ export function isVisualEditorPageSlug(slug) {
 }
 
 export function visualEditorHref(slug) {
-  return `/admin/visual/${encodeURIComponent(String(slug || '').trim().toLowerCase())}`;
+  return `/admin/studio/${encodeURIComponent(String(slug || '').trim().toLowerCase())}`;
 }
 
 export function sidebarPageLabel(page = {}) {

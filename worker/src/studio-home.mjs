@@ -100,7 +100,7 @@ export async function loadStudioHome(env, { perms = {}, canEditSlug = () => fals
       title: String(d.title || d.slug).replace(/\s*\|\s*East Forsyth Band$/i, ''),
       by: d.by_name || '',
       updated_at: d.updated_at,
-      href: `/admin/visual/${encodeURIComponent(d.slug)}`,
+      href: `/admin/studio/${encodeURIComponent(d.slug)}`,
     }));
   return {
     greeting: greetingFor(now),
