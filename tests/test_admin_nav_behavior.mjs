@@ -241,3 +241,17 @@ test('390: bottom bar (Home, section, Find, More); More sheet = icon grid, Close
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('admin-nav-toggle')), true);
   });
 });
+
+for (const w of [1024, 1280]) {
+  test(`${w}: Website flyout shows the flat list, no phone More grid or back button`, async (t) => {
+    await withPage(t, w, 900, '/admin', async (page) => {
+      await page.click('.sn-rail button[data-rail-section="website"]');
+      await page.waitForTimeout(260);
+      assert.equal(await page.isVisible('.sn-section[data-nav-section="website"]'), true);
+      const v = await page.evaluate(() => ({
+        more: [...document.querySelectorAll('.sn-more,.sn-more-back')].filter((el) => el.offsetParent).length,
+      }));
+      assert.equal(v.more, 0);
+    });
+  });
+}

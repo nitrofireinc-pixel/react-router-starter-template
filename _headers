@@ -39,3 +39,33 @@
 /manifest.webmanifest
   Cache-Control: no-store
   Content-Type: application/manifest+json; charset=utf-8
+
+# Admin nav-rev assets: short cache so a request that races a deploy can't pin stale code for a year.
+/admin-nav.js
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-nav.css
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-events.js
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-events.css
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-people.js
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-people.css
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+
+/admin-forms.js
+  ! Cache-Control
+  Cache-Control: public, max-age=300, must-revalidate
+

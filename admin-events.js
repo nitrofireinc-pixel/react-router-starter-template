@@ -774,6 +774,7 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
     if (/^\d{4}-\d{2}$/.test(q || "") && years().includes(Number(q.slice(0, 4)))) { state.year = Number(q.slice(0, 4)); state.month = Number(q.slice(5, 7)) - 1; }
     shell(); bind();
     if (isPhone()) state.picked = state.year === Number(d.slice(0, 4)) && state.month === Number(d.slice(5, 7)) - 1 ? d : "";
+    render(); // show the current month right away; events fill in when the load finishes
     try { await load(); } catch (err) { setStatus(err.message || "Could not load events", true); }
     render();
   }

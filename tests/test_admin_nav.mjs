@@ -165,3 +165,11 @@ test('14d-2 phone More sheet: icon grid tiles for sections plus Account, back bu
   for (const key of ['website', 'calendar', 'money', 'account']) assert.match(html, new RegExp(`data-sn-more-key="${key}"`));
   assert.match(html, /data-sn-more-back>‹ More</);
 });
+
+test('14d-2: More grid/back are hidden outside the phone sheet; nav assets get a short cache', () => {
+  const css = readFileSync(new URL('../admin-nav.css', import.meta.url), 'utf8');
+  const top = css.slice(0, css.indexOf('@media (max-width:699px)'));
+  assert.match(top, /\.sn-more,\.sn-more-back\{display:none!important\}/);
+  const headers = readFileSync(new URL('../_headers', import.meta.url), 'utf8');
+  assert.match(headers, /\/admin-nav\.js\n  ! Cache-Control\n  Cache-Control: public, max-age=300, must-revalidate/);
+});
