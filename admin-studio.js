@@ -1,6 +1,8 @@
 /* Site Studio page editor: WYSIWYG canvas, palette drag, move/resize with
  * snap + no-overlap hints, inline text editing, undo/redo, draft autosave.
- * Autosave writes the DRAFT only. Nothing goes live until Publish is pressed. */
+ * Autosave writes the DRAFT only. Nothing goes live until Publish is pressed.
+ * Right-click text or an image and choose Add link. ← CMS returns to the staff menu.
+ * The live studio page inlines this file. */
 (() => {
   const slug = document.body.dataset.slug;
   const api = `/api/admin/studio/pages/${slug}`;
@@ -128,6 +130,66 @@
     return toks.map((t) => t.tag ?? t.text).join('');
   }
   const openTags = (html) => tokens(html).filter((t) => t.tag && !t.tag.startsWith('</') && !t.tag.startsWith('<!')).map((t) => t.tag);
+  const LINKABLE = new Set(['heading', 'text', 'image', 'button', 'el', 'card', 'html']);
+  const anchorIndex = (html) => openTags(html).findIndex((t) => /^<a\b/i.test(t));
+  function removeAttr(html, tagIndex, name) {
+    const toks = tokens(html); let n = -1;
+    for (const t of toks) {
+      if (t.tag == null || t.tag.startsWith('</') || t.tag.startsWith('<!')) continue;
+      n += 1; if (n !== tagIndex) continue;
+      t.tag = t.tag.replace(new RegExp(`\\s${name}="[^"]*"`), '');
+    }
+    return toks.map((t) => t.tag ?? t.text).join('');
+  }
+  function normalizeHref(raw) {
+    const href = String(raw || '').trim();
+    if (!href) return '';
+    if (/[\s<>"]/.test(href) || /^javascript:/i.test(href)) return null;
+    if (/^(https?:|mailto:|tel:)/i.test(href)) return href;
+    if (href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//'))) return href;
+    if (/^www\./i.test(href)) return `https://${href}`;
+    if (/^[a-z0-9.-]+\.[a-z]{2,}([/?#].*)?$/i.test(href)) return `https://${href}`;
+    if (/^[a-z0-9][a-z0-9._/-]*\.[a-z0-9]{1,8}([?#].*)?$/i.test(href)) return `/${href.replace(/^\.\//, '')}`;
+    return null;
+  }
+  function findAny(id) {
+    const hit = findBlock(id); if (hit) return hit.block;
+    const walk = (list) => {
+      for (const b of list || []) {
+        if (b.id === id) return b;
+        const inner = walk(b.props?.children);
+        if (inner) return inner;
+      }
+      return null;
+    };
+    for (const section of layout.sections || []) { const b = walk(section.blocks); if (b) return b; }
+    return null;
+  }
+  function readHref(b) {
+    if (!b || !LINKABLE.has(b.type)) return null;
+    const props = b.props || {};
+    if (b.type === 'el') {
+      const i = anchorIndex(props.html);
+      if (i >= 0) return tagAttr(openTags(props.html)[i], 'href') || '';
+    }
+    return props.href || '';
+  }
+  function writeHref(b, href) {
+    const props = b.props || (b.props = {});
+    if (b.type === 'el') {
+      const i = anchorIndex(props.html);
+      if (i >= 0) {
+        props.html = href ? withAttr(props.html, i, 'href', href) : removeAttr(props.html, i, 'href');
+        delete props.href;
+        return;
+      }
+    }
+    if (href) props.href = href; else delete props.href;
+  }
+  function hasInnerLink(b) {
+    const kids = b.props?.children || [];
+    return kids.some((k) => (k.props && k.props.href) || (k.type === 'el' && anchorIndex(k.props?.html || '') >= 0) || hasInnerLink(k));
+  }
   const rootTag = (html) => (String(html || '').match(/^<([a-zA-Z0-9-]+)/)?.[1] || '').toLowerCase();
   const liveInfo = (b) => (state?.live_sources || {})[b.props?.source] || { label: b.props?.source || 'another page', admin: '/admin.html' };
   const typeName = (b) => {
@@ -715,6 +777,74 @@
     d.addEventListener('touchend', end); d.addEventListener('touchcancel', () => { clearTimeout(lp); lp = null; dragging = false; });
     d.addEventListener('contextmenu', (e) => { if (isMobile()) e.preventDefault(); });
   }
+  function ensureExit() {
+    if ($('[data-exit-cms]')) return;
+    const host = $('.st-top-right') || $('.st-tb-right');
+    if (!host) return;
+    const a = el('a', { class: 'st-exit', href: '/admin', 'data-exit-cms': '', title: 'Back to the main CMS', text: '← CMS' });
+    host.prepend(a);
+  }
+  function ensureLinkUi() {
+    if ($('[data-link-menu]')) return;
+    document.head.append(el('style', { text: '.st-exit{color:#fff;font-weight:800;font-size:13px;text-decoration:none;border:1px solid rgba(255,255,255,.5);border-radius:999px;padding:4px 10px;white-space:nowrap;margin-right:8px}.st-linkmenu{position:fixed;z-index:80;background:#fff;border:1px solid #d6dce8;border-radius:10px;box-shadow:0 12px 30px rgba(10,30,70,.2);padding:6px;min-width:160px}.st-linkmenu button{display:block;width:100%;text-align:left;border:0;background:#fff;color:#16233d;font:700 13px/1.2 "Work Sans",system-ui,sans-serif;padding:8px 10px;border-radius:7px;cursor:pointer}.st-linkmenu button:hover{background:#eef3fb}.st-linkpop{position:fixed;z-index:81;left:50%;top:18%;transform:translateX(-50%);width:min(420px,calc(100% - 24px));background:#fff;border:1px solid #d6dce8;border-radius:14px;box-shadow:0 18px 50px rgba(10,30,70,.28);padding:16px}.st-linkpop h2{margin:0 0 6px;font-size:18px;color:#0b2a5b}.st-linkpop p{margin:0 0 8px;color:#5b6782;font-size:13px}.st-linkpop input{width:100%;box-sizing:border-box;font:inherit;padding:8px 10px;border:1px solid #c4cbd9;border-radius:8px}.st-linkpop .st-row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}' }));
+    const menu = el('div', { class: 'st-linkmenu', 'data-link-menu': '', hidden: '' });
+    const pop = el('div', { class: 'st-linkpop', 'data-linkpop': '', hidden: '', role: 'dialog', 'aria-modal': 'false', 'aria-label': 'Add link' });
+    const input = el('input', { type: 'text', 'data-link-input': '', placeholder: 'https://example.com or /calendar', 'aria-label': 'Link address' });
+    const who = el('p', { 'data-link-for': '' });
+    pop.append(el('h2', { text: 'Add link' }), who, input, el('div', { class: 'st-row' },
+      el('button', { type: 'button', class: 'st-btn', 'data-link-cancel': '', text: 'Cancel' }),
+      el('button', { type: 'button', class: 'st-btn st-publish', 'data-link-save': '', text: 'Add link' })));
+    document.body.append(menu, pop);
+    document.addEventListener('click', (e) => { if (!e.target.closest('[data-link-menu],[data-linkpop]')) closeLinkMenu(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeLinkMenu(); $('[data-linkpop]').hidden = true; } });
+    pop.querySelector('[data-link-cancel]').addEventListener('click', () => { pop.hidden = true; });
+    pop.querySelector('[data-link-save]').addEventListener('click', () => saveLinkFromPop());
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveLinkFromPop(); } });
+  }
+  function closeLinkMenu() { const m = $('[data-link-menu]'); if (m) m.hidden = true; }
+  function openLinkMenu(e, block) {
+    ensureLinkUi();
+    const menu = $('[data-link-menu]');
+    const current = readHref(block) || '';
+    menu.replaceChildren(
+      el('button', { type: 'button', text: current ? 'Edit link' : 'Add link', onclick: () => openLinkPop(block) }),
+      current && block.type !== 'button' ? el('button', { type: 'button', text: 'Remove link', onclick: () => { if (applyBlockLink(block, '')) closeLinkMenu(); } }) : null
+    );
+    const frame = $('[data-canvas]').getBoundingClientRect();
+    const view = canvasDoc.defaultView;
+    const sx = frame.width / (view.innerWidth || frame.width || 1);
+    const sy = frame.height / (view.innerHeight || frame.height || 1);
+    menu.hidden = false;
+    menu.style.left = `${Math.max(8, Math.min(frame.left + e.clientX * sx, innerWidth - 180))}px`;
+    menu.style.top = `${Math.max(8, Math.min(frame.top + e.clientY * sy, innerHeight - 80))}px`;
+  }
+  function openLinkPop(block) {
+    ensureLinkUi(); closeLinkMenu();
+    const pop = $('[data-linkpop]');
+    pop.dataset.block = block.id;
+    $('[data-link-for]').textContent = `This link is added to the selected ${typeName(block).toLowerCase()}.`;
+    const input = $('[data-link-input]');
+    input.value = readHref(block) || '';
+    pop.hidden = false;
+    input.focus(); input.select();
+  }
+  function applyBlockLink(block, href) {
+    if (block.type === 'card' && href && hasInnerLink(block)) { toast('This card already has a link inside. Right-click that part instead.', true); return false; }
+    if (block.type === 'button' && !href) { toast('A button needs a link.', true); return false; }
+    writeHref(block, href);
+    changed();
+    toast(href ? 'Link added. Publish when you want it on the live page.' : 'Link removed.');
+    return true;
+  }
+  function saveLinkFromPop() {
+    const pop = $('[data-linkpop]');
+    const block = findAny(pop.dataset.block);
+    if (!block) { pop.hidden = true; return; }
+    const href = normalizeHref($('[data-link-input]').value);
+    if (href == null) { toast('Use a web address (https://…) or a site path (/page).', true); return; }
+    if (!applyBlockLink(block, href)) return;
+    pop.hidden = true;
+  }
   function wireCanvas() {
     const d = canvasDoc;
     wirePick(d);
@@ -735,6 +865,16 @@
     d.addEventListener('dblclick', (e) => {
       const b = e.target.closest('[data-sc-block]'); const f = b && findBlock(b.dataset.scBlock);
       if (f?.block.type === 'live') toast(liveInfo(f.block).app ? `${liveInfo(f.block).label} app: it has a fixed design. Move, resize or hide it; manage its content with the link in the panel.` : `Live data from ${liveInfo(f.block).label}. It updates by itself, so edit it at the source (link in the panel).`);
+    });
+    d.addEventListener('contextmenu', (e) => {
+      const kid = e.target.closest('[data-sc-kid]');
+      const blockEl = e.target.closest('[data-sc-block]');
+      const id = kid?.dataset.scKid || blockEl?.dataset.scBlock;
+      const block = id && findAny(id);
+      if (!block || readHref(block) === null) return;
+      e.preventDefault();
+      if (!kid && blockEl) { selected = blockEl.dataset.scBlock; afterSelect(); }
+      openLinkMenu(e, block);
     });
     d.addEventListener('pointermove', (e) => {
       if (drag) return;
@@ -857,8 +997,18 @@
     return el('label', { class: 'st-field' }, label, i);
   };
   const ordinal = (n) => ['1st', '2nd', '3rd'][n - 1] || `${n}th`;
+  function linkEditor(b) {
+    const i = el('input', { value: readHref(b) || '', placeholder: 'https://… or /page', 'aria-label': 'Link address' });
+    i.addEventListener('change', () => {
+      const href = normalizeHref(i.value);
+      if (href == null) { toast('Use a web address (https://…) or a site path (/page).', true); i.value = readHref(b) || ''; return; }
+      if (!applyBlockLink(b, href)) { i.value = readHref(b) || ''; return; }
+    });
+    return el('label', { class: 'st-field' }, 'Link', i);
+  }
   function contentFields(host, b, depth = 0) {
     const p = b.props || (b.props = {});
+    if (readHref(b) !== null && b.type !== 'button' && !(b.type === 'el' && anchorIndex(p.html) >= 0)) host.append(linkEditor(b));
     if (b.type === 'heading') host.append(field('Heading text', p.text, (v) => { p.text = v; }, { attrs: { 'data-sync': b.id } }));
     if (b.type === 'text') host.append(field('Text (blank line = new paragraph)', textOf(p.rich), (v) => { p.rich = richFrom(v); }, { multi: true, attrs: { 'data-sync': b.id } }));
     if (b.type === 'button') { host.append(field('Button words', p.label, (v) => { p.label = v; }, { attrs: { 'data-sync': b.id } })); host.append(kv('Link', (() => { const i = el('input', { value: p.href || '', 'aria-label': 'Link', style: 'width:96px;border:0;text-align:right' }); i.addEventListener('change', () => { p.href = i.value.trim(); changed({ panel: false }); }); return i; })())); }
@@ -977,7 +1127,7 @@
     const found = selected && findBlock(selected);
     if (!found) {
       host.append(el('h2', { text: 'Page settings' }), el('p', { class: 'st-selname', text: `${state?.page?.title || slug} · nothing selected` }));
-      host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it.' }));
+      host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Right-click it and choose Add link. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it. ← CMS (top right) goes back to the staff menu.' }));
       host.append(el('div', { class: 'st-group', text: 'Page' }), kv('Address', el('b', { text: state?.page?.path || '' })), kv('Live editor', el('b', { text: state?.page?.editor || 'legacy' })), kv('Sections', el('b', { text: String(layout?.sections?.length || 0) })));
       host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
       host.append(el('p', { class: 'st-note', text: `You can ${canLayout() ? 'change words and layout' : 'change words, links and pictures'} here.` }));
@@ -1234,6 +1384,7 @@
     if (!reload && new URLSearchParams(location.search).has('new')) { if (isMobile() && canLayout()) openSheet('add'); history.replaceState(null, '', location.pathname + location.hash); }
   }
   window.__studio = { find: (id) => findBlock(id), get layout() { return layout; }, get selected() { return selected; }, get undo() { return undoStack.length; }, get redo() { return redoStack.length; }, get scale() { return scale; }, get sheet() { return sheet; }, get pick() { return pick && { id: pick.id, k: pick.k }; }, get dirty() { return isDirty(); }, select: (id) => { selected = id; afterSelect(); } };
+  ensureExit();
   load().then(loadPages).catch((e) => { $('[data-pill]').textContent = `Could not load: ${e.message}`; });
 
   const CANVAS_CSS = `
