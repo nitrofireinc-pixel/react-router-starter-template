@@ -2570,7 +2570,7 @@ body.sponsor-flyin-open{overflow:hidden}
   cursor:pointer;
 }
 .sponsor-flyin.is-visible .sponsor-flyin-backdrop{opacity:1}
-.sponsor-flyin.is-leaving .sponsor-flyin-backdrop{opacity:0}
+.sponsor-flyin.is-leaving .sponsor-flyin-backdrop{opacity:0}.sponsor-flyin.is-leaving{pointer-events:auto}
 .sponsor-flyin-panel{
   position:relative;
   z-index:1;

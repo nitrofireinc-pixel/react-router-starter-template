@@ -412,6 +412,13 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   };
   root.querySelector('.sponsor-flyin-close')?.addEventListener('click', close);
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
+  // While the popup fades out, swallow taps so they never reach a donate
+  // trigger (e.g. the sticky Support button) underneath.
+  root.addEventListener('click', (event) => {
+    if (!root.classList.contains('is-leaving')) return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
 
   const durationMs = normalizeSponsorAdSeconds(durationSeconds, 6) * 1000;
   window.setTimeout(() => {
