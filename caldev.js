@@ -304,14 +304,6 @@
       state.events = [];
     } finally {
       state.loading = false;
-      const linkedId = Number(new URLSearchParams(window.location.search).get('event'));
-      const linked = linkedId ? state.events.find((ev) => Number(ev.id) === linkedId) : null;
-      if (linked) {
-        const m = String(linked.start_date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (m) state.cursor = new Date(Number(m[1]), Number(m[2]) - 1, 1);
-        state.selectedId = linked.id;
-        state.didAutoOpen = true;
-      }
       render();
       autoOpenLandingEvents();
     }

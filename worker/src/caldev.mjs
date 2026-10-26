@@ -247,18 +247,7 @@ export function hydrateCaldevRow(row) {
     cancelled_at: row.cancelled_at == null || row.cancelled_at === '' ? null : String(row.cancelled_at),
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || ''),
-    deal_text: row.deal_text == null ? '' : String(row.deal_text),
-    must_attend: Number(row.must_attend) ? 1 : 0,
   };
-}
-
-/** Optional home-card fields; only written when the payload carries them. */
-async function saveCaldevCardFields(env, id, payload = {}) {
-  if (payload?.deal_text === undefined && payload?.must_attend === undefined) return;
-  const deal = stripSimpleHtml(String(payload.deal_text ?? '')).trim().slice(0, 200);
-  const must = payload.must_attend === true || payload.must_attend === 1 || payload.must_attend === '1' ? 1 : null;
-  await env.DB.prepare('UPDATE caldev_events SET deal_text = ?, must_attend = ? WHERE id = ?')
-    .bind(deal || null, must, Number(id)).run();
 }
 
 export function compareCaldevEvents(a, b) {
@@ -466,9 +455,6 @@ export async function ensureCaldevSchema(env) {
         'ALTER TABLE caldev_events ADD COLUMN series_id INTEGER',
         'ALTER TABLE caldev_events ADD COLUMN series_rule TEXT',
         'ALTER TABLE caldev_events ADD COLUMN cancelled_at TEXT',
-        // Additive (home featured card): optional deal text and must-attend flag.
-        'ALTER TABLE caldev_events ADD COLUMN deal_text TEXT',
-        'ALTER TABLE caldev_events ADD COLUMN must_attend INTEGER',
       ]) {
         try {
           await env.DB.prepare(sql).run();
@@ -492,7 +478,7 @@ export async function ensureCaldevSchema(env) {
 const CALDEV_SELECT = `
   id, title, description, location, who, start_date, end_date, start_time, end_time,
   track, all_day, source_event_id, booster_event_id, created_at, updated_at,
-  series_id, series_rule, cancelled_at, deal_text, must_attend
+  series_id, series_rule, cancelled_at
 `;
 
 async function setCaldevBoosterEventId(env, caldevId, boosterEventId) {
@@ -718,7 +704,6 @@ export async function insertCaldevEvent(env, payload, options = {}) {
     Number.isInteger(Number(payload?.series_id)) && Number(payload.series_id) > 0 ? Number(payload.series_id) : null,
     payload?.series_rule ? String(payload.series_rule).slice(0, 2000) : null,
   ).run();
-  await saveCaldevCardFields(env, result.meta.last_row_id, payload);
   let created = await getCaldevEventById(env, result.meta.last_row_id);
   if (syncBoosters) {
     created = await syncCaldevMeetingToBoosters(env, created);
@@ -758,7 +743,6 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
     cancelledAfter,
     Number(id),
   ).run();
-  await saveCaldevCardFields(env, id, payload);
   let updated = await getCaldevEventById(env, id);
   if (syncBoosters) {
     updated = await syncCaldevMeetingToBoosters(env, updated);
