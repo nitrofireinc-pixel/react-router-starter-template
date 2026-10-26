@@ -24,7 +24,7 @@ function fakeD1() {
     location TEXT NOT NULL DEFAULT '', who TEXT NOT NULL DEFAULT '', start_date TEXT NOT NULL DEFAULT '', end_date TEXT NOT NULL DEFAULT '',
     start_time TEXT NOT NULL DEFAULT '', end_time TEXT NOT NULL DEFAULT '', track TEXT NOT NULL DEFAULT 'other', all_day INTEGER NOT NULL DEFAULT 1,
     source_event_id INTEGER, booster_event_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    series_id INTEGER, series_rule TEXT, cancelled_at TEXT);
+    series_id INTEGER, series_rule TEXT, cancelled_at TEXT, deal_text TEXT, must_attend INTEGER);
     CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, date_label TEXT, date_detail TEXT, event_year INTEGER, title TEXT, description TEXT,
     sort_order INTEGER, show_on_boosters INTEGER, created_by INTEGER, repeat_enabled INTEGER, repeat_days TEXT, repeat_months TEXT, repeat_exceptions TEXT, caldev_event_id INTEGER);
     CREATE TABLE site_content (key TEXT PRIMARY KEY, value TEXT);`);

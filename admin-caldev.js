@@ -236,11 +236,22 @@
     await api(`/api/admin/caldev/events/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  function syncFundGroup(scope) {
+    const group = scope?.querySelector?.("[data-cms-caldev-fund]");
+    const track = scope?.querySelector?.('[name="track"]');
+    if (group && track) group.hidden = track.value !== "fundraiser";
+  }
+  document.addEventListener("change", (event) => {
+    if (event.target?.name === "track") syncFundGroup(event.target.closest("form, [data-event-id], .cms-caldev-panel") || document);
+  });
+
   function payloadFromEvent(ev) {
     return {
       title: ev.title || "",
       description: ev.description || "",
       location: ev.location || "",
+      deal_text: ev.deal_text || "",
+      must_attend: Number(ev.must_attend) ? 1 : 0,
       who: ev.who || "",
       start_date: ev.start_date || "",
       end_date: ev.end_date || "",
@@ -282,6 +293,8 @@
       title: "",
       description: "",
       location: "",
+      deal_text: "",
+      must_attend: 0,
       who: "",
       start_date: dateKey || toDateKey(new Date()),
       end_date: "",
@@ -302,6 +315,8 @@
       title: ev.title || "",
       description: ev.description || "",
       location: ev.location || "",
+      deal_text: ev.deal_text || "",
+      must_attend: Number(ev.must_attend) ? 1 : 0,
       who: ev.who || "",
       start_date: eventDayKey(ev) || toDateKey(new Date()),
       end_date: String(ev.end_date || "").slice(0, 10),
@@ -407,6 +422,8 @@
       title: panel.querySelector('[name="title"]').value.trim(),
       description: desc,
       location: panel.querySelector('[name="location"]').value.trim(),
+      deal_text: panel.querySelector('[name="deal_text"]').value.trim(),
+      must_attend: panel.querySelector('[name="must_attend"]').checked ? 1 : 0,
       who: panel.dataset.who || "",
       start_date: panel.querySelector('[name="start_date"]').value,
       end_date: panel.querySelector('[name="end_date"]').value,
@@ -465,8 +482,11 @@
     panel.querySelector('[name="end_time"]').value = form.end_time || "18:00";
     panel.querySelector('[name="all_day"]').checked = !!form.all_day;
     panel.querySelector('[name="track"]').value = form.track || "other";
+    syncFundGroup(panel);
     panel.dataset.who = form.who || "";
     panel.querySelector('[name="location"]').value = form.location || "";
+    panel.querySelector('[name="deal_text"]').value = form.deal_text || "";
+    panel.querySelector('[name="must_attend"]').checked = !!Number(form.must_attend);
     panel.querySelector("[data-cms-caldev-desc]").innerHTML = form.description || "";
     closeDescLinkBar();
     panel.querySelector('[name="repeat_yes"]').checked = !!form.repeat;
@@ -821,6 +841,12 @@
               </select>
             </label>
             <label>Location<input name="location" maxlength="200" /></label>
+            <fieldset class="cms-caldev-fund" data-cms-caldev-fund hidden>
+              <legend>Fundraiser details <small>optional · shown on the home fundraiser card when filled in</small></legend>
+              <label>Deal text<input name="deal_text" maxlength="200" placeholder="e.g. Save 30%–70% off retail" /></label>
+              <label class="cms-caldev-check"><input type="checkbox" name="must_attend" value="1" /> Band members must attend</label>
+              <small>The card also uses this event's title, date, time, Location and Description. Empty fields are hidden.</small>
+            </fieldset>
 
             <label class="cms-caldev-desc-label">Description
               <div class="cms-caldev-desc-toolbar" data-cms-caldev-desc-toolbar>
