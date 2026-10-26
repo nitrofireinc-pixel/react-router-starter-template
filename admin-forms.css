@@ -84,7 +84,12 @@
 .fb-tip{font-size:12px;background:#eef5ff;border-radius:8px;padding:8px;color:#33405c}
 .fb-mail{max-width:720px;margin:0 auto;background:#fff;border:1px solid #dfe4ee;border-radius:12px;padding:16px 20px}
 .fb-mail h2{margin:0 0 4px;font-size:18px}
-.fb-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0 12px;margin:6px 0 10px}
+.fb-people{display:grid;grid-template-columns:1fr;gap:0;margin:6px 0 10px}
+.fb-people h3{margin:14px 0 4px;font-size:13px;color:#0b2a5b}
+.fb-person{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding:6px 0;border-bottom:1px solid #e6ebf3}
+.fb-person .fb-check{margin:0}
+.fb-person small,.fb-person-email{color:#5b6680;font-weight:500}
+.fb-person input[type=email]{font:inherit;font-weight:400;padding:6px 8px;border:1px solid #c4cbd9;border-radius:8px;width:100%;box-sizing:border-box}
 .fb-mail-preview{width:100%;height:420px;border:1px solid #dfe4ee;border-radius:10px;margin-top:12px;background:#fff}
 /* submissions */
 .fb-menu{list-style:none;padding:0;display:grid;gap:8px}

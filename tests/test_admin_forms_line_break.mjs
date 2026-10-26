@@ -10,4 +10,6 @@ test('form builder palette can insert a line break', () => {
   assert.match(src, /f\.type === 'break' \? ' fb-break'/);
   assert.match(src, /class: 'full fb-preview-break'/);
   assert.match(src, /Puts the next field on a new line/);
+  assert.match(src, /\['staff', 'Staff'\], \['boosters', 'Boosters'\]/);
+  assert.match(src, /e\.addresses\[u\.id\]/);
 });

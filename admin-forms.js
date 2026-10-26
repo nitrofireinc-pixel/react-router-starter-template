@@ -307,15 +307,41 @@
     function sel(label, value, opts, set) { const s = el('select', {}, ...opts.map(([v, t]) => el('option', { value: v, text: t }))); s.value = value || ''; s.addEventListener('change', () => commit(() => set(s.value))); return el('label', { class: 'fb-field' }, label, s); }
     function mailDesigner() {
       const e = def.email;
-      const people = el('div', { class: 'fb-people' }, ...data.users.map((u) => {
-        const cb = el('input', { type: 'checkbox', value: String(u.id) }); cb.checked = e.to_user_ids.includes(u.id);
-        cb.addEventListener('change', () => { if (cb.checked && e.to_user_ids.length >= data.max_recipients) { cb.checked = false; toast(`At most ${data.max_recipients} staff get each sign-up.`, true); return; } commit(() => { e.to_user_ids = cb.checked ? [...e.to_user_ids, u.id] : e.to_user_ids.filter((x) => x !== u.id); }); });
-        return el('label', { class: 'fb-check' }, cb, ` ${u.name}`);
-      }));
+      e.addresses = e.addresses && typeof e.addresses === 'object' ? e.addresses : {};
+      const validEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+      const roleLabel = { director: 'Director', 'assistant-director': 'Assistant Director', staff: 'Staff', president: 'President', 'vice-president': 'Vice President', secretary: 'Secretary', treasurer: 'Treasurer', committee: 'Committee', editor: 'Editor', site_admin: 'Admin', admin: 'Super Admin' };
+      const groups = [['staff', 'Staff'], ['boosters', 'Boosters'], ['', 'Other accounts']];
+      const personRow = (u) => {
+        const known = String(u.email || '').trim();
+        const cb = el('input', { type: 'checkbox', value: String(u.id) });
+        cb.checked = e.to_user_ids.includes(u.id);
+        const role = roleLabel[u.role] || '';
+        let emailInput = null;
+        const chosenEmail = () => known || String(e.addresses[u.id] || '').trim();
+        cb.addEventListener('change', () => {
+          if (cb.checked && e.to_user_ids.length >= data.max_recipients) { cb.checked = false; toast(`At most ${data.max_recipients} people get each sign-up.`, true); return; }
+          if (cb.checked && !validEmail(chosenEmail())) { cb.checked = false; toast(`Add an email address for ${u.name}.`, true); emailInput?.focus(); return; }
+          commit(() => { e.to_user_ids = cb.checked ? [...e.to_user_ids, u.id] : e.to_user_ids.filter((x) => x !== u.id); });
+        });
+        const name = el('span', {}, u.name, role ? el('small', { text: ` · ${role}` }) : null);
+        if (known) {
+          return el('div', { class: 'fb-person' }, el('label', { class: 'fb-check' }, cb, ' ', name), el('small', { class: 'fb-person-email', text: known }));
+        }
+        emailInput = el('input', { type: 'email', placeholder: 'Email address', 'aria-label': `Email for ${u.name}`, value: e.addresses[u.id] || '' });
+        emailInput.addEventListener('input', () => { e.addresses[u.id] = emailInput.value.trim(); });
+        emailInput.addEventListener('change', () => { e.addresses[u.id] = emailInput.value.trim(); if (cb.checked && !validEmail(e.addresses[u.id])) { cb.checked = false; commit(() => { e.to_user_ids = e.to_user_ids.filter((x) => x !== u.id); }); toast(`Add an email address for ${u.name}.`, true); } });
+        return el('div', { class: 'fb-person' }, el('label', { class: 'fb-check' }, cb, ' ', name), emailInput);
+      };
+      const people = el('div', { class: 'fb-people' });
+      for (const [group, label] of groups) {
+        const rows = (data.users || []).filter((u) => (u.group || '') === group);
+        if (!rows.length) continue;
+        people.append(el('h3', { text: label }), ...rows.map(personRow));
+      }
       const emails = def.fields.filter((f) => f.type === 'email');
       const tokens = def.fields.filter((f) => INPUT.has(f.type)).map((f) => `{${f.name}}`).join(' ');
       return el('section', { class: 'fb-mail' },
-        el('h2', { text: 'Who gets each sign-up' }), el('p', { class: 'fb-muted', text: `Pick up to ${data.max_recipients} staff accounts. They get an email with every answer and a PDF copy.` }), people,
+        el('h2', { text: 'Who gets each sign-up' }), el('p', { class: 'fb-muted', text: `Every staff member, booster officer, and account is listed. Pick up to ${data.max_recipients}. Add an email for anyone who does not have one yet. They get an email with every answer and a PDF copy.` }), people,
         sel('Replies go to', e.reply_to_field, [['', 'Nobody (no reply-to)'], ...emails.map((f) => [f.name, f.label])], (v) => { e.reply_to_field = v; }),
         txt(`Email subject (you can use {title} ${tokens})`, e.subject, (v) => { e.subject = v; }),
         txt('Short note at the top of the staff email', e.intro, (v) => { e.intro = v; }, true),
