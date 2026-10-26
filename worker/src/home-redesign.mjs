@@ -186,25 +186,26 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
 export function renderFeaturedFundraiser(event, { flyer = '', dealHtml = '' } = {}) {
   if (!event) return '';
   const when = formatHomeEventWhen(event);
-  const where = eventWhere(event);
-  const directions = mapsHref(where);
-  const deal = String(dealHtml || '').trim();
+  const where = plainText(event.location);
+  const directions = where ? mapsHref(where) : '';
+  const deal = escapeHtml(plainText(event.deal_text));
+  const sub = plainText(event.description);
   const timeLine = when.time ? `<br>${escapeHtml(when.time)}` : '';
   const media = flyer
     ? `<div class="ff-media"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(plainText(event.title) || 'Fundraiser')} flyer"></div>`
     : '<style>.home-redesign .feature-fund{grid-template-columns:1fr}</style>';
   return `${media}
       <div class="ff-body">
-        <div class="pill-row"><span class="pill pill-gold">Featured fundraiser</span><span class="pill pill-red">Band members must attend</span></div>
+        <div class="pill-row"><span class="pill pill-gold">Featured fundraiser</span>${Number(event.must_attend) ? '<span class="pill pill-red">Band members must attend</span>' : ''}</div>
         <h3>${escapeHtml(plainText(event.title))}</h3>
-        <p class="ff-sub">${escapeHtml(plainText(event.description) || 'See the fundraising page for details.')}</p>
+        ${sub ? `<p class="ff-sub">${escapeHtml(sub)}</p>` : ''}
         <dl class="ff-facts">
           <div><dt>When</dt><dd>${escapeHtml(when.long || when.short)}${timeLine}</dd></div>
           ${where ? `<div><dt>Where</dt><dd>${escapeHtml(where)}</dd></div>` : ''}
           ${deal ? `<div class="ff-deal"><dt>The deal</dt><dd>${deal}</dd></div>` : ''}
         </dl>
         <div class="btn-row">
-          <a class="btn btn-blue" href="/calendar.html">View on calendar</a>
+          <a class="btn btn-blue" href="/calendar.html${event.id ? `?event=${encodeURIComponent(event.id)}` : ''}">View on calendar</a>
           ${directions ? `<a class="btn btn-outline" href="${escapeAttr(directions)}" target="_blank" rel="noopener noreferrer">Get directions</a>` : ''}
           <a class="btn btn-link" href="/fundraising.html">Fundraising page ${ARROW}</a>
         </div>
@@ -733,15 +734,14 @@ export function fillLiveSlots(html, data = {}) {
   let next = String(html || '');
   if (!next.includes('data-home-slot')) return next;
   const schedule = selectHomeSchedule(data.events || []);
-  const deal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
   const nf = schedule.nextFundraiser;
   const cards = data.fundraiserCards || [];
   const card = nf ? (cards.find((c) => c.source_event_id != null && String(c.source_event_id) === String(nf.id))
     || cards.find((c) => c.event_date && c.event_date === nf.start_date)) : null;
   const flyer = card && card.picture_mode === 'image' && card.image_url ? card.image_url : '';
   if (schedule.nextFundraiser) {
-    next = replaceSlot(next, 'next-fund', renderNextFundraiserCard(schedule.nextFundraiser, { dealHtml: deal }));
-    next = replaceSlot(next, 'featured-fund', renderFeaturedFundraiser(schedule.nextFundraiser, { flyer, dealHtml: deal }));
+    next = replaceSlot(next, 'next-fund', renderNextFundraiserCard(schedule.nextFundraiser, { dealHtml: escapeHtml(plainText(schedule.nextFundraiser.deal_text)) }));
+    next = replaceSlot(next, 'featured-fund', renderFeaturedFundraiser(schedule.nextFundraiser, { flyer }));
   }
   const others = limitList(schedule.fundraisers.slice(1), slotLimit(next, 'other-funds')).map(renderOtherFundraiserCard).join('');
   if (others) next = replaceSlot(next, 'other-funds', others);
