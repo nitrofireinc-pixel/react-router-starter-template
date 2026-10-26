@@ -6,6 +6,7 @@
     { id: 'deadline', label: 'IMPORTANT', color: '#FDD703', ink: '#002142' },
     { id: 'trip', label: 'Trips', color: '#7c3aed' },
     { id: 'other', label: 'Other', color: '#5b6472' },
+    { id: 'fundraiser', label: 'Fundraising', color: '#F2B705', ink: '#002142' },
   ];
   const TRACK_MAP = Object.fromEntries(TRACKS.map((t) => [t.id, t]));
   const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -168,6 +169,7 @@
   function activeDeadlineEvents(events, today) {
     return (events || []).filter((event) => {
       if (String(event?.track || '').toLowerCase() !== 'deadline') return false;
+      if (event?.cancelled_at) return false;
       const due = deadlineDueIso(event);
       if (!due) return false;
       const windowStart = shiftIsoDate(due, -DEADLINE_BANNER_LEAD_DAYS);
@@ -207,14 +209,24 @@
     }).join('');
   }
 
+  function excludedDateSet(event) {
+    const raw = event?.excluded_dates;
+    const list = Array.isArray(raw) ? raw : [];
+    return new Set(list.map((day) => String(day).slice(0, 10)));
+  }
+
+  function eventCoversIso(event, iso) {
+    const start = String(event?.start_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return false;
+    const end = event.end_date && event.end_date >= start ? event.end_date : start;
+    if (iso < start || iso > end) return false;
+    if (end > start && excludedDateSet(event).has(iso)) return false;
+    return true;
+  }
+
   function eventsOnDate(iso) {
-    return visibleEvents().filter((event) => {
-      if (!event.start_date) return false;
-      if (event.end_date && event.end_date >= event.start_date) {
-        return iso >= event.start_date && iso <= event.end_date;
-      }
-      return event.start_date === iso;
-    }).sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))
+    return visibleEvents().filter((event) => eventCoversIso(event, iso))
+      .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))
       || String(a.title || '').localeCompare(String(b.title || '')));
   }
 
@@ -240,6 +252,18 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
+  function formatSpanWhen(event) {
+    const start = formatLongDate(event.start_date);
+    const end = event.end_date && event.end_date > event.start_date ? formatLongDate(event.end_date) : '';
+    const range = end ? `${start} through ${end}` : start;
+    const skipped = (Array.isArray(event.excluded_dates) ? event.excluded_dates : [])
+      .map((iso) => String(iso).slice(0, 10))
+      .filter((iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso) && (!end || (iso > event.start_date && iso < event.end_date)))
+      .map((iso) => formatLongDate(iso));
+    const closed = skipped.length ? `. Closed ${skipped.join(', ')}` : '';
+    return `${range} · ${eventTimeLabel(event)}${closed}`;
+  }
+
   function nextIsoDay(iso) {
     const [year, month, day] = String(iso).split('-').map(Number);
     return isoDate(new Date(year, month - 1, day + 1));
@@ -253,9 +277,10 @@
       const end = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end_date || '')) && event.end_date >= start
         ? event.end_date
         : start;
+      const skipped = excludedDateSet(event);
       let iso = start < fromIso ? fromIso : start;
       while (iso <= end) {
-        dates.add(iso);
+        if (!(end > start && skipped.has(iso))) dates.add(iso);
         iso = nextIsoDay(iso);
       }
     }
@@ -359,10 +384,15 @@
     `;
   }
 
+  function cancelledTag(event) {
+    return event?.cancelled_at ? ' <em class="caldev-cancelled-tag">Cancelled</em>' : '';
+  }
+
   function eventChip(event) {
     const track = TRACK_MAP[event.track] || TRACK_MAP.other;
-    return `<button type="button" class="caldev-event-chip" style="--caldev-track:${track.color}"
-      data-caldev-open="${event.id}" title="${escapeHtml(event.title)}">${escapeHtml(event.title)}</button>`;
+    const off = event.cancelled_at ? ' is-cancelled' : '';
+    return `<button type="button" class="caldev-event-chip${off}" style="--caldev-track:${track.color}"
+      data-caldev-open="${event.id}" title="${escapeHtml(event.title)}${event.cancelled_at ? ' (Cancelled)' : ''}"><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</button>`;
   }
 
   function renderMonth() {
@@ -418,9 +448,9 @@
                   ? dayEvents.map((event) => {
                     const track = TRACK_MAP[event.track] || TRACK_MAP.other;
                     return `
-                      <button type="button" class="caldev-week-event" style="--caldev-track:${track.color}" data-caldev-open="${event.id}">
+                      <button type="button" class="caldev-week-event${event.cancelled_at ? ' is-cancelled' : ''}" style="--caldev-track:${track.color}" data-caldev-open="${event.id}">
                         <small>${escapeHtml(eventTimeLabel(event))}</small>
-                        <strong>${escapeHtml(event.title)}</strong>
+                        <strong><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</strong>
                       </button>
                     `;
                   }).join('')
@@ -462,10 +492,10 @@
             <ul>
               ${events.map((event) => `
                 <li>
-                  <article class="caldev-rundown-item" data-caldev-open="${event.id}" role="button" tabindex="0">
+                  <article class="caldev-rundown-item${event.cancelled_at ? ' is-cancelled' : ''}" data-caldev-open="${event.id}" role="button" tabindex="0">
                     ${trackChip(event.track)}
                     <span class="caldev-rundown-copy">
-                      <strong>${escapeHtml(event.title)}</strong>
+                      <strong><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</strong>
                       <small>${escapeHtml(eventTimeLabel(event))}${event.who ? ` · ${escapeHtml(event.who)}` : ''}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</small>
                       ${event.description ? `<span>${formatDescHtml(event.description)}</span>` : ''}
                     </span>
@@ -488,8 +518,8 @@
         <div class="caldev-detail-panel">
           <button type="button" class="sponsor-flyin-close" data-caldev-close aria-label="Close">×</button>
           ${trackChip(event.track)}
-          <h3 id="caldev-detail-title">${escapeHtml(event.title)}</h3>
-          <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
+          <h3 id="caldev-detail-title"${event.cancelled_at ? ' class="is-cancelled"' : ''}><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</h3>
+          <p class="caldev-detail-when">${escapeHtml(formatSpanWhen(event))}</p>
           ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
           ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
           ${event.description ? `<div class="caldev-detail-body">${formatDescHtml(event.description)}</div>` : '<p class="draft">No details yet.</p>'}

@@ -7,6 +7,7 @@ export const CALDEV_TRACKS = [
   { id: 'deadline', label: 'IMPORTANT', color: '#FDD703' },
   { id: 'trip', label: 'Trips', color: '#7c3aed' },
   { id: 'other', label: 'Other', color: '#5b6472' },
+  { id: 'fundraiser', label: 'Fundraising', color: '#F2B705' },
 ];
 
 const TRACK_IDS = new Set(CALDEV_TRACKS.map((t) => t.id));
@@ -37,6 +38,52 @@ export function pad2(n) {
 
 export function isIsoDate(value = '') {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+}
+
+const EXCLUDED_DATES_MAX = 60;
+
+/** Dates strictly inside a span (after the start, before the end). Endpoints stay covered. */
+export function normalizeExcludedDates(value, startDate = '', endDate = '') {
+  const start = isIsoDate(startDate) ? String(startDate).trim() : '';
+  const end = isIsoDate(endDate) ? String(endDate).trim() : '';
+  if (!start || !end || end <= start) return [];
+  let list = value;
+  if (typeof list === 'string') {
+    const trimmed = list.trim();
+    if (!trimmed) list = [];
+    else {
+      try {
+        list = JSON.parse(trimmed);
+      } catch {
+        list = [];
+      }
+    }
+  }
+  if (!Array.isArray(list)) list = [];
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const iso = String(item || '').trim().slice(0, 10);
+    if (!isIsoDate(iso) || seen.has(iso)) continue;
+    if (iso <= start || iso >= end) continue;
+    seen.add(iso);
+    out.push(iso);
+    if (out.length >= EXCLUDED_DATES_MAX) break;
+  }
+  out.sort();
+  return out;
+}
+
+export function caldevEventCoversDate(event, iso) {
+  const day = String(iso || '').trim().slice(0, 10);
+  if (!isIsoDate(day)) return false;
+  const start = String(event?.start_date || '').trim().slice(0, 10);
+  if (!isIsoDate(start)) return false;
+  const endRaw = String(event?.end_date || '').trim().slice(0, 10);
+  const end = isIsoDate(endRaw) && endRaw >= start ? endRaw : start;
+  if (day < start || day > end) return false;
+  if (end > start && normalizeExcludedDates(event?.excluded_dates, start, end).includes(day)) return false;
+  return true;
 }
 
 /** Map ISO YYYY-MM-DD → production events date fields. */
@@ -187,6 +234,9 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
   const source_event_id = payload.source_event_id !== undefined
     ? (payload.source_event_id == null || payload.source_event_id === '' ? null : Number(payload.source_event_id))
     : (existing?.source_event_id == null ? null : Number(existing.source_event_id));
+  const excludedSource = Object.prototype.hasOwnProperty.call(payload || {}, 'excluded_dates')
+    ? payload.excluded_dates
+    : existing?.excluded_dates;
   return {
     title,
     description,
@@ -199,6 +249,7 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
     track,
     all_day: all_day || (!start_time ? 1 : all_day),
     source_event_id: Number.isFinite(source_event_id) ? source_event_id : null,
+    excluded_dates: normalizeExcludedDates(excludedSource, start_date, end_date),
   };
 }
 
@@ -208,6 +259,7 @@ export function shiftCaldevEventToDate(event, nextStartDate) {
   const currentStart = String(event?.start_date || '');
   const currentEnd = String(event?.end_date || '');
   let end_date = '';
+  let excluded_dates = [];
   if (currentStart && currentEnd && currentEnd >= currentStart) {
     const startMs = Date.parse(`${currentStart}T00:00:00Z`);
     const endMs = Date.parse(`${currentEnd}T00:00:00Z`);
@@ -216,12 +268,16 @@ export function shiftCaldevEventToDate(event, nextStartDate) {
       const spanDays = Math.round((endMs - startMs) / 86400000);
       const shifted = new Date(nextMs + (spanDays * 86400000));
       end_date = `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+      const deltaDays = Math.round((nextMs - startMs) / 86400000);
+      excluded_dates = normalizeExcludedDates(event?.excluded_dates, currentStart, currentEnd)
+        .map((iso) => shiftIsoDate(iso, deltaDays));
     }
   }
   return {
     ...event,
     start_date: nextStartDate,
     end_date,
+    excluded_dates: normalizeExcludedDates(excluded_dates, nextStartDate, end_date),
   };
 }
 
@@ -241,6 +297,7 @@ export function hydrateCaldevRow(row) {
     all_day: Number(row.all_day) ? 1 : 0,
     source_event_id: row.source_event_id == null ? null : Number(row.source_event_id),
     booster_event_id: row.booster_event_id == null ? null : Number(row.booster_event_id),
+    excluded_dates: normalizeExcludedDates(row.excluded_dates, row.start_date, row.end_date),
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || ''),
   };
@@ -303,6 +360,7 @@ export function caldevEventToHighlight(event) {
     end_time: String(hydrated?.end_time || ''),
     track: normalizeCaldevTrack(hydrated?.track),
     all_day: Number(hydrated?.all_day) ? 1 : 0,
+    excluded_dates: normalizeExcludedDates(hydrated?.excluded_dates, hydrated?.start_date, hydrated?.end_date),
     date_label: parts?.date_label || '',
     date_detail: parts?.date_detail || '',
     event_year: parts?.event_year ?? null,
@@ -445,6 +503,7 @@ export async function ensureCaldevSchema(env) {
         'ALTER TABLE caldev_events ADD COLUMN booster_event_id INTEGER',
         'ALTER TABLE events ADD COLUMN caldev_event_id INTEGER',
         'CREATE INDEX IF NOT EXISTS idx_caldev_events_start_date ON caldev_events (start_date, start_time, id)',
+        "ALTER TABLE caldev_events ADD COLUMN excluded_dates TEXT NOT NULL DEFAULT '[]'",
       ]) {
         try {
           await env.DB.prepare(sql).run();
@@ -467,7 +526,7 @@ export async function ensureCaldevSchema(env) {
 
 const CALDEV_SELECT = `
   id, title, description, location, who, start_date, end_date, start_time, end_time,
-  track, all_day, source_event_id, booster_event_id, created_at, updated_at
+  track, all_day, source_event_id, booster_event_id, excluded_dates, created_at, updated_at
 `;
 
 async function setCaldevBoosterEventId(env, caldevId, boosterEventId) {
@@ -646,10 +705,13 @@ export function caldevEventsFromDateStatement(env, { todayIso = '', limit = 80 }
     SELECT ${CALDEV_SELECT}
     FROM caldev_events
     WHERE start_date != ''
-      AND start_date >= ?
+      AND (
+        start_date >= ?
+        OR (end_date != '' AND end_date >= ?)
+      )
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
-  `).bind(today, rowLimit);
+  `).bind(today, today, rowLimit);
 }
 
 /** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
@@ -671,8 +733,8 @@ export async function insertCaldevEvent(env, payload, options = {}) {
   const result = await env.DB.prepare(`
     INSERT INTO caldev_events (
       title, description, location, who, start_date, end_date, start_time, end_time,
-      track, all_day, source_event_id, booster_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      track, all_day, source_event_id, booster_event_id, excluded_dates
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     p.title,
     p.description,
@@ -688,6 +750,7 @@ export async function insertCaldevEvent(env, payload, options = {}) {
     payload?.booster_event_id != null && Number.isFinite(Number(payload.booster_event_id))
       ? Number(payload.booster_event_id)
       : null,
+    JSON.stringify(p.excluded_dates),
   ).run();
   let created = await getCaldevEventById(env, result.meta.last_row_id);
   if (syncBoosters) {
@@ -703,6 +766,7 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
     UPDATE caldev_events SET
       title = ?, description = ?, location = ?, who = ?, start_date = ?, end_date = ?,
       start_time = ?, end_time = ?, track = ?, all_day = ?, source_event_id = ?,
+      excluded_dates = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -717,6 +781,7 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
     p.track,
     p.all_day,
     p.source_event_id,
+    JSON.stringify(p.excluded_dates),
     Number(id),
   ).run();
   let updated = await getCaldevEventById(env, id);
