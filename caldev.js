@@ -209,14 +209,24 @@
     }).join('');
   }
 
+  function excludedDateSet(event) {
+    const raw = event?.excluded_dates;
+    const list = Array.isArray(raw) ? raw : [];
+    return new Set(list.map((day) => String(day).slice(0, 10)));
+  }
+
+  function eventCoversIso(event, iso) {
+    const start = String(event?.start_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return false;
+    const end = event.end_date && event.end_date >= start ? event.end_date : start;
+    if (iso < start || iso > end) return false;
+    if (end > start && excludedDateSet(event).has(iso)) return false;
+    return true;
+  }
+
   function eventsOnDate(iso) {
-    return visibleEvents().filter((event) => {
-      if (!event.start_date) return false;
-      if (event.end_date && event.end_date >= event.start_date) {
-        return iso >= event.start_date && iso <= event.end_date;
-      }
-      return event.start_date === iso;
-    }).sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))
+    return visibleEvents().filter((event) => eventCoversIso(event, iso))
+      .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))
       || String(a.title || '').localeCompare(String(b.title || '')));
   }
 
@@ -242,6 +252,18 @@
     return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
+  function formatSpanWhen(event) {
+    const start = formatLongDate(event.start_date);
+    const end = event.end_date && event.end_date > event.start_date ? formatLongDate(event.end_date) : '';
+    const range = end ? `${start} through ${end}` : start;
+    const skipped = (Array.isArray(event.excluded_dates) ? event.excluded_dates : [])
+      .map((iso) => String(iso).slice(0, 10))
+      .filter((iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso) && (!end || (iso > event.start_date && iso < event.end_date)))
+      .map((iso) => formatLongDate(iso));
+    const closed = skipped.length ? `. Closed ${skipped.join(', ')}` : '';
+    return `${range} · ${eventTimeLabel(event)}${closed}`;
+  }
+
   function nextIsoDay(iso) {
     const [year, month, day] = String(iso).split('-').map(Number);
     return isoDate(new Date(year, month - 1, day + 1));
@@ -255,9 +277,10 @@
       const end = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end_date || '')) && event.end_date >= start
         ? event.end_date
         : start;
+      const skipped = excludedDateSet(event);
       let iso = start < fromIso ? fromIso : start;
       while (iso <= end) {
-        dates.add(iso);
+        if (!(end > start && skipped.has(iso))) dates.add(iso);
         iso = nextIsoDay(iso);
       }
     }
@@ -504,7 +527,7 @@
           <button type="button" class="sponsor-flyin-close" data-caldev-close aria-label="Close">×</button>
           ${trackChip(event.track)}
           <h3 id="caldev-detail-title"${event.cancelled_at ? ' class="is-cancelled"' : ''}><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</h3>
-          <p class="caldev-detail-when">${escapeHtml(formatLongDate(event.start_date))} · ${escapeHtml(eventTimeLabel(event))}</p>
+          <p class="caldev-detail-when">${escapeHtml(formatSpanWhen(event))}</p>
           ${event.who ? `<p class="caldev-detail-meta"><span>Who</span>${escapeHtml(event.who)}</p>` : ''}
           ${event.location ? `<p class="caldev-detail-meta"><span>Where</span>${escapeHtml(event.location)}</p>` : ''}
           ${event.description ? `<div class="caldev-detail-body">${formatDescHtml(event.description)}</div>` : '<p class="draft">No details yet.</p>'}

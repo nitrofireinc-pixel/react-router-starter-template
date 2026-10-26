@@ -40,6 +40,52 @@ export function isIsoDate(value = '') {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
 }
 
+const EXCLUDED_DATES_MAX = 60;
+
+/** Dates strictly inside a span (after the start, before the end). Endpoints stay covered. */
+export function normalizeExcludedDates(value, startDate = '', endDate = '') {
+  const start = isIsoDate(startDate) ? String(startDate).trim() : '';
+  const end = isIsoDate(endDate) ? String(endDate).trim() : '';
+  if (!start || !end || end <= start) return [];
+  let list = value;
+  if (typeof list === 'string') {
+    const trimmed = list.trim();
+    if (!trimmed) list = [];
+    else {
+      try {
+        list = JSON.parse(trimmed);
+      } catch {
+        list = [];
+      }
+    }
+  }
+  if (!Array.isArray(list)) list = [];
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const iso = String(item || '').trim().slice(0, 10);
+    if (!isIsoDate(iso) || seen.has(iso)) continue;
+    if (iso <= start || iso >= end) continue;
+    seen.add(iso);
+    out.push(iso);
+    if (out.length >= EXCLUDED_DATES_MAX) break;
+  }
+  out.sort();
+  return out;
+}
+
+export function caldevEventCoversDate(event, iso) {
+  const day = String(iso || '').trim().slice(0, 10);
+  if (!isIsoDate(day)) return false;
+  const start = String(event?.start_date || '').trim().slice(0, 10);
+  if (!isIsoDate(start)) return false;
+  const endRaw = String(event?.end_date || '').trim().slice(0, 10);
+  const end = isIsoDate(endRaw) && endRaw >= start ? endRaw : start;
+  if (day < start || day > end) return false;
+  if (end > start && normalizeExcludedDates(event?.excluded_dates, start, end).includes(day)) return false;
+  return true;
+}
+
 /** Map ISO YYYY-MM-DD → production events date fields. */
 export function isoToProductionDateParts(iso) {
   if (!isIsoDate(iso)) return null;
@@ -188,6 +234,9 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
   const source_event_id = payload.source_event_id !== undefined
     ? (payload.source_event_id == null || payload.source_event_id === '' ? null : Number(payload.source_event_id))
     : (existing?.source_event_id == null ? null : Number(existing.source_event_id));
+  const excludedSource = Object.prototype.hasOwnProperty.call(payload || {}, 'excluded_dates')
+    ? payload.excluded_dates
+    : existing?.excluded_dates;
   return {
     title,
     description,
@@ -200,6 +249,7 @@ export function normalizeCaldevPayload(payload = {}, existing = null) {
     track,
     all_day: all_day || (!start_time ? 1 : all_day),
     source_event_id: Number.isFinite(source_event_id) ? source_event_id : null,
+    excluded_dates: normalizeExcludedDates(excludedSource, start_date, end_date),
   };
 }
 
@@ -209,6 +259,7 @@ export function shiftCaldevEventToDate(event, nextStartDate) {
   const currentStart = String(event?.start_date || '');
   const currentEnd = String(event?.end_date || '');
   let end_date = '';
+  let excluded_dates = [];
   if (currentStart && currentEnd && currentEnd >= currentStart) {
     const startMs = Date.parse(`${currentStart}T00:00:00Z`);
     const endMs = Date.parse(`${currentEnd}T00:00:00Z`);
@@ -217,12 +268,16 @@ export function shiftCaldevEventToDate(event, nextStartDate) {
       const spanDays = Math.round((endMs - startMs) / 86400000);
       const shifted = new Date(nextMs + (spanDays * 86400000));
       end_date = `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+      const deltaDays = Math.round((nextMs - startMs) / 86400000);
+      excluded_dates = normalizeExcludedDates(event?.excluded_dates, currentStart, currentEnd)
+        .map((iso) => shiftIsoDate(iso, deltaDays));
     }
   }
   return {
     ...event,
     start_date: nextStartDate,
     end_date,
+    excluded_dates: normalizeExcludedDates(excluded_dates, nextStartDate, end_date),
   };
 }
 
@@ -245,6 +300,7 @@ export function hydrateCaldevRow(row) {
     series_id: row.series_id == null ? null : Number(row.series_id),
     series_rule: row.series_rule == null ? null : String(row.series_rule),
     cancelled_at: row.cancelled_at == null || row.cancelled_at === '' ? null : String(row.cancelled_at),
+    excluded_dates: normalizeExcludedDates(row.excluded_dates, row.start_date, row.end_date),
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || ''),
     deal_text: row.deal_text == null ? '' : String(row.deal_text),
@@ -318,6 +374,7 @@ export function caldevEventToHighlight(event) {
     end_time: String(hydrated?.end_time || ''),
     track: normalizeCaldevTrack(hydrated?.track),
     all_day: Number(hydrated?.all_day) ? 1 : 0,
+    excluded_dates: normalizeExcludedDates(hydrated?.excluded_dates, hydrated?.start_date, hydrated?.end_date),
     date_label: parts?.date_label || '',
     date_detail: parts?.date_detail || '',
     event_year: parts?.event_year ?? null,
@@ -469,6 +526,7 @@ export async function ensureCaldevSchema(env) {
         // Additive (home featured card): optional deal text and must-attend flag.
         'ALTER TABLE caldev_events ADD COLUMN deal_text TEXT',
         'ALTER TABLE caldev_events ADD COLUMN must_attend INTEGER',
+        "ALTER TABLE caldev_events ADD COLUMN excluded_dates TEXT NOT NULL DEFAULT '[]'",
       ]) {
         try {
           await env.DB.prepare(sql).run();
@@ -491,7 +549,7 @@ export async function ensureCaldevSchema(env) {
 
 const CALDEV_SELECT = `
   id, title, description, location, who, start_date, end_date, start_time, end_time,
-  track, all_day, source_event_id, booster_event_id, created_at, updated_at,
+  track, all_day, source_event_id, booster_event_id, excluded_dates, created_at, updated_at,
   series_id, series_rule, cancelled_at, deal_text, must_attend
 `;
 
@@ -672,11 +730,14 @@ export function caldevEventsFromDateStatement(env, { todayIso = '', limit = 80 }
     SELECT ${CALDEV_SELECT}
     FROM caldev_events
     WHERE start_date != ''
-      AND start_date >= ?
+      AND (
+        start_date >= ?
+        OR (end_date != '' AND end_date >= ?)
+      )
       AND cancelled_at IS NULL
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
-  `).bind(today, rowLimit);
+  `).bind(today, today, rowLimit);
 }
 
 /** Wider upcoming window for the home redesign. Not capped by the public highlights limit. */
@@ -698,8 +759,8 @@ export async function insertCaldevEvent(env, payload, options = {}) {
   const result = await env.DB.prepare(`
     INSERT INTO caldev_events (
       title, description, location, who, start_date, end_date, start_time, end_time,
-      track, all_day, source_event_id, booster_event_id, series_id, series_rule
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      track, all_day, source_event_id, booster_event_id, series_id, series_rule, excluded_dates
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     p.title,
     p.description,
@@ -717,6 +778,7 @@ export async function insertCaldevEvent(env, payload, options = {}) {
       : null,
     Number.isInteger(Number(payload?.series_id)) && Number(payload.series_id) > 0 ? Number(payload.series_id) : null,
     payload?.series_rule ? String(payload.series_rule).slice(0, 2000) : null,
+    JSON.stringify(p.excluded_dates),
   ).run();
   await saveCaldevCardFields(env, result.meta.last_row_id, payload);
   let created = await getCaldevEventById(env, result.meta.last_row_id);
@@ -740,6 +802,7 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
       title = ?, description = ?, location = ?, who = ?, start_date = ?, end_date = ?,
       start_time = ?, end_time = ?, track = ?, all_day = ?, source_event_id = ?,
       series_id = ?, cancelled_at = ?,
+      excluded_dates = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -756,6 +819,7 @@ export async function updateCaldevEvent(env, id, payload, existing, options = {}
     p.source_event_id,
     seriesAfter,
     cancelledAfter,
+    JSON.stringify(p.excluded_dates),
     Number(id),
   ).run();
   await saveCaldevCardFields(env, id, payload);

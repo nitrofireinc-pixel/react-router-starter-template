@@ -16,8 +16,11 @@ import {
   isoToProductionDateParts,
   listUpcomingCaldevEvents,
   normalizeCaldevLinkUrl,
+  caldevEventCoversDate,
+  caldevEventsFromDateStatement,
   normalizeCaldevPayload,
   normalizeCaldevTrack,
+  normalizeExcludedDates,
   parseCaldevUpcomingLimit,
   productionEventToCaldevPayload,
   productionEventToStartDate,
@@ -107,9 +110,54 @@ test('shiftCaldevEventToDate preserves multi-day span', () => {
     start_date: '2026-08-03',
     end_date: '2026-08-05',
     title: 'Spirit week',
+    excluded_dates: ['2026-08-04'],
   }, '2026-09-10');
   assert.equal(shifted.start_date, '2026-09-10');
   assert.equal(shifted.end_date, '2026-09-12');
+  assert.deepEqual(shifted.excluded_dates, ['2026-09-11']);
+});
+
+test('a date span can skip a closed day inside the range', () => {
+  const parsed = normalizeCaldevPayload({
+    title: 'Dewey Store Fundraiser',
+    start_date: '2026-11-16',
+    end_date: '2026-12-24',
+    excluded_dates: ['2026-11-26', '2026-11-16', '2026-12-24', '2026-11-26', 'nope', '2027-01-01'],
+    track: 'fundraiser',
+  });
+  assert.equal(parsed.track, 'fundraiser');
+  assert.deepEqual(parsed.excluded_dates, ['2026-11-26']);
+  assert.equal(caldevEventCoversDate(parsed, '2026-11-16'), true);
+  assert.equal(caldevEventCoversDate(parsed, '2026-11-26'), false);
+  assert.equal(caldevEventCoversDate(parsed, '2026-11-27'), true);
+  assert.equal(caldevEventCoversDate(parsed, '2026-12-24'), true);
+  assert.equal(caldevEventCoversDate(parsed, '2026-12-25'), false);
+  assert.deepEqual(normalizeExcludedDates('["2026-11-26"]', '2026-11-16', '2026-12-24'), ['2026-11-26']);
+  assert.deepEqual(normalizeExcludedDates(['2026-11-20'], '2026-11-16', '2026-11-16'), []);
+  const kept = normalizeCaldevPayload({ title: 'Keep skips', start_date: '2026-11-16', end_date: '2026-12-24' }, parsed);
+  assert.deepEqual(kept.excluded_dates, ['2026-11-26']);
+});
+
+test('home schedule keeps a span until the day after it ends', () => {
+  let sql = '';
+  let binds = [];
+  const env = {
+    DB: {
+      prepare(text) {
+        sql = String(text);
+        return {
+          bind(...args) {
+            binds = args;
+            return this;
+          },
+        };
+      },
+    },
+  };
+  caldevEventsFromDateStatement(env, { todayIso: '2026-11-20', limit: 80 });
+  assert.match(sql, /end_date >= \?/);
+  assert.match(sql, /excluded_dates/);
+  assert.deepEqual(binds, ['2026-11-20', '2026-11-20', 80]);
 });
 
 test('iso dates map to production event date parts for Boosters bridge', () => {

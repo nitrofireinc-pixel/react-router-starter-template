@@ -32,6 +32,7 @@
   let bound = false;
   let mounted = false;
   let exceptionDates = [];
+  let spanSkipDates = [];
   let lastTap = { id: null, at: 0 };
   let longPress = { timer: null, id: null, active: false, startX: 0, startY: 0 };
   let descLinkRange = null;
@@ -141,6 +142,7 @@
     const currentStart = String(ev.start_date || "");
     const currentEnd = String(ev.end_date || "");
     let end_date = "";
+    let excluded_dates = [];
     if (currentStart && currentEnd && currentEnd >= currentStart) {
       const startMs = Date.parse(`${currentStart}T00:00:00Z`);
       const endMs = Date.parse(`${currentEnd}T00:00:00Z`);
@@ -149,9 +151,13 @@
         const spanDays = Math.round((endMs - startMs) / 86400000);
         const shifted = new Date(nextMs + spanDays * 86400000);
         end_date = `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+        const deltaDays = Math.round((nextMs - startMs) / 86400000);
+        excluded_dates = (Array.isArray(ev.excluded_dates) ? ev.excluded_dates : [])
+          .map((iso) => shiftIsoDate(String(iso).slice(0, 10), deltaDays))
+          .filter((iso) => iso && iso > targetDateKey && iso < end_date);
       }
     }
-    return { ...ev, start_date: targetDateKey, end_date };
+    return { ...ev, start_date: targetDateKey, end_date, excluded_dates };
   }
   function sortEvents(list) {
     return [...list].sort((a, b) => {
@@ -175,7 +181,14 @@
       const start = eventDayKey(ev);
       if (!start) return false;
       const end = String(ev.end_date || "").slice(0, 10);
-      if (end && end >= start) return dateKey >= start && dateKey <= end;
+      if (end && end >= start) {
+        if (dateKey < start || dateKey > end) return false;
+        if (end > start) {
+          const skipped = new Set((Array.isArray(ev.excluded_dates) ? ev.excluded_dates : []).map((d) => String(d).slice(0, 10)));
+          if (skipped.has(dateKey)) return false;
+        }
+        return true;
+      }
       return start === dateKey;
     });
   }
@@ -259,6 +272,7 @@
       end_time: ev.end_time || "",
       all_day: !!Number(ev.all_day) || !ev.start_time,
       track: ev.track || "other",
+      excluded_dates: Array.isArray(ev.excluded_dates) ? ev.excluded_dates : [],
     };
   }
 
@@ -306,6 +320,7 @@
       repeat_days: [],
       repeat_months: [],
       repeat_exceptions: [],
+      excluded_dates: [],
     };
   }
 
@@ -328,6 +343,7 @@
       repeat_days: [],
       repeat_months: [],
       repeat_exceptions: [],
+      excluded_dates: Array.isArray(ev.excluded_dates) ? [...ev.excluded_dates] : [],
     };
   }
 
@@ -435,7 +451,32 @@
       repeat_days: [...panel.querySelectorAll('input[name="repeat_day"]:checked')].map((el) => Number(el.value)),
       repeat_months: [...panel.querySelectorAll('input[name="repeat_month"]:checked')].map((el) => Number(el.value)),
       repeat_exceptions: [...exceptionDates],
+      excluded_dates: spanSkipPayload(),
     };
+  }
+
+  function spanBounds() {
+    const panel = root.querySelector("[data-cms-caldev-editor]");
+    if (!panel) return null;
+    const start = panel.querySelector('[name="start_date"]').value;
+    const end = panel.querySelector('[name="end_date"]').value;
+    const repeat = panel.querySelector('[name="repeat_yes"]').checked;
+    if (repeat || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end <= start) return null;
+    return { start, end };
+  }
+
+  function spanSkipPayload() {
+    const bounds = spanBounds();
+    if (!bounds) return [];
+    return [...new Set(spanSkipDates)]
+      .filter((iso) => iso > bounds.start && iso < bounds.end)
+      .sort();
+  }
+
+  function formatSkipDate(iso) {
+    const date = parseDateKey(iso);
+    if (!date || Number.isNaN(date.getTime())) return iso;
+    return `${MONTHS[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
   }
 
   function renderExceptions() {
@@ -447,6 +488,33 @@
       : '<li class="draft">No skipped dates yet.</li>';
   }
 
+  function renderSpanSkips() {
+    const list = root.querySelector("[data-cms-caldev-span-skips]");
+    if (!list) return;
+    const bounds = spanBounds();
+    if (bounds) {
+      spanSkipDates = [...new Set(spanSkipDates)].filter((iso) => iso > bounds.start && iso < bounds.end).sort();
+    }
+    const dates = bounds ? spanSkipDates : [];
+    list.innerHTML = dates.length
+      ? dates.map((date) => `<li><span>${escapeHtml(formatSkipDate(date))}</span><button type="button" data-cms-caldev-remove-span-skip="${escapeHtml(date)}">Remove</button></li>`).join("")
+      : '<li class="draft">No closed days yet. The event runs every day from the start date through the end date.</li>';
+  }
+
+  function syncSpanSkipUi() {
+    const panel = root.querySelector("[data-cms-caldev-editor]");
+    const block = panel?.querySelector("[data-cms-caldev-span-skip]");
+    if (!block) return;
+    const bounds = spanBounds();
+    block.hidden = !bounds;
+    const input = block.querySelector("[data-cms-caldev-span-skip-input]");
+    if (input && bounds) {
+      input.min = shiftIsoDate(bounds.start, 1);
+      input.max = shiftIsoDate(bounds.end, -1);
+    }
+    renderSpanSkips();
+  }
+
   function syncRepeatUi() {
     const panel = root.querySelector("[data-cms-caldev-editor]");
     if (!panel) return;
@@ -454,6 +522,7 @@
     const options = panel.querySelector("[data-cms-caldev-repeat-options]");
     if (options) options.hidden = !on;
     panel.querySelector('[name="repeat_no"]').checked = !on;
+    syncSpanSkipUi();
   }
 
   function toggleTimeFields() {
@@ -468,6 +537,7 @@
   function openEditor(form) {
     selectedId = form.id || null;
     exceptionDates = Array.isArray(form.repeat_exceptions) ? [...form.repeat_exceptions] : [];
+    spanSkipDates = Array.isArray(form.excluded_dates) ? [...form.excluded_dates] : [];
     const overlay = root.querySelector("[data-cms-caldev-editor-overlay]");
     const panel = root.querySelector("[data-cms-caldev-editor]");
     if (!overlay || !panel) return;
@@ -794,6 +864,16 @@
             <label>End date <span class="cms-caldev-optional">(optional)</span>
               <input name="end_date" type="date" />
             </label>
+            <div class="cms-caldev-repeat-options" data-cms-caldev-span-skip hidden>
+              <p class="muted">This event runs every day from the start date through the end date. Skip a closed day, such as Thanksgiving, instead of making a second event.</p>
+              <label>Skip a date in this range
+                <span class="cms-caldev-exception-row">
+                  <input type="date" data-cms-caldev-span-skip-input>
+                  <button type="button" class="btn outline" data-cms-caldev-add-span-skip>Add skip</button>
+                </span>
+              </label>
+              <ul class="cms-caldev-exceptions" data-cms-caldev-span-skips></ul>
+            </div>
 
             <fieldset class="cms-caldev-repeat" data-cms-caldev-repeat-wrap>
               <legend>Repeat</legend>
@@ -804,7 +884,7 @@
                 <input type="checkbox" name="repeat_no" checked hidden>
               </div>
               <div class="cms-caldev-repeat-options" data-cms-caldev-repeat-options hidden>
-                <p class="muted">Creates one Schedule Board event for each matching weekday in the selected months. Exceptions skip specific dates.</p>
+                <p class="muted">Repeat is for selected weekdays, such as every Tuesday in the months you pick. For every day from the start date through the end date, leave Repeat on No and skip the closed days above.</p>
                 <div class="cms-caldev-repeat-grid">
                   <div>
                     <p class="cms-caldev-repeat-heading">Days</p>
@@ -1251,6 +1331,25 @@
         if (input) input.value = "";
         return;
       }
+      if (e.target.closest("[data-cms-caldev-add-span-skip]")) {
+        const input = root.querySelector("[data-cms-caldev-span-skip-input]");
+        const value = String(input?.value || "").trim();
+        const bounds = spanBounds();
+        if (bounds && value > bounds.start && value < bounds.end && !spanSkipDates.includes(value)) {
+          spanSkipDates.push(value);
+          renderSpanSkips();
+        } else if (value) {
+          showToast("Pick a day after the start date and before the end date", true);
+        }
+        if (input) input.value = "";
+        return;
+      }
+      const removeSpan = e.target.closest("[data-cms-caldev-remove-span-skip]");
+      if (removeSpan) {
+        spanSkipDates = spanSkipDates.filter((d) => d !== removeSpan.getAttribute("data-cms-caldev-remove-span-skip"));
+        renderSpanSkips();
+        return;
+      }
       const removeEx = e.target.closest("[data-cms-caldev-remove-exception]");
       if (removeEx) {
         exceptionDates = exceptionDates.filter((d) => d !== removeEx.getAttribute("data-cms-caldev-remove-exception"));
@@ -1321,6 +1420,7 @@
         return;
       }
       if (e.target.matches('[name="all_day"]')) toggleTimeFields();
+      if (e.target.matches('[name="start_date"]') || e.target.matches('[name="end_date"]')) syncSpanSkipUi();
       if (e.target.matches("[data-cms-caldev-repeat-yes]")) {
         root.querySelector('[name="repeat_yes"]').checked = true;
         root.querySelector('[name="repeat_no"]').checked = false;
