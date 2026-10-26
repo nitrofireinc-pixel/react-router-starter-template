@@ -347,12 +347,49 @@ function pickRotatingSponsor(sponsors = [], site = {}, storage) {
   return rotation[cursor % rotation.length];
 }
 
+// After a sponsor popup hides, taps that land where it was must not reach a
+// donate trigger underneath (its X sits over the hero Support button on phones).
+const SPONSOR_FLYIN_FADE_MS = 600; // >= longest panel transition (.55s)
+const SPONSOR_FLYIN_GUARD_MS = 600;
+let sponsorFlyinGuard = null;
+
+function sponsorFlyinGuardBlocks(event) {
+  const guard = sponsorFlyinGuard;
+  if (!guard) return false;
+  if (Date.now() > guard.until) {
+    sponsorFlyinGuard = null;
+    return false;
+  }
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || !target.closest('[data-donate-open]')) return false;
+  const { rect } = guard;
+  const x = event.clientX;
+  const y = event.clientY;
+  // Synthetic clicks without coordinates (keyboard) are deliberate; let them through.
+  if (!x && !y && event.detail === 0) return false;
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (event) => {
+    if (!sponsorFlyinGuardBlocks(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+}
+
 function dismissSponsorAd(root) {
-  if (!root) return;
+  if (!root || root.dataset.flyinLeaving === '1') return;
+  root.dataset.flyinLeaving = '1';
+  const panel = root.querySelector('.sponsor-flyin-panel') || root;
+  const box = panel.getBoundingClientRect();
+  const rect = { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+  // Guard covers the whole fade plus the grace period after removal.
+  sponsorFlyinGuard = { rect, until: Date.now() + SPONSOR_FLYIN_FADE_MS + SPONSOR_FLYIN_GUARD_MS };
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
   document.body.classList.remove('sponsor-flyin-open');
-  window.setTimeout(() => root.remove(), 420);
+  window.setTimeout(() => root.remove(), SPONSOR_FLYIN_FADE_MS);
 }
 
 function normalizeSponsorAdSeconds(value, fallback = 6) {
@@ -420,9 +457,22 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     event.stopPropagation();
   });
 
+  // Don't auto-hide while a finger or pointer is down on the popup.
+  let pressing = false;
+  let hideDue = false;
+  const release = () => {
+    pressing = false;
+    if (hideDue && document.body.contains(root)) dismissSponsorAd(root);
+  };
+  root.addEventListener('pointerdown', () => { pressing = true; });
+  root.addEventListener('pointerup', release);
+  root.addEventListener('pointercancel', release);
+
   const durationMs = normalizeSponsorAdSeconds(durationSeconds, 6) * 1000;
   window.setTimeout(() => {
-    if (document.body.contains(root)) dismissSponsorAd(root);
+    if (!document.body.contains(root)) return;
+    if (pressing) { hideDue = true; return; }
+    dismissSponsorAd(root);
   }, durationMs);
 }
 
