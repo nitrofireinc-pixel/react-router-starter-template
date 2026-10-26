@@ -7961,7 +7961,10 @@ function pageByPathStatement(env, path) {
 
 function homeSourcePagesStatement(env) {
   return env.DB.prepare(
-    `SELECT ${CMS_PAGE_READ_COLUMNS} FROM cms_pages WHERE slug IN ('fundraising', 'become-a-sponsor')`,
+    `SELECT ${CMS_PAGE_READ_COLUMNS},
+       (SELECT json_group_array(json_object('source_event_id', source_event_id, 'event_date', event_date, 'picture_mode', picture_mode, 'image_url', image_url))
+          FROM fundraiser_cards WHERE status = 'approved') AS fundraiser_cards_json
+     FROM cms_pages WHERE slug IN ('fundraising', 'become-a-sponsor')`,
   );
 }
 
@@ -8085,7 +8088,10 @@ export function publicReadJobs(env, { path = '/', today = '', isHome = false, ne
       statement: () => homeSourcePagesStatement(env),
       parse: (result) => {
         const bySlug = new Map(rowsOf(result).map((page) => [page.slug, page]));
+        let fundraiserCards = [];
+        try { fundraiserCards = JSON.parse(rowsOf(result)[0]?.fundraiser_cards_json || '[]'); } catch { fundraiserCards = []; }
         return {
+          fundraiserCards: Array.isArray(fundraiserCards) ? fundraiserCards : [],
           fundraising: bySlug.get('fundraising') || null,
           sponsor: bySlug.get('become-a-sponsor') || null,
         };
@@ -12067,6 +12073,7 @@ async function routeApi(request, env, url, ctx = null) {
           events: reads.homeEvents,
           members: reads.boosterMembers,
           fundraisingHtml: homeSources.fundraising?.body_html || '',
+          fundraiserCards: homeSources.fundraiserCards || [],
           tiers: extractSponsorTierFields(homeSources.sponsor?.body_html || ''),
           sponsors: (reads.sponsors || []).filter(sponsorShowsOnPage),
         });
@@ -15328,6 +15335,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         events: reads.homeEvents,
         members: boosterMembers,
         fundraisingHtml: homeSources.fundraising?.body_html || '',
+        fundraiserCards: homeSources.fundraiserCards || [],
         tiers: extractSponsorTierFields(homeSources.sponsor?.body_html || ''),
         sponsors: allSponsors.filter(sponsorShowsOnPage),
         instagramHref: normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '',

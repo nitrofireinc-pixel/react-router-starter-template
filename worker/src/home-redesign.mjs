@@ -183,14 +183,17 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
       <a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>`;
 }
 
-export function renderFeaturedFundraiser(event, { flyer = '/assets/home/mattress-flyer.jpg', dealHtml = '' } = {}) {
+export function renderFeaturedFundraiser(event, { flyer = '', dealHtml = '' } = {}) {
   if (!event) return '';
   const when = formatHomeEventWhen(event);
   const where = eventWhere(event);
   const directions = mapsHref(where);
   const deal = String(dealHtml || '').trim();
   const timeLine = when.time ? `<br>${escapeHtml(when.time)}` : '';
-  return `<div class="ff-media"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(plainText(event.title) || 'Fundraiser')} flyer"></div>
+  const media = flyer
+    ? `<div class="ff-media"><img src="${escapeAttr(flyer)}" alt="${escapeAttr(plainText(event.title) || 'Fundraiser')} flyer"></div>`
+    : '<style>.home-redesign .feature-fund{grid-template-columns:1fr}</style>';
+  return `${media}
       <div class="ff-body">
         <div class="pill-row"><span class="pill pill-gold">Featured fundraiser</span><span class="pill pill-red">Band members must attend</span></div>
         <h3>${escapeHtml(plainText(event.title))}</h3>
@@ -731,7 +734,11 @@ export function fillLiveSlots(html, data = {}) {
   if (!next.includes('data-home-slot')) return next;
   const schedule = selectHomeSchedule(data.events || []);
   const deal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
-  const flyer = firstFundraisingImage(data.fundraisingHtml) || '/assets/home/mattress-flyer.jpg';
+  const nf = schedule.nextFundraiser;
+  const cards = data.fundraiserCards || [];
+  const card = nf ? (cards.find((c) => c.source_event_id != null && String(c.source_event_id) === String(nf.id))
+    || cards.find((c) => c.event_date && c.event_date === nf.start_date)) : null;
+  const flyer = card && card.picture_mode === 'image' && card.image_url ? card.image_url : '';
   if (schedule.nextFundraiser) {
     next = replaceSlot(next, 'next-fund', renderNextFundraiserCard(schedule.nextFundraiser, { dealHtml: deal }));
     next = replaceSlot(next, 'featured-fund', renderFeaturedFundraiser(schedule.nextFundraiser, { flyer, dealHtml: deal }));
