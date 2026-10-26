@@ -33,6 +33,7 @@
     busy: false,
     editing: null,     // event being edited or null for new
     exceptions: [],
+    spanSkips: [],
     mode: "",          // "" | "one" (just this date) | "series" (whole series) for series rows
     shift: null,       // whole-series day shift {from, to}
     settings: null,    // overlap settings {evening_start, evening_end, modes}
@@ -55,10 +56,74 @@
   function longDate(isoStr) { const d = parse(isoStr); return `${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`; }
   function years() { const y = Number(todayIso().slice(0, 4)); return [y - 1, y, y + 1]; }
   const dayOf = (ev) => String(ev.start_date || "").slice(0, 10);
+  function excludedList(ev) {
+    let list = ev && ev.excluded_dates;
+    if (typeof list === "string") {
+      try { list = JSON.parse(list); } catch { list = []; }
+    }
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const item of list) {
+      const key = String(item || "").trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+      if (out.length >= 60) break;
+    }
+    return out.sort();
+  }
   function spans(ev, key) {
     const s = dayOf(ev); if (!s) return false;
     const e = String(ev.end_date || "").slice(0, 10);
-    return e && e > s ? key >= s && key <= e : key === s;
+    if (!(e && e > s)) return key === s;
+    if (key < s || key > e) return false;
+    return !excludedList(ev).includes(key);
+  }
+  function shiftIso(isoStr, days) {
+    const d = parse(isoStr);
+    d.setDate(d.getDate() + days);
+    return iso(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  function spanBoundsFromForm() {
+    const form = root.querySelector("[data-form]");
+    if (!form || state.mode === "series") return null;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || "";
+    const repeatOn = !!form.querySelector('[name="repeat"][value="yes"]')?.checked;
+    if (repeatOn || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end <= start) return null;
+    return { start, end };
+  }
+  function spanSkipPayload() {
+    const bounds = spanBoundsFromForm();
+    if (!bounds) return [];
+    return [...new Set(state.spanSkips)].filter((d) => d > bounds.start && d < bounds.end).sort().slice(0, 60);
+  }
+  function prettySkip(isoStr) {
+    const d = parse(isoStr);
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  }
+  function renderSpanSkips() {
+    const list = root.querySelector("[data-span-skips]");
+    if (!list) return;
+    const bounds = spanBoundsFromForm();
+    if (bounds) state.spanSkips = [...new Set(state.spanSkips)].filter((d) => d > bounds.start && d < bounds.end).sort();
+    const dates = bounds ? state.spanSkips : [];
+    list.innerHTML = dates.length
+      ? dates.map((d) => `<li>${esc(prettySkip(d))} <button type="button" data-unspan="${esc(d)}" aria-label="Remove ${esc(prettySkip(d))}">\u2715</button></li>`).join("")
+      : "<li>No closed days yet. The event runs every day from the start through the end.</li>";
+  }
+  function syncSpanSkipUi() {
+    const block = root.querySelector("[data-span-skip]");
+    if (!block) return;
+    const bounds = spanBoundsFromForm();
+    block.hidden = !bounds;
+    const input = block.querySelector("[data-span-input]");
+    if (input && bounds) {
+      input.min = shiftIso(bounds.start, 1);
+      input.max = shiftIso(bounds.end, -1);
+    }
+    renderSpanSkips();
   }
   function timeLabel(ev) {
     if (Number(ev.all_day) || !ev.start_time) return "All day";
@@ -99,6 +164,7 @@
       start_date: dayOf(ev), end_date: String(ev.end_date || "").slice(0, 10), start_time: ev.start_time || "", end_time: ev.end_time || "",
       all_day: !!Number(ev.all_day) || !ev.start_time, track: ev.track || "other",
       deal_text: ev.deal_text || "", must_attend: !!Number(ev.must_attend),
+      excluded_dates: excludedList(ev),
     };
   }
   async function load() {
@@ -269,7 +335,8 @@ ${list.length ? list.map((ev) => { const t = TRACK[ev.track] || TRACK.other; ret
     if (!chosen) { state.mode = ""; state.shift = null; }
     state.editing = ev || null;
     state.exceptions = [];
-    const f = ev ? payloadOf(ev) : { title: "", description: "", location: "", start_date: dateKey || todayIso(), end_date: "", start_time: "", end_time: "", all_day: true, track: "rehearsal", deal_text: "", must_attend: false };
+    state.spanSkips = excludedList(ev);
+    const f = ev ? payloadOf(ev) : { title: "", description: "", location: "", start_date: dateKey || todayIso(), end_date: "", start_time: "", end_time: "", all_day: true, track: "rehearsal" };
     let suggested = false;
     if (ev && f.track === "other" && FUNDRAISER_RE.test(`${f.title} ${plain(f.description)}`)) { f.track = "fundraiser"; suggested = true; }
     const inSeries = ev && ev.series_id && !ev.cancelled_at;
@@ -289,10 +356,18 @@ ${ev && ev.cancelled_at ? '<p class="ev-note ev-cancel-note">⊘ <b>Cancelled</b
   <label class="ev-f"><span>Date</span><input name="start_date" type="date" value="${esc(f.start_date)}"${state.mode === "series" ? " disabled" : ""}></label>
   <label class="ev-f"><span>End date (optional)</span><input name="end_date" type="date" value="${esc(f.end_date)}"${state.mode === "series" ? " disabled" : ""}></label>
 </div>
+<div data-span-skip hidden>
+  <p class="ev-note">This event runs every day from the start date through the end date. Skip a closed day, such as Thanksgiving, instead of making a second event.</p>
+  <div class="ev-f-row">
+    <label class="ev-f"><span>Skip a date in this range</span><input type="date" data-span-input aria-label="Skip a date in this range"></label>
+    <button type="button" class="ev-btn" data-add-span>Add skip date</button>
+  </div>
+  <ul class="ev-skips" data-span-skips></ul>
+</div>
 ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
   <div class="ev-seg"><label><input type="radio" name="repeat" value="yes"><span>Yes</span></label><label><input type="radio" name="repeat" value="no" checked><span>No</span></label></div>
   <div class="ev-rep-opts" data-rep hidden>
-    <p class="ev-note">Creates one event for each matching weekday in the selected months of that year. Skip dates leave a day out.</p>
+    <p class="ev-note">Repeat fills each matching weekday for the whole selected months. For one event from the start date through the end date, leave Repeat on No and skip closed days above.</p>
     <div class="ev-checks" aria-label="Days">${DOW.map((d, i) => `<label><input type="checkbox" name="rday" value="${i}"> ${d}</label>`).join("")}</div>
     <div class="ev-checks" aria-label="Months">${MON.map((d, i) => `<label><input type="checkbox" name="rmonth" value="${i + 1}"> ${d}</label>`).join("")}</div>
     <div class="ev-f-row"><input type="date" data-skip aria-label="Skip date"><button type="button" class="ev-btn" data-add-skip>Add skip date</button></div>
@@ -332,6 +407,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
     root.querySelector("[data-scrim]").hidden = false;
     document.body.classList.add("ev-modal");
     setTimeout(() => form.querySelector('[name="title"]').focus(), 20);
+    syncSpanSkipUi();
   }
   function closeForm() {
     root.querySelector("[data-form]").hidden = true;
@@ -387,6 +463,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
       repeat: form.querySelector('[name="repeat"][value="yes"]')?.checked || false,
       days: [...form.querySelectorAll('[name="rday"]:checked')].map((x) => Number(x.value)),
       months: [...form.querySelectorAll('[name="rmonth"]:checked')].map((x) => Number(x.value)),
+      excluded_dates: spanSkipPayload(),
     };
   }
   function repeatDates(p) {
@@ -729,6 +806,20 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
         inp.value = ""; renderSkips(); return;
       }
       if (t.dataset.unskip) { state.exceptions = state.exceptions.filter((x) => x !== t.dataset.unskip); renderSkips(); return; }
+      if (t.matches("[data-add-span]")) {
+        const inp = root.querySelector("[data-span-input]");
+        const bounds = spanBoundsFromForm();
+        const value = inp?.value || "";
+        if (!bounds || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value <= bounds.start || value >= bounds.end) {
+          toast("Pick a day after the start date and before the end date", true);
+          return;
+        }
+        if (!state.spanSkips.includes(value)) state.spanSkips.push(value);
+        inp.value = "";
+        renderSpanSkips();
+        return;
+      }
+      if (t.dataset.unspan) { state.spanSkips = state.spanSkips.filter((x) => x !== t.dataset.unspan); renderSpanSkips(); return; }
       if (t.dataset.cmd) return richCmd(t.dataset.cmd);
       if (t.dataset.day && isPhone()) { state.picked = t.dataset.day; render(); }
     });
@@ -737,7 +828,8 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
       if (t.matches("[data-month]")) { state.month = Number(t.value); state.picked = ""; render(); }
       else if (t.matches("[data-year]")) { state.year = Number(t.value); state.picked = ""; render(); }
       else if (t.name === "all_day") root.querySelector("[data-times]").hidden = t.checked;
-      else if (t.name === "repeat") root.querySelector("[data-rep]").hidden = t.value !== "yes";
+      else if (t.name === "repeat") { const rep = root.querySelector("[data-rep]"); if (rep) rep.hidden = t.value !== "yes"; syncSpanSkipUi(); }
+      else if (t.name === "start_date" || t.name === "end_date") syncSpanSkipUi();
       else if (t.name === "track") { root.querySelector("[data-fund-note]").hidden = t.value !== "fundraiser"; const fd = root.querySelector("[data-fund-details]"); if (fd) fd.hidden = t.value !== "fundraiser"; }
       else if (t.matches("[data-color]")) { root.querySelector("[data-desc]").focus(); document.execCommand("foreColor", false, t.value); }
       else if (t.matches("[data-size]") && t.value) {
@@ -745,6 +837,10 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
         ed.querySelectorAll('font[size="7"]').forEach((n) => { const s = document.createElement("span"); s.style.fontSize = t.value; while (n.firstChild) s.appendChild(n.firstChild); n.replaceWith(s); });
         t.value = "";
       }
+    });
+    root.addEventListener("input", (e) => {
+      const t = e.target;
+      if (t.name === "start_date" || t.name === "end_date") syncSpanSkipUi();
     });
     root.addEventListener("submit", save);
     document.addEventListener("keydown", (e) => {

@@ -35,6 +35,8 @@ for (const name of [
   'site-content.js',
   'caldev.js',
   'admin-caldev.js',
+  'admin-events.js',
+  'admin-events.css',
   'admin.js',
   'admin-nav.js',
   'admin-nav.css',
