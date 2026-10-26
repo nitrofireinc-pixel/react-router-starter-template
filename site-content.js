@@ -1527,12 +1527,13 @@ function renderPhotoGallery(container, photos = []) {
     container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }
+  const hideTitles = container.classList.contains('photo-gallery');
   container.innerHTML = list.map((photo) => `
     <figure class="gallery-item" data-photo-open>
       <button type="button" class="gallery-item-trigger" aria-label="View ${escapeHtml(photo.alt_text || photo.caption || 'photo')}">
         <img src="${escapeHtml(photo.thumb_url || photo.url)}"${photo.thumb_url && photo.width && photo.height ? ` width="${Number(photo.width)}" height="${Number(photo.height)}"` : ''} data-photo-full="${escapeHtml(photo.full_url || photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" decoding="async" draggable="false">
       </button>
-      <figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>
+      ${hideTitles ? '' : `<figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>`}
     </figure>
   `).join('');
 }
@@ -1562,14 +1563,15 @@ function closePhotoLightbox() {
   }, 280);
 }
 
-function openPhotoLightbox({ src, alt = '', caption = '' } = {}) {
+function openPhotoLightbox({ src, alt = '', caption = '', showCaption = true } = {}) {
   if (!src) return;
   closePhotoLightbox();
+  const visibleCaption = showCaption ? (caption || alt) : '';
   const modal = document.createElement('aside');
   modal.className = 'photo-lightbox';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', caption || alt || 'Photo');
+  modal.setAttribute('aria-label', visibleCaption || alt || 'Photo');
   modal.innerHTML = `
     <button type="button" class="photo-lightbox-backdrop" aria-label="Close photo"></button>
     <div class="photo-lightbox-panel">
@@ -1577,7 +1579,7 @@ function openPhotoLightbox({ src, alt = '', caption = '' } = {}) {
       <div class="photo-lightbox-frame">
         <img class="photo-lightbox-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt || caption || 'Band photo')}" draggable="false">
       </div>
-      ${caption || alt ? `<p class="photo-lightbox-caption">${escapeHtml(caption || alt)}</p>` : ''}
+      ${visibleCaption ? `<p class="photo-lightbox-caption">${escapeHtml(visibleCaption)}</p>` : ''}
     </div>
   `;
   document.body.appendChild(modal);
@@ -1626,11 +1628,13 @@ function bindPhotoGalleries(root = document) {
       const img = item.querySelector('img');
       if (!img?.src) return;
       event.preventDefault();
-      const caption = item.querySelector('figcaption')?.textContent?.trim() || '';
+      const hideTitles = container.classList.contains('photo-gallery');
+      const caption = hideTitles ? '' : (item.querySelector('figcaption')?.textContent?.trim() || '');
       openPhotoLightbox({
         src: img.getAttribute('data-photo-full') || img.currentSrc || img.src,
         alt: img.alt || '',
         caption,
+        showCaption: !hideTitles,
       });
     });
   });
