@@ -515,3 +515,10 @@ test('content-only user is 403 on approve and reject via the API', async () => {
   }), store.env, { waitUntil() {} });
   assert.ok(restore.status === 200 || restore.status === 409 || restore.status === 404);
 });
+
+test('fundraiser card radios and checks sit beside their labels', () => {
+  const css = readFileSync(join(root, 'admin-fundraiser-cards.css'), 'utf8');
+  assert.match(css, /\.fc-editor label\.fc-radio,\s*\.fc-editor label\.fc-check\{[^}]*display:flex/);
+  assert.match(css, /\.fc-editor label\.fc-radio input,\s*\.fc-editor label\.fc-check input\{[^}]*width:1\.05rem/);
+  assert.match(css, /padding:0/);
+});
