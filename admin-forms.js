@@ -24,6 +24,7 @@
   const TYPES = [
     ['text', 'Aa', 'Short text'], ['textarea', '¶', 'Long text'], ['email', '@', 'Email'], ['phone', '☎', 'Phone'], ['number', '#', 'Number'], ['date', '📅', 'Date'],
     ['select', '▾', 'Dropdown'], ['radio', '◉', 'Radio (pick one)'], ['checkbox', '☑', 'Checkbox(es)'], ['heading', '—', 'Section heading'], ['note', 'ℹ', 'Note text'], ['pricing', '$', 'Price list'],
+    ['break', '↵', 'Line break'],
   ];
   const TYPE_LABEL = Object.fromEntries(TYPES.map(([k, , l]) => [k, l.replace(/ \(.*/, '')]));
   const HAS_OPTIONS = new Set(['select', 'radio', 'checkbox']);
@@ -160,7 +161,7 @@
     const addField = (type, at = def.fields.length) => commit(() => {
       const label = { heading: 'New section', note: '', pricing: 'Prices' }[type] ?? TYPE_LABEL[type];
       const used = new Set(def.fields.map((f) => f.name)); let name = slugName(label) || type; let n = 2; const b = name; while (used.has(name)) name = `${b}_${n++}`;
-      const f = { id: `f${rid()}`, type, name, label, help: '', placeholder: '', required: false, width: ['textarea', 'radio', 'checkbox', 'heading', 'note', 'pricing'].includes(type) ? 'full' : 'half' };
+      const f = { id: `f${rid()}`, type, name, label, help: '', placeholder: '', required: false, width: ['textarea', 'radio', 'checkbox', 'heading', 'note', 'pricing', 'break'].includes(type) ? 'full' : 'half' };
       if (HAS_OPTIONS.has(type)) f.options = [{ id: `o${rid()}`, value: 'Option 1', label: 'Option 1' }, { id: `o${rid()}`, value: 'Option 2', label: 'Option 2' }];
       if (type === 'radio') f.display = 'buttons';
       if (type === 'note') { f.text = 'Add a note for families.'; f.style = ''; }
@@ -212,13 +213,13 @@
     function canvas() {
       const list = el('ol', { class: 'fb-fields', 'aria-label': 'Form fields' });
       def.fields.forEach((f, i) => {
-        const item = el('li', { class: `fb-field-row${f.id === selected ? ' sel' : ''}`, tabindex: '0', draggable: 'true', 'data-field': f.id, 'aria-label': `${TYPE_LABEL[f.type]}: ${f.label || f.text || ''}`,
+        const item = el('li', { class: `fb-field-row${f.id === selected ? ' sel' : ''}${f.type === 'break' ? ' fb-break' : ''}`, tabindex: '0', draggable: 'true', 'data-field': f.id, 'aria-label': `${TYPE_LABEL[f.type]}: ${f.label || f.text || ''}`,
           onclick: () => { selected = f.id; render(); }, onkeydown: (e) => { if (e.key === 'Enter') { selected = f.id; render(); } if (e.altKey && e.key === 'ArrowUp') move(f.id, i - 1); if (e.altKey && e.key === 'ArrowDown') move(f.id, i + 1); },
           ondragstart: (e) => { e.dataTransfer.setData('text/fb-move', f.id); }, ondragover: (e) => e.preventDefault(),
           ondrop: (e) => { e.preventDefault(); const add = e.dataTransfer.getData('text/fb-add'); const mv = e.dataTransfer.getData('text/fb-move'); if (add) addField(add, i); else if (mv && mv !== f.id) move(mv, i); } },
           el('span', { class: 'fb-grip', 'aria-hidden': 'true', text: '⠿' }),
           el('span', { class: 'fb-type', text: f.type === 'radio' ? 'Radio · button group' : TYPE_LABEL[f.type] }),
-          el('div', { class: 'fb-field-body' }, el('b', { text: f.type === 'note' ? (f.text || '').slice(0, 90) : f.label }), f.required ? el('span', { class: 'fb-req', text: ' *' }) : null,
+          el('div', { class: 'fb-field-body' }, f.type === 'break' ? el('span', { class: 'fb-break-line', text: 'new line' }) : el('b', { text: f.type === 'note' ? (f.text || '').slice(0, 90) : f.label }), f.type === 'break' ? null : f.required ? el('span', { class: 'fb-req', text: ' *' }) : null,
             f.type === 'radio' ? el('div', { class: 'rgp-row fb-pill-prev', 'aria-hidden': 'true' }, ...f.options.map((o) => el('span', { class: 'fb-pill', text: o.label }))) : null,
             HAS_OPTIONS.has(f.type) && f.type !== 'radio' ? el('small', { class: 'fb-muted', text: f.options.map((o) => o.label).join(' · ') }) : null,
             f.type === 'pricing' ? el('small', { class: 'fb-muted', text: f.items.map((it) => `${it.label} ${it.price}`).join(' · ') }) : null,
@@ -242,7 +243,8 @@
       const wrap = el('div', { class: 'card inkind-card letterman-card fs-card' });
       const form = el('div', { class: 'inkind-form letterman-form form-grid fs-form' });
       def.fields.forEach((f) => {
-        if (f.type === 'heading') form.append(el('h3', { class: 'full letterman-section', text: f.label }));
+        if (f.type === 'break') form.append(el('div', { class: 'full fb-preview-break', 'aria-hidden': 'true', text: '↵ new line' }));
+        else if (f.type === 'heading') form.append(el('h3', { class: 'full letterman-section', text: f.label }));
         else if (f.type === 'note') form.append(el('p', { class: 'full letterman-note', text: f.text }));
         else if (f.type === 'pricing') form.append(el('div', { class: 'full letterman-pricing' }, ...f.items.map((it) => el('div', {}, el('span', { text: it.label }), el('b', { text: it.price })))));
         else if (f.type === 'radio') form.append(el('fieldset', { class: 'full rgp' }, el('legend', { text: `${f.label}${f.required ? ' *' : ' (optional)'}` }), el('div', { class: 'rgp-row' }, ...f.options.map((o) => el('label', { class: 'rpl' }, el('input', { type: 'radio', name: `pv-${f.id}`, value: o.value }), el('span', { text: o.label }))))));
@@ -258,6 +260,7 @@
     function inspector(f) {
       const box = el('aside', { class: 'fb-inspector', 'aria-label': 'Field settings' });
       if (!f) { box.append(el('h2', { text: 'Form settings' }), txt('Submit button words', def.submit_label, (v) => { def.submit_label = v; }), txt('Message after sending', def.success_message, (v) => { def.success_message = v; }, true), el('p', { class: 'fb-muted', text: 'Click a field to change it.' })); return box; }
+      if (f.type === 'break') { box.append(el('h2', { text: 'Line break' }), el('p', { text: 'Puts the next field on a new line, under the field before it. A half-width field after this break no longer sits beside the field above.' })); return box; }
       box.append(el('h2', { text: `✎ Field: ${TYPE_LABEL[f.type]}${f.label ? ` · ${f.label}` : ''}` }));
       if (f.type === 'note') box.append(txt('Note text (links need Super Admin review)', f.text, (v) => { f.text = v; }, true), sel('Style', f.style, [['', 'Plain'], ['strong', 'Bold'], ['italic', 'Italic']], (v) => { f.style = v; }));
       else box.append(txt(f.type === 'radio' ? 'Label (shown as the group title)' : 'Label', f.label, (v) => { f.label = v; }));
@@ -304,15 +307,41 @@
     function sel(label, value, opts, set) { const s = el('select', {}, ...opts.map(([v, t]) => el('option', { value: v, text: t }))); s.value = value || ''; s.addEventListener('change', () => commit(() => set(s.value))); return el('label', { class: 'fb-field' }, label, s); }
     function mailDesigner() {
       const e = def.email;
-      const people = el('div', { class: 'fb-people' }, ...data.users.map((u) => {
-        const cb = el('input', { type: 'checkbox', value: String(u.id) }); cb.checked = e.to_user_ids.includes(u.id);
-        cb.addEventListener('change', () => { if (cb.checked && e.to_user_ids.length >= data.max_recipients) { cb.checked = false; toast(`At most ${data.max_recipients} staff get each sign-up.`, true); return; } commit(() => { e.to_user_ids = cb.checked ? [...e.to_user_ids, u.id] : e.to_user_ids.filter((x) => x !== u.id); }); });
-        return el('label', { class: 'fb-check' }, cb, ` ${u.name}`);
-      }));
+      e.addresses = e.addresses && typeof e.addresses === 'object' ? e.addresses : {};
+      const validEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+      const roleLabel = { director: 'Director', 'assistant-director': 'Assistant Director', staff: 'Staff', president: 'President', 'vice-president': 'Vice President', secretary: 'Secretary', treasurer: 'Treasurer', committee: 'Committee', editor: 'Editor', site_admin: 'Admin', admin: 'Super Admin' };
+      const groups = [['staff', 'Staff'], ['boosters', 'Boosters'], ['', 'Other accounts']];
+      const personRow = (u) => {
+        const known = String(u.email || '').trim();
+        const cb = el('input', { type: 'checkbox', value: String(u.id) });
+        cb.checked = e.to_user_ids.includes(u.id);
+        const role = roleLabel[u.role] || '';
+        let emailInput = null;
+        const chosenEmail = () => known || String(e.addresses[u.id] || '').trim();
+        cb.addEventListener('change', () => {
+          if (cb.checked && e.to_user_ids.length >= data.max_recipients) { cb.checked = false; toast(`At most ${data.max_recipients} people get each sign-up.`, true); return; }
+          if (cb.checked && !validEmail(chosenEmail())) { cb.checked = false; toast(`Add an email address for ${u.name}.`, true); emailInput?.focus(); return; }
+          commit(() => { e.to_user_ids = cb.checked ? [...e.to_user_ids, u.id] : e.to_user_ids.filter((x) => x !== u.id); });
+        });
+        const name = el('span', {}, u.name, role ? el('small', { text: ` · ${role}` }) : null);
+        if (known) {
+          return el('div', { class: 'fb-person' }, el('label', { class: 'fb-check' }, cb, ' ', name), el('small', { class: 'fb-person-email', text: known }));
+        }
+        emailInput = el('input', { type: 'email', placeholder: 'Email address', 'aria-label': `Email for ${u.name}`, value: e.addresses[u.id] || '' });
+        emailInput.addEventListener('input', () => { e.addresses[u.id] = emailInput.value.trim(); });
+        emailInput.addEventListener('change', () => { e.addresses[u.id] = emailInput.value.trim(); if (cb.checked && !validEmail(e.addresses[u.id])) { cb.checked = false; commit(() => { e.to_user_ids = e.to_user_ids.filter((x) => x !== u.id); }); toast(`Add an email address for ${u.name}.`, true); } });
+        return el('div', { class: 'fb-person' }, el('label', { class: 'fb-check' }, cb, ' ', name), emailInput);
+      };
+      const people = el('div', { class: 'fb-people' });
+      for (const [group, label] of groups) {
+        const rows = (data.users || []).filter((u) => (u.group || '') === group);
+        if (!rows.length) continue;
+        people.append(el('h3', { text: label }), ...rows.map(personRow));
+      }
       const emails = def.fields.filter((f) => f.type === 'email');
       const tokens = def.fields.filter((f) => INPUT.has(f.type)).map((f) => `{${f.name}}`).join(' ');
       return el('section', { class: 'fb-mail' },
-        el('h2', { text: 'Who gets each sign-up' }), el('p', { class: 'fb-muted', text: `Pick up to ${data.max_recipients} staff accounts. They get an email with every answer and a PDF copy.` }), people,
+        el('h2', { text: 'Who gets each sign-up' }), el('p', { class: 'fb-muted', text: `Every staff member, booster officer, and account is listed. Pick up to ${data.max_recipients}. Add an email for anyone who does not have one yet. They get an email with every answer and a PDF copy.` }), people,
         sel('Replies go to', e.reply_to_field, [['', 'Nobody (no reply-to)'], ...emails.map((f) => [f.name, f.label])], (v) => { e.reply_to_field = v; }),
         txt(`Email subject (you can use {title} ${tokens})`, e.subject, (v) => { e.subject = v; }),
         txt('Short note at the top of the staff email', e.intro, (v) => { e.intro = v; }, true),

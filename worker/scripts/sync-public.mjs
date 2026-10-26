@@ -50,6 +50,8 @@ for (const name of [
   'form-studio.js',
   'admin-fundraiser-cards.js',
   'admin-fundraiser-cards.css',
+  'admin-forms.js',
+  'admin-forms.css',
   'badge-creator.js',
   'badge-creator-admin.js',
   'push-sw.js',

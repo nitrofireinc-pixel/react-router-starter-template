@@ -64,6 +64,8 @@
 .fb-grip{color:#9aa3b5;cursor:grab;user-select:none}
 .fb-type{background:#e5edfb;color:#0b4fb3;font-size:11px;font-weight:700;border-radius:5px;padding:2px 6px;white-space:nowrap}
 .fb-field-body{flex:1;min-width:0;display:grid;gap:3px}.fb-req{color:#b3001b;font-weight:800}
+.fb-break-line{display:block;border-top:2px dashed #8aa0c4;margin:8px 0;color:#5b6b84;font-size:12px;font-weight:700}
+.fb-preview-break{grid-column:1/-1;border-top:2px dashed #8aa0c4;margin:6px 0 2px;padding-top:2px;color:#5b6b84;font-size:12px;font-weight:700}
 .fb-row-tools{display:flex;gap:3px}
 .fb-ib{width:28px;height:28px;border:1px solid #dfe4ee;border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
 .fb-ib:disabled{opacity:.35}.fb-x{background:#d61f2c;border-color:#d61f2c;color:#fff;font-weight:800}
@@ -82,7 +84,12 @@
 .fb-tip{font-size:12px;background:#eef5ff;border-radius:8px;padding:8px;color:#33405c}
 .fb-mail{max-width:720px;margin:0 auto;background:#fff;border:1px solid #dfe4ee;border-radius:12px;padding:16px 20px}
 .fb-mail h2{margin:0 0 4px;font-size:18px}
-.fb-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0 12px;margin:6px 0 10px}
+.fb-people{display:grid;grid-template-columns:1fr;gap:0;margin:6px 0 10px}
+.fb-people h3{margin:14px 0 4px;font-size:13px;color:#0b2a5b}
+.fb-person{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding:6px 0;border-bottom:1px solid #e6ebf3}
+.fb-person .fb-check{margin:0}
+.fb-person small,.fb-person-email{color:#5b6680;font-weight:500}
+.fb-person input[type=email]{font:inherit;font-weight:400;padding:6px 8px;border:1px solid #c4cbd9;border-radius:8px;width:100%;box-sizing:border-box}
 .fb-mail-preview{width:100%;height:420px;border:1px solid #dfe4ee;border-radius:10px;margin-top:12px;background:#fff}
 /* submissions */
 .fb-menu{list-style:none;padding:0;display:grid;gap:8px}
