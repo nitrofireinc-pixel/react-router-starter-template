@@ -2678,7 +2678,8 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.doesNotMatch(upgraded, /logo-lockup/);
   assert.match(upgraded, /<h2>Keep me<\/h2>/);
   assert.match(upgraded, /data-home-slot="next-fund"/);
-  assert.match(upgraded, /data-home-deal/);
+  assert.doesNotMatch(upgraded, /data-home-deal/);
+  assert.doesNotMatch(upgraded, /off retail pricing/);
   assert.doesNotMatch(upgraded, /class="amt"/);
   assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).label, 'IMPORTANT');
   assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).className, 'ev-deadline');
@@ -2709,7 +2710,32 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.doesNotMatch(buildHomeRedesignDocument(), /logo-lockup/);
   assert.doesNotMatch(upgradeHomeBody(buildHomeRedesignDocument().replace('<div class="eyebrow">', '<div class="logo-lockup"><img class="lock-eagle" alt="x"></div><div class="eyebrow">')), /logo-lockup/);
   assert.match(decorated, /Mattress Sale/);
+  assert.doesNotMatch(decorated, /off retail pricing/);
   assert.doesNotMatch(decorated, /10 AM/);
+  const storedDeal = buildHomeRedesignDocument().replace(
+    '<a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>',
+    '<p class="nf-deal" data-home-deal>Save <b>30%–70%</b> off retail pricing</p><a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>',
+  );
+  const silentAuction = decorateHomeRedesign(storedDeal, {
+    events: [{
+      title: 'Fundraiser/Silent Auction',
+      description: 'Silent Auction Students and Parents Help Needed Location TBD',
+      start_date: '2026-11-14',
+      all_day: 1,
+    }],
+  });
+  assert.match(silentAuction, /Silent Auction/);
+  assert.doesNotMatch(silentAuction, /off retail pricing/);
+  assert.doesNotMatch(silentAuction, /class="nf-deal"/);
+  const customDeal = decorateHomeRedesign(storedDeal.replace('Save <b>30%–70%</b> off retail pricing', 'Bring a neighbor'), {
+    events: [{
+      title: 'Fundraiser/Silent Auction',
+      description: 'Silent Auction Students and Parents Help Needed Location TBD',
+      start_date: '2026-11-14',
+      all_day: 1,
+    }],
+  });
+  assert.match(customDeal, /Bring a neighbor/);
   assert.match(decorated, /Jamie Olsen/);
   assert.match(decorated, /aireserv\.jpg/);
   assert.match(decorated, /data-home-slot="events"/);

@@ -46,6 +46,21 @@ function looksLikeCssOrStyleDump(value) {
   return /\{[^}]*margin\s*:[^}]*\}/i.test(text) && text.length < 80;
 }
 
+function isHardcodedRetailDeal(html) {
+  const text = plainText(html);
+  return /^save 30%[–-]70% off retail pricing$/i.test(text);
+}
+
+function stripHardcodedHomeDeal(html) {
+  return String(html || '')
+    .replace(/<p\b[^>]*\bnf-deal\b[^>]*>[\s\S]*?<\/p>/gi, (paragraph) => (
+      isHardcodedRetailDeal(paragraph) ? '' : paragraph
+    ))
+    .replace(/<div\b[^>]*\bff-deal\b[^>]*>[\s\S]*?<\/div>/gi, (block) => (
+      isHardcodedRetailDeal(block) ? '' : block
+    ));
+}
+
 function plainText(value) {
   return stripStyleAndEditorChrome(value)
     .replace(/<br\s*\/?>/gi, ' ')
@@ -700,10 +715,11 @@ export function stripHomeHeroLogoLockup(html) {
 }
 
 export function decorateHomeRedesign(html, data = {}) {
-  let next = stripHomeHeroLogoLockup(html);
+  let next = stripHardcodedHomeDeal(stripHomeHeroLogoLockup(html));
   if (!next.includes(HOME_REDESIGN_MARKER) && !next.includes('data-home-slot')) return next;
   const schedule = selectHomeSchedule(data.events || []);
-  const deal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
+  const rawDeal = next.match(/data-home-deal[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
+  const deal = isHardcodedRetailDeal(rawDeal) ? '' : rawDeal.trim();
   const flyer = firstFundraisingImage(data.fundraisingHtml) || '/assets/home/mattress-flyer.jpg';
   if (schedule.nextFundraiser) {
     next = replaceSlot(next, 'next-fund', renderNextFundraiserCard(schedule.nextFundraiser, { dealHtml: deal }));
@@ -817,7 +833,6 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
       <h2>Mattress Fundraiser</h2>
       <div class="nf-date"><b>Sat, Oct 24</b><span>10 AM – 5 PM</span></div>
       <p class="nf-where">Mattress Warehouse of Kernersville<br>820 South Main Street, Kernersville, NC 27284</p>
-      <p class="nf-deal" data-home-deal>Save <b>30%–70%</b> off retail pricing</p>
       <a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>
     </aside>
     ${heroCardHtml}
@@ -847,7 +862,6 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
         <dl class="ff-facts">
           <div><dt>When</dt><dd>Saturday, October 24th, 2026<br>10 AM – 5 PM</dd></div>
           <div><dt>Where</dt><dd>Mattress Warehouse of Kernersville<br>820 South Main Street, Kernersville, NC 27284</dd></div>
-          <div class="ff-deal"><dt>The deal</dt><dd>Save <b>30%–70%</b> off retail pricing</dd></div>
         </dl>
         <div class="btn-row">
           <a class="btn btn-blue" href="/calendar.html">View on calendar</a>
