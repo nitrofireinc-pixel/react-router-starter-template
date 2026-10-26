@@ -42,6 +42,8 @@ for (const name of [
   'admin-visual.css',
   'admin-fundraiser-cards.js',
   'admin-fundraiser-cards.css',
+  'admin-forms.js',
+  'admin-forms.css',
   'badge-creator.js',
   'badge-creator-admin.js',
   'push-sw.js',
