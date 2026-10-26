@@ -2384,7 +2384,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025d'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025e'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2639,7 +2639,7 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.doesNotMatch(upgraded, /logo-lockup/);
   assert.match(upgraded, /<h2>Keep me<\/h2>/);
   assert.match(upgraded, /data-home-slot="next-fund"/);
-  assert.match(upgraded, /data-home-deal/);
+  assert.doesNotMatch(upgraded, /Save <b>30%/);
   assert.doesNotMatch(upgraded, /class="amt"/);
   assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).label, 'IMPORTANT');
   assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).className, 'ev-deadline');
