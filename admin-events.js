@@ -98,6 +98,7 @@
       title: ev.title || "", description: ev.description || "", location: ev.location || "", who: ev.who || "",
       start_date: dayOf(ev), end_date: String(ev.end_date || "").slice(0, 10), start_time: ev.start_time || "", end_time: ev.end_time || "",
       all_day: !!Number(ev.all_day) || !ev.start_time, track: ev.track || "other",
+      deal_text: ev.deal_text || "", must_attend: !!Number(ev.must_attend),
     };
   }
   async function load() {
@@ -268,7 +269,7 @@ ${list.length ? list.map((ev) => { const t = TRACK[ev.track] || TRACK.other; ret
     if (!chosen) { state.mode = ""; state.shift = null; }
     state.editing = ev || null;
     state.exceptions = [];
-    const f = ev ? payloadOf(ev) : { title: "", description: "", location: "", start_date: dateKey || todayIso(), end_date: "", start_time: "", end_time: "", all_day: true, track: "rehearsal" };
+    const f = ev ? payloadOf(ev) : { title: "", description: "", location: "", start_date: dateKey || todayIso(), end_date: "", start_time: "", end_time: "", all_day: true, track: "rehearsal", deal_text: "", must_attend: false };
     let suggested = false;
     if (ev && f.track === "other" && FUNDRAISER_RE.test(`${f.title} ${plain(f.description)}`)) { f.track = "fundraiser"; suggested = true; }
     const inSeries = ev && ev.series_id && !ev.cancelled_at;
@@ -305,7 +306,10 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
 <fieldset class="ev-f ev-f-wide"><legend>Category (pick one)</legend><div class="ev-cats" role="radiogroup">${radioCats(f.track)}</div>
 <p class="ev-note">IMPORTANT shows the red banner on every page for the 7 days up to the event. Meetings also show on Boosters.</p>
 <p class="ev-note ev-fund-note" data-fund-note${f.track === "fundraiser" ? "" : " hidden"}>💰 Category <b>Fundraising</b>${suggested ? " (suggested because the title looks like a fundraiser; it is saved only when you press Save)" : ""}. Fundraising never shows the red IMPORTANT banner; pick IMPORTANT if you need the banner.</p></fieldset>
+<fieldset class="ev-f ev-f-wide ev-fund-details" data-fund-details${f.track === "fundraiser" ? "" : " hidden"}><legend>Fundraiser details <small>optional · shown on the home fundraiser card when filled in</small></legend>
 <label class="ev-f ev-f-wide"><span>Location</span><input name="location" maxlength="200" value="${esc(f.location)}"></label>
+<label class="ev-f ev-f-wide"><span>Deal text</span><input name="deal_text" maxlength="200" placeholder="e.g. Save 30%–70% off retail" value="${esc(f.deal_text || "")}"></label>
+<label class="ev-allday"><input type="checkbox" name="must_attend"${f.must_attend ? " checked" : ""}> Must attend (shows the badge on the home card)</label></fieldset>
 <div class="ev-f ev-f-wide"><span id="ev-desc-l">Description</span>
   <div class="ev-rt-bar" role="toolbar" aria-label="Text style">
     <button type="button" data-cmd="bold" title="Bold"><b>B</b></button><button type="button" data-cmd="italic" title="Italic"><i>I</i></button><button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
@@ -379,6 +383,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
       start_date: v("start_date"), end_date: v("end_date"),
       start_time: allDay ? "" : v("start_time"), end_time: allDay ? "" : v("end_time"), all_day: allDay,
       track: form.querySelector('[name="track"]:checked')?.value || "other",
+      deal_text: v("deal_text").trim(), must_attend: !!form.querySelector('[name="must_attend"]')?.checked,
       repeat: form.querySelector('[name="repeat"][value="yes"]')?.checked || false,
       days: [...form.querySelectorAll('[name="rday"]:checked')].map((x) => Number(x.value)),
       months: [...form.querySelectorAll('[name="rmonth"]:checked')].map((x) => Number(x.value)),
@@ -733,7 +738,7 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
       else if (t.matches("[data-year]")) { state.year = Number(t.value); state.picked = ""; render(); }
       else if (t.name === "all_day") root.querySelector("[data-times]").hidden = t.checked;
       else if (t.name === "repeat") root.querySelector("[data-rep]").hidden = t.value !== "yes";
-      else if (t.name === "track") root.querySelector("[data-fund-note]").hidden = t.value !== "fundraiser";
+      else if (t.name === "track") { root.querySelector("[data-fund-note]").hidden = t.value !== "fundraiser"; const fd = root.querySelector("[data-fund-details]"); if (fd) fd.hidden = t.value !== "fundraiser"; }
       else if (t.matches("[data-color]")) { root.querySelector("[data-desc]").focus(); document.execCommand("foreColor", false, t.value); }
       else if (t.matches("[data-size]") && t.value) {
         const ed = root.querySelector("[data-desc]"); ed.focus(); document.execCommand("fontSize", false, "7");
