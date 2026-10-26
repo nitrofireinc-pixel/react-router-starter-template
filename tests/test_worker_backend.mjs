@@ -636,6 +636,14 @@ test('ensureGalleryPageSlot clears placeholder images from the gallery mount', (
   assert.doesNotMatch(next, /efhs-photo-1\.png/);
 });
 
+test('public gallery page hides photo titles', () => {
+  const workerSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'worker/src/worker.mjs'), 'utf8');
+  const siteContent = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'site-content.js'), 'utf8');
+  assert.match(workerSrc, /page\.slug === 'gallery' \? '<style>\.photo-gallery \.gallery-item figcaption,\.photo-lightbox-caption\{display:none!important\}<\/style>'/);
+  assert.match(siteContent, /container\.classList\.contains\('photo-gallery'\)/);
+  assert.match(siteContent, /showCaption: !hideTitles/);
+});
+
 test('events sort by year, month, and day instead of editor sort_order', () => {
   const events = [
     { id: 1, date_label: 'Jan', date_detail: '05', event_year: 2027, title: 'Next year', sort_order: 1 },

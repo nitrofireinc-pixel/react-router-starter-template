@@ -13957,6 +13957,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
   ${extraCss}
+  ${page.slug === 'gallery' ? '<style>.photo-gallery .gallery-item figcaption,.photo-lightbox-caption{display:none!important}</style>' : ''}
   ${themePhotoStyle}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
