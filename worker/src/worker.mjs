@@ -15186,6 +15186,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   ${page.slug === 'boosters' ? boostersPageHeroStyle() : ''}
   ${page.slug === 'fundraising' ? fundraiserPageHeroStyle() : ''}
   ${page.slug === 'sponsors' ? sponsorsPageHeroStyle() : ''}
+  ${halloweenBatHeaderStyle()}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
@@ -15198,7 +15199,7 @@ ${deadlineHtml}
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div><p class="footer-disclaimer">East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.</p></footer>
 ${isHomePage ? renderHomeStickySupport() : ''}
 ${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
-<script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
+<script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${halloweenBatLockScript()}${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
 }
 
@@ -15382,6 +15383,58 @@ async function renderPublicNotFound(env, url, { loggedIn = false, ctx } = {}) {
   return renderErrorPage(404, { env, url, loggedIn, ctx });
 }
 
+export function halloweenBatHeaderStyle() {
+  return `<style id="halloween-bat-lock">body.efhs-theme header.site-header{min-height:120px;padding-top:34px}#efhs-halloween{position:absolute!important;inset:0!important;height:auto!important;z-index:4;pointer-events:none;overflow:visible}#efhs-halloween .hw-bat{left:50%!important;top:4px!important;animation:none!important}@media (min-width:768px){#efhs-halloween .hw-bat{margin-left:-50px!important}}@media (max-width:767px){body.efhs-theme header.site-header{height:auto;min-height:84px;max-height:none;padding-top:26px}#efhs-halloween .hw-bat{margin-left:-23px!important}}@media (max-width:640px){#efhs-halloween .hw-bat{margin-left:-18px!important}}@media (orientation:landscape) and (max-height:500px){body.efhs-theme header.site-header{height:auto;min-height:72px;max-height:none;padding-top:20px}}</style>`;
+}
+
+export function halloweenBatLockScript() {
+  return '<script id="halloween-bat-lock">(function(){function lock(){var header=document.querySelector("header.site-header");var wrap=document.getElementById("efhs-halloween");if(!header||!wrap)return;if(wrap.parentElement!==header)header.appendChild(wrap);wrap.style.setProperty("--hw-bat-top","4px");wrap.style.setProperty("--hw-bat-left","50%");}lock();window.setTimeout(lock,400);window.setTimeout(lock,1700);})();</script>';
+}
+
+export function lockHalloweenBatScript(source = '') {
+  const text = String(source || '');
+  const replacements = [
+    [
+      '#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:60;pointer-events:none}',
+      '#efhs-halloween{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:visible}',
+    ],
+    [
+      'animation:hw-drift 9s ease-in-out infinite',
+      'animation:none',
+    ],
+    [
+      `  // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
+  // floats just under the header/marquee/notice strip instead of on the logo or icons.
+  const placeBat = () => {
+    if (window.innerWidth > 900) {
+      wrap.style.setProperty('--hw-bat-top', '40px');
+      wrap.style.setProperty('--hw-bat-left', '36%');
+      return;
+    }
+    const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
+      .map((sel) => document.querySelector(sel)?.getBoundingClientRect().bottom || 0);
+    const bottom = Math.max(...chrome);
+    wrap.style.setProperty('--hw-bat-top', \`\${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px\`);
+    wrap.style.setProperty('--hw-bat-left', '50%');
+  };`,
+      `  const placeBat = () => {
+    wrap.style.setProperty('--hw-bat-top', '4px');
+    wrap.style.setProperty('--hw-bat-left', '50%');
+  };`,
+    ],
+    [
+      `  document.head.appendChild(style);
+  body.appendChild(wrap);`,
+      `  document.head.appendChild(style);
+  const header = document.querySelector('header.site-header') || body;
+  if (header !== body && getComputedStyle(header).position === 'static') header.style.position = 'relative';
+  header.appendChild(wrap);`,
+    ],
+  ];
+  if (replacements.some(([from]) => !text.includes(from))) return text;
+  return replacements.reduce((next, [from, to]) => next.replace(from, to), text);
+}
+
 async function serveBundledStaticAsset(request, env, url) {
   if (url.pathname === '/push-sw.js') {
     const asset = await env.ASSETS.fetch(new Request(new URL('/push-sw.js', request.url), request));
@@ -15415,6 +15468,15 @@ async function serveBundledStaticAsset(request, env, url) {
     }
     if (assetName === 'manifest.webmanifest') {
       headers.set('content-type', 'application/manifest+json; charset=utf-8');
+    }
+    if (assetName === 'site-content.js' && assetResponse.ok) {
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      headers.delete('content-length');
+      return new Response(lockHalloweenBatScript(await assetResponse.text()), {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers,
+      });
     }
     return new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers });
   }

@@ -1648,3 +1648,25 @@ body.efhs-theme header.site-header .brand .brand-mark{aspect-ratio:1/1;object-fi
   .home-redesign .hero-ctas .btn{max-width:100%;box-sizing:border-box}
   .home-redesign .hero h1{overflow-wrap:break-word}
 }
+
+/* Room in the header for the Halloween bat, centered above the banner wordmark. */
+body.efhs-theme header.site-header{
+  min-height:120px;
+  padding-top:34px;
+}
+@media (max-width:767px){
+  body.efhs-theme header.site-header{
+    height:auto;
+    min-height:84px;
+    max-height:none;
+    padding-top:26px;
+  }
+}
+@media (orientation:landscape) and (max-height:500px){
+  body.efhs-theme header.site-header{
+    height:auto;
+    min-height:72px;
+    max-height:none;
+    padding-top:20px;
+  }
+}

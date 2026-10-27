@@ -16,6 +16,7 @@ import { directorsHeroImageResponse, directorsPageHeroStyle, DIRECTORS_HERO_URL 
 import { boostersHeroImageResponse, boostersPageHeroStyle, BOOSTERS_HERO_URL } from '../worker/src/worker.mjs';
 import { fundraiserPageHeroStyle, FUNDRAISER_HERO_URL } from '../worker/src/worker.mjs';
 import { sponsorsHeroImageResponse, sponsorsPageHeroStyle, SPONSORS_HERO_URL } from '../worker/src/worker.mjs';
+import { halloweenBatHeaderStyle, halloweenBatLockScript, lockHalloweenBatScript } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2605,6 +2606,41 @@ test('sponsors page hero uses the approved thank-you photo under the landing was
   assert.equal(body[0], 0xff);
   assert.equal(body[1], 0xd8);
   assert.equal(body.length, file.length);
+});
+
+test('halloween bat locks to the top center of the header', () => {
+  const source = `
+#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:60;pointer-events:none}
+#efhs-halloween .hw-bat{animation:hw-drift 9s ease-in-out infinite}
+  // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
+  // floats just under the header/marquee/notice strip instead of on the logo or icons.
+  const placeBat = () => {
+    if (window.innerWidth > 900) {
+      wrap.style.setProperty('--hw-bat-top', '40px');
+      wrap.style.setProperty('--hw-bat-left', '36%');
+      return;
+    }
+    const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
+      .map((sel) => document.querySelector(sel)?.getBoundingClientRect().bottom || 0);
+    const bottom = Math.max(...chrome);
+    wrap.style.setProperty('--hw-bat-top', \`\${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px\`);
+    wrap.style.setProperty('--hw-bat-left', '50%');
+  };
+  document.head.appendChild(style);
+  body.appendChild(wrap);
+`;
+  const patched = lockHalloweenBatScript(source);
+  assert.match(patched, /position:absolute;inset:0/);
+  assert.match(patched, /animation:none/);
+  assert.match(patched, /--hw-bat-left', '50%'/);
+  assert.match(patched, /header\.appendChild\(wrap\)/);
+  assert.doesNotMatch(patched, /36%/);
+  assert.equal(lockHalloweenBatScript('var untouched = true;'), 'var untouched = true;');
+  const style = halloweenBatHeaderStyle();
+  assert.match(style, /id="halloween-bat-lock"/);
+  assert.match(style, /min-height:120px/);
+  assert.match(style, /top:4px!important/);
+  assert.match(halloweenBatLockScript(), /header\.appendChild\(wrap\)/);
 });
 
 test('staff auth lives in the utility bar, not the main public nav', () => {
