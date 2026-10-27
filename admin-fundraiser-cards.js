@@ -55,13 +55,27 @@
     return escapeHtml(value).replace(/'/g, '&#39;');
   }
 
+  function prettyDate(iso) {
+    const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[Number(match[2]) - 1] || ''} ${Number(match[3])}, ${match[1]}`;
+  }
+
+  function spanText(card) {
+    const start = String(card?.event_date || '');
+    const end = String(card?.span_end || '');
+    if (!prettyDate(start) || !prettyDate(end) || end <= start) return '';
+    return `${prettyDate(start)} – ${prettyDate(end)}`;
+  }
+
   function rowHtml(card, { reject = false } = {}) {
     return `<article class="fc-card-row${Number(card.id) === Number(selectedId) ? ' is-active' : ''}" data-id="${card.id}" ${reject ? '' : 'draggable="true"'}>
       <span class="fc-drag" aria-hidden="true">${reject ? '' : '⋮⋮'}</span>
       ${thumb(card)}
       <div class="fc-card-copy">
         <strong>${escapeHtml(card.title)}</strong>
-        <small>${escapeHtml(card.event_date || 'No date')}</small>
+        <small>${escapeHtml(spanText(card) || card.event_date || 'No date')}</small>
         <div class="fc-pills">${pillFor(card)}</div>
       </div>
       <div class="fc-row-actions">
@@ -150,6 +164,16 @@
     field('title').value = card.title || '';
     field('description').value = card.description || '';
     field('event_date').value = card.event_date || '';
+    let spanNote = editor.querySelector('[data-fc-span]');
+    if (!spanNote) {
+      spanNote = document.createElement('p');
+      spanNote.setAttribute('data-fc-span', '');
+      spanNote.className = 'fc-editor-note';
+      field('event_date').closest('.fc-grid-2')?.after(spanNote);
+    }
+    const range = spanText(card);
+    spanNote.hidden = !range;
+    spanNote.textContent = range ? `Shows ${range}` : '';
     field('location').value = card.location || '';
     field('start_time').value = card.start_time || '';
     field('end_time').value = card.end_time || '';
@@ -195,6 +219,7 @@
       title: field('title').value,
       description: field('description').value,
       event_date: field('event_date').value,
+      span_end: cards.find((item) => Number(item.id) === Number(field('id').value))?.span_end || '',
       location: field('location').value,
       start_time: field('start_time').value,
       end_time: field('end_time').value,

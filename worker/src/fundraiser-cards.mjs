@@ -147,20 +147,31 @@ export function canPublishFundraiserCards(user, deps = {}) {
 export function isPublicFundraiserCard(card = {}, today = '') {
   if (String(card.status || '') !== 'approved') return false;
   if (!Number(card.auto_hide_after_date)) return true;
-  const date = String(card.event_date || '').trim();
+  const start = String(card.event_date || '').trim();
+  const spanEnd = String(card.span_end || '').trim();
+  const date = spanEnd && (!start || spanEnd > start) ? spanEnd : start;
   if (!date) return true;
   return !today || date >= today;
 }
 
 export function publicFundraiserCardsStatement(env) {
   return env.DB.prepare(`
-    SELECT id, title, description, event_date, start_time, end_time, location,
-           picture_mode, image_url, must_attend, volunteers_needed, custom_label,
-           primary_button, primary_url, show_add_to_calendar, auto_hide_after_date,
-           status, source_event_id, calendar_changed, sort_order
-    FROM fundraiser_cards
-    WHERE status = 'approved'
-    ORDER BY sort_order ASC, event_date ASC, id ASC
+    SELECT c.id, c.title, c.description, c.event_date, c.start_time, c.end_time, c.location,
+           c.picture_mode, c.image_url, c.must_attend, c.volunteers_needed, c.custom_label,
+           c.primary_button, c.primary_url, c.show_add_to_calendar, c.auto_hide_after_date,
+           c.status, c.source_event_id, c.calendar_changed, c.sort_order,
+           CASE
+             WHEN e.end_date != '' AND e.end_date > c.event_date THEN e.end_date
+             WHEN e.series_id IS NOT NULL THEN (
+               SELECT MAX(s.start_date) FROM caldev_events s
+               WHERE s.series_id = e.series_id AND s.cancelled_at IS NULL
+             )
+             ELSE ''
+           END AS span_end
+    FROM fundraiser_cards c
+    LEFT JOIN caldev_events e ON e.id = c.source_event_id
+    WHERE c.status = 'approved'
+    ORDER BY c.sort_order ASC, c.event_date ASC, c.id ASC
   `);
 }
 
@@ -185,6 +196,7 @@ export function mapFundraiserCardRow(row) {
     auto_hide_after_date: row.auto_hide_after_date == null ? 1 : (Number(row.auto_hide_after_date) ? 1 : 0),
     status: FUNDRAISER_CARD_STATUSES.includes(row.status) ? row.status : 'draft',
     source_event_id: row.source_event_id == null || row.source_event_id === '' ? null : Number(row.source_event_id),
+    span_end: String(row.span_end || ''),
     calendar_changed: Number(row.calendar_changed) ? 1 : 0,
     sort_order: Number(row.sort_order) || 0,
     created_by: row.created_by == null ? null : Number(row.created_by),
@@ -287,6 +299,191 @@ export function addDaysIso(iso, days) {
 
 export function isCalendarFundraiserEvent(event = {}) {
   return String(event.track || '').toLowerCase() === 'fundraiser' || isHomeFundraiserEvent(event);
+}
+
+export function fundraiserTitlesMatch(left = '', right = '') {
+  const norm = (value) => fundraiserDisplayTitle(value).toLowerCase().replace(/\s+fundr(?:aiser|asier|aizer)$/, '').trim();
+  const a = norm(left);
+  const b = norm(right);
+  return Boolean(a) && a === b;
+}
+
+function spanEndOf(event = {}) {
+  const start = String(event.start_date || '');
+  const end = String(event.end_date || '');
+  return end && start && end > start ? end : '';
+}
+
+export function fundraiserCardRepresentatives(events = []) {
+  const bySeries = new Map();
+  const singles = [];
+  for (const event of events) {
+    const seriesId = Number(event?.series_id);
+    if (Number.isInteger(seriesId) && seriesId > 0) {
+      const list = bySeries.get(seriesId) || [];
+      list.push(event);
+      bySeries.set(seriesId, list);
+    } else {
+      singles.push(event);
+    }
+  }
+  const reps = [];
+  for (const list of bySeries.values()) {
+    list.sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)) || Number(a.id) - Number(b.id));
+    const first = list[0];
+    const end = list.reduce((max, event) => {
+      const candidate = spanEndOf(event) || String(event.start_date || '');
+      return candidate > max ? candidate : max;
+    }, String(first.start_date || ''));
+    reps.push({
+      ...first,
+      end_date: end > String(first.start_date || '') ? end : String(first.end_date || ''),
+    });
+  }
+  const spans = [...reps, ...singles].filter((event) => spanEndOf(event));
+  for (const event of singles) {
+    const covered = spans.some((span) => (
+      span !== event
+      && Number(span.id) !== Number(event.id)
+      && fundraiserTitlesMatch(span.title, event.title)
+      && String(event.start_date || '') >= String(span.start_date || '')
+      && String(event.start_date || '') <= spanEndOf(span)
+    ));
+    if (!covered) reps.push(event);
+  }
+  return reps;
+}
+
+function unmodifiedAutoDraft(card = {}) {
+  if (String(card.status || '') !== 'draft') return false;
+  if (String(card.description || '').trim()) return false;
+  if (String(card.image_url || '').trim()) return false;
+  if (String(card.custom_label || '').trim()) return false;
+  if (String(card.primary_url || '').trim()) return false;
+  const button = String(card.primary_button || 'details');
+  return button === 'details' || button === '';
+}
+
+export async function collapseSpannedFundraiserCards(env) {
+  const eventResult = await env.DB.prepare(`
+    SELECT id, title, description, start_date, end_date, series_id, track, cancelled_at
+    FROM caldev_events
+    WHERE start_date != ''
+  `).all();
+  const allEvents = eventResult?.results || [];
+  const liveIds = new Set(allEvents.map((event) => Number(event.id)));
+  const rows = allEvents.filter((event) => !event.cancelled_at && isCalendarFundraiserEvent(event));
+  const spans = fundraiserCardRepresentatives(rows)
+    .map((event) => {
+      const end = spanEndOf(event);
+      if (!end) return null;
+      return {
+        id: Number(event.id),
+        title: event.title,
+        start: String(event.start_date || ''),
+        end,
+      };
+    })
+    .filter(Boolean);
+  if (!spans.length) return { removed: 0, relinked: 0 };
+  const cardResult = await env.DB.prepare(`
+    SELECT id, title, description, event_date, image_url, custom_label, primary_button, primary_url,
+           status, source_event_id
+    FROM fundraiser_cards
+  `).all();
+  const cards = cardResult?.results || [];
+  const removedIds = new Set();
+  let removed = 0;
+  let relinked = 0;
+  const now = new Date().toISOString();
+  for (const span of spans) {
+    const matching = cards.filter((card) => {
+      if (removedIds.has(Number(card.id))) return false;
+      if (!fundraiserTitlesMatch(card.title, span.title)) return false;
+      const date = String(card.event_date || '');
+      const source = card.source_event_id == null || card.source_event_id === '' ? null : Number(card.source_event_id);
+      const inside = Boolean(date) && date >= span.start && date <= span.end;
+      const linked = source != null && source === span.id;
+      return inside || linked;
+    });
+    if (!matching.length) continue;
+    matching.sort((a, b) => {
+      const rank = (card) => {
+        const statusRank = card.status === 'approved' ? 0 : card.status === 'hidden' ? 1 : card.status === 'draft' ? 2 : 3;
+        const linked = Number(card.source_event_id) === span.id ? 0 : 1;
+        return [statusRank, linked, String(card.event_date || '9999-99-99'), Number(card.id)];
+      };
+      const left = rank(a);
+      const right = rank(b);
+      for (let i = 0; i < left.length; i += 1) {
+        if (left[i] < right[i]) return -1;
+        if (left[i] > right[i]) return 1;
+      }
+      return 0;
+    });
+    const keep = matching[0];
+    if (String(keep.status) !== 'rejected' && Number(keep.source_event_id) !== span.id) {
+      await env.DB.prepare(
+        'UPDATE fundraiser_cards SET source_event_id = NULL, updated_at = ? WHERE source_event_id = ? AND id != ?',
+      ).bind(now, span.id, Number(keep.id)).run();
+      await env.DB.prepare(
+        'UPDATE fundraiser_cards SET source_event_id = ?, updated_at = ? WHERE id = ?',
+      ).bind(span.id, now, Number(keep.id)).run();
+      keep.source_event_id = span.id;
+      relinked += 1;
+    }
+    for (const extra of matching.slice(1)) {
+      if (!unmodifiedAutoDraft(extra)) continue;
+      await env.DB.prepare('DELETE FROM fundraiser_cards WHERE id = ?').bind(Number(extra.id)).run();
+      removedIds.add(Number(extra.id));
+      removed += 1;
+    }
+  }
+  for (const card of cards) {
+    if (removedIds.has(Number(card.id)) || !unmodifiedAutoDraft(card)) continue;
+    const source = card.source_event_id == null || card.source_event_id === '' ? null : Number(card.source_event_id);
+    if (source == null || liveIds.has(source)) continue;
+    if (!spans.some((span) => fundraiserTitlesMatch(card.title, span.title))) continue;
+    await env.DB.prepare('DELETE FROM fundraiser_cards WHERE id = ?').bind(Number(card.id)).run();
+    removedIds.add(Number(card.id));
+    removed += 1;
+  }
+  return { removed, relinked };
+}
+
+async function applyFundraiserSpanEnds(env, cards = []) {
+  if (!cards.length) return cards;
+  let events = [];
+  try {
+    const result = await env.DB.prepare(`
+      SELECT id, start_date, end_date, series_id, cancelled_at
+      FROM caldev_events
+      WHERE start_date != ''
+    `).all();
+    events = result?.results || [];
+  } catch {
+    return cards;
+  }
+  const byId = new Map(events.map((event) => [Number(event.id), event]));
+  const seriesLast = new Map();
+  for (const event of events) {
+    if (event.cancelled_at || !event.series_id) continue;
+    const day = spanEndOf(event) || String(event.start_date || '');
+    const key = Number(event.series_id);
+    if (day > (seriesLast.get(key) || '')) seriesLast.set(key, day);
+  }
+  for (const card of cards) {
+    const event = byId.get(Number(card.source_event_id));
+    if (!event || event.cancelled_at) {
+      card.span_end = card.span_end || '';
+      continue;
+    }
+    let end = spanEndOf(event);
+    const seriesEnd = event.series_id ? seriesLast.get(Number(event.series_id)) : '';
+    if (seriesEnd && (!end || seriesEnd > end)) end = seriesEnd;
+    card.span_end = end && end > String(card.event_date || '') ? end : '';
+  }
+  return cards;
 }
 
 function normalizeLocation(value) {
@@ -423,6 +620,7 @@ export async function importLiveFundraiserCards(env) {
 export async function listFundraiserCards(env) {
   await importLiveFundraiserCards(env);
   await repairSilentAuctionDescription(env);
+  await collapseSpannedFundraiserCards(env);
   const result = await env.DB.prepare(`
     SELECT id, title, description, event_date, start_time, end_time, location,
            picture_mode, image_url, must_attend, volunteers_needed, custom_label,
@@ -432,7 +630,9 @@ export async function listFundraiserCards(env) {
     FROM fundraiser_cards
     ORDER BY CASE status WHEN 'rejected' THEN 1 ELSE 0 END, sort_order ASC, event_date ASC, id ASC
   `).all();
-  return (result?.results || []).map(mapFundraiserCardRow);
+  const cards = (result?.results || []).map(mapFundraiserCardRow);
+  await applyFundraiserSpanEnds(env, cards);
+  return cards;
 }
 
 export async function getFundraiserCard(env, id) {
@@ -444,7 +644,10 @@ export async function getFundraiserCard(env, id) {
            created_by, created_at, updated_by, updated_at, approved_by, approved_at
     FROM fundraiser_cards WHERE id = ?
   `).bind(Number(id)).first();
-  return mapFundraiserCardRow(row);
+  const card = mapFundraiserCardRow(row);
+  if (!card) return null;
+  await applyFundraiserSpanEnds(env, [card]);
+  return card;
 }
 
 async function nextSortOrder(env) {
@@ -664,6 +867,92 @@ async function insertDraftCard(env, card, { user = null, now = '' } = {}) {
   return id ? getFundraiserCard(env, id) : { ...card, id };
 }
 
+export async function syncCalendarEventToFundraiserCard(env, event, { actor = null, logAudit } = {}) {
+  if (!event?.id || event.cancelled_at || !isCalendarFundraiserEvent(event)) return { action: 'skipped' };
+  if (!normalizeIsoDate(event.start_date)) return { action: 'skipped' };
+  if (Number(event.series_id) > 0 && !event._seriesResolved) {
+    const siblings = await env.DB.prepare(`
+      SELECT id, title, description, location, start_date, end_date, start_time, end_time, track, all_day, series_id, cancelled_at
+      FROM caldev_events
+      WHERE series_id = ? AND cancelled_at IS NULL
+      ORDER BY start_date ASC, id ASC
+    `).bind(Number(event.series_id)).all();
+    const list = siblings?.results || [];
+    if (list.length > 1) {
+      const [rep] = fundraiserCardRepresentatives(list);
+      if (rep) {
+        return syncCalendarEventToFundraiserCard(env, { ...rep, _seriesResolved: true }, { actor, logAudit });
+      }
+    }
+  }
+  const spanEnd = spanEndOf(event) || String(event.start_date || '');
+  const result = await env.DB.prepare(`
+    SELECT id, title, description, event_date, start_time, end_time, location, status,
+           source_event_id, calendar_changed, sort_order, image_url, custom_label, primary_button, primary_url
+    FROM fundraiser_cards
+    WHERE source_event_id = ? OR (event_date >= ? AND event_date <= ?)
+  `).bind(Number(event.id), String(event.start_date), spanEnd).all();
+  const cards = (result?.results || []).map(mapFundraiserCardRow);
+  let linked = cards.filter((card) => Number(card.source_event_id) === Number(event.id));
+  if (!linked.length) {
+    const named = cards.find((card) => (
+      card.status !== 'rejected'
+      && fundraiserTitlesMatch(card.title, event.title)
+      && (
+        !card.source_event_id
+        || card.event_date === String(event.start_date || '')
+        || (spanEnd > String(event.start_date || '') && card.event_date >= String(event.start_date || '') && card.event_date <= spanEnd)
+      )
+    ));
+    if (named) {
+      await env.DB.prepare('UPDATE fundraiser_cards SET source_event_id = NULL, updated_at = ? WHERE source_event_id = ? AND id != ?')
+        .bind(new Date().toISOString(), Number(event.id), named.id).run();
+      await env.DB.prepare('UPDATE fundraiser_cards SET source_event_id = ?, updated_at = ? WHERE id = ?')
+        .bind(Number(event.id), new Date().toISOString(), named.id).run();
+      linked = [{ ...named, source_event_id: Number(event.id) }];
+    }
+  }
+  const draft = linked.find((card) => card.status === 'draft');
+  const fresh = draftFromEvent(event, 0);
+  let outcome = { action: 'unchanged' };
+  if (draft) {
+    const same = draft.title === fresh.title && draft.event_date === fresh.event_date && draft.start_time === fresh.start_time && draft.end_time === fresh.end_time && draft.location === fresh.location;
+    if (!same) {
+      await env.DB.prepare(`
+        UPDATE fundraiser_cards SET title = ?, event_date = ?, start_time = ?, end_time = ?, location = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(fresh.title, fresh.event_date, fresh.start_time, fresh.end_time, fresh.location, new Date().toISOString(), draft.id).run();
+      outcome = { action: 'updated', card_id: draft.id };
+    } else {
+      outcome = { action: 'unchanged', card_id: draft.id };
+    }
+  } else {
+    const approved = linked.find((card) => card.status === 'approved');
+    if (approved) {
+      if (calendarEventChanged(event, approved) && !approved.calendar_changed) {
+        await env.DB.prepare('UPDATE fundraiser_cards SET calendar_changed = 1, updated_at = ? WHERE id = ?')
+          .bind(new Date().toISOString(), approved.id).run();
+        outcome = { action: 'flagged', card_id: approved.id };
+      } else {
+        outcome = { action: 'unchanged', card_id: approved.id };
+      }
+    } else if (linked.some((card) => card.status === 'rejected' && card.event_date === fresh.event_date)) {
+      outcome = { action: 'skipped' };
+    } else if (linked.some((card) => card.status !== 'rejected')) {
+      outcome = { action: 'unchanged' };
+    } else {
+      fresh.sort_order = await nextSortOrder(env);
+      const saved = await insertDraftCard(env, fresh, { user: actor });
+      if (typeof logAudit === 'function') {
+        await logAudit({ action: 'fundraiser.draft.auto', card: saved, meta: { source_event_id: event.id, reason: 'event_saved' } });
+      }
+      outcome = { action: 'created', card_id: saved?.id };
+    }
+  }
+  await collapseSpannedFundraiserCards(env);
+  return outcome;
+}
+
 export async function runFundraiserCardCalendarSync(env, options = {}) {
   const {
     sendEmail,
@@ -676,14 +965,15 @@ export async function runFundraiserCardCalendarSync(env, options = {}) {
   } = options;
   const todayIso = today || new Date().toISOString().slice(0, 10);
   const horizon = addDaysIso(todayIso, horizonDays);
+  await collapseSpannedFundraiserCards(env);
   const eventResult = await env.DB.prepare(`
-    SELECT id, title, description, location, start_date, end_date, start_time, end_time, track, all_day
+    SELECT id, title, description, location, start_date, end_date, start_time, end_time, track, all_day, series_id
     FROM caldev_events
     WHERE start_date != '' AND start_date >= ? AND start_date <= ?
     ORDER BY start_date ASC, start_time ASC, id ASC
     LIMIT ?
   `).bind(todayIso, horizon, FUNDRAISER_SYNC_EVENT_LIMIT).all();
-  const events = (eventResult?.results || []).filter(isCalendarFundraiserEvent);
+  const events = fundraiserCardRepresentatives((eventResult?.results || []).filter(isCalendarFundraiserEvent));
   const cardResult = await env.DB.prepare(`
     SELECT id, title, description, event_date, start_time, end_time, location, status,
            source_event_id, calendar_changed, sort_order

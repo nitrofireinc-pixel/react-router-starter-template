@@ -144,6 +144,7 @@ import {
   renderFundraisingCardFromCms,
   reorderFundraiserCards,
   runFundraiserCardCalendarSync,
+  syncCalendarEventToFundraiserCard,
   setFundraiserAlertEmails,
   setFundraiserCardStatus,
   updateFundraiserCard,
@@ -12998,6 +12999,11 @@ async function routeApi(request, env, url, ctx = null) {
     const p = normalizeCaldevPayload(payload);
     if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
     const created = await insertCaldevEvent(env, p);
+    try {
+      await syncCalendarEventToFundraiserCard(env, created, { actor: auth.user });
+    } catch (error) {
+      console.warn('fundraiser card sync failed', error?.message || error);
+    }
     return jsonResponse(created, 201);
   }
   if (url.pathname === '/api/admin/caldev/seed' && request.method === 'POST') {
@@ -13045,6 +13051,11 @@ async function routeApi(request, env, url, ctx = null) {
     const p = normalizeCaldevPayload(payload, existing);
     if (!p.title) return jsonResponse({ detail: 'Title is required' }, 422);
     const updated = await updateCaldevEvent(env, id, p, existing);
+    try {
+      await syncCalendarEventToFundraiserCard(env, updated, { actor: auth.user });
+    } catch (error) {
+      console.warn('fundraiser card sync failed', error?.message || error);
+    }
     return jsonResponse(updated);
   }
   if (url.pathname === '/api/admin/events' && request.method === 'POST') {
