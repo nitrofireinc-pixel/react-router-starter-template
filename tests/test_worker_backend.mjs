@@ -13,6 +13,7 @@ import { volunteerHeroImageResponse, volunteerPageHeroStyle, VOLUNTEER_HERO_URL 
 import { calendarHeroImageResponse, calendarPageHeroStyle, CALENDAR_HERO_URL } from '../worker/src/worker.mjs';
 import { contactHeroImageResponse, contactPageHeroStyle, CONTACT_HERO_URL } from '../worker/src/worker.mjs';
 import { directorsHeroImageResponse, directorsPageHeroStyle, DIRECTORS_HERO_URL } from '../worker/src/worker.mjs';
+import { boostersHeroImageResponse, boostersPageHeroStyle, BOOSTERS_HERO_URL } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2542,6 +2543,27 @@ test('directors page hero uses the approved staff photo under the landing wash',
   assert.match(style, new RegExp(DIRECTORS_HERO_URL.replace(/[?]/g, '\\?')));
   assert.match(themeCss, /body\.efhs-theme\.directors-page \.page-hero:before/);
   const response = directorsHeroImageResponse(new Request(`https://efhsband.org${DIRECTORS_HERO_URL}`));
+  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  const body = new Uint8Array(await response.arrayBuffer());
+  assert.equal(body[0], 0xff);
+  assert.equal(body[1], 0xd8);
+  assert.equal(body.length, file.length);
+});
+
+test('boosters page hero uses the approved round-table photo under the landing wash', async () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const file = readFileSync(join(root, 'assets/boosters-hero.jpg'));
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  assert.equal(file[0], 0xff);
+  assert.equal(file[1], 0xd8);
+  assert.ok(file.length > 50_000);
+  const style = boostersPageHeroStyle();
+  assert.match(style, /id="boosters-hero-photo"/);
+  assert.match(style, /boosters-page \.page-hero:before/);
+  assert.match(style, /linear-gradient\(100deg,rgba\(0,10,22,\.95\)/);
+  assert.match(style, new RegExp(BOOSTERS_HERO_URL.replace(/[?]/g, '\\?')));
+  assert.match(themeCss, /body\.efhs-theme\.boosters-page \.page-hero:before/);
+  const response = boostersHeroImageResponse(new Request(`https://efhsband.org${BOOSTERS_HERO_URL}`));
   assert.equal(response.headers.get('content-type'), 'image/jpeg');
   const body = new Uint8Array(await response.arrayBuffer());
   assert.equal(body[0], 0xff);
