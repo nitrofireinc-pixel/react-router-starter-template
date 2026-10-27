@@ -13958,6 +13958,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
   ${extraCss}
   ${page.slug === 'gallery' ? '<style>.photo-gallery .gallery-item figcaption,.photo-lightbox-caption{display:none!important}</style>' : ''}
+  ${isHomePage ? '<style>[data-photo-gallery] figcaption{display:none!important}</style><script>document.addEventListener("click",function(e){var n=e.target&&e.target.closest&&e.target.closest("[data-photo-gallery]");if(!n)return;queueMicrotask(function(){document.querySelectorAll(".photo-lightbox-caption").forEach(function(el){el.remove()})})});</script>' : ''}
   ${themePhotoStyle}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
