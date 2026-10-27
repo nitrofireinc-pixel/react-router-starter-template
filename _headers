@@ -39,3 +39,6 @@
 /manifest.webmanifest
   Cache-Control: no-store
   Content-Type: application/manifest+json; charset=utf-8
+
+/assets/efhs-gallery-collage.mp4
+  Content-Type: video/mp4
