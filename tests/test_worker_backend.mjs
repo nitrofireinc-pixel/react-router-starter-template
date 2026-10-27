@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 
 import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFromHtml, renderCalendarHighlightArticles, canAccessCheckout, canAccessScheduleBoard, canAccessBadgeCreator, canAccessSecurityLog, canAccessTreasurerLedger, canAccessFormsPage, canCreateEvents, canViewEvents, canManageAllEvents, canMutateEvent, compareEventsByDate, decodeBasicHtmlEntities, describeContactEmailProvider, normalizeCommitteeBadgePayload, ensureCommitteeBadgesSchema, resetCommitteeBadgesSchemaCache, ensureBoosterMeetingsSlot, ensureBoosterMembersSlot, ensureBoostersDuesSlot, stripBoostersDuesSlot, applyBoostersDuesVisibility, isBoostersDuesEnabled, ensureCalendarMonthMount, ensureFundraisingDonateSlot, ensureGalleryPageSlot, ensureHomePhotoGallerySlot, ensureSponsorDonateButton, buildDuesReceipt, recordDuesPaymentLedger, recordDuesFailedLedger, refreshHomeStartHereSection, refreshHomeHeroBrandMark, ensureSponsorTiersSection, escapeHtml, escapeXml, expandRecurringEvent, formatHeaderBrandTitle, extractHomeFeatureCards, extractSponsorTierFields, formatInlineRichText, formatRepeatSummary, formatRichText, formatSponsorAddress, formatSponsorAmountDisplay, formatLedgerAmountDisplay, normalizeLedgerKind, ledgerSignedCents, summarizeLedgerEntries, buildPaymentLedgerXml, buildPaymentLedgerExcelXml, LEDGER_KINDS, LEDGER_INCOME_KINDS, generateStructuredPageHtml, hasPermission, htmlToPlainText, hydrateSponsor, isMaintenanceMode, isUpcomingEvent, isValidEmail, jsonResponse, publicSitePayload, PUBLIC_SITE_KEYS, DEFAULT_SITE, normalizeAdminMailPayload, normalizeBoosterMemberPayload, normalizeBoosterMemberReorderIds, normalizeContactTopicPayload, parseRecipientUserIds, contactTopicHasRecipients, serializeContactTopic, formatContactRecipientLabel, normalizeEventPayload, normalizeHomeFeatureCards, normalizePageSlug, normalizePhotoMetaPayload, normalizeRepeatDays, normalizeRepeatExceptions, normalizeRepeatMonths, normalizeSocialHref, normalizeSocialLinks, normalizeSponsorAdSeconds, normalizeSponsorLevel, normalizeSponsorPayload, normalizeSponsorTier, normalizeSponsorTierFields, normalizeSponsorTierKey, isPublicPurchasableSponsorTier, sponsorFormLevelValue, sponsorEditorActiveChecked, normalizeSponsorActiveFlag, normalizeStaffPayload, normalizeStaffReorderIds, normalizeStaticPath, normalizePublicHtmlPath, isPublicHtmlPath, normalizeUtilityLinks, parseLegacySponsorAddress, parsePermissions, parseSponsorAmountCents, parseZernioFacebookConnection, parseZernioInstagramConnection, parseZernioUserProfile, normalizeZernioPostPayload, galleryInstagramCaption, isInstagramGalleryAutopostEnabled, isInstagramPublishableImage, resolveZernioApiKey, ZERNIO_API_KEY_CONTENT_KEY, sanitizeAdminReturnPath, parseFacebookEventSyncState, eventFacebookFingerprint, formatFacebookCalendarDigest, clearLegacyFacebookPublishQueueIfNeeded, pickSquareLocationId, SQUARE_SETTINGS_KEY, resolveSquareRuntimeEnv, syncSquareSettingsFromEnv, parseSquareSettings, renderBoosterMembersDirectory, renderBoostersDuesCard, renderContactForm, isDefaultContactTopicLabel, defaultContactTopicId, renderHomeFeatureCardsSection, renderMaintenancePreviewBanner, renderSocialLinks, publicPageShowsSponsorMarquee, renderSponsorMarqueeSection, renderSponsorTiersHtml, renderSponsorsDirectory, sponsorShowsMarquee, sponsorShowsOnPage, renderStaffDirectory, canDeleteMeetingMinutes, canEditMeetingMinutes, canManageMeetingMinutes, canViewMeetingMinutes, formatMeetingDateDisplay, MINUTES_EDIT_WINDOW_HOURS, minutesEditableUntil, canEditPageContent, canEditPageLayout, canEditPage, normalizePageGrants, userPageCapabilities, normalizeMinutesPayload, parseMeetingDateInput, parseBoostersMinutesDocx, extractMeetingDateFromFilename, extractMeetingDateFromMinutesText, parseBoostersMinutesFieldsFromText, renderMinutesDocumentHtml, extractEnsemblesBodyHtml, applyEnsemblesBodyHtml, sanitizePageSectionHtml, resolveAdminMailSender, resolveContactEmailProvider, resolveSponsorAmountCents, rewriteBecomeSponsorLinks, rewriteSponsorChoiceButtons, sanitizeHomeBodyHtml, sanitizeInlineRichHtml, sanitizeMaintenanceReturnPath, sanitizeRichHtml, serializePagePayload, shouldRedirectToMaintenance, sortPhotosByRecent, sponsorBenefitsFromLevel, sponsorLevelFromTierKey, sponsorMapsUrls, squareApiBase, squareCheckoutConfigured, squareMockPayEnabled, stripSponsorTiersSection, validateSelfPasswordChange, buildSponsorDonationInvoice, SPONSOR_INVOICE_FROM_EMAIL, formatUserLastLoginDisplay, renderNav, HOME_HERO_PHOTO, pickPublicThemePhotoVars, renderPublicThemePhotoStyle, safePublicThemePhotoUrl, renderStaffAuthNavLink, renderUtilityLinks, renderNotifyMeNavControl, renderAddToHomeNavControl, isSessionFresh, sessionCookieHeader, SESSION_TTL_SECONDS, normalizeWebPushSubscription, buildCalendarPushPayload, parseCalendarPushState, normalizeEmailListTopics, wantsEmailListNotify, extractEmailAddress, isEmailListStopRequest, verifyResendWebhookSignature, ensureEmailListSignupSlot, renderEmailListSignup, buildEmailListUpdateMessage, buildEmailListWelcomeMessage, buildEmailListTopicsChangedMessage, formatEmailListTopicsLabel, emailListTopicsEqual, EMAIL_LIST_REPLY_TO, emptyCalendarPushState, normalizeInKindPayload, renderInKindFormHtml, renderInKindPageBody, buildInKindPdfBase64, buildInKindLedgerEntry, normalizeLettermanPayload, normalizeLettermanFormCopy, DEFAULT_LETTERMAN_FORM, createLettermanField, renderLettermanDeadlineBanner, renderLettermanPageBody, buildLettermanPdfBase64, emptyFormDefinition, normalizeFormDefinition, normalizeFormPayload, renderCmsFormPageBody, slugFromFormTitle, isReservedFormSlug, createFormField, isCmsFormPage, DB_SCHEMA_VERSION, initDb, resetDbInitCache, isWorkerStaticAssetPath, publicPhotoUrl, shouldInvalidatePublicReadCache, loginHintCookieHeader, LOGIN_HINT_COOKIE, applyAuthCookies, attachLoginHintIfNeeded, uploadCacheRequest, uploadCacheKeysForPhoto, PHOTO_BROWSER_CACHE, PHOTO_CACHE_API_TTL, makeSession } from '../worker/src/worker.mjs';
 import worker from '../worker/src/worker.mjs';
+import { halloweenBatHeaderStyle, halloweenBatLockScript, lockHalloweenBatScript } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2488,6 +2489,41 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   ], { slug: 'ensembles' });
   assert.equal(ensembleVars.hero, HOME_HERO_PHOTO);
   assert.equal(ensembleVars.page, '/uploads/marching.jpg');
+});
+
+test('halloween bat locks to the top center of the header', () => {
+  const source = `
+#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:60;pointer-events:none}
+#efhs-halloween .hw-bat{animation:hw-drift 9s ease-in-out infinite}
+  // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
+  // floats just under the header/marquee/notice strip instead of on the logo or icons.
+  const placeBat = () => {
+    if (window.innerWidth > 900) {
+      wrap.style.setProperty('--hw-bat-top', '40px');
+      wrap.style.setProperty('--hw-bat-left', '36%');
+      return;
+    }
+    const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
+      .map((sel) => document.querySelector(sel)?.getBoundingClientRect().bottom || 0);
+    const bottom = Math.max(...chrome);
+    wrap.style.setProperty('--hw-bat-top', \`\${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px\`);
+    wrap.style.setProperty('--hw-bat-left', '50%');
+  };
+  document.head.appendChild(style);
+  body.appendChild(wrap);
+`;
+  const patched = lockHalloweenBatScript(source);
+  assert.match(patched, /position:absolute;inset:0/);
+  assert.match(patched, /animation:none/);
+  assert.match(patched, /--hw-bat-left', '50%'/);
+  assert.match(patched, /header\.appendChild\(wrap\)/);
+  assert.doesNotMatch(patched, /36%/);
+  assert.equal(lockHalloweenBatScript('var untouched = true;'), 'var untouched = true;');
+  const style = halloweenBatHeaderStyle();
+  assert.match(style, /id="halloween-bat-lock"/);
+  assert.match(style, /min-height:120px/);
+  assert.match(style, /top:4px!important/);
+  assert.match(halloweenBatLockScript(), /header\.appendChild\(wrap\)/);
 });
 
 test('staff auth lives in the utility bar, not the main public nav', () => {
