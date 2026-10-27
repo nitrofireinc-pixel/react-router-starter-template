@@ -13502,6 +13502,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts);
     const created = await insertCaldevEvent(env, p);
     await caldevAfterSave(env, ctx, auth.user, [created]);
+    try {
+      await syncCalendarEventToFundraiserCard(env, created, { actor: auth.user });
+    } catch (error) {
+      console.warn('fundraiser card sync failed', error?.message || error);
+    }
     return withEventLog(jsonResponse(created, 201), conflicts.length && flags.force
       ? overlapLog(conflicts, { id: created?.id }, 'Event added')
       : { label: 'Event added', meta: { id: created?.id, title: created?.title, date: created?.start_date } });
@@ -13582,6 +13587,11 @@ async function routeApi(request, env, url, ctx = null) {
     if (flags.check && !flags.force && conflicts.length) return caldevConflictResponse(conflicts);
     const updated = await updateCaldevEvent(env, id, { ...p, ...extras }, existing);
     await caldevAfterSave(env, ctx, auth.user, [updated]);
+    try {
+      await syncCalendarEventToFundraiserCard(env, updated, { actor: auth.user });
+    } catch (error) {
+      console.warn('fundraiser card sync failed', error?.message || error);
+    }
     let label = 'Event changed';
     if (extras.cancelled === true && !existing.cancelled_at) label = 'Date cancelled';
     else if (extras.cancelled === false && existing.cancelled_at) label = 'Date restored';

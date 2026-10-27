@@ -12,13 +12,16 @@ import {
   createFundraiserCard,
   fundraiserCardFieldDiff,
   fundraiserCardSchemaStatements,
+  fundraiserTitlesMatch,
   importLiveFundraiserCards,
   isPublicFundraiserCard,
   MATTRESS_FLYER_URL,
   renderFundraiserCardsAdminHtml,
   renderFundraisingCardFromCms,
+  listFundraiserCards,
   runFundraiserCardCalendarSync,
   setFundraiserCardStatus,
+  syncCalendarEventToFundraiserCard,
 } from '../worker/src/fundraiser-cards.mjs';
 import { decorateFundraisingPage } from '../worker/src/home-redesign.mjs';
 import {
@@ -93,19 +96,20 @@ function createCardStore(seed = {}) {
             return null;
           },
           async all() {
+            if (q.includes('FROM fundraiser_cards')) {
+              return { results: cards.map((card) => ({ ...card })) };
+            }
             if (q.includes('FROM caldev_events')) {
               const start = this.binds[0];
               const end = this.binds[1];
               return {
                 results: events.filter((event) => {
+                  if (q.includes('series_id = ?')) return Number(event.series_id) === Number(start) && !event.cancelled_at;
                   if (q.includes('IN (')) return ['2026-10-24', '2026-11-07'].includes(event.start_date);
                   if (start && end) return event.start_date >= start && event.start_date <= end;
                   return true;
                 }),
               };
-            }
-            if (q.includes('FROM fundraiser_cards')) {
-              return { results: cards.map((card) => ({ ...card })) };
             }
             return { results: [] };
           },
@@ -160,6 +164,23 @@ function createCardStore(seed = {}) {
                 row.status = status;
                 row.calendar_changed = calendar_changed;
               }
+              return { success: true };
+            }
+            if (q.includes('SET source_event_id = NULL')) {
+              const sourceId = this.binds[1];
+              const keepId = this.binds[2];
+              for (const row of cards) {
+                if (Number(row.source_event_id) === Number(sourceId) && Number(row.id) !== Number(keepId)) {
+                  row.source_event_id = null;
+                }
+              }
+              return { success: true };
+            }
+            if (q.includes('SET source_event_id = ?') || q.includes('SET source_event_id=?')) {
+              const sourceId = this.binds[0];
+              const id = this.binds[this.binds.length - 1];
+              const row = cards.find((card) => Number(card.id) === Number(id));
+              if (row) row.source_event_id = sourceId == null ? null : Number(sourceId);
               return { success: true };
             }
             if (q.includes('UPDATE fundraiser_cards SET calendar_changed')) {
@@ -467,6 +488,205 @@ test('rejected event may create one new draft only when the date changes, and th
   });
   assert.equal(again.created, 0);
   assert.equal(sent.length, 1);
+});
+
+test('a misspelled fundraiser title still counts as the same span', () => {
+  assert.equal(fundraiserTitlesMatch('Dewey Store Fundraiser', 'Dewey Store Fundrasier'), true);
+  assert.equal(fundraiserTitlesMatch('Dewey Store', 'Dewey Store Fundrasier'), true);
+  assert.equal(fundraiserTitlesMatch('Silent Auction', 'Dewey Store Fundrasier'), false);
+});
+
+test('a spanned fundraiser card shows the start through the end date', () => {
+  const html = renderFundraisingCardFromCms({
+    title: 'Dewey Store Fundraiser',
+    event_date: '2026-11-16',
+    span_end: '2026-12-24',
+    location: '119 North Boutique',
+    picture_mode: 'date_tile',
+    status: 'approved',
+    primary_button: 'details',
+  });
+  assert.match(html, /Nov 16/);
+  assert.match(html, /Dec 24, 2026/);
+  assert.match(html, /–/);
+  const oneDay = renderFundraisingCardFromCms({
+    title: 'Silent Auction',
+    event_date: '2026-11-14',
+    picture_mode: 'date_tile',
+    status: 'approved',
+  });
+  assert.doesNotMatch(oneDay, /–/);
+});
+
+test('the card list reports the calendar span on the one kept card', async () => {
+  const store = createCardStore({
+    events: [{
+      id: 187,
+      title: 'Dewey Store',
+      start_date: '2026-11-16',
+      end_date: '2026-12-24',
+      track: 'fundraiser',
+    }],
+    cards: [{
+      id: 3,
+      title: 'Dewey Store Fundraiser',
+      event_date: '2026-11-16',
+      status: 'approved',
+      source_event_id: 187,
+      description: '',
+      image_url: '',
+      custom_label: '',
+      primary_button: 'details',
+      primary_url: '',
+    }],
+  });
+  const cards = await listFundraiserCards(store.env);
+  const dewey = cards.find((card) => card.id === 3);
+  assert.equal(dewey.span_end, '2026-12-24');
+  assert.equal(dewey.event_date, '2026-11-16');
+});
+
+test('a public card for a multi-day fundraiser stays up through the last day', () => {
+  const card = {
+    status: 'approved',
+    auto_hide_after_date: 1,
+    event_date: '2026-11-16',
+    span_end: '2026-12-24',
+  };
+  assert.equal(isPublicFundraiserCard(card, '2026-11-20'), true);
+  assert.equal(isPublicFundraiserCard(card, '2026-12-24'), true);
+  assert.equal(isPublicFundraiserCard(card, '2026-12-25'), false);
+  assert.equal(isPublicFundraiserCard({ ...card, span_end: '' }, '2026-11-17'), false);
+});
+
+test('a multi-day fundraiser span keeps one card and drops the daily drafts', async () => {
+  const store = createCardStore({
+    users: [{ id: 1, username: 'admin@efhsband.org', role: 'admin', active: 1 }],
+    events: [{
+      id: 187,
+      title: 'Dewey Store',
+      start_date: '2026-11-16',
+      end_date: '2026-12-24',
+      track: 'fundraiser',
+      location: '119 N Main St',
+    }],
+    cards: [
+      {
+        id: 3,
+        title: 'Dewey Store Fundraiser',
+        event_date: '2026-11-16',
+        status: 'approved',
+        source_event_id: 86,
+        description: '',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'details',
+        primary_url: '',
+      },
+      {
+        id: 6,
+        title: 'Dewey Store',
+        event_date: '2026-11-01',
+        status: 'draft',
+        source_event_id: 126,
+        description: '',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'details',
+        primary_url: '',
+      },
+      {
+        id: 21,
+        title: 'Dewey Store',
+        event_date: '2026-11-16',
+        status: 'draft',
+        source_event_id: 141,
+        description: '',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'details',
+        primary_url: '',
+      },
+      {
+        id: 58,
+        title: 'Dewey Store',
+        event_date: '2026-12-24',
+        status: 'draft',
+        source_event_id: 178,
+        description: '',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'details',
+        primary_url: '',
+      },
+      {
+        id: 70,
+        title: 'Dewey Store',
+        event_date: '2026-11-20',
+        status: 'draft',
+        source_event_id: 144,
+        description: 'Bring cash',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'details',
+        primary_url: '',
+      },
+      {
+        id: 2,
+        title: 'Silent Auction',
+        event_date: '2026-11-14',
+        status: 'approved',
+        source_event_id: 61,
+        description: 'Students and parents help needed',
+        image_url: '',
+        custom_label: '',
+        primary_button: 'volunteer',
+        primary_url: '',
+      },
+    ],
+  });
+  const result = await runFundraiserCardCalendarSync(store.env, {
+    today: '2026-10-26',
+    sendEmail: async () => {},
+  });
+  assert.equal(result.created, 0);
+  const dewey = store.cards.filter((card) => /dewey/i.test(card.title));
+  assert.deepEqual(dewey.map((card) => card.id).sort((a, b) => a - b), [3, 70]);
+  assert.equal(store.cards.find((card) => card.id === 3).source_event_id, 187);
+  assert.equal(store.cards.find((card) => card.id === 3).title, 'Dewey Store Fundraiser');
+  assert.equal(store.cards.find((card) => card.id === 2).status, 'approved');
+});
+
+test('saving one fundraiser across many days creates one card', async () => {
+  const events = [16, 17, 18, 19, 20].map((day) => ({
+    id: 200 + day,
+    title: 'Dewey Store',
+    start_date: `2026-11-${day}`,
+    end_date: '',
+    track: 'fundraiser',
+    series_id: 9,
+    location: '119 N Main St',
+  }));
+  const store = createCardStore({
+    users: [{ id: 1, username: 'admin@efhsband.org', role: 'admin', active: 1 }],
+    events,
+  });
+  const sent = [];
+  const result = await runFundraiserCardCalendarSync(store.env, {
+    today: '2026-10-26',
+    sendEmail: async (payload) => { sent.push(payload); },
+  });
+  assert.equal(result.created, 1);
+  assert.equal(store.cards.length, 1);
+  assert.equal(store.cards[0].event_date, '2026-11-16');
+  assert.equal(store.cards[0].source_event_id, 216);
+  assert.equal(sent.length, 1);
+  const again = await syncCalendarEventToFundraiserCard(store.env, {
+    ...events[2],
+    end_date: '2026-11-20',
+  });
+  assert.equal(again.action, 'unchanged');
+  assert.equal(store.cards.length, 1);
 });
 
 test('field diffs omit image bytes and restore/reject are distinct actions', () => {
