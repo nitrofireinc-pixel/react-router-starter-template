@@ -126,6 +126,16 @@ export function formatHomeEventWhen(event = {}) {
   };
 }
 
+export function fundraiserSpanLabel(event = {}) {
+  const start = String(event.start_date || '');
+  const end = String(event.end_date || event.span_end || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end <= start) return '';
+  const from = formatHomeEventWhen({ start_date: start });
+  const to = formatHomeEventWhen({ start_date: end });
+  if (!from.short || !to.long) return '';
+  return `${from.short} – ${to.long}`;
+}
+
 function formatTimeRange(event = {}) {
   const source = event || {};
   if (Number(source.all_day) && !source.start_time && !source.end_time) return '';
@@ -186,13 +196,14 @@ export function renderHomeEventArticle(event) {
 export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
   if (!event) return '';
   const when = formatHomeEventWhen(event);
+  const span = fundraiserSpanLabel(event);
   const time = when.time ? `<span>${escapeHtml(when.time)}</span>` : '';
   const where = eventWhere(event);
   const deal = String(dealHtml || '').trim();
   return `<div class="nf-flag">Save the date</div>
       <div class="nf-kicker">Next fundraiser</div>
       <h2>${escapeHtml(plainText(event.title))}</h2>
-      <div class="nf-date"><b>${escapeHtml(when.short)}</b>${time}</div>
+      <div class="nf-date"><b>${escapeHtml(span || when.short)}</b>${time}</div>
       ${where ? `<p class="nf-where">${escapeHtml(where)}</p>` : ''}
       ${deal ? `<p class="nf-deal">${deal}</p>` : ''}
       <a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>`;
@@ -201,6 +212,7 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
 export function renderFeaturedFundraiser(event, { flyer = '/assets/home/mattress-flyer.jpg', dealHtml = '' } = {}) {
   if (!event) return '';
   const when = formatHomeEventWhen(event);
+  const span = fundraiserSpanLabel(event);
   const where = eventWhere(event);
   const directions = mapsHref(where);
   const deal = String(dealHtml || '').trim();
@@ -211,7 +223,7 @@ export function renderFeaturedFundraiser(event, { flyer = '/assets/home/mattress
         <h3>${escapeHtml(plainText(event.title))}</h3>
         <p class="ff-sub">${escapeHtml(plainText(event.description) || 'See the fundraising page for details.')}</p>
         <dl class="ff-facts">
-          <div><dt>When</dt><dd>${escapeHtml(when.long || when.short)}${timeLine}</dd></div>
+          <div><dt>When</dt><dd>${escapeHtml(span || when.long || when.short)}${timeLine}</dd></div>
           ${where ? `<div><dt>Where</dt><dd>${escapeHtml(where)}</dd></div>` : ''}
           ${deal ? `<div class="ff-deal"><dt>The deal</dt><dd>${deal}</dd></div>` : ''}
         </dl>
@@ -226,8 +238,9 @@ export function renderFeaturedFundraiser(event, { flyer = '/assets/home/mattress
 export function renderOtherFundraiserCard(event) {
   if (!event) return '';
   const when = formatHomeEventWhen(event);
+  const span = fundraiserSpanLabel(event) || when.short;
   return `<article class="fund-card photo-card" style="--img:url('/assets/home/home2-13.jpg')">
-        <div class="fc-top"><span class="pill pill-light">Fundraiser${when.short ? ` · ${escapeHtml(when.short)}` : ''}</span></div>
+        <div class="fc-top"><span class="pill pill-light">Fundraiser${span ? ` · ${escapeHtml(span)}` : ''}</span></div>
         <div class="fc-body">
           <h3>${escapeHtml(plainText(event.title))}</h3>
           <p>${escapeHtml(plainText(event.description) || 'See the calendar for details.')}</p>
@@ -561,6 +574,7 @@ export function cardToFundraisingEvent(card = {}) {
     description: card.description,
     location: card.location,
     start_date: card.event_date || card.start_date,
+    end_date: card.span_end || '',
     start_time: card.start_time,
     end_time: card.end_time,
     all_day: card.start_time || card.end_time ? 0 : 1,
@@ -605,7 +619,7 @@ export function renderFundraisingCard(event, {
   const volunteers = volunteersNeeded != null
     ? Boolean(volunteersNeeded) && !attend
     : (!attend && fundraiserNeedsVolunteers(event, description));
-  const whenLabel = when.long || when.short;
+  const whenLabel = fundraiserSpanLabel(event) || when.long || when.short;
   const timeBit = fundraiserWhenTime(event);
   const whenValue = [whenLabel, timeBit].filter(Boolean).join(' · ');
   const factsHtml = (whenValue || facts.where)
