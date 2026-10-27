@@ -48,7 +48,22 @@
       schoolYear: form.school_year.value,
       photoUrl: form.photo_url.value.trim(),
       photoCrop: currentPhotoCropFromForm(),
+      badgeScale: currentBadgePercent(),
     };
+  }
+
+  function currentBadgePercent() {
+    const input = $('#badge-creator-size-input');
+    return BadgeCreator.normalizeBadgePercent(input ? input.value : BadgeCreator.DEFAULT_BADGE_PERCENT);
+  }
+
+  function writeBadgePercent(percent) {
+    const value = BadgeCreator.normalizeBadgePercent(percent);
+    const slider = $('#badge-creator-size');
+    const input = $('#badge-creator-size-input');
+    if (slider) slider.value = String(value);
+    if (input) input.value = String(value);
+    return value;
   }
 
   function currentPhotoCropFromForm() {
@@ -173,6 +188,7 @@
       photoUrl: state.photoImage ? '' : values.photoUrl,
       photo: state.photoImage || null,
       photoCrop,
+      badgeScale: values.badgeScale,
     };
     try {
       const result = await BadgeCreator.renderBadge(canvas, options);
@@ -180,6 +196,12 @@
       canvas.style.width = '100%';
       canvas.style.maxWidth = '100%';
       canvas.style.height = 'auto';
+      const stage = $('#badge-creator-photo-stage');
+      if (stage) {
+        const shown = Math.min(100, Math.round((values.badgeScale / 125) * 75));
+        stage.style.width = `${shown}%`;
+        stage.style.maxWidth = `${shown}%`;
+      }
       state.layout = result?.layout || BadgeCreator.getProfileLayout(values.role);
       if (result?.layout?.photoCrop) {
         writePhotoCropToForm(result.layout.photoCrop);
@@ -253,6 +275,7 @@
     populateRoleOptions();
     const fileInput = form.photo_file;
     if (fileInput) fileInput.value = '';
+    writeBadgePercent(BadgeCreator.DEFAULT_BADGE_PERCENT);
     setStatus(message);
     schedulePreview();
   }
@@ -272,6 +295,7 @@
       offsetX: badge.photo_offset_x,
       offsetY: badge.photo_offset_y,
     });
+    writeBadgePercent(badge.badge_scale ?? BadgeCreator.DEFAULT_BADGE_PERCENT);
     const fileInput = form.photo_file;
     if (fileInput) fileInput.value = '';
     setStatus(`Editing badge for ${badge.member_name || 'member'}. Drag the photo to center it, then save.`);
@@ -313,6 +337,7 @@
         offsetX: badge.photo_offset_x,
         offsetY: badge.photo_offset_y,
       },
+      badgeScale: badge.badge_scale,
     });
     return canvas;
   }
@@ -405,7 +430,7 @@
         <div class="mini-logo staff-mini-photo">${badge.photo_url ? `<img src="${escapeHtml(badge.photo_url)}" alt="">` : escapeHtml(badgeInitials(badge.member_name))}</div>
         <div>
           <b>${escapeHtml(badge.member_name)}</b>
-          <span>${escapeHtml(badge.role)} · ${escapeHtml(badge.school_year)}</span>
+          <span>${escapeHtml(badge.role)} · ${escapeHtml(badge.school_year)} · ${BadgeCreator.normalizeBadgePercent(badge.badge_scale)}%</span>
           <small>Updated ${escapeHtml((badge.updated_at || '').slice(0, 10) || 'recently')}</small>
         </div>
         <div class="row-actions">
@@ -580,6 +605,29 @@
     window.addEventListener('resize', () => syncPhotoHandle());
   }
 
+  function bindBadgeSize() {
+    const slider = $('#badge-creator-size');
+    const input = $('#badge-creator-size-input');
+    if (!slider || !input || slider.dataset.bound === 'true') return;
+    slider.dataset.bound = 'true';
+    slider.addEventListener('input', () => {
+      input.value = slider.value;
+      schedulePreview();
+    });
+    input.addEventListener('input', () => {
+      const raw = Number(input.value);
+      if (!Number.isFinite(raw)) return;
+      slider.value = String(BadgeCreator.normalizeBadgePercent(raw));
+      schedulePreview();
+    });
+    input.addEventListener('change', () => {
+      const value = BadgeCreator.normalizeBadgePercent(input.value);
+      input.value = String(value);
+      slider.value = String(value);
+      schedulePreview();
+    });
+  }
+
   function bindForm() {
     const form = $('#badge-creator-form');
     if (!form || form.dataset.bound === 'true') return;
@@ -588,6 +636,8 @@
     populateRoleOptions();
     populateYearOptions();
     writePhotoCropToForm(state.photoCrop);
+    writeBadgePercent(BadgeCreator.DEFAULT_BADGE_PERCENT);
+    bindBadgeSize();
     bindPhotoAdjustControls();
 
     form.addEventListener('input', (event) => {
@@ -637,6 +687,7 @@
           photo_zoom: crop.zoom,
           photo_offset_x: crop.offsetX,
           photo_offset_y: crop.offsetY,
+          badge_scale: values.badgeScale,
         };
         const saved = await global.jsonFetch(
           values.id ? `/api/admin/badges/${values.id}` : '/api/admin/badges',
