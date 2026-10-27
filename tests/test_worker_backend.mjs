@@ -11,6 +11,7 @@ import { applyHomeFeatureCards, applyHomeCalendarHighlights, homeEventsLimitFrom
 import worker from '../worker/src/worker.mjs';
 import { volunteerHeroImageResponse, volunteerPageHeroStyle, VOLUNTEER_HERO_URL } from '../worker/src/worker.mjs';
 import { calendarHeroImageResponse, calendarPageHeroStyle, CALENDAR_HERO_URL } from '../worker/src/worker.mjs';
+import { contactHeroImageResponse, contactPageHeroStyle, CONTACT_HERO_URL } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2498,6 +2499,27 @@ test('calendar page hero uses the approved band-room photo under the landing was
   assert.match(style, new RegExp(CALENDAR_HERO_URL.replace(/[?]/g, '\\?')));
   assert.match(themeCss, /body\.efhs-theme\.calendar-page \.page-hero:before/);
   const response = calendarHeroImageResponse(new Request(`https://efhsband.org${CALENDAR_HERO_URL}`));
+  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  const body = new Uint8Array(await response.arrayBuffer());
+  assert.equal(body[0], 0xff);
+  assert.equal(body[1], 0xd8);
+  assert.equal(body.length, file.length);
+});
+
+test('contact page hero uses the approved contact sheet under the landing wash', async () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const file = readFileSync(join(root, 'assets/contact-hero.jpg'));
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  assert.equal(file[0], 0xff);
+  assert.equal(file[1], 0xd8);
+  assert.ok(file.length > 50_000);
+  const style = contactPageHeroStyle();
+  assert.match(style, /id="contact-hero-photo"/);
+  assert.match(style, /contact-page \.page-hero:before/);
+  assert.match(style, /linear-gradient\(100deg,rgba\(0,10,22,\.95\)/);
+  assert.match(style, new RegExp(CONTACT_HERO_URL.replace(/[?]/g, '\\?')));
+  assert.match(themeCss, /body\.efhs-theme\.contact-page \.page-hero:before/);
+  const response = contactHeroImageResponse(new Request(`https://efhsband.org${CONTACT_HERO_URL}`));
   assert.equal(response.headers.get('content-type'), 'image/jpeg');
   const body = new Uint8Array(await response.arrayBuffer());
   assert.equal(body[0], 0xff);
