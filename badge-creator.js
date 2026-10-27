@@ -1,56 +1,77 @@
 /* global document, Image, Blob, URL */
 /**
  * East Forsyth Blue Regiment badge renderer.
- * 125% of CR80 portrait @ 300 DPI, with enlarged type for print readability.
+ * CR80 portrait @ 300 DPI. 100% is the standard card; larger percents print bigger.
  */
 (function badgeCreatorModule(global) {
   const DPI = 300;
   const INCH = DPI;
   const MM = DPI / 25.4;
-  const BADGE_SCALE = 1.25;
-  // Type grows a bit more than the card so titles/names stay readable in print.
-  const TYPE_SCALE = BADGE_SCALE * 1.2;
+  const MIN_BADGE_PERCENT = 100;
+  const MAX_BADGE_PERCENT = 200;
+  const DEFAULT_BADGE_PERCENT = 125;
   // Blank outer margin so edge-cropping printers do not clip badge artwork.
   const SAFE_MARGIN_IN = 0.25;
+  // Header logos + title stack enlargement (requested 25% on top of the badge scale).
+  const HEADER_ENLARGE = 1.25;
 
-  function scalePx(value) {
-    return Math.round(value * BADGE_SCALE);
+  function normalizeBadgePercent(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return DEFAULT_BADGE_PERCENT;
+    return Math.min(MAX_BADGE_PERCENT, Math.max(MIN_BADGE_PERCENT, Math.round(n)));
   }
 
-  function typePx(value) {
-    return Math.round(value * TYPE_SCALE);
+  function badgeMetrics(percent = DEFAULT_BADGE_PERCENT) {
+    const badgeScale = normalizeBadgePercent(percent) / 100;
+    const typeScale = badgeScale * 1.2;
+    const scalePx = (value) => Math.round(value * badgeScale);
+    const typePx = (value) => Math.round(value * typeScale);
+    const contentWidthIn = 2.125 * badgeScale;
+    const contentHeightIn = 3.375 * badgeScale;
+    const contentWidth = Math.round(contentWidthIn * INCH);
+    const contentHeight = Math.round(contentHeightIn * INCH);
+    const safeMargin = Math.round(SAFE_MARGIN_IN * INCH);
+    const BADGE = {
+      scale: badgeScale,
+      percent: normalizeBadgePercent(percent),
+      typeScale,
+      safeMarginIn: SAFE_MARGIN_IN,
+      safeMargin,
+      contentWidthIn,
+      contentHeightIn,
+      contentWidth,
+      contentHeight,
+      widthIn: contentWidthIn + (SAFE_MARGIN_IN * 2),
+      heightIn: contentHeightIn + (SAFE_MARGIN_IN * 2),
+      width: contentWidth + (safeMargin * 2),
+      height: contentHeight + (safeMargin * 2),
+      cornerRadius: Math.round(3 * MM * badgeScale),
+      slot: {
+        width: Math.round(14 * MM * badgeScale),
+        height: Math.round(3 * MM * badgeScale),
+        top: scalePx(12),
+      },
+      outerBorder: Math.round(2.5 * MM * badgeScale),
+      dpi: DPI,
+    };
+    const LINE = scalePx(18);
+    const TYPE = {
+      titleTop: typePx(Math.round(28 * HEADER_ENLARGE)),
+      titleBottom: typePx(Math.round(22 * HEADER_ENLARGE)),
+      official: typePx(Math.round(13 * HEADER_ENLARGE)),
+      label: typePx(15),
+      role: typePx(38),
+      name: typePx(32),
+      years: typePx(24),
+      org: typePx(20),
+      footer: typePx(16),
+    };
+    return { BADGE, TYPE, LINE, scalePx, typePx, HEADER_ENLARGE };
   }
 
-  const contentWidthIn = 2.125 * BADGE_SCALE;
-  const contentHeightIn = 3.375 * BADGE_SCALE;
-  const contentWidth = Math.round(contentWidthIn * INCH);
-  const contentHeight = Math.round(contentHeightIn * INCH);
-  const safeMargin = Math.round(SAFE_MARGIN_IN * INCH);
-
-  const BADGE = {
-    scale: BADGE_SCALE,
-    typeScale: TYPE_SCALE,
-    safeMarginIn: SAFE_MARGIN_IN,
-    safeMargin,
-    contentWidthIn,
-    contentHeightIn,
-    contentWidth,
-    contentHeight,
-    // Full printable canvas includes the safe margin on every side.
-    widthIn: contentWidthIn + (SAFE_MARGIN_IN * 2),
-    heightIn: contentHeightIn + (SAFE_MARGIN_IN * 2),
-    width: contentWidth + (safeMargin * 2),
-    height: contentHeight + (safeMargin * 2),
-    cornerRadius: Math.round(3 * MM * BADGE_SCALE),
-    slot: {
-      width: Math.round(14 * MM * BADGE_SCALE),
-      height: Math.round(3 * MM * BADGE_SCALE),
-      top: scalePx(12),
-    },
-    // Outer role border thickness (red for Committee Member, gold for officers/directors).
-    outerBorder: Math.round(2.5 * MM * BADGE_SCALE),
-    dpi: DPI,
-  };
+  const DEFAULT_METRICS = badgeMetrics(DEFAULT_BADGE_PERCENT);
+  const BADGE = DEFAULT_METRICS.BADGE;
+  const TYPE = DEFAULT_METRICS.TYPE;
 
   const COLORS = {
     navy: '#002142',
@@ -64,23 +85,6 @@
     soft: '#f5f7fb',
     profileGrey: '#9CA3AF',
     profileGreyDark: '#6B7280',
-  };
-
-  const LINE = scalePx(18);
-  // Header logos + title stack enlargement (requested 25%).
-  const HEADER_ENLARGE = 1.25;
-
-  const TYPE = {
-    titleTop: typePx(Math.round(28 * HEADER_ENLARGE)),
-    titleBottom: typePx(Math.round(22 * HEADER_ENLARGE)),
-    official: typePx(Math.round(13 * HEADER_ENLARGE)),
-    // Identity block below the portrait — kept larger for print readability.
-    label: typePx(15),
-    role: typePx(38),
-    name: typePx(32),
-    years: typePx(24),
-    org: typePx(20),
-    footer: typePx(16),
   };
 
   const BADGE_ROLES = [
@@ -224,7 +228,8 @@
     return metrics;
   }
 
-  function getProfileLayout(role = 'Committee Member') {
+  function getProfileLayout(role = 'Committee Member', metrics = DEFAULT_METRICS) {
+    const { BADGE, LINE, scalePx } = metrics;
     const isCommitteeMember = role === 'Committee Member';
     const isOfficer = OFFICER_ROLES.includes(role);
     const isDirector = DIRECTOR_ROLES.includes(role);
@@ -262,7 +267,8 @@
     };
   }
 
-  function drawSlotHole(ctx, cardX = 0, cardY = 0, cardW = BADGE.contentWidth) {
+  function drawSlotHole(ctx, cardX = 0, cardY = 0, cardW = BADGE.contentWidth, metrics = DEFAULT_METRICS) {
+    const { BADGE, scalePx } = metrics;
     const { width, height, top } = BADGE.slot;
     const x = cardX + (cardW - width) / 2;
     const y = cardY + top;
@@ -292,7 +298,8 @@
     return `${weight} ${sizePx}px Liberation Sans, DejaVu Sans, Noto Sans, sans-serif`;
   }
 
-  function measureTitleWidth(ctx) {
+  function measureTitleWidth(ctx, metrics = DEFAULT_METRICS) {
+    const { TYPE } = metrics;
     ctx.font = typeFont('bold', TYPE.titleTop);
     const top = ctx.measureText('EAST FORSYTH').width;
     ctx.font = typeFont('bold', TYPE.titleBottom);
@@ -319,6 +326,8 @@
   }
 
   async function renderBadge(canvas, options = {}) {
+    const metrics = badgeMetrics(options.badgeScale ?? options.badge_scale ?? DEFAULT_BADGE_PERCENT);
+    const { BADGE, TYPE, scalePx, typePx, HEADER_ENLARGE } = metrics;
     const ctx = canvas.getContext('2d');
     const width = BADGE.width;
     const height = BADGE.height;
@@ -329,7 +338,7 @@
     const role = BADGE_ROLES.includes(options.role) ? options.role : 'Committee Member';
     const schoolYear = String(options.schoolYear || schoolYearOptions()[0]).trim();
     const photoCrop = normalizePhotoCrop(options.photoCrop || options);
-    const layout = getProfileLayout(role);
+    const layout = getProfileLayout(role, metrics);
     const { margin, contentX, contentY, cardX, cardY, cardW, cardH } = layout;
 
     const [schoolLogo, regimentMark, photo] = await Promise.all([
@@ -384,7 +393,7 @@
     const headerCenterY = (slotBottom + stripeY) / 2;
 
     // Slot, logos, and title in navy header
-    drawSlotHole(ctx, cardX, cardY, cardW);
+    drawSlotHole(ctx, cardX, cardY, cardW, metrics);
 
     const schoolSize = fitImage(
       schoolLogo,
@@ -400,7 +409,7 @@
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const titleTopWidth = measureTitleWidth(ctx);
+    const titleTopWidth = measureTitleWidth(ctx, metrics);
 
     // Title stack offsets relative to titleCenterY (used to keep the block centered as a group).
     const titleStackTop = -TYPE.titleTop;
@@ -577,24 +586,35 @@
     return '';
   }
 
+  function printItem(source) {
+    if (source instanceof HTMLCanvasElement && source.width && source.height) {
+      return {
+        src: source.toDataURL('image/png'),
+        w: source.width / DPI,
+        h: source.height / DPI,
+      };
+    }
+    const src = canvasToDataUrl(source);
+    if (!src) return null;
+    return { src, w: BADGE.widthIn, h: BADGE.heightIn };
+  }
+
   function printBadges(sources, title = 'Badges') {
-    const items = (Array.isArray(sources) ? sources : [sources])
-      .map((source) => canvasToDataUrl(source))
-      .filter(Boolean);
+    const items = (Array.isArray(sources) ? sources : [sources]).map(printItem).filter(Boolean);
     if (!items.length) return Promise.reject(new Error('No badges ready to print.'));
     if (items.length > 3) return Promise.reject(new Error('Print at most three badges on one page.'));
 
     const safeTitle = String(title || 'Badges').replace(/[<>&"]/g, '');
-    const badgeW = BADGE.widthIn;
-    const badgeH = BADGE.heightIn;
     const count = items.length;
     const landscape = count === 3;
-    // Letter: portrait for 1–2, landscape for 3 so a row of badges fits.
-    const pageW = count === 1 ? badgeW : (landscape ? 11 : 8.5);
-    const pageH = count === 1 ? badgeH : (landscape ? 8.5 : 11);
     const gapIn = count === 1 ? 0 : (count === 3 ? 0.2 : 0.3);
-    const imgs = items.map((src, index) => (
-      `<img src="${src}" alt="Badge ${index + 1}" width="${Math.round(badgeW * DPI)}" height="${Math.round(badgeH * DPI)}">`
+    const pageW = count === 1 ? items[0].w : (landscape ? 11 : 8.5);
+    const pageH = count === 1 ? items[0].h : (landscape ? 8.5 : 11);
+    const rowW = items.reduce((sum, item) => sum + item.w, 0) + (gapIn * Math.max(0, count - 1));
+    const tallest = Math.max(...items.map((item) => item.h));
+    const fit = count === 1 ? 1 : Math.min(1, (pageW - 0.4) / rowW, (pageH - 0.4) / tallest);
+    const imgs = items.map((item, index) => (
+      `<img src="${item.src}" alt="Badge ${index + 1}" style="width:${(item.w * fit).toFixed(3)}in;height:${(item.h * fit).toFixed(3)}in">`
     )).join('');
 
     const html = `<!doctype html>
@@ -620,8 +640,6 @@
     }
     .sheet img {
       display: block;
-      width: ${badgeW}in;
-      height: ${badgeH}in;
       max-width: none;
       flex: 0 0 auto;
     }
@@ -674,6 +692,11 @@
     BADGE,
     COLORS,
     TYPE,
+    MIN_BADGE_PERCENT,
+    MAX_BADGE_PERCENT,
+    DEFAULT_BADGE_PERCENT,
+    normalizeBadgePercent,
+    badgeMetrics,
     BADGE_ROLES,
     DIRECTOR_ROLES,
     OFFICER_ROLES,

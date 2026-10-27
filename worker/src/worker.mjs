@@ -1885,19 +1885,21 @@ export function normalizeCommitteeBadgePayload(payload = {}, existing = {}) {
     photo_zoom: clamp(photoZoomRaw, 1, 4, 1),
     photo_offset_x: clamp(photoOffsetXRaw, -2, 2, 0),
     photo_offset_y: clamp(photoOffsetYRaw, -2, 2, 0),
+    badge_scale: Math.round(clamp(Number(payload.badge_scale ?? existing.badge_scale ?? 125), 100, 200, 125)),
   };
 }
 
 async function getCommitteeBadges(env) {
   await ensureCommitteeBadgesSchema(env);
   const { results } = await env.DB.prepare(
-    'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
+    'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, badge_scale, created_by, created_at, updated_at FROM committee_badges ORDER BY datetime(updated_at) DESC, id DESC',
   ).all();
   return (results || []).map((row) => ({
     ...row,
     photo_zoom: Number(row.photo_zoom ?? 1) || 1,
     photo_offset_x: Number(row.photo_offset_x ?? 0) || 0,
     photo_offset_y: Number(row.photo_offset_y ?? 0) || 0,
+    badge_scale: Math.min(200, Math.max(100, Math.round(Number(row.badge_scale ?? 125) || 125))),
   }));
 }
 
@@ -1938,6 +1940,7 @@ export async function ensureCommitteeBadgesSchema(env) {
         'ALTER TABLE committee_badges ADD COLUMN photo_zoom REAL NOT NULL DEFAULT 1',
         'ALTER TABLE committee_badges ADD COLUMN photo_offset_x REAL NOT NULL DEFAULT 0',
         'ALTER TABLE committee_badges ADD COLUMN photo_offset_y REAL NOT NULL DEFAULT 0',
+        'ALTER TABLE committee_badges ADD COLUMN badge_scale INTEGER NOT NULL DEFAULT 125',
       ]) {
         try {
           await env.DB.prepare(sql).run();
@@ -12920,7 +12923,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
     await ensureCommitteeBadgesSchema(env);
     const result = await env.DB.prepare(
-      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO committee_badges (member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, badge_scale, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).bind(
       badge.member_name,
       badge.role,
@@ -12929,10 +12932,11 @@ async function routeApi(request, env, url, ctx = null) {
       badge.photo_zoom,
       badge.photo_offset_x,
       badge.photo_offset_y,
+      badge.badge_scale,
       auth.user.id || null,
     ).run();
     return jsonResponse(await env.DB.prepare(
-      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, badge_scale, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
     ).bind(result.meta.last_row_id).first());
   }
   const badgeMatch = url.pathname.match(/^\/api\/admin\/badges\/(\d+)$/);
@@ -12954,7 +12958,7 @@ async function routeApi(request, env, url, ctx = null) {
     if (!badge.member_name) return jsonResponse({ detail: 'Member name is required' }, 422);
     if (!badge.school_year) return jsonResponse({ detail: 'School year is required' }, 422);
     await env.DB.prepare(
-      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, photo_zoom = ?, photo_offset_x = ?, photo_offset_y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE committee_badges SET member_name = ?, role = ?, school_year = ?, photo_url = ?, photo_zoom = ?, photo_offset_x = ?, photo_offset_y = ?, badge_scale = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).bind(
       badge.member_name,
       badge.role,
@@ -12963,10 +12967,11 @@ async function routeApi(request, env, url, ctx = null) {
       badge.photo_zoom,
       badge.photo_offset_x,
       badge.photo_offset_y,
+      badge.badge_scale,
       id,
     ).run();
     return jsonResponse(await env.DB.prepare(
-      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
+      'SELECT id, member_name, role, school_year, photo_url, photo_zoom, photo_offset_x, photo_offset_y, badge_scale, created_by, created_at, updated_at FROM committee_badges WHERE id = ?',
     ).bind(id).first());
   }
 
@@ -16104,7 +16109,7 @@ __ADMIN_SIDEBAR__
     </form>
   </div>
 </div>
-</section><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Create enlarged portrait badges (125% of CR80) for directors, officers, and committee members. Titles and names print larger for readability. Drag the photo in the live preview to center it, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form></div><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="947" height="1416" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">Print includes a 0.25 in white margin around the badge to avoid edge cropping. Drag the photo to center, then resize with the handle or slider.</p></div></aside>
+</section><style id="badge-creator-studio">.badge-creator-panel .admin-card{border:1px solid #e1e8f1;border-radius:22px;box-shadow:0 16px 46px rgba(15,34,58,.08);background:#fff}.badge-creator-layout{display:grid;grid-template-columns:minmax(300px,460px) minmax(280px,1fr);gap:20px;align-items:start}.badge-creator-preview-card{position:sticky;top:12px;max-width:none;width:100%;margin:0}.badge-creator-list-card{margin-top:20px}.badge-size-field small{display:block;margin-top:6px;color:#5b6472;font-weight:600;line-height:1.35}.badge-size-control{display:grid;grid-template-columns:minmax(0,1fr) 5.6rem auto;gap:10px;align-items:center;margin-top:8px}.badge-size-control input[type="range"]{width:100%;accent-color:#014990;height:28px}.badge-size-control input[type="number"]{width:100%;height:42px;border:2px solid #014990;border-radius:10px;font-weight:800;font-size:1.15rem;text-align:center;color:#002142;background:#f3f7ff}.badge-size-unit{font-weight:800;font-size:1.15rem;color:#002142}@media(max-width:980px){.badge-creator-layout{grid-template-columns:minmax(0,1fr)}.badge-creator-preview-card{position:static;max-width:min(336px,100%);margin-left:auto;margin-right:auto}}</style><section id="tab-badge-creator" class="cms-panel badge-creator-panel"><div class="panel-head"><div><p class="kicker">Boosters</p><h1>Badge Creator</h1><p>Name badges for directors, officers, and committee members. 100% is a standard CR80 card. Use the slider or type a percent to print it larger. Drag the photo in the live preview to center it, then save, download, or print.</p></div></div><div class="badge-creator-layout"><form id="badge-creator-form" class="admin-card stack"><input type="hidden" name="badge_id" value=""><input type="hidden" name="photo_url" value=""><input type="hidden" name="photo_zoom" value="1"><input type="hidden" name="photo_offset_x" value="0"><input type="hidden" name="photo_offset_y" value="0"><div class="form-grid"><label>Name<input name="member_name" required placeholder="Jordan Smith" autocomplete="name"></label><label>Role<select name="role"></select></label><label>Active years<select name="school_year"></select></label><label class="full badge-size-field">Badge size<span class="badge-size-control"><input id="badge-creator-size" type="range" min="100" max="200" step="1" value="125" aria-label="Badge size percent"><input id="badge-creator-size-input" name="badge_scale" type="number" min="100" max="200" step="1" value="125" inputmode="numeric" aria-label="Badge size percent"><span class="badge-size-unit">%</span></span><small>100% is standard size. Slide or type any percent up to 200%.</small></label><label class="full">Photo<input name="photo_file" type="file" accept="image/*"></label></div><div class="badge-creator-actions"><button class="btn primary" type="submit">Save Badge</button><button class="btn outline" type="button" id="badge-creator-new">New</button><button class="btn outline" type="button" id="badge-creator-download">Download PNG</button><button class="btn outline" type="button" id="badge-creator-print">Print</button></div><p class="status" id="badge-creator-status"></p></form><aside class="admin-card stack badge-creator-preview-card"><h2>Live preview</h2><div class="badge-creator-preview-wrap"><div id="badge-creator-photo-stage" class="badge-creator-photo-stage"><canvas id="badge-creator-preview" width="947" height="1416" aria-label="Badge preview"></canvas><div id="badge-creator-photo-handle" class="badge-creator-photo-handle" hidden><span class="badge-creator-photo-hint">Drag to center</span><button type="button" id="badge-creator-photo-resize" class="badge-creator-photo-resize" aria-label="Resize photo"></button></div></div></div><div id="badge-creator-photo-controls" class="badge-creator-photo-controls" hidden><label class="badge-creator-zoom-label">Photo size <input id="badge-creator-photo-zoom" type="range" min="1" max="3.5" step="0.01" value="1"><span id="badge-creator-photo-zoom-label">1.00×</span></label><button class="btn outline" type="button" id="badge-creator-photo-reset">Reset photo</button><p class="muted">Print includes a 0.25 in white margin around the badge to avoid edge cropping. Drag the photo to center, then resize with the handle or slider.</p></div></aside></div>
 <div class="admin-card stack badge-creator-list-card"><h2>Saved badges</h2><div class="badge-creator-list-toolbar"><p class="muted">Select up to 3 badges to print on one page (3 print in landscape). Or open one to edit, download, or print alone.</p><button class="btn primary" type="button" id="badge-creator-print-selected" disabled>Print selected <span id="badge-creator-print-selected-count"></span></button></div><div id="badge-creator-list" class="admin-list" aria-label="Saved badges"></div></div></section><section id="tab-mail" class="cms-panel mail-panel">
 <div class="panel-head"><div><p class="kicker">Administration</p><h1>Staff Email</h1><p>Compose a rich-text email with optional attachments and send it to selected CMS users. Replies go to the logged-in user’s email username.</p></div></div>
 <div class="editor-layout">

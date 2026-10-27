@@ -3907,6 +3907,10 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
 
   assert.match(readFileSync(join(root, 'worker/src/admin-chrome.mjs'), 'utf8'), /item\('badge-creator', 'Badge Creator', 'badge-creator'/);
   assert.match(workerSrc, /id="tab-badge-creator"/);
+  assert.match(workerSrc, /id="badge-creator-size"/);
+  assert.match(workerSrc, /id="badge-creator-size-input"/);
+  assert.match(workerSrc, /id="badge-creator-studio"/);
+  assert.match(workerSrc, /badge_scale INTEGER NOT NULL DEFAULT 125/);
   assert.match(workerSrc, /id="badge-creator-print"/);
   assert.match(workerSrc, /badge-creator\.js/);
   assert.match(workerSrc, /\/api\/admin\/badges/);
@@ -3919,6 +3923,11 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
   assert.match(adminSrc, /window\.canAccessBadgeCreator/);
   assert.match(adminSrc, /initBadgeCreatorPanel/);
   assert.match(badgeAdmin, /badge-creator-print-selected/);
+  assert.match(badgeAdmin, /badge-creator-size-input/);
+  assert.match(badgeJs, /MIN_BADGE_PERCENT = 100/);
+  assert.match(badgeJs, /MAX_BADGE_PERCENT = 200/);
+  assert.match(badgeJs, /function normalizeBadgePercent/);
+  assert.match(styles, /\.badge-size-control/);
   assert.match(badgeAdmin, /MAX_PRINT_SELECTION = 3/);
   assert.match(badgeJs, /function renderBadge/);
   assert.match(badgeJs, /function printBadges/);
@@ -3940,6 +3949,28 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
   assert.equal(saved.role, 'President');
   assert.equal(saved.photo_url, '/uploads/badge-jordan.jpg');
   assert.equal(saved.photo_zoom, 1.5);
+  assert.equal(saved.badge_scale, 125);
+  const enlarged = normalizeCommitteeBadgePayload({
+    member_name: 'Jordan Smith',
+    role: 'President',
+    school_year: '2026-2027',
+    badge_scale: 180,
+  });
+  assert.equal(enlarged.badge_scale, 180);
+  const tooSmall = normalizeCommitteeBadgePayload({
+    member_name: 'Jordan Smith',
+    role: 'President',
+    school_year: '2026-2027',
+    badge_scale: 40,
+  });
+  assert.equal(tooSmall.badge_scale, 100);
+  const tooLarge = normalizeCommitteeBadgePayload({
+    member_name: 'Jordan Smith',
+    role: 'President',
+    school_year: '2026-2027',
+    badge_scale: 900,
+  });
+  assert.equal(tooLarge.badge_scale, 200);
   const unsafe = normalizeCommitteeBadgePayload({
     member_name: 'Pat',
     role: 'Hacker',
@@ -3965,7 +3996,7 @@ test('Badge Creator stores photo paths only and stays off the full D1 migrate pa
   };
   await ensureCommitteeBadgesSchema(env);
   await ensureCommitteeBadgesSchema(env);
-  assert.equal(runs, 4); // 1 CREATE + 3 ALTER attempts
+  assert.equal(runs, 5); // 1 CREATE + 4 ALTER attempts
 });
 
 test('ensureCaldevSchema only migrates once per isolate', async () => {

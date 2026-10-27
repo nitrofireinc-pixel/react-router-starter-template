@@ -6370,11 +6370,52 @@ body.cms-caldev-editor-open .admin-workspace{
 }
 
 /* Badge Creator (Band Boosters) */
+.badge-creator-panel .admin-card{
+  border:1px solid #e1e8f1;
+  border-radius:22px;
+  box-shadow:0 16px 46px rgba(15,34,58,.08);
+  background:#fff;
+}
 .badge-creator-layout{
   display:grid;
-  grid-template-columns:minmax(0,1fr);
-  gap:18px;
+  grid-template-columns:minmax(300px,460px) minmax(280px,1fr);
+  gap:20px;
   align-items:start;
+}
+.badge-size-field small{
+  display:block;
+  margin-top:6px;
+  color:#5b6472;
+  font-weight:600;
+  line-height:1.35;
+}
+.badge-size-control{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 5.6rem auto;
+  gap:10px;
+  align-items:center;
+  margin-top:8px;
+}
+.badge-size-control input[type="range"]{
+  width:100%;
+  accent-color:#014990;
+  height:28px;
+}
+.badge-size-control input[type="number"]{
+  width:100%;
+  height:42px;
+  border:2px solid #014990;
+  border-radius:10px;
+  font-weight:800;
+  font-size:1.15rem;
+  text-align:center;
+  color:#002142;
+  background:#f3f7ff;
+}
+.badge-size-unit{
+  font-weight:800;
+  font-size:1.15rem;
+  color:#002142;
 }
 .badge-creator-actions{
   display:flex;
@@ -6383,11 +6424,12 @@ body.cms-caldev-editor-open .admin-workspace{
   align-items:center;
 }
 .badge-creator-preview-card{
-  position:static;
+  position:sticky;
+  top:12px;
   min-width:0;
-  max-width:336px;
+  max-width:none;
   width:100%;
-  margin:0 auto 18px;
+  margin:0;
   overflow:hidden;
 }
 .badge-creator-preview-card h2{
@@ -6519,6 +6561,7 @@ body.cms-caldev-editor-open .admin-workspace{
   background:linear-gradient(160deg,#eceef1,#f8fafc 55%,#e8eaed);
   border-color:#c0bfc4;
 }
+.badge-creator-list-card{margin-top:20px}
 .badge-creator-list-card h2{margin:0}
 .badge-creator-list-toolbar{
   display:flex;
