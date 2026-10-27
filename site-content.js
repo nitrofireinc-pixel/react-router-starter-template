@@ -1527,13 +1527,11 @@ function renderPhotoGallery(container, photos = []) {
     container.innerHTML = '<p class="draft">No photos have been published yet.</p>';
     return;
   }
-  const hideTitles = container.classList.contains('photo-gallery');
   container.innerHTML = list.map((photo) => `
     <figure class="gallery-item" data-photo-open>
       <button type="button" class="gallery-item-trigger" aria-label="View ${escapeHtml(photo.alt_text || photo.caption || 'photo')}">
         <img src="${escapeHtml(photo.thumb_url || photo.url)}"${photo.thumb_url && photo.width && photo.height ? ` width="${Number(photo.width)}" height="${Number(photo.height)}"` : ''} data-photo-full="${escapeHtml(photo.full_url || photo.url)}" alt="${escapeHtml(photo.alt_text || '')}" loading="lazy" decoding="async" draggable="false">
       </button>
-      ${hideTitles ? '' : `<figcaption>${formatInlineRichText(photo.caption || photo.alt_text || '')}</figcaption>`}
     </figure>
   `).join('');
 }
@@ -1628,13 +1626,11 @@ function bindPhotoGalleries(root = document) {
       const img = item.querySelector('img');
       if (!img?.src) return;
       event.preventDefault();
-      const hideTitles = container.classList.contains('photo-gallery');
-      const caption = hideTitles ? '' : (item.querySelector('figcaption')?.textContent?.trim() || '');
       openPhotoLightbox({
         src: img.getAttribute('data-photo-full') || img.currentSrc || img.src,
         alt: img.alt || '',
-        caption,
-        showCaption: !hideTitles,
+        caption: '',
+        showCaption: false,
       });
     });
   });
