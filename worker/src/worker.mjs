@@ -42,6 +42,7 @@ import {
   renderCmsFormPageBody,
   slugFromFormTitle,
 } from './form-builder.mjs';
+import { VOLUNTEER_HERO_JPEG_BASE64 } from './volunteer-hero-image.mjs';
 import {
   ADMIN_AUDIT_KNOWN_ACTIONS,
   ADMIN_AUDIT_PAGE_SIZE,
@@ -13834,6 +13835,32 @@ export function renderNav(pages, { loggedIn = false, currentPath = '' } = {}) {
   return `${parts.join('')}${renderNotifyMeNavControl()}${renderAddToHomeNavControl()}`;
 }
 
+export const VOLUNTEER_HERO_URL = '/api/theme/volunteer-hero.jpg?v=volunteer-hero-20261027';
+
+let volunteerHeroBytes;
+function volunteerHeroBytesOnce() {
+  if (volunteerHeroBytes) return volunteerHeroBytes;
+  const binary = atob(VOLUNTEER_HERO_JPEG_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  volunteerHeroBytes = bytes;
+  return bytes;
+}
+
+export function volunteerHeroImageResponse(request) {
+  const headers = {
+    'content-type': 'image/jpeg',
+    'cache-control': 'public, max-age=86400',
+    'x-content-type-options': 'nosniff',
+  };
+  if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+  return new Response(volunteerHeroBytesOnce(), { status: 200, headers });
+}
+
+export function volunteerPageHeroStyle() {
+  return `<style id="volunteer-hero-photo">body.efhs-theme.volunteer-page .page-hero:before{background-color:#001326;background-image:radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),url("${VOLUNTEER_HERO_URL}");background-repeat:no-repeat;background-size:100% 100%,100% 100%,100% 100%,cover;background-position:center,center,center,center 42%}</style>`;
+}
+
 export function safePublicThemePhotoUrl(url = '') {
   const value = String(url || '').trim();
   if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
@@ -13922,6 +13949,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   if (page.slug === 'calendar') bodyClasses.push('caldev-body');
   if (isHomePage) bodyClasses.push('home-page');
   if (page.slug === 'fundraising') bodyClasses.push('fundraising-page');
+  if (page.slug === 'volunteer') bodyClasses.push('volunteer-page');
   if (isComingSoonPage) bodyClasses.push('coming-soon-page');
   if (page.slug === 'not-found' || String(page.slug || '').startsWith('error-')) bodyClasses.push('not-found-page');
   for (const extra of extraBodyClasses) {
@@ -13958,6 +13986,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
   ${extraCss}
   ${themePhotoStyle}
+  ${page.slug === 'volunteer' ? volunteerPageHeroStyle() : ''}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
@@ -14528,6 +14557,9 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/theme/volunteer-hero.jpg') {
+        return applyWorkerSecurityHeaders(volunteerHeroImageResponse(request), url.pathname);
+      }
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
         return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url), url.pathname);
       }
