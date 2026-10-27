@@ -233,7 +233,7 @@ export function renderOtherFundraiserCard(event) {
         <div class="fc-body">
           <h3>${escapeHtml(plainText(event.title))}</h3>
           <p>${escapeHtml(plainText(event.description) || 'See the calendar for details.')}</p>
-          <a class="btn btn-gold btn-sm" href="/boosters.html">I can help</a>
+          <a class="btn btn-gold btn-sm" href="/volunteer.html">I can help</a>
         </div>
       </article>`;
 }
@@ -918,7 +918,7 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
           <div class="fc-body">
             <h3>Silent Auction</h3>
             <p>Students and parents help needed. Location TBD.</p>
-            <a class="btn btn-gold btn-sm" href="/boosters.html">I can help</a>
+            <a class="btn btn-gold btn-sm" href="/volunteer.html">I can help</a>
           </div>
         </article>
       </div>

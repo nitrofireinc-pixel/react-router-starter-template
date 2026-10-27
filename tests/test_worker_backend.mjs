@@ -28,6 +28,7 @@ import {
   plainHeroSubtitle,
   upgradeHomeBody,
   homeEventTag,
+  renderOtherFundraiserCard,
 } from '../worker/src/home-redesign.mjs';
 
 
@@ -2639,6 +2640,20 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(homeCss, /body\.efhs-theme \.home-redesign \.next-fund p\.nf-deal,[\s\S]*?color:#10233C/);
   assert.match(styles, /\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(styles, /header\.site-header nav a,\s*header\.site-header nav \.nav-support-toggle\{[^}]*font-weight:800/);
+});
+
+test('home fundraiser help button opens the volunteer signup form', () => {
+  const card = renderOtherFundraiserCard({
+    title: 'Dewey Store Fundraiser',
+    description: '',
+    start_date: '2026-11-16',
+    end_date: '2026-12-24',
+  });
+  assert.match(card, /href="\/volunteer\.html">I can help</);
+  assert.doesNotMatch(card, /boosters\.html/);
+  const doc = buildHomeRedesignDocument();
+  assert.match(doc, /href="\/volunteer\.html">I can help</);
+  assert.doesNotMatch(doc, /href="\/boosters\.html">I can help/);
 });
 
 test('home redesign upgrades old CMS HTML and binds fundraisers without inventing a time', () => {
