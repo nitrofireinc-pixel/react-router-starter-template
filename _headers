@@ -69,3 +69,6 @@
   ! Cache-Control
   Cache-Control: public, max-age=300, must-revalidate
 
+
+/assets/efhs-gallery-collage.mp4
+  Content-Type: video/mp4
