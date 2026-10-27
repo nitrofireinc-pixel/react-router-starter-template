@@ -15013,6 +15013,12 @@ export function boostersPageHeroStyle() {
   return `<style id="boosters-hero-photo">body.efhs-theme.boosters-page .page-hero:before{background-color:#001326;background-image:radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),url("${BOOSTERS_HERO_URL}");background-repeat:no-repeat;background-size:100% 100%,100% 100%,100% 100%,cover;background-position:center,center,center,center 42%}</style>`;
 }
 
+export const FUNDRAISER_HERO_URL = '/api/theme/volunteer-hero.jpg?v=volunteer-hero-20261027';
+
+export function fundraiserPageHeroStyle() {
+  return `<style id="fundraiser-hero-photo">body.efhs-theme.fundraising-page .page-hero:before{background-color:#001326;background-image:radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),url("${FUNDRAISER_HERO_URL}");background-repeat:no-repeat;background-size:100% 100%,100% 100%,100% 100%,cover;background-position:center,center,center,center 42%}</style>`;
+}
+
 export function safePublicThemePhotoUrl(url = '') {
   const value = String(url || '').trim();
   if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
@@ -15150,6 +15156,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   ${page.slug === 'contact' ? contactPageHeroStyle() : ''}
   ${page.slug === 'directors' ? directorsPageHeroStyle() : ''}
   ${page.slug === 'boosters' ? boostersPageHeroStyle() : ''}
+  ${page.slug === 'fundraising' ? fundraiserPageHeroStyle() : ''}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}

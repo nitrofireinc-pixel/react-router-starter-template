@@ -14,6 +14,7 @@ import { calendarHeroImageResponse, calendarPageHeroStyle, CALENDAR_HERO_URL } f
 import { contactHeroImageResponse, contactPageHeroStyle, CONTACT_HERO_URL } from '../worker/src/worker.mjs';
 import { directorsHeroImageResponse, directorsPageHeroStyle, DIRECTORS_HERO_URL } from '../worker/src/worker.mjs';
 import { boostersHeroImageResponse, boostersPageHeroStyle, BOOSTERS_HERO_URL } from '../worker/src/worker.mjs';
+import { fundraiserPageHeroStyle, FUNDRAISER_HERO_URL } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2569,6 +2570,19 @@ test('boosters page hero uses the approved round-table photo under the landing w
   assert.equal(body[0], 0xff);
   assert.equal(body[1], 0xd8);
   assert.equal(body.length, file.length);
+});
+
+test('fundraising page hero uses the volunteer photo under the landing wash', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  const style = fundraiserPageHeroStyle();
+  assert.equal(FUNDRAISER_HERO_URL, '/api/theme/volunteer-hero.jpg?v=volunteer-hero-20261027');
+  assert.match(style, /id="fundraiser-hero-photo"/);
+  assert.match(style, /fundraising-page \.page-hero:before/);
+  assert.match(style, /linear-gradient\(100deg,rgba\(0,10,22,\.95\)/);
+  assert.match(style, new RegExp(FUNDRAISER_HERO_URL.replace(/[?]/g, '\\?')));
+  assert.match(themeCss, /body\.efhs-theme\.fundraising-page \.page-hero:before/);
+  assert.match(themeCss, /url\("\/api\/theme\/volunteer-hero\.jpg\?v=volunteer-hero-20261027"\)/);
 });
 
 test('staff auth lives in the utility bar, not the main public nav', () => {
