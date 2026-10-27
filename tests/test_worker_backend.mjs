@@ -15,6 +15,7 @@ import { contactHeroImageResponse, contactPageHeroStyle, CONTACT_HERO_URL } from
 import { directorsHeroImageResponse, directorsPageHeroStyle, DIRECTORS_HERO_URL } from '../worker/src/worker.mjs';
 import { boostersHeroImageResponse, boostersPageHeroStyle, BOOSTERS_HERO_URL } from '../worker/src/worker.mjs';
 import { fundraiserPageHeroStyle, FUNDRAISER_HERO_URL } from '../worker/src/worker.mjs';
+import { sponsorsHeroImageResponse, sponsorsPageHeroStyle, SPONSORS_HERO_URL } from '../worker/src/worker.mjs';
 import {
   ensureCaldevSchema,
   resetCaldevSchemaCache,
@@ -2583,6 +2584,27 @@ test('fundraising page hero uses the volunteer photo under the landing wash', ()
   assert.match(style, new RegExp(FUNDRAISER_HERO_URL.replace(/[?]/g, '\\?')));
   assert.match(themeCss, /body\.efhs-theme\.fundraising-page \.page-hero:before/);
   assert.match(themeCss, /url\("\/api\/theme\/volunteer-hero\.jpg\?v=volunteer-hero-20261027"\)/);
+});
+
+test('sponsors page hero uses the approved thank-you photo under the landing wash', async () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const file = readFileSync(join(root, 'assets/sponsors-hero.jpg'));
+  const themeCss = readFileSync(join(root, 'public-theme.css'), 'utf8');
+  assert.equal(file[0], 0xff);
+  assert.equal(file[1], 0xd8);
+  assert.ok(file.length > 50_000);
+  const style = sponsorsPageHeroStyle();
+  assert.match(style, /id="sponsors-hero-photo"/);
+  assert.match(style, /sponsors-page \.page-hero:before/);
+  assert.match(style, /linear-gradient\(100deg,rgba\(0,10,22,\.95\)/);
+  assert.match(style, new RegExp(SPONSORS_HERO_URL.replace(/[?]/g, '\\?')));
+  assert.match(themeCss, /body\.efhs-theme\.sponsors-page \.page-hero:before/);
+  const response = sponsorsHeroImageResponse(new Request(`https://efhsband.org${SPONSORS_HERO_URL}`));
+  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  const body = new Uint8Array(await response.arrayBuffer());
+  assert.equal(body[0], 0xff);
+  assert.equal(body[1], 0xd8);
+  assert.equal(body.length, file.length);
 });
 
 test('staff auth lives in the utility bar, not the main public nav', () => {
