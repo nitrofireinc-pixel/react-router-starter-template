@@ -693,6 +693,18 @@ body.efhs-theme .page-hero:before,
   background-size:cover;
   background-position:center;
 }
+body.efhs-theme.contact-page .page-hero:before,
+#page-preview.contact-page .page-hero:before{
+  background-color:#001326;
+  background-image:
+    radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),
+    linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),
+    linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),
+    url("/api/theme/contact-hero.jpg?v=contact-hero-20261027");
+  background-repeat:no-repeat;
+  background-size:100% 100%,100% 100%,100% 100%,cover;
+  background-position:center,center,center,center 42%;
+}
 body.efhs-theme .page-hero:after,
 #page-preview .page-hero:after{
   content:"";
