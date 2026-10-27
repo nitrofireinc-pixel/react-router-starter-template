@@ -47,6 +47,7 @@ import {
   slugFromFormTitle,
 } from './form-builder.mjs';
 import { VOLUNTEER_HERO_JPEG_BASE64 } from './volunteer-hero-image.mjs';
+import { CALENDAR_HERO_JPEG_BASE64 } from './calendar-hero-image.mjs';
 import {
   ADMIN_AUDIT_KNOWN_ACTIONS,
   ADMIN_AUDIT_PAGE_SIZE,
@@ -14905,6 +14906,32 @@ export function volunteerPageHeroStyle() {
   return `<style id="volunteer-hero-photo">body.efhs-theme.volunteer-page .page-hero:before{background-color:#001326;background-image:radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),url("${VOLUNTEER_HERO_URL}");background-repeat:no-repeat;background-size:100% 100%,100% 100%,100% 100%,cover;background-position:center,center,center,center 42%}</style>`;
 }
 
+export const CALENDAR_HERO_URL = '/api/theme/calendar-hero.jpg?v=calendar-hero-20261027';
+
+let calendarHeroBytes;
+function calendarHeroBytesOnce() {
+  if (calendarHeroBytes) return calendarHeroBytes;
+  const binary = atob(CALENDAR_HERO_JPEG_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  calendarHeroBytes = bytes;
+  return bytes;
+}
+
+export function calendarHeroImageResponse(request) {
+  const headers = {
+    'content-type': 'image/jpeg',
+    'cache-control': 'public, max-age=86400',
+    'x-content-type-options': 'nosniff',
+  };
+  if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+  return new Response(calendarHeroBytesOnce(), { status: 200, headers });
+}
+
+export function calendarPageHeroStyle() {
+  return `<style id="calendar-hero-photo">body.efhs-theme.calendar-page .page-hero:before{background-color:#001326;background-image:radial-gradient(ellipse 30% 36% at 84% 0%,rgba(255,255,255,.35),transparent 62%),linear-gradient(100deg,rgba(0,10,22,.95) 0%,rgba(0,19,38,.88) 34%,rgba(1,36,74,.62) 54%,rgba(7,58,134,.28) 72%,rgba(0,19,38,.22) 100%),linear-gradient(180deg,rgba(0,19,38,.2) 0%,transparent 28%,transparent 70%,rgba(0,19,38,.45) 100%),url("${CALENDAR_HERO_URL}");background-repeat:no-repeat;background-size:100% 100%,100% 100%,100% 100%,cover;background-position:center,center,center,center 42%}</style>`;
+}
+
 export function safePublicThemePhotoUrl(url = '') {
   const value = String(url || '').trim();
   if (!value.startsWith('/uploads/') && !value.startsWith('/assets/')) return '';
@@ -14992,7 +15019,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   const previewBanner = maintenancePreview ? renderMaintenancePreviewBanner() : '';
   const bodyClasses = ['efhs-theme'];
   if (maintenancePreview) bodyClasses.push('maintenance-preview');
-  if (page.slug === 'calendar') bodyClasses.push('caldev-body');
+  if (page.slug === 'calendar') bodyClasses.push('caldev-body', 'calendar-page');
   if (isHomePage) bodyClasses.push('home-page');
   if (page.slug === 'fundraising') bodyClasses.push('fundraising-page');
   if (page.slug === 'volunteer') bodyClasses.push('volunteer-page');
@@ -15035,6 +15062,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   ${isHomePage ? '<style>[data-photo-gallery] figcaption{display:none!important}</style><script>document.addEventListener("click",function(e){var n=e.target&&e.target.closest&&e.target.closest("[data-photo-gallery]");if(!n)return;queueMicrotask(function(){document.querySelectorAll(".photo-lightbox-caption").forEach(function(el){el.remove()})})});</script>' : ''}
   ${themePhotoStyle}${studioThemeCss(site.studio_theme)}
   ${page.slug === 'volunteer' ? volunteerPageHeroStyle() : ''}
+  ${page.slug === 'calendar' ? calendarPageHeroStyle() : ''}
 </head>
 <body${bodyClass} data-sponsor-marquee="${marqueeFlag}">
 ${previewBanner}
@@ -15662,6 +15690,9 @@ export default {
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/theme/volunteer-hero.jpg') {
         return applyWorkerSecurityHeaders(volunteerHeroImageResponse(request), url.pathname);
+      }
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/theme/calendar-hero.jpg') {
+        return applyWorkerSecurityHeaders(calendarHeroImageResponse(request), url.pathname);
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && isWorkerStaticAssetPath(url.pathname)) {
         return applyWorkerSecurityHeaders(await serveBundledStaticAsset(request, env, url), url.pathname);
