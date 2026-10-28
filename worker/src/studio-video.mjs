@@ -121,6 +121,17 @@ export async function verifyRemoteVideo(src, fetchImpl = fetch) {
   return { ok: false, detail: "That address did not return a video file." };
 }
 
+/** Pixel box for a video block. Column span sets the width; row span sets the height. */
+export function videoFrameStyle(block, { columns = 12, rowUnit = 40, gap = 16, includeWidth = true } = {}) {
+  const rows = Math.max(1, Number(block?.h) || 1);
+  const cols = Math.max(1, Math.min(columns, Number(block?.w) || columns));
+  const height = rows * rowUnit + Math.max(0, rows - 1) * gap;
+  const box = `height:${height}px;min-height:0;overflow:hidden;align-self:start`;
+  if (!includeWidth) return box;
+  const width = +((cols / columns) * 100).toFixed(3);
+  return `width:${width}%;max-width:100%;${box}`;
+}
+
 export function renderVideoInner(props = {}, { annotate = false, escapeHtml = (v) => String(v ?? "") } = {}) {
   const src = safeVideoSrc(props.src);
   if (!src) {
