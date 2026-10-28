@@ -13,7 +13,7 @@
   const COLS = 12; const GAP = 16; const ROW = 40; const DESK = 1180; const PHONE = 390;
   const uid = (p = 'b') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const rich = (t) => ({ paragraphs: [[{ text: t }]] });
-  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML', el: 'Element', group: 'Container', live: 'Live data', form: 'Form' };
+  const TYPE_NAMES = { heading: 'Heading', text: 'Text box', button: 'Button', image: 'Image', video: 'Video', card: 'Card', logos: 'Logos', divider: 'Divider', spacer: 'Spacer', html: 'HTML', el: 'Element', group: 'Container', live: 'Live data', form: 'Form' };
   const TREE = new Set(['el', 'group', 'live']);
   const liveMake = (source, limit) => () => ({ type: 'live', props: { source, html: (state?.live_templates || {})[source] || '', ...(limit ? { limit } : {}) } });
   // [key, icon, label, make(), {w,h}, flags]
@@ -27,6 +27,7 @@
         { id: uid('c'), type: 'heading', props: { level: 3, text: 'Card title' } },
         { id: uid('c'), type: 'text', props: { rich: rich('Card text') } }] } }), { w: 4, h: 3 }],
       ['image', '🖼️', 'Image', () => ({ type: 'image', props: { src: '/assets/efhs-photo-1.png', alt: 'Band photo' } }), { w: 4, h: 4 }],
+      ['video', '🎬', 'Video', () => ({ type: 'video', props: { src: '', title: 'Video' } }), { w: 8, h: 6 }],
       ['gallery', '🎞️', 'Gallery', () => ({ type: 'card', props: { className: 'card studio-gallery', children: [
         { id: uid('c'), type: 'image', props: { src: '/assets/efhs-photo-1.png', alt: 'Band photo' } },
         { id: uid('c'), type: 'image', props: { src: '/assets/efhs-photo-2.png', alt: 'Band photo' } }] } }), { w: 12, h: 5 }],
@@ -216,6 +217,7 @@
     if (b.type === 'text') return textOf(p.rich);
     if (b.type === 'button') return p.label;
     if (b.type === 'image') return p.alt || 'Image';
+    if (b.type === 'video') return p.title || 'Video';
     if (b.type === 'card') { const h = (p.children || []).find((k) => k.type === 'heading'); return h ? h.props.text : 'Card'; }
     if (b.type === 'el') return wordsOf(p.html) || typeName(b);
     if (b.type === 'live') return `Live: ${liveInfo(b).label}`;
@@ -557,12 +559,43 @@
       const plan = drag.plan; drag = null;
       if (plan?.ok) {
         const made = make(); const block = { id: uid(), ...made, x: 0, y: 0, w: size.w, h: size.h };
-        if (applyPlan(plan, block, true)) { selected = block.id; scrollToSel = true; changed(); toast(`${name} added`); return; }
+        if (applyPlan(plan, block, true)) { selected = block.id; scrollToSel = true; changed(); finishAdd(block, name); return; }
       } else if (plan) toast('That spot is taken. Drop it on an empty part of the grid.', true);
       drawOverlay();
     };
     tile.addEventListener('pointermove', move); tile.addEventListener('pointerup', up); tile.addEventListener('pointercancel', up);
     move(e);
+  }
+  function finishAdd(block, name) {
+    if (block.type === 'video' && !String(block.props?.src || '').trim()) openVideoPicker(block.id);
+    else toast(`${name} added`);
+  }
+  /** A video needs its own grid row so the blue corner can change its width and height. */
+  function placeVideoGrid(section, block) {
+    block.x = 0;
+    block.y = 0;
+    block.w = Math.min(12, Math.max(2, block.w || 8));
+    block.h = Math.max(2, block.h || 6);
+    applyPlan({ kind: 'newsection', section, x: 0, ok: true }, block, true);
+  }
+  /** Videos already dropped into a flowing section get a grid row the corner can resize. */
+  function hoistFlowVideos() {
+    for (const section of [...layout.sections]) {
+      if (!section || section.raw || section.nested || isGrid(section)) continue;
+      const videos = (section.blocks || []).filter((b) => b.type === 'video');
+      if (!videos.length) continue;
+      let at = layout.sections.indexOf(section);
+      for (const block of videos) {
+        section.blocks = section.blocks.filter((b) => b !== block);
+        block.x = 0;
+        block.y = 0;
+        block.w = Math.min(12, Math.max(2, block.w && block.w < 12 ? block.w : 8));
+        block.h = Math.max(2, block.h || 6);
+        at += 1;
+        layout.sections.splice(at, 0, { id: uid('s'), variant: 'content', blocks: [block] });
+      }
+      if (!(section.blocks || []).length && layout.sections.length > 1) layout.sections = layout.sections.filter((s) => s !== section);
+    }
   }
   function addAtEnd(def) {
     if (!canLayout()) return;
@@ -571,10 +604,11 @@
     let section = found?.section || [...layout.sections].reverse().find((s) => !s.raw) || layout.sections[layout.sections.length - 1];
     if (!section) { section = { id: 'main', variant: 'content', blocks: [] }; layout.sections.push(section); }
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
-    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    if (block.type === 'video' && !isGrid(section)) placeVideoGrid(section, block);
+    else if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
     else if (isGrid(section)) { block.y = Math.max(0, ...section.blocks.map((b) => b.y + b.h)); block.w = Math.min(12, size.w); section.blocks.push(block); }
     else applyPlan({ kind: 'flow', section, before: null, ok: true }, block, true);
-    selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
+    selected = block.id; scrollToSel = true; changed(); finishAdd(block, name);
   }
 
   /** Touch: add a tile right after the selected block (no drag needed). */
@@ -585,7 +619,8 @@
     if (!found) { addAtEnd(def); closeSheet(); requestAnimationFrame(() => requestAnimationFrame(revealSelected)); return; }
     const { section, block: ref } = found;
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
-    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    if (block.type === 'video' && !isGrid(section)) placeVideoGrid(section, block);
+    else if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
     else if (isGrid(section)) {
       const y = ref.y + ref.h; block.w = Math.min(12, size.w); block.y = y;
       section.blocks.forEach((o) => { if (o.y >= y) o.y += block.h; }); section.blocks.push(block);
@@ -593,7 +628,7 @@
       const order = sorted(section); order.splice(order.indexOf(ref) + 1, 0, block);
       if (section.nested) section.blocks = order; else { block.h = block.h || 1; renumberFlow(section, order); }
     }
-    selected = block.id; scrollToSel = true; changed(); toast(`${name} added`);
+    selected = block.id; scrollToSel = true; changed(); finishAdd(block, name);
     // Add sheet only: close it so the new block is in view (Edit/History sheets never auto-close).
     closeSheet(); requestAnimationFrame(() => requestAnimationFrame(revealSelected));
   }
@@ -952,6 +987,110 @@
   let lastMobile = null;
   window.addEventListener('resize', () => { const m = isMobile(); if (m !== lastMobile) { lastMobile = m; if (!m) closeSheet(); } sizeStage(); });
 
+  // ---------- video picker ----------
+  const VIDEO_MAX = 80 * 1024 * 1024;
+  let videoPicker = null;
+  function openVideoPicker(blockId) {
+    if (videoPicker) return;
+    const found = findBlock(blockId);
+    if (!found || found.block.type !== 'video') return;
+    const hadSrc = String(found.block.props?.src || '').trim();
+    const wrap = el('div', { class: 'st-video-toast', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'st-video-title' });
+    wrap.innerHTML = `<style>
+.st-video-toast{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:18px}
+.st-video-toast .st-vt-back{position:absolute;inset:0;background:rgba(0,20,40,.55)}
+.st-video-toast .st-vt-card{position:relative;width:min(440px,100%);background:#fff;color:#002142;border-radius:16px;padding:18px 18px 16px;box-shadow:0 18px 50px rgba(0,0,0,.28);display:grid;gap:12px;font:600 14px/1.35 "Work Sans",system-ui,sans-serif}
+.st-video-toast h3{margin:0;font:700 22px/1.1 Oswald,system-ui,sans-serif;letter-spacing:.02em}
+.st-video-toast p{margin:0;color:#3d5470}
+.st-video-toast label{display:grid;gap:6px;font-weight:800}
+.st-video-toast input,.st-video-toast select{font:inherit;padding:8px 10px;border:1px solid #9fb4d6;border-radius:10px;background:#fff;color:#002142}
+.st-video-toast .st-vt-actions{display:flex;gap:8px;justify-content:flex-end}
+.st-video-toast button{font:800 14px/1 "Work Sans",system-ui,sans-serif;border-radius:999px;padding:10px 16px;border:0;cursor:pointer}
+.st-video-toast .st-vt-ok{background:#014990;color:#fff}
+.st-video-toast .st-vt-ok:disabled{opacity:.45;cursor:not-allowed}
+.st-video-toast .st-vt-cancel{background:#e8eef6;color:#002142}
+.st-video-toast .st-vt-status{min-height:1.2em;font-weight:700}
+</style>
+<div class="st-vt-back" data-vt-cancel></div>
+<div class="st-vt-card">
+  <h3 id="st-video-title">Add a video</h3>
+  <p>Fill in one. Upload a file, pick one from the asset folder, or paste a link to a video file.</p>
+  <label>Upload a video<input type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.mp4,.webm,.ogg,.mov" data-vt-file></label>
+  <label>Asset folder<select data-vt-asset><option value="">Choose a file…</option></select></label>
+  <label>Video address<input type="url" placeholder="https://…/video.mp4" data-vt-url autocomplete="off"></label>
+  <p class="st-vt-status" data-vt-status>Choose one video.</p>
+  <div class="st-vt-actions"><button type="button" class="st-vt-cancel" data-vt-cancel>Cancel</button><button type="button" class="st-vt-ok" data-vt-ok disabled>OK</button></div>
+</div>`;
+    document.body.append(wrap);
+    videoPicker = wrap;
+    const file = wrap.querySelector('[data-vt-file]');
+    const asset = wrap.querySelector('[data-vt-asset]');
+    const url = wrap.querySelector('[data-vt-url]');
+    const status = wrap.querySelector('[data-vt-status]');
+    const ok = wrap.querySelector('[data-vt-ok]');
+    let busy = false;
+    const filled = () => [file.files?.length ? file.files[0].name : '', asset.value, url.value.trim()].filter(Boolean);
+    const refresh = () => {
+      const n = filled().length;
+      ok.disabled = busy || n !== 1;
+      if (!busy) status.textContent = n > 1 ? 'Choose only one video.' : n === 0 ? 'Choose one video.' : 'OK checks that the file is really there.';
+    };
+    file.addEventListener('change', () => { if (file.files?.length) { asset.value = ''; url.value = ''; } refresh(); });
+    asset.addEventListener('change', () => { if (asset.value) { file.value = ''; url.value = ''; } refresh(); });
+    url.addEventListener('input', () => { if (url.value.trim()) { file.value = ''; asset.value = ''; } refresh(); });
+    call(`${api}/video`, 'GET').then((data) => {
+      for (const video of data.videos || []) {
+        asset.append(el('option', { value: video.src, text: video.name || video.src }));
+      }
+      if ((data.videos || []).length === 0) asset.append(el('option', { value: '', text: 'No videos in the asset folder yet', disabled: true }));
+    }).catch(() => { status.textContent = 'The asset list could not be loaded. You can still upload or paste a link.'; });
+    const close = (removeEmpty) => {
+      document.removeEventListener('keydown', onKey, true);
+      wrap.remove();
+      videoPicker = null;
+      if (!removeEmpty || hadSrc) return;
+      const hit = findBlock(blockId);
+      if (!hit || String(hit.block.props?.src || '').trim()) return;
+      hit.section.blocks = hit.section.blocks.filter((x) => x !== hit.block);
+      if (!hit.section.blocks.length && layout.sections.length > 1 && !hit.section.flow) layout.sections = layout.sections.filter((s) => s !== hit.section);
+      selected = null;
+      changed();
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+      if (e.key === 'Enter' && e.target !== url && !ok.disabled) { e.preventDefault(); ok.click(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    wrap.addEventListener('click', (e) => { if (e.target.closest('[data-vt-cancel]')) close(true); });
+    ok.addEventListener('click', async () => {
+      const choice = filled();
+      if (choice.length !== 1 || busy) return;
+      busy = true; ok.disabled = true; status.textContent = 'Checking the video…';
+      try {
+        let out;
+        if (file.files?.length) {
+          const f = file.files[0];
+          if (f.size > VIDEO_MAX) throw new Error('Videos must be 80 MB or smaller.');
+          const fd = new FormData(); fd.append('file', f);
+          out = await call(`${api}/video`, 'POST', null, fd);
+        } else {
+          out = await call(`${api}/video`, 'POST', { src: asset.value || url.value.trim() });
+        }
+        const hit = findBlock(blockId);
+        if (!hit) throw new Error('That block is gone.');
+        hit.block.props.src = out.src;
+        if (!String(hit.block.props.title || '').trim()) hit.block.props.title = out.name || 'Video';
+        close(false);
+        changed();
+        toast('Video added');
+      } catch (err) {
+        busy = false;
+        status.textContent = err.message || 'That video could not be used.';
+        refresh();
+      }
+    });
+  }
+
   // ---------- palette ----------
   function renderPalette() {
     const host = $('[data-palette]'); host.innerHTML = '';
@@ -1023,6 +1162,12 @@
       });
       host.append(el('label', { class: 'st-field' }, 'Replace picture (max 10 MB)', file));
       if (isAdmin()) host.append(el('div', { class: 'st-adv' }, field('Image URL', p.src, (v) => { p.src = v; })));
+    }
+    if (b.type === 'video') {
+      host.append(field('Title', p.title || '', (v) => { p.title = v; }));
+      host.append(el('p', { class: 'st-note', text: p.src ? `Playing ${p.src}` : 'No video chosen yet.' }));
+      host.append(el('div', { class: 'st-actions' }, el('button', { type: 'button', text: p.src ? 'Change video' : 'Choose video', onclick: () => openVideoPicker(b.id) })));
+      host.append(el('p', { class: 'st-note', text: 'Drag the blue corner to resize this video.' }));
     }
     if (b.type === 'html') {
       if (isAdmin()) host.append(el('div', { class: depth ? '' : 'st-adv' }, field('HTML (Super Admin)', p.html, (v) => { p.html = v; p.locked = false; }, { multi: true, code: true })));
@@ -1368,6 +1513,7 @@
       layout = state.draft?.layout || state.live_layout || starter;
       if (!layout && state.can_html) { try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; } catch { /* fall through */ } }
       if (!layout) layout = { version: 1, sections: [{ id: 'main', variant: 'content', blocks: [] }] };
+      hoistFlowVideos();
       if (state.draft?.updated_at) lastSaved = new Date(`${String(state.draft.updated_at).replace(' ', 'T')}Z`).getTime() || null;
       if (!mode) mode = state.can_html ? 'advanced' : 'simple';
     } else {
@@ -1425,6 +1571,7 @@ body.sc-touch{overflow-x:hidden}
 [data-fundraising-cards]:empty::before{content:'⚡ Fundraiser cards (live)'}[data-visual-locked="email-list"]:empty::before{content:'⚡ Email list signup (live)'}
 [data-staff]:empty::before{content:'⚡ Directors & Staff (live)'}[data-sponsors]:empty::before{content:'⚡ Sponsors (live)'}[data-booster-members]:empty::before{content:'⚡ Booster Members (live)'}[data-booster-meetings]:empty::before{content:'⚡ Booster meetings (live)'}[data-contact-form-slot]:empty::before{content:'⚡ Contact form (live)'}[data-photo-gallery]:empty::before{content:'⚡ Photos (live)'}
 .studio-live-hidden{border:2px dashed #0f7a43;border-radius:10px;padding:12px;color:#0f7a43;font:700 14px/1.3 "Work Sans",system-ui,sans-serif;text-align:center;background:rgba(15,122,67,.06)}
+.studio-block.studio-video video{pointer-events:none}
 .sc-editable{outline:1.5px dashed rgba(47,125,225,.55);outline-offset:3px;cursor:text!important;border-radius:3px}
 .sc-editable:focus{outline:2px solid #ffd21f;background:rgba(255,210,31,.12)}
 body.sc-dragging,body.sc-dragging *{cursor:grabbing!important;user-select:none}
