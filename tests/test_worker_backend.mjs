@@ -2783,7 +2783,7 @@ test('public homepage uses a single-row cover banner and hides the hero card', (
   assert.match(headerHtml, /class="menu-button"/);
   assert.ok(headerHtml.indexOf('class="menu-button"') < headerHtml.indexOf('class="header-inner"'));
   assert.ok(headerHtml.indexOf('class="header-inner"') < headerHtml.indexOf('data-header-quick-actions'));
-  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:flex-end/);
+  assert.match(themeCss, /body\.efhs-theme header\.site-header nav\{[\s\S]*?justify-content:center/);
   assert.match(themeCss, /body\.efhs-theme header\.site-header nav a,[\s\S]*?\.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(themeCss, /body\.efhs-theme \.nav-support-toggle\{[\s\S]*?font-weight:800/);
   assert.match(homeCss, /\.home-redesign \.logo-lockup\{display:none!important/);
