@@ -570,6 +570,33 @@
     if (block.type === 'video' && !String(block.props?.src || '').trim()) openVideoPicker(block.id);
     else toast(`${name} added`);
   }
+  /** A video needs its own grid row so the blue corner can change its width and height. */
+  function placeVideoGrid(section, block) {
+    block.x = 0;
+    block.y = 0;
+    block.w = Math.min(12, Math.max(2, block.w || 8));
+    block.h = Math.max(2, block.h || 6);
+    applyPlan({ kind: 'newsection', section, x: 0, ok: true }, block, true);
+  }
+  /** Videos already dropped into a flowing section get a grid row the corner can resize. */
+  function hoistFlowVideos() {
+    for (const section of [...layout.sections]) {
+      if (!section || section.raw || section.nested || isGrid(section)) continue;
+      const videos = (section.blocks || []).filter((b) => b.type === 'video');
+      if (!videos.length) continue;
+      let at = layout.sections.indexOf(section);
+      for (const block of videos) {
+        section.blocks = section.blocks.filter((b) => b !== block);
+        block.x = 0;
+        block.y = 0;
+        block.w = Math.min(12, Math.max(2, block.w && block.w < 12 ? block.w : 8));
+        block.h = Math.max(2, block.h || 6);
+        at += 1;
+        layout.sections.splice(at, 0, { id: uid('s'), variant: 'content', blocks: [block] });
+      }
+      if (!(section.blocks || []).length && layout.sections.length > 1) layout.sections = layout.sections.filter((s) => s !== section);
+    }
+  }
   function addAtEnd(def) {
     if (!canLayout()) return;
     const [, , name, make, size] = def;
@@ -577,7 +604,8 @@
     let section = found?.section || [...layout.sections].reverse().find((s) => !s.raw) || layout.sections[layout.sections.length - 1];
     if (!section) { section = { id: 'main', variant: 'content', blocks: [] }; layout.sections.push(section); }
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
-    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    if (block.type === 'video' && !isGrid(section)) placeVideoGrid(section, block);
+    else if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
     else if (isGrid(section)) { block.y = Math.max(0, ...section.blocks.map((b) => b.y + b.h)); block.w = Math.min(12, size.w); section.blocks.push(block); }
     else applyPlan({ kind: 'flow', section, before: null, ok: true }, block, true);
     selected = block.id; scrollToSel = true; changed(); finishAdd(block, name);
@@ -591,7 +619,8 @@
     if (!found) { addAtEnd(def); closeSheet(); requestAnimationFrame(() => requestAnimationFrame(revealSelected)); return; }
     const { section, block: ref } = found;
     const block = { id: uid(), ...make(), x: 0, y: 0, w: size.w, h: size.h };
-    if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
+    if (block.type === 'video' && !isGrid(section)) placeVideoGrid(section, block);
+    else if (section.raw) applyPlan({ kind: 'newsection', section, ok: true }, block, true);
     else if (isGrid(section)) {
       const y = ref.y + ref.h; block.w = Math.min(12, size.w); block.y = y;
       section.blocks.forEach((o) => { if (o.y >= y) o.y += block.h; }); section.blocks.push(block);
@@ -1484,6 +1513,7 @@
       layout = state.draft?.layout || state.live_layout || starter;
       if (!layout && state.can_html) { try { layout = (await call(`${api}/migrate`, 'POST', {})).layout; } catch { /* fall through */ } }
       if (!layout) layout = { version: 1, sections: [{ id: 'main', variant: 'content', blocks: [] }] };
+      hoistFlowVideos();
       if (state.draft?.updated_at) lastSaved = new Date(`${String(state.draft.updated_at).replace(' ', 'T')}Z`).getTime() || null;
       if (!mode) mode = state.can_html ? 'advanced' : 'simple';
     } else {
@@ -1541,6 +1571,7 @@ body.sc-touch{overflow-x:hidden}
 [data-fundraising-cards]:empty::before{content:'⚡ Fundraiser cards (live)'}[data-visual-locked="email-list"]:empty::before{content:'⚡ Email list signup (live)'}
 [data-staff]:empty::before{content:'⚡ Directors & Staff (live)'}[data-sponsors]:empty::before{content:'⚡ Sponsors (live)'}[data-booster-members]:empty::before{content:'⚡ Booster Members (live)'}[data-booster-meetings]:empty::before{content:'⚡ Booster meetings (live)'}[data-contact-form-slot]:empty::before{content:'⚡ Contact form (live)'}[data-photo-gallery]:empty::before{content:'⚡ Photos (live)'}
 .studio-live-hidden{border:2px dashed #0f7a43;border-radius:10px;padding:12px;color:#0f7a43;font:700 14px/1.3 "Work Sans",system-ui,sans-serif;text-align:center;background:rgba(15,122,67,.06)}
+.studio-block.studio-video video{pointer-events:none}
 .sc-editable{outline:1.5px dashed rgba(47,125,225,.55);outline-offset:3px;cursor:text!important;border-radius:3px}
 .sc-editable:focus{outline:2px solid #ffd21f;background:rgba(255,210,31,.12)}
 body.sc-dragging,body.sc-dragging *{cursor:grabbing!important;user-select:none}

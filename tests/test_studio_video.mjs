@@ -6,6 +6,7 @@ import {
   chosenVideoSource,
   renderVideoInner,
   safeVideoSrc,
+  videoFrameStyle,
   sniffVideoType,
   verifyRemoteVideo,
   videoPropsError
@@ -21,6 +22,12 @@ test('site studio add-elements panel can add a resizable video', () => {
   assert.match(studio, /Video address/);
   assert.match(studio, /\$\{api\}\/video/);
   assert.match(studio, /Drag the blue corner to resize this video/);
+  assert.match(studio, /function placeVideoGrid/);
+  assert.match(studio, /function hoistFlowVideos/);
+  const frame = videoFrameStyle({ w: 8, h: 6 });
+  assert.match(frame, /width:66\.667%/);
+  assert.match(frame, /height:320px/);
+  assert.match(videoFrameStyle({ w: 8, h: 4 }, { includeWidth: false }), /^height:208px/);
 });
 
 test('exactly one video source is accepted', () => {
