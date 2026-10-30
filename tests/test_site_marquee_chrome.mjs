@@ -298,3 +298,10 @@ test('sponsor ticker floats at the bottom of public pages with reserved body spa
   assert.match(css, /html body:not\(\.admin-body\) \.sponsor-marquee-section\{\s*position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;/);
   assert.match(css, /body:not\(\.admin-body\)\{padding-bottom:calc\(var\(--sponsor-ticker-h,0px\) \+ env\(safe-area-inset-bottom\)\)\}/);
 });
+
+test('home sticky-support bar stacks above the bottom sponsor ticker', () => {
+  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
+  assert.match(css, /bottom:calc\(24px \+ var\(--sponsor-ticker-vis,0px\)\)/);
+  assert.match(css, /left:0;right:0;bottom:var\(--sponsor-ticker-vis,0px\)/);
+  assert.match(readFileSync(join(root, 'site-content.js'), 'utf8'), /--sponsor-ticker-vis/);
+});
