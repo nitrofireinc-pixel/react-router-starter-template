@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickHomeNews, sortNews, renderHomeNewsStripHtml, validateNewsImage, normalizeNewsPayload, NEWS_IMAGE_MAX_BYTES, routeNewsApi } from '../worker/src/news.mjs';
+import { pickHomeNews, sortNews, renderHomeNewsStripHtml, validateNewsImage, normalizeNewsPayload, NEWS_IMAGE_MAX_BYTES, routeNewsApi, sanitizeNewsBodyHtml, renderNewsAdminHtml, renderNewsItemBody, NEWS_ADMIN_JS } from '../worker/src/news.mjs';
 
 const T = '2026-10-30';
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -72,4 +72,27 @@ test('library lists studio uploads and gallery photos as thumbnails', async () =
 test('Escape closes the link list only and refocuses the trigger', async () => {
   const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
   assert.match(NEWS_ADMIN_JS, /e\.key !== 'Escape' \|\| \$\('#nw-link-menu'\)\.hidden\) return; e\.preventDefault\(\); e\.stopImmediatePropagation\(\); \$\('#nw-link-menu'\)\.hidden = true; \$\('#nw-link-btn'\)\.focus\(\);/);
+});
+
+test('body sanitizer: allowlist keeps formatting, lists, safe links', () => {
+  const out = sanitizeNewsBodyHtml('<p>Hi <b>b</b><strong>s</strong><i>i</i><em>e</em><u>u</u><br><span style="color: rgb(255, 0, 0); position:fixed; font-size: 18px">c</span></p><ul><li>a</li></ul><ol><li>b</li></ol><a href="/forms/sign-up">f</a><a href="https://x.org" target="_blank">x</a><a href="mailto:a@b.org">m</a>');
+  assert.match(out, /<p>Hi <b>b<\/b><strong>s<\/strong><i>i<\/i><em>e<\/em><u>u<\/u><br>/);
+  assert.match(out, /<span style="color: rgb\(255, 0, 0\); font-size: 18px">c<\/span>/);
+  assert.match(out, /<ul><li>a<\/li><\/ul><ol><li>b<\/li><\/ol>/);
+  assert.match(out, /<a href="\/forms\/sign-up">f<\/a>/);
+  assert.match(out, /<a href="https:\/\/x.org" target="_blank" rel="noopener noreferrer">x<\/a>/);
+  assert.match(out, /<a href="mailto:a@b.org">m<\/a>/);
+});
+test('body sanitizer: strips scripts, handlers, bad schemes, other tags', () => {
+  const out = sanitizeNewsBodyHtml('<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)" onclick="x">j</a><a href="//evil.com">e</a><div class="k">d</div><h2>H</h2><span style="background:url(x)">s</span><iframe src="x"></iframe>');
+  assert.doesNotMatch(out, /script|img|onerror|onclick|javascript|evil|iframe|<h2|class=|url\(/i);
+  assert.match(out, /H/);
+});
+test('existing bodies still render; editor has toolbar, picker with forms', () => {
+  assert.match(renderNewsItemBody({ headline: 'h', body_html: '<p>Old <b>body</b></p>' }, (h) => h), /<p>Old <b>body<\/b><\/p>/);
+  assert.equal(sanitizeNewsBodyHtml('<p>Example — dev only.</p>'), '<p>Example — dev only.</p>');
+  const html = renderNewsAdminHtml('v', {}, [{ title: 'Home', path: '/' }], [{ title: 'Volunteer', path: '/forms/volunteer' }]);
+  for (const k of ['data-nw-cmd="bold"', 'insertOrderedList', 'insertUnorderedList', 'data-nw-color', 'data-nw-size', 'data-nw-link-blank', 'data-nw-link-remove', 'cms-caldev-desc-toolbar']) assert.ok(html.includes(k), k);
+  assert.match(html, /<option value="\/forms\/volunteer">Form: Volunteer<\/option>/);
+  assert.doesNotThrow(() => new Function(NEWS_ADMIN_JS));
 });

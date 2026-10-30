@@ -614,13 +614,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261025z';
+export const ASSET_VERSION = 'cms-p2-20261030n';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025z';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030n';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -9897,12 +9897,13 @@ async function handleNewsAdminPage(request, env) {
   const v = ASSET_VERSION;
   const navV = adminNavAssetVersion(v);
   const pages = (nav.pages || []).filter((pg) => pg && pg.path && Number(pg.active) !== 0).map((pg) => ({ title: sidebarPageLabel(pg), path: pg.path }));
+  const forms = ((await env.DB.prepare("SELECT title, path FROM cms_forms WHERE path != '' ORDER BY title").all().catch(() => null))?.results) || [];
   return attachLoginHintIfNeeded(request, htmlResponse(renderNewsAdminHtml(v, {
     head: `<link rel="stylesheet" href="/styles.css?v=${v}"><link rel="stylesheet" href="/admin-nav.css?v=${navV}">`,
     top: renderAdminChromeBar({ assetVersion: v, user }) + renderAdminSidebarBackdrop(),
     sidebar: renderAdminSidebarHtml(v, { ...nav, user }),
     scripts: `<script src="/admin-nav.js?v=${navV}"></script>`,
-  }, [{ title: 'News', path: '/news' }, ...pages])), user);
+  }, [{ title: 'News', path: '/news' }, ...pages], forms)), user);
 }
 
 async function renderNewsPublicPage(request, env, url, ctx, itemId = 0) {

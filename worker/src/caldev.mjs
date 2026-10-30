@@ -181,16 +181,18 @@ function sanitizeCaldevStyleAttribute(attrs = '') {
 }
 
 /** Keep safe description markup (links + basic formatting). Strip everything else. */
-export function sanitizeCaldevDescriptionHtml(value = '') {
+/** opts.blocks keeps p/ul/ol/li (News body); opts.keepTarget keeps a link's own target choice; opts.max caps length. */
+export function sanitizeCaldevDescriptionHtml(value = '', opts = {}) {
+  const { blocks = false, keepTarget = false, max = 4000 } = opts;
   let html = String(value || '');
   if (!html.trim()) return '';
   html = html
     .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<\/?(script|style|iframe|object|embed|link|meta|form|input|button|textarea|select)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/<(p|div)(\s[^>]*)?>/gi, '')
-    .replace(/<\/(p|div)>/gi, '<br>');
-  const allowed = new Set(['a', 'b', 'i', 'u', 'strong', 'em', 'span', 'br']);
+    .replace(blocks ? /<(div)(\s[^>]*)?>/gi : /<(p|div)(\s[^>]*)?>/gi, '')
+    .replace(blocks ? /<\/(div)>/gi : /<\/(p|div)>/gi, '<br>');
+  const allowed = new Set(['a', 'b', 'i', 'u', 'strong', 'em', 'span', 'br', ...(blocks ? ['p', 'ul', 'ol', 'li'] : [])]);
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
@@ -199,6 +201,7 @@ export function sanitizeCaldevDescriptionHtml(value = '') {
     if (tag === 'a') {
       const href = normalizeCaldevLinkUrl(extractHtmlAttr(attrs, 'href'));
       if (!href) return '';
+      if (keepTarget && !/^_blank$/i.test(extractHtmlAttr(attrs, 'target'))) return `<a href="${escapeHtmlAttr(href)}">`;
       return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">`;
     }
     if (tag === 'span') {
@@ -212,7 +215,7 @@ export function sanitizeCaldevDescriptionHtml(value = '') {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/(?:<br>\s*)+$/gi, '')
     .trim()
-    .slice(0, 4000);
+    .slice(0, max);
 }
 
 export function normalizeCaldevPayload(payload = {}, existing = null) {
