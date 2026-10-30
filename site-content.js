@@ -379,9 +379,9 @@ if (typeof document !== 'undefined') {
 
 let sponsorPopupClosedAt = 0;
 function markSponsorPopupClose() { sponsorPopupClosedAt = Date.now(); }
-/** Donate openers ignore input for 500ms after any sponsor popup close/press. */
+/** Donate openers ignore input for 600ms after any sponsor popup close/press. */
 function sponsorPopupRecentlyClosed() {
-  return Date.now() - sponsorPopupClosedAt < 500 || !!document.querySelector('.sponsor-flyin.is-leaving');
+  return Date.now() - sponsorPopupClosedAt < 600 || !!document.querySelector('.sponsor-flyin.is-leaving');
 }
 
 function dismissSponsorAd(root) {
@@ -713,7 +713,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025j';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025k';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1480,7 +1480,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025j';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025k';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();

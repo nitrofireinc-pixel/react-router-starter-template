@@ -251,6 +251,9 @@ export function renderSeoHead(page, site = {}, { noindex = false } = {}) {
     `<meta name="geo.region" content="US-NC">`,
     `<meta name="geo.placename" content="Kernersville">`,
   );
+  // Reloads always paint from the top: browser scroll restoration otherwise
+  // re-applies a stale offset (e.g. 26px = the utility bar) and then resets it.
+  tags.push(`<script>try{if('scrollRestoration' in history)history.scrollRestoration='manual';}catch(e){}</script>`);
   if (!noindex && seo.slug === 'home') tags.push(ldScript(organizationJsonLd(site)));
   if (!noindex && seo.slug === 'fundraising') tags.push(ldScript(donateJsonLd()));
   return { title: seo.title, head: tags.join('\n  ') };

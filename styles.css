@@ -6630,3 +6630,13 @@ body.cms-caldev-editor-open .admin-workspace{
 /* Cancelled calendar dates (event manager phase 2) */
 .is-cancelled .caldev-t, h3.is-cancelled .caldev-t { text-decoration: line-through; opacity: .7; }
 .caldev-cancelled-tag { font-style: normal; font-size: .75em; font-weight: 700; background: #5b6472; color: #fff; border-radius: 4px; padding: 0 .35em; margin-left: .25em; text-decoration: none; }
+/* Sponsor popup: the panel (and its X) never moves - fade only - so the X hit
+   area is exactly where it is drawn from the first frame to removal. */
+.sponsor-flyin-panel,
+.sponsor-flyin.is-visible .sponsor-flyin-panel,
+.sponsor-flyin.is-leaving .sponsor-flyin-panel{transform:none;transition:opacity .35s ease}
+.sponsor-flyin-close{transform:none;transition:background-color .15s ease}
+/* Phones: sit the popup just under the header so its X is never over the hero buttons. */
+@media(max-width:640px){
+  .sponsor-flyin{place-items:start center;padding-top:calc(var(--efhs-sticky-header-height,140px) + 12px)}
+}
