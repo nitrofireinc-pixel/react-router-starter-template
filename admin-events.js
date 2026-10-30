@@ -225,7 +225,7 @@
   <div class="ev-show"><span class="ev-show-h">Show:</span><span data-chips></span><span class="ev-legend">↻ = repeating · <s>struck</s> = cancelled</span></div>
   <div class="ev-bar2-r">
     <button type="button" class="ev-link" data-act="settings">⚙ Overlap settings</button>
-    <button type="button" class="ev-link" data-act="banners" aria-expanded="false" title="The IMPORTANT banners the public site is showing now">Banner preview</button>
+    <button type="button" class="ev-btn" data-act="banners" aria-expanded="false" title="The IMPORTANT banners the public site is showing now">Banner preview</button>
     <button type="button" class="ev-link" data-act="undated" aria-expanded="false">Needs a date (<span data-undated-n>0</span>)</button>
     ${canNotify ? '<button type="button" class="ev-btn ev-finished" data-act="finished">✉ Finished: notify subscribers</button>' : ""}
   </div>
