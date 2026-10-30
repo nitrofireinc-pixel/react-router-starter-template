@@ -594,13 +594,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261025h';
+export const ASSET_VERSION = 'cms-p2-20261025i';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025i';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -14651,7 +14651,7 @@ async function handlePeoplePage(request, env) {
   const who = `${String(user.display_name || user.username || '').trim()}${roleLabel}`;
   const nav = await loadAdminNavContext(env, user, { route: 'people' }, { skipQueries: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · People &amp; Access</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
 <link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-people.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app pp-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-site-admin="${isSiteAdminOrAbove(user) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · People &amp; Access</span></a>
@@ -14676,7 +14676,7 @@ async function handleEventsManagerPage(request, env) {
   const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
   const nav = await loadAdminNavContext(env, user, { route: 'events-manager' }, { skipQueries: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Calendar</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
 <link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app sn-body" data-can-notify="${canNotifyCalendarSubscribers(user) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Calendar</span></a>
@@ -14701,7 +14701,7 @@ async function handleFormsBuilderPage(request, env) {
   const who = `${String(user.display_name || user.username || '').trim()}${isSuperAdmin(user) ? ' · Super Admin' : ''}`;
   const nav = await loadAdminNavContext(env, user, { route: 'forms-builder' }, { skipQueries: true, formsAccessIds: accessIds });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · Form Builder</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
 <link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app fb-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Form Builder</span></a>
@@ -14723,7 +14723,7 @@ async function handleStudioEditorPage(request, env, slug) {
   await ensureStudioSchema(env);
   const starter = slug === 'coming-soon' ? comingSoonLayout({ mark: PUBLIC_BRAND_MARK }) : null;
   const shell = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio: ${escapeHtml(slug)}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
 <link rel="stylesheet" href="/admin-studio.css?v=${ASSET_VERSION}-st6"></head>
 <body class="studio-app st-lc st-rc" data-slug="${escapeAttr(slug)}" data-mode="simple">
 <script type="application/json" id="studio-starter">${starter ? JSON.stringify(starter).replace(/</g, '\\u003c') : 'null'}</script>
@@ -14983,7 +14983,7 @@ function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMemb
   <meta name="apple-mobile-web-app-title" content="EFHS Band">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Oswald:ital,wght@0,500;0,600;0,700;1,700&family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:ital,wght@0,500;0,600;0,700;1,700&family=Work+Sans:wght@400;500;700;800;900&display=optional" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}">
   <link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}">
@@ -15019,7 +15019,7 @@ function renderMaintenancePage(site = {}) {
   <link rel="icon" href="${escapeAttr(site.logo_url || '/assets/efhs-icon.png')}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700;800;900&display=optional" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
 </head>
 <body class="maintenance-body">

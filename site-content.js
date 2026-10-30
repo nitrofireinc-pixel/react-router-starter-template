@@ -350,7 +350,7 @@ function pickRotatingSponsor(sponsors = [], site = {}, storage) {
 // After a sponsor popup hides, taps that land where it was must not reach a
 // donate trigger underneath (its X sits over the hero Support button on phones).
 const SPONSOR_FLYIN_FADE_MS = 600; // >= longest panel transition (.55s)
-const SPONSOR_FLYIN_GUARD_MS = 600;
+const SPONSOR_FLYIN_GUARD_MS = 450;
 let sponsorFlyinGuard = null;
 
 function sponsorFlyinGuardBlocks(event) {
@@ -360,14 +360,13 @@ function sponsorFlyinGuardBlocks(event) {
     sponsorFlyinGuard = null;
     return false;
   }
+  // Any ghost/compat click in the guard window is swallowed, wherever it lands
+  // (the X can sit outside the panel rect, over the hero Support button).
   const target = event.target instanceof Element ? event.target : null;
-  if (!target || !target.closest('[data-donate-open]')) return false;
-  const { rect } = guard;
-  const x = event.clientX;
-  const y = event.clientY;
-  // Synthetic clicks without coordinates (keyboard) are deliberate; let them through.
-  if (!x && !y && event.detail === 0) return false;
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  if (target && target.closest('.sponsor-flyin:not(.is-leaving)')) return false;
+  // Keyboard-activated clicks are deliberate.
+  if (event.detail === 0 && !event.clientX && !event.clientY) return false;
+  return true;
 }
 
 if (typeof document !== 'undefined') {
@@ -447,7 +446,17 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     event?.stopPropagation?.();
     dismissSponsorAd(root);
   };
-  root.querySelector('.sponsor-flyin-close')?.addEventListener('click', close);
+  const closeBtn = root.querySelector('.sponsor-flyin-close');
+  closeBtn?.addEventListener('click', close);
+  // Close on press and cancel the touch so no compatibility click is
+  // synthesized onto whatever sits under the X once the popup is gone.
+  ['pointerdown', 'touchstart', 'touchend', 'pointerup', 'mousedown'].forEach((type) => {
+    closeBtn?.addEventListener(type, (event) => {
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+      if (type === 'pointerdown' || type === 'touchstart') dismissSponsorAd(root);
+    }, { passive: false });
+  });
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
   // While the popup fades out, swallow taps so they never reach a donate
   // trigger (e.g. the sticky Support button) underneath.
@@ -695,7 +704,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=home-hero-logo-20260816';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025i';
     mark.alt = 'East Forsyth Blue Regiment';
     brand.appendChild(mark);
   });
@@ -1460,7 +1469,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=hero-kids-frame-20260918';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025i';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
@@ -3619,10 +3628,16 @@ function mountHalloweenOverlay() {
     + '<svg class="hw-bat" viewBox="0 0 46 24" focusable="false"><path fill="currentColor" d="M23 7c-1.2 0-2 .8-2.4 1.6L19.5 6l-.3 3.2C16 6.5 11 4 4 6c3 1.5 4.5 4 4.3 7 2.4-1.4 5.2-.8 6.7 1.4 1.4-1 3.6-.9 5 .6.8 1.6 1.8 3.4 3 4.8 1.2-1.4 2.2-3.2 3-4.8 1.4-1.5 3.6-1.6 5-.6 1.5-2.2 4.3-2.8 6.7-1.4-.2-3 1.3-5.5 4.3-7-7-2-12 .5-15.2 3.2L26.5 6l-1.1 2.6C25 7.8 24.2 7 23 7z"/></svg>';
   // Desktop: bat sits in the header gap between logo and nav. Phone: header is full, so the bat
   // floats just under the header/marquee/notice strip instead of on the logo or icons.
+  // Keep the bat clear of the logo and site name: park it in the empty header
+  // space left of the brand when there is room, else just under the chrome.
   const placeBat = () => {
-    if (window.innerWidth > 900) {
-      wrap.style.setProperty('--hw-bat-top', '40px');
-      wrap.style.setProperty('--hw-bat-left', '36%');
+    const brand = document.querySelector('header.site-header .brand');
+    const r = brand?.getBoundingClientRect();
+    const half = window.innerWidth >= 768 ? 50 : 18;
+    const reach = half + 18 + 16; // half-width + drift + breathing room
+    if (r && r.width && r.left - reach >= half + 8) {
+      wrap.style.setProperty('--hw-bat-top', `${Math.round(r.top + r.height / 2 - half * 0.52)}px`);
+      wrap.style.setProperty('--hw-bat-left', `${Math.round(r.left - reach)}px`);
       return;
     }
     const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
@@ -3631,6 +3646,7 @@ function mountHalloweenOverlay() {
     wrap.style.setProperty('--hw-bat-top', `${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px`);
     wrap.style.setProperty('--hw-bat-left', '50%');
   };
+  window.addEventListener('resize', placeBat, { passive: true });
   placeBat();
   window.setTimeout(placeBat, 1500);
   document.head.appendChild(style);
