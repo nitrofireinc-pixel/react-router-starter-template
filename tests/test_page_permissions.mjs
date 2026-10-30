@@ -409,7 +409,7 @@ test('Worker APIs return layout_required and minutes audit actions without doubl
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.denied'));
   assert.ok(ADMIN_AUDIT_KNOWN_ACTIONS.includes('access.unauthenticated'));
   assert.match(workerSrc, /maybeLogAccessDenial/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025v'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025w'/);
   assert.match(workerSrc, /DB_SCHEMA_VERSION = '2026-10-04\.8'/);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/fundraiser-cards', 'POST'), false);
   assert.equal(shouldAuditAdminApiRequest('/api/admin/fundraiser-cards/9/reject', 'POST'), false);
