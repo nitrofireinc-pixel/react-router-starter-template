@@ -193,13 +193,18 @@ export function sanitizeCaldevDescriptionHtml(value = '', opts = {}) {
     .replace(blocks ? /<(div)(\s[^>]*)?>/gi : /<(p|div)(\s[^>]*)?>/gi, '')
     .replace(blocks ? /<\/(div)>/gi : /<\/(p|div)>/gi, '<br>');
   const allowed = new Set(['a', 'b', 'i', 'u', 'strong', 'em', 'span', 'br', ...(blocks ? ['p', 'ul', 'ol', 'li'] : [])]);
+  const openA = []; // true = kept opener; a blocked link's closing tag is dropped with it
   html = html.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (match, rawTag, attrs) => {
     const tag = rawTag.toLowerCase();
     if (!allowed.has(tag)) return '';
     if (tag === 'br') return '<br>';
-    if (match.startsWith('</')) return `</${tag}>`;
+    if (match.startsWith('</')) {
+      if (tag === 'a' && !openA.pop()) return '';
+      return `</${tag}>`;
+    }
     if (tag === 'a') {
       const href = normalizeCaldevLinkUrl(extractHtmlAttr(attrs, 'href'));
+      openA.push(Boolean(href));
       if (!href) return '';
       if (keepTarget && !/^_blank$/i.test(extractHtmlAttr(attrs, 'target'))) return `<a href="${escapeHtmlAttr(href)}">`;
       return `<a href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer">`;

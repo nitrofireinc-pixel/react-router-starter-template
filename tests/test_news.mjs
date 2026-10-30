@@ -96,3 +96,12 @@ test('existing bodies still render; editor has toolbar, picker with forms', () =
   assert.match(html, /<option value="\/forms\/volunteer">Form: Volunteer<\/option>/);
   assert.doesNotThrow(() => new Function(NEWS_ADMIN_JS));
 });
+test('blocked link drops its closing tag too (News + Schedule Board)', async () => {
+  const { sanitizeCaldevDescriptionHtml } = await import('../worker/src/caldev.mjs');
+  for (const fn of [sanitizeNewsBodyHtml, (h) => sanitizeCaldevDescriptionHtml(h)]) {
+    const out = fn('a <a href="javascript:alert(1)">bad</a> b <a href="https://ok.org">ok</a> c </a>');
+    assert.equal((out.match(/<\/a>/g) || []).length, 1, out);
+    assert.match(out, /bad <\/?b|bad b|a bad b/);
+    assert.match(out, /<a href="https:\/\/ok.org"[^>]*>ok<\/a> c$/);
+  }
+});
