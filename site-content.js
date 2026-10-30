@@ -451,7 +451,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">
       <button type="button" class="sponsor-flyin-close" aria-label="Close sponsor ad"><span aria-hidden="true">×</span></button>
-      <a class="sponsor-flyin-card" href="${escapeHtml(sponsor.flyin_href || '/sponsors.html')}">
+      <div class="sponsor-flyin-card" role="button" tabindex="0" aria-label="Close sponsor ad">
         ${logo}
         <div class="sponsor-flyin-copy">
           <span class="sponsor-flyin-kicker">${escapeHtml(sponsor.tier_label || 'Community')} Partner</span>
@@ -459,7 +459,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
           <span class="sponsor-flyin-tier">${escapeHtml(sponsor.level || 'Sponsor')}</span>
           <em>${escapeHtml(sponsor.flyin_cta || 'View all sponsors')}</em>
         </div>
-      </a>
+      </div>
     </div>
   `;
 
@@ -489,13 +489,10 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   });
   });
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
-  // A click on the card within 16px of the X (or after closing) never navigates.
-  root.querySelector('.sponsor-flyin-card')?.addEventListener('click', (event) => {
-    const x = root.querySelector('.sponsor-flyin-close span') || root.querySelector('.sponsor-flyin-close');
-    const r = x?.getBoundingClientRect?.();
-    const near = r && event.clientX >= r.left - 16 && event.clientX <= r.right + 16 && event.clientY >= r.top - 16 && event.clientY <= r.bottom + 16;
-    if (near || root.classList.contains('is-leaving') || !document.body.contains(root)) { event.preventDefault(); event.stopPropagation(); }
-  });
+  // The card is not a link: clicking or tapping anywhere on it closes the ad.
+  const cardEl = root.querySelector('.sponsor-flyin-card');
+  cardEl?.addEventListener('click', close);
+  cardEl?.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') close(event); });
   // While the popup fades out, swallow taps so they never reach a donate
   // trigger (e.g. the sticky Support button) underneath.
   root.addEventListener('click', (event) => {
@@ -742,7 +739,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025t';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025v';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1509,7 +1506,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025t';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025v';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
