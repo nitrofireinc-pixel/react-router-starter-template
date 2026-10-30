@@ -299,16 +299,10 @@ test('sponsor ticker floats at the bottom of public pages with reserved body spa
   assert.match(css, /body:not\(\.admin-body\)\{padding-bottom:calc\(var\(--sponsor-ticker-h,0px\) \+ env\(safe-area-inset-bottom\)\)\}/);
 });
 
-test('home sticky-support bar stacks above the bottom sponsor ticker', () => {
-  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
-  assert.match(css, /bottom:calc\(24px \+ var\(--sponsor-ticker-vis,0px\)\)/);
-  assert.match(css, /left:0;right:0;bottom:var\(--sponsor-ticker-vis,0px\)/);
-  assert.match(readFileSync(join(root, 'site-content.js'), 'utf8'), /--sponsor-ticker-vis/);
-});
-
-test('phone sticky-support hide fades in place (never slides over the ticker)', () => {
-  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
-  assert.match(css, /body\.home-page\.ss-reveal-armed \.sticky-support\{transform:none;opacity:0;/);
+test('sticky Join/Support bar is removed from public pages', () => {
+  for (const f of ['home-redesign.css', 'script.js', 'worker/src/worker.mjs', 'worker/src/home-redesign.mjs']) {
+    assert.doesNotMatch(readFileSync(join(root, f), 'utf8'), /sticky-support|ss-reveal-armed|renderHomeStickySupport/);
+  }
 });
 
 test('IMPORTANT banner tucks the News strip behind an accessible newspaper tab', () => {

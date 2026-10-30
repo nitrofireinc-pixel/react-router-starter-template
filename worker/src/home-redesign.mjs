@@ -1076,6 +1076,3 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
 </div>`;
 }
 
-export function renderHomeStickySupport() {
-  return `<div class="sticky-support"><a class="ss-join" href="/join.html">Join the Band</a><a class="ss-give" href="/fundraising.html" data-donate-open>${HEART}Support the Band</a></div>`;
-}

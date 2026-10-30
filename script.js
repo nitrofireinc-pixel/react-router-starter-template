@@ -569,7 +569,7 @@ function webPushSupported() {
 }
 
 async function getNotifyMeSubscription() {
-  const registration = await navigator.serviceWorker.register('/push-sw.js?v=cms-p2-20261031i', { scope: '/' });
+  const registration = await navigator.serviceWorker.register('/push-sw.js?v=cms-p2-20261031j', { scope: '/' });
   await navigator.serviceWorker.ready;
   return {
     registration,
@@ -782,7 +782,7 @@ function ensureWebAppManifestLink() {
   if (!document.querySelector('link[rel="apple-touch-icon"]')) {
     const apple = document.createElement('link');
     apple.rel = 'apple-touch-icon';
-    apple.href = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031i';
+    apple.href = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031j';
     document.head.appendChild(apple);
   }
 }
@@ -801,7 +801,7 @@ function ensureAddToHomeNavControl() {
     button.innerHTML = `
       <span class="nav-add-home-icon" aria-hidden="true">
         <svg class="nav-add-home-house" viewBox="0 0 24 24" focusable="false"><path d="M3.6 10.4 12 3.5l8.4 6.9V20a1.1 1.1 0 0 1-1.1 1.1H4.7A1.1 1.1 0 0 1 3.6 20V10.4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031i" alt="" width="16" height="16" decoding="async">
+        <img class="nav-add-home-mark" src="/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031j" alt="" width="16" height="16" decoding="async">
       </span>`;
     const notify = siteNav.querySelector('[data-notify-me]');
     if (notify && notify.nextSibling) siteNav.insertBefore(button, notify.nextSibling);
@@ -863,7 +863,7 @@ function ensureAddToHomeSheet() {
   sheet.innerHTML = `
     <div class="add-home-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="add-home-title">
       <div class="add-home-sheet-head">
-        <img src="/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031i" alt="">
+        <img src="/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031j" alt="">
         <div>
           <h2 id="add-home-title">Add to Home Screen</h2>
           <p data-add-home-os></p>
@@ -943,7 +943,7 @@ function syncAddToHomeButtonState(button) {
   }
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register('/push-sw.js?v=cms-p2-20261031i', { scope: '/' }).catch(() => {});
+    navigator.serviceWorker.register('/push-sw.js?v=cms-p2-20261031j', { scope: '/' }).catch(() => {});
   }
 
   button.addEventListener('click', async () => {
@@ -1225,23 +1225,6 @@ function syncAddToHomeButtonState(button) {
     syncIcalButtons();
     watchStickyStack();
   });
-})();
-
-// Home (phones): keep the sticky Join/Support bar hidden until the visitor scrolls past the hero.
-(function () {
-  function initStickySupportReveal() {
-    var bar = document.querySelector('body.home-page .sticky-support');
-    var hero = document.querySelector('body.home-page .hero');
-    if (!bar || !hero || !('IntersectionObserver' in window)) return;
-    document.body.classList.add('ss-reveal-armed');
-    var obs = new IntersectionObserver(function (entries) {
-      var pastHero = !entries[0].isIntersecting;
-      bar.classList.toggle('is-revealed', pastHero);
-    });
-    obs.observe(hero);
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initStickySupportReveal);
-  else initStickySupportReveal();
 })();
 
 // Smooth scrolling only after load, so scroll restoration on reload is instant.
