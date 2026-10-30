@@ -229,5 +229,5 @@ body.st-rc .st-rail-txt{writing-mode:vertical-rl}
 @media (min-width:768px){
   header.st-top,header.ev-top{position:relative!important}
   header .st-top-right,header .ev-top-right{width:340px;justify-content:flex-end;min-width:0;overflow:hidden}
-  header.st-top a.st-exit,header.ev-top a.st-exit{position:absolute!important;top:14px!important;right:370px!important;left:auto!important;margin:0!important;padding:2px 0!important;border:0!important;font-family:"Work Sans",system-ui,sans-serif!important;font-size:13px!important;font-weight:400!important;letter-spacing:0!important;line-height:15px!important;height:19px!important;box-sizing:border-box!important;white-space:nowrap!important}
+  header.st-top a.st-exit,header.ev-top a.st-exit{position:absolute!important;top:14px!important;right:385px!important;left:auto!important;margin:0!important;padding:2px 0!important;border:0!important;font-family:"Work Sans",system-ui,sans-serif!important;font-size:13px!important;font-weight:400!important;letter-spacing:0!important;line-height:15px!important;height:19px!important;box-sizing:border-box!important;white-space:nowrap!important}
 }
