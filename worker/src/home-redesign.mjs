@@ -8,7 +8,7 @@ const CHEV = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="
 
 export const HOME_REDESIGN_MARKER = 'data-home-redesign';
 
-export const APPROVED_HERO_SUBTITLE = 'The East Forsyth Blue Regiment — marching band, concert bands, color guard and percussion — powered by students, families, alumni, sponsors, and the Kernersville community.';
+export const APPROVED_HERO_SUBTITLE = 'The East Forsyth Band Boosters — marching band, concert bands, color guard and percussion — powered by students, families, alumni, sponsors, and the Kernersville community.';
 
 export const DEFAULT_FUNDRAISING_INTRO = 'Centralize active campaigns, passive giving links, payment information, and fundraiser deadlines.';
 
@@ -892,7 +892,7 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
 <section id="support" class="sec">
   <div class="wrap">
     <div class="sec-head">
-      <div><div class="kicker">Support the Band</div><h2>Fuel the Blue Regiment</h2></div>
+      <div><div class="kicker">Support the Band</div><h2>Fuel the bands</h2></div>
       <p>Our fundraising efforts help provide students with the equipment, experiences, and opportunities needed to continue growing as musicians. Discover how you can make a difference through giving, sponsorships, and participation.</p>
     </div>
     <article class="feature-fund" data-home-slot="featured-fund" data-home-dynamic>
@@ -1064,7 +1064,7 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
   <div class="wrap final-inner">
     <div class="final-logos"><img src="/assets/efhs-logo.png" alt="East Forsyth High School Eagles logo"><img src="/assets/efhs-blue-regiment-mark.png" alt="East Forsyth Blue Regiment logo"></div>
     <h2>Be part of the sound.</h2>
-    <p>Give, sponsor, volunteer, or march with us — every bit of support strengthens the Blue Regiment tradition.</p>
+    <p>Give, sponsor, volunteer, or march with us — every bit of support strengthens the High School Band tradition.</p>
     <div class="btn-row center"><a class="btn btn-gold btn-lg" href="/fundraising.html" data-donate-open>Support the Band</a><a class="btn btn-ghost-light btn-lg" href="/join.html">Join the Band</a></div>
   </div>
 </section>

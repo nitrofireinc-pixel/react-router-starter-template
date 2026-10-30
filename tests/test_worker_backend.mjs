@@ -2852,7 +2852,7 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.equal(homeEventTag({ track: 'deadline', title: 'Jacket forms' }).className, 'ev-deadline');
   assert.equal(upgradeHomeBody(upgraded), upgraded);
   assert.equal(plainHeroSubtitle(`<p>${PREVIOUS_HERO_SUBTITLE}</p>`), PREVIOUS_HERO_SUBTITLE);
-  assert.equal(APPROVED_HERO_SUBTITLE.includes('Blue Regiment'), true);
+  assert.equal(APPROVED_HERO_SUBTITLE.includes('Band Boosters'), true);
 
   const decorated = decorateHomeRedesign(buildHomeRedesignDocument(), {
     events: [{
