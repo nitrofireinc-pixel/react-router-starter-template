@@ -1512,3 +1512,33 @@ body.efhs-theme .footer .footer-disclaimer{
   color:rgba(215,227,243,.66);
   letter-spacing:.01em;
 }
+
+/* Header banner (site title) centered at every width and locked in place:
+   desktop (>=1200) uses the same centered brand row + centered nav row as mid-width. */
+@media (min-width:1200px){
+  body.efhs-theme header.site-header{
+    flex-direction:column;
+    flex-wrap:nowrap;
+    align-items:stretch;
+    justify-content:center;
+    min-height:0;
+    height:auto;
+    padding:8px 20px 6px;
+    column-gap:0;
+    row-gap:2px;
+  }
+  body.efhs-theme .header-inner{width:100%;justify-content:center;min-height:64px}
+  body.efhs-theme .brand{justify-content:center;margin:0 auto}
+  body.efhs-theme header.site-header nav,
+  body.efhs-theme header.site-header #site-nav{
+    width:100%;
+    max-width:100%;
+    justify-content:center;
+    flex-wrap:nowrap;
+    padding:0 0 4px;
+  }
+}
+@media (min-width:768px){
+  body.efhs-theme header.site-header .brand{position:relative;left:auto;transform:none}
+  body.efhs-theme header.site-header .brand [data-site-field="title"]{align-items:center;text-align:center}
+}

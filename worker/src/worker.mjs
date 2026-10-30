@@ -327,7 +327,7 @@ const SOCIAL_ICONS = {
 
 export const DEFAULT_SITE = {
   page_seo: '{}',
-  title: 'East Forsyth Band',
+  title: 'East Forsyth Band Boosters',
   hero_title: 'Sound. Spirit. Eagle Pride.',
   hero_subtitle: 'A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.',
   footer_note: 'Draft website for the East Forsyth High School band program. Replace placeholder copy with official program details before launch.',
@@ -594,7 +594,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261025f';
+export const ASSET_VERSION = 'cms-p2-20261025g';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -3186,7 +3186,7 @@ async function handleBuiltFormSubmit(request, env, slug) {
   }
   const recipients = await resolveFormRecipientEmails(env, record.recipient_user_ids);
   const site = await getSite(env).catch(() => ({}));
-  const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+  const siteTitle = String(site?.title || 'East Forsyth Band Boosters').trim() || 'East Forsyth Band Boosters';
   const mail = buildFormEmail({ data: normalized.data, siteTitle, definition: record.definition });
   const pdf = buildFormPdfBase64(normalized.data, { definition: record.definition });
   const fromEmail = String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
@@ -3758,7 +3758,7 @@ export function galleryInstagramCaption(photo = {}) {
   if (caption) return caption.slice(0, 2200);
   const alt = String(photo.alt_text || '').trim();
   if (alt) return alt.slice(0, 2200);
-  return 'New photo from East Forsyth Band';
+  return 'New photo from East Forsyth Band Boosters';
 }
 
 export function isInstagramPublishableImage(photo = {}) {
@@ -3962,7 +3962,7 @@ async function ensureZernioProfileId(env) {
   const created = await zernioApi(env, '/profiles', {
     method: 'POST',
     body: JSON.stringify({
-      name: 'East Forsyth Band',
+      name: 'East Forsyth Band Boosters',
       description: 'EFHS Band CMS social publishing profile',
     }),
   });
@@ -4386,7 +4386,7 @@ function formatEventDateForFacebook(event = {}) {
 }
 
 export function formatFacebookCalendarDigest(events = [], { calendarUrl = '' } = {}) {
-  const lines = ['East Forsyth Band — calendar updates', ''];
+  const lines = ['East Forsyth Band Boosters — calendar updates', ''];
   for (const event of events) {
     const title = htmlToPlainText(event.title || '').trim() || 'Untitled event';
     const when = formatEventDateForFacebook(event);
@@ -7215,7 +7215,7 @@ function renderContactPageBody(page) {
   const form = '<div data-contact-form-slot></div>';
   const html = page.body_html || '';
   if (!html.trim()) {
-    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p></article>${form}</div></section>`;
+    return `<section class="page-hero" data-cms-layout="contact"><div class="page-title"><div class="kicker" data-cms-field="kicker">Connect</div><h1 data-cms-field="heading">${escapeHtml(page.title || 'Contact')}</h1><p data-cms-field="intro">Use this page for director contact information, booster questions, sponsor inquiries, and student/family support.</p></div></section><section class="content soft"><div class="wrap grid two"><article class="card" data-cms-field="body_text"><span class="tag">East Forsyth Band Boosters</span><h3>East Forsyth High School</h3><p><strong>Phone:</strong><br>(336) 703-6735</p><p><strong>Mailing Address:</strong><br>East Forsyth High School<br>2500 W Mountain Street<br>Kernersville, NC 27284</p><p><strong>Response Expectations:</strong><br>General inquiries should be directed to the main office during regular school hours (8:00 AM–4:00 PM). Allow reasonable time for staff response, as requests may need to be routed to the appropriate department, administrator, counselor, or staff member.</p><p style="margin-top:14px"><a class="btn outline" href="https://www.wsfcs.k12.nc.us/o/efhs">Visit EFHS Website</a></p></article>${form}</div></section>`;
   }
   let next = html;
   if (next.includes('data-contact-form-slot')) {
@@ -8823,7 +8823,7 @@ async function writeMinutesAudit(env, request, user, {
 }
 
 export function renderMinutesDocumentHtml(site = {}, minutes = {}, { embed = false } = {}) {
-  const title = site.title || 'East Forsyth Band';
+  const title = site.title || 'East Forsyth Band Boosters';
   const dateLabel = formatMeetingDateDisplay(minutes.meeting_date_display || minutes.meeting_date);
   const recorder = String(minutes.created_by_name || '').trim();
   const body = sanitizeRichHtml(minutes.body_html || '');
@@ -9578,7 +9578,7 @@ function d1UnavailableHtml(path = '/') {
 
 function formStudioDeps(env, ctx) {
   const fromEmail = () => String(env.CONTACT_FROM_EMAIL || SPONSOR_INVOICE_FROM_EMAIL).trim();
-  const siteTitle = async (e) => { const site = await getSite(e).catch(() => ({})); return String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band'; };
+  const siteTitle = async (e) => { const site = await getSite(e).catch(() => ({})); return String(site?.title || 'East Forsyth Band Boosters').trim() || 'East Forsyth Band Boosters'; };
   const deps = {
     jsonResponse, requireFormsAccess, requireLogin, isSuperAdmin, hasPermission, siteTitle,
     listUsers: listCmsFormUsers,
@@ -9954,7 +9954,7 @@ async function routeApi(request, env, url, ctx = null) {
       const message = result.found
         ? (result.already ? 'You were already unsubscribed.' : 'You are unsubscribed from band email updates.')
         : 'That unsubscribe link is invalid or expired.';
-      return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="st-lc st-rc admin-body"><main class="admin-shell small"><h1>Email list</h1><p>${escapeHtml(message)}</p><p><a class="btn primary" href="/calendar.html">Back to calendar</a></p></main></body></html>`, {
+      return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe | East Forsyth Band Boosters</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="st-lc st-rc admin-body"><main class="admin-shell small"><h1>Email list</h1><p>${escapeHtml(message)}</p><p><a class="btn primary" href="/calendar.html">Back to calendar</a></p></main></body></html>`, {
         status: 200,
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
@@ -10713,7 +10713,7 @@ async function routeApi(request, env, url, ctx = null) {
     }
     const recipients = await resolveFormsRecipientEmails(env);
     const site = await getSite(env).catch(() => ({}));
-    const siteTitle = String(site?.title || 'East Forsyth Band').trim() || 'East Forsyth Band';
+    const siteTitle = String(site?.title || 'East Forsyth Band Boosters').trim() || 'East Forsyth Band Boosters';
     const mail = buildInKindEmail({ data: normalized.data, siteTitle });
     const pdf = buildInKindPdfBase64(normalized.data);
     const attachments = [
@@ -15006,7 +15006,7 @@ ${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
 }
 
 function renderMaintenancePage(site = {}) {
-  const title = site.title || 'East Forsyth Band';
+  const title = site.title || 'East Forsyth Band Boosters';
   const logo = site.logo_url || '/assets/efhs-logo.png';
   return `<!doctype html>
 <html lang="en">
@@ -15646,7 +15646,7 @@ export default {
   },
 };
 
-const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="device" value="" autocomplete="off"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script><script>(function(){try{var field=document.querySelector("input[name=device]");if(!field)return;var fill=function(){try{field.value=JSON.stringify({screen:[screen.width||0,screen.height||0],dpr:window.devicePixelRatio||1,viewport:[window.innerWidth||0,window.innerHeight||0],tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),language:navigator.language||"",platform:navigator.platform||""});}catch(e){}};fill();var form=field.form;if(form)form.addEventListener("submit",fill);}catch(e){}})();</script></body></html>`;
+const LOGIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Login | East Forsyth Band Boosters</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"></head><body class="admin-body"><main class="admin-shell small admin-login-shell"><h1>East Forsyth Band Boosters Admin</h1><p>Log in to edit assigned CMS areas.</p><form class="admin-card" method="post" action="/admin/login"><input type="hidden" name="device" value="" autocomplete="off"><label>Username<input name="username" required autocomplete="username"></label><label class="admin-password-label">Password<span class="admin-password-field"><input id="admin-login-password" name="password" type="password" required autocomplete="current-password"><button type="button" class="admin-password-toggle" data-password-toggle aria-controls="admin-login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg class="admin-password-icon admin-password-icon-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg><svg class="admin-password-icon admin-password-icon-hide" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.6 1.7 9.2.9 11c1.7 3.9 6 7 11.1 7 2.1 0 4.1-.5 5.8-1.4l3 3 1.1-1.1L3.3 2.2Zm8.7 13.3c-2.5 0-4.5-2-4.5-4.5 0-.7.2-1.4.5-2l6 6c-.6.3-1.3.5-2 .5Zm10.1-4.5c-.5 1.2-1.4 2.4-2.5 3.4l-2.2-2.2a4.5 4.5 0 0 0-5.9-5.9L8.9 4.7C9.9 4.4 10.9 4.2 12 4.2c5.1 0 9.4 3.1 11.1 7Z"/></svg></button></span></label><button class="btn primary" type="submit">Log in</button></form><p class="admin-login-home"><a href="/">← Back to home page</a></p></main><script>(function(){var btn=document.querySelector("[data-password-toggle]");var input=document.getElementById("admin-login-password");if(!btn||!input)return;btn.addEventListener("click",function(){var show=input.type==="password";input.type=show?"text":"password";btn.setAttribute("aria-pressed",show?"true":"false");btn.setAttribute("aria-label",show?"Hide password":"Show password");btn.title=show?"Hide password":"Show password";btn.classList.toggle("is-revealed",show);});})();</script><script>(function(){try{var field=document.querySelector("input[name=device]");if(!field)return;var fill=function(){try{field.value=JSON.stringify({screen:[screen.width||0,screen.height||0],dpr:window.devicePixelRatio||1,viewport:[window.innerWidth||0,window.innerHeight||0],tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||""),language:navigator.language||"",platform:navigator.platform||""});}catch(e){}};fill();var form=field.form;if(form)form.addEventListener("submit",fill);}catch(e){}})();</script></body></html>`;
 
 const ADMIN_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EFHS Band Admin CMS</title><link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/public-theme.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/home-redesign.css?v=${ASSET_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-home.css?v=${ADMIN_HOME_VERSION}"></head><body class="admin-body sn-body"><main class="admin-shell cms-shell image-admin-shell">
 ${renderAdminChromeBar({ assetVersion: ASSET_VERSION })}
@@ -15743,7 +15743,7 @@ __ADMIN_SIDEBAR__
     <button class="btn primary" type="button" data-open-social-tab>Open Social Media</button>
   </div>
 </div>
-<form id="site-form" class="stack site-settings-form"><div class="site-settings-grid"><div class="admin-card stack site-text-card"><h2>Site text &amp; logo</h2><label class="site-text-picker"><span>Element to edit</span><select id="site-text-element" data-site-text-select aria-label="Element to edit"><option value="title">Site title</option><option value="hero_title">Hero title</option><option value="hero_subtitle">Hero subtitle</option><option value="footer_note">Footer note</option></select></label><label class="full form-rich-label" data-site-text-pane="title"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label" data-site-text-pane="hero_title"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label" data-site-text-pane="hero_subtitle"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label" data-site-text-pane="footer_note"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label></div>
+<form id="site-form" class="stack site-settings-form"><div class="site-settings-grid"><div class="admin-card stack site-text-card"><h2>Site text &amp; logo</h2><label class="site-text-picker"><span>Element to edit</span><select id="site-text-element" data-site-text-select aria-label="Element to edit"><option value="title">Site title</option><option value="hero_title">Hero title</option><option value="hero_subtitle">Hero subtitle</option><option value="footer_note">Footer note</option></select></label><label class="full form-rich-label" data-site-text-pane="title"><span>Site title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="title" data-rich-mode="inline" data-placeholder="East Forsyth Band Boosters" aria-label="Site title"></div><input type="hidden" name="title" required></label><label class="full form-rich-label" data-site-text-pane="hero_title"><span>Hero title</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor form-rich-inline cms-edit-rich cms-edit-inline" contenteditable="true" role="textbox" spellcheck="true" data-rich-input="hero_title" data-rich-mode="inline" data-placeholder="Sound. Spirit. Eagle Pride." aria-label="Hero title"></div><input type="hidden" name="hero_title" required></label><label class="full form-rich-label" data-site-text-pane="hero_subtitle"><span>Hero subtitle</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="hero_subtitle" data-rich-mode="block" data-placeholder="Short hero supporting sentence" aria-label="Hero subtitle"></div><input type="hidden" name="hero_subtitle" required></label><label class="full form-rich-label" data-site-text-pane="footer_note"><span>Footer note</span>${FORM_RICH_TOOLBAR}<div class="form-rich-editor cms-edit-rich" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-rich-input="footer_note" data-rich-mode="block" data-placeholder="Footer note" aria-label="Footer note"></div><input type="hidden" name="footer_note" required></label><label>Logo URL<input name="logo_url" required></label></div>
 <div class="admin-card stack error-pages-card" data-error-pages-card>
   <h2>Error pages</h2>
   <p class="muted">Copy for 404, 403, 401, 500, 503, and 429. Empty fields fall back to the built-in band defaults. 500/503/429 stay on the lite page so they never query the database.</p>
@@ -15907,7 +15907,7 @@ __ADMIN_SIDEBAR__
     <section class="form-builder-canvas" aria-label="Form preview">
       <article class="card letterman-card form-builder-preview">
         <span class="tag" id="form-builder-kicker-preview">Band Boosters</span>
-        <h2 id="form-builder-heading-preview">East Forsyth Band</h2>
+        <h2 id="form-builder-heading-preview">East Forsyth Band Boosters</h2>
         <label class="full">Intro<textarea id="form-builder-intro" rows="2" maxlength="800" placeholder="Optional intro shown above the fields"></textarea></label>
         <div id="form-builder-canvas" class="form-builder-canvas-list"></div>
         <div class="full inkind-form-actions">

@@ -14,7 +14,7 @@ const PAGE_KEYS = ['kicker', 'heading', 'title', 'intro', 'submit_label'];
 
 export const DEFAULT_LETTERMAN_PAGE = {
   kicker: 'Band Boosters',
-  heading: 'East Forsyth Band',
+  heading: 'East Forsyth Band Boosters',
   title: 'Letterman Jacket Order Form',
   intro: 'Complete this order form for an East Forsyth Band letterman jacket. Return the form with payment to the Band Boosters.',
   submit_label: 'Submit order',
@@ -407,7 +407,7 @@ function orderTitle(data = {}, form = DEFAULT_LETTERMAN_FORM) {
     || 'Order';
 }
 
-export function buildLettermanEmail({ data, siteTitle = 'East Forsyth Band', copy = DEFAULT_LETTERMAN_FORM }) {
+export function buildLettermanEmail({ data, siteTitle = 'East Forsyth Band Boosters', copy = DEFAULT_LETTERMAN_FORM }) {
   const form = normalizeLettermanFormCopy(copy);
   const subject = `${form.title}: ${orderTitle(data, form)}`;
   const text = [

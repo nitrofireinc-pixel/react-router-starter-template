@@ -172,7 +172,7 @@ export function normalizeDefinition(input = {}, fallbackTitle = 'Untitled form')
     version: 2,
     title: trim(s.title || fallbackTitle, 160) || fallbackTitle,
     kicker: trim(s.kicker ?? 'Band Boosters', 80),
-    heading: trim(s.heading ?? 'East Forsyth Band', 120),
+    heading: trim(s.heading ?? 'East Forsyth Band Boosters', 120),
     intro: trimMulti(s.intro, 1200),
     submit_label: trim(s.submit_label || 'Submit', 60) || 'Submit',
     success_message: trim(s.success_message, 300),

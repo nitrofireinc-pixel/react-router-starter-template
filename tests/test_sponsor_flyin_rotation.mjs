@@ -22,7 +22,7 @@ const S = { id: 2, name: 'Silver Co', level: 'Silver Sponsor', active: 1 };
 const B = { id: 3, name: 'Aire Serv', level: 'Bronze Sponsor', active: 1 };
 const H = { id: 4, name: 'Dominos', level: 'Honorable Mention', active: 1 };
 
-test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p2-20261025f'));
+test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p2-20261025g'));
 
 test('weights 2:1 give G S G', () => {
   assert.deepEqual([...buildSponsorFlyinRotation([G], [S], { gold: 2, silver: 1 }).map((s) => s.id)], [1, 2, 1]);

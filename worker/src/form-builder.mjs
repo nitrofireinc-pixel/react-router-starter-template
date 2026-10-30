@@ -162,7 +162,7 @@ export function normalizeFormDefinition(input = {}, fallbackTitle = 'Untitled Fo
     : [];
   return {
     kicker: trimText(source.kicker || 'Band Boosters', 80) || 'Band Boosters',
-    heading: trimText(source.heading || 'East Forsyth Band', 120) || 'East Forsyth Band',
+    heading: trimText(source.heading || 'East Forsyth Band Boosters', 120) || 'East Forsyth Band Boosters',
     title,
     intro: trimMultiline(source.intro, 800),
     submit_label: trimText(source.submit_label || 'Submit', 80) || 'Submit',
@@ -404,7 +404,7 @@ export function buildFormPdfBase64(data = {}, options = {}) {
   });
 }
 
-export function buildFormEmail({ data, siteTitle = 'East Forsyth Band', definition = emptyFormDefinition() }) {
+export function buildFormEmail({ data, siteTitle = 'East Forsyth Band Boosters', definition = emptyFormDefinition() }) {
   const form = normalizeFormDefinition(definition);
   const firstValue = form.fields.find((field) => FORM_INPUT_TYPES.includes(field.type) && data[field.id])?.id;
   const subject = `${form.title}: ${data.student_name || data.name || data[firstValue] || 'Submission'}`;

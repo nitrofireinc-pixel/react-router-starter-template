@@ -70,19 +70,19 @@ test('public read cache coalesces misses and drops after a write', async () => {
   let loads = 0;
   const loader = async () => {
     loads += 1;
-    return { title: 'East Forsyth Band' };
+    return { title: 'East Forsyth Band Boosters' };
   };
   const [first, second] = await Promise.all([
     cachedPublicRead('site', loader),
     cachedPublicRead('site', loader),
   ]);
   assert.equal(loads, 1);
-  assert.equal(first.title, 'East Forsyth Band');
+  assert.equal(first.title, 'East Forsyth Band Boosters');
   assert.equal(second.title, first.title);
-  assert.equal((await cachedPublicRead('site', loader)).title, 'East Forsyth Band');
+  assert.equal((await cachedPublicRead('site', loader)).title, 'East Forsyth Band Boosters');
   assert.equal(loads, 1);
   await invalidatePublicReadCache();
-  assert.equal((await cachedPublicRead('site', loader)).title, 'East Forsyth Band');
+  assert.equal((await cachedPublicRead('site', loader)).title, 'East Forsyth Band Boosters');
   assert.equal(loads, 2);
 });
 
@@ -221,7 +221,7 @@ test('rejected public reads are evicted so the next caller can load again', asyn
 
 test('bootstrap JSON cannot close the script tag', () => {
   const html = renderPublicReadBootstrap({
-    site: { title: 'East Forsyth Band' },
+    site: { title: 'East Forsyth Band Boosters' },
     sponsors: [],
     photos: [{ caption: '</script><img src=x onerror=alert(1)>' }],
     deadlineBanners: [],

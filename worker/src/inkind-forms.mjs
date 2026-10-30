@@ -171,11 +171,11 @@ export function buildInKindPdfLines(data = {}, { submittedAt = '' } = {}) {
 
 export function buildInKindPdfBase64(data = {}, options = {}) {
   return buildMultiPageTextPdfBase64(buildInKindPdfLines(data, options), {
-    title: 'East Forsyth Band — In-Kind Donation Form',
+    title: 'East Forsyth Band Boosters — In-Kind Donation Form',
   });
 }
 
-export function buildInKindEmail({ data, siteTitle = 'East Forsyth Band' }) {
+export function buildInKindEmail({ data, siteTitle = 'East Forsyth Band Boosters' }) {
   const name = `${data.first_name} ${data.last_name}`.trim();
   const subject = `In-kind donation: ${data.business_name || name}`;
   const text = [

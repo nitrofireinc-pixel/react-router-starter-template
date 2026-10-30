@@ -36,7 +36,7 @@ test('public Square publishable config exposes application and location IDs only
   assert.equal(publicSquarePublishableConfig({}).web_payments, false);
   assert.equal(PUBLIC_SITE_KEYS.includes('square_settings'), false);
   const site = publicSitePayload({
-    title: 'East Forsyth Band',
+    title: 'East Forsyth Band Boosters',
     square_settings: JSON.stringify({
       access_token: 'EAABsecret-token',
       application_id: 'sq0idp-public-app',
@@ -50,7 +50,7 @@ test('public Square publishable config exposes application and location IDs only
 
 test('public read bootstrap keeps Square IDs and drops any access token', () => {
   const html = renderPublicReadBootstrap({
-    site: { title: 'East Forsyth Band' },
+    site: { title: 'East Forsyth Band Boosters' },
     sponsors: [],
     photos: [],
     deadlineBanners: [],

@@ -235,7 +235,7 @@ export function renderSeoHead(page, site = {}, { noindex = false } = {}) {
   if (!noindex) tags.push(`<link rel="canonical" href="${esc(url)}">`);
   tags.push(
     `<meta property="og:type" content="website">`,
-    `<meta property="og:site_name" content="${esc(SEO_ORG_NAME)}">`,
+    `<meta property="og:site_name" content="East Forsyth Band Boosters">`,
     `<meta property="og:locale" content="en_US">`,
     `<meta property="og:title" content="${esc(seo.title)}">`,
     `<meta property="og:description" content="${esc(seo.description)}">`,

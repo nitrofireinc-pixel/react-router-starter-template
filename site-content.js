@@ -1325,7 +1325,7 @@ async function loadPublicContent() {
     });
     if (site.title) {
       const plainTitle = String(site.title).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      if (plainTitle) document.title = document.title.replace('East Forsyth Band', plainTitle);
+      if (plainTitle) document.title = document.title.replace('East Forsyth Band Boosters', plainTitle);
     }
     ensurePublicBrandMark();
     const duesEnabled = !(
@@ -2401,7 +2401,7 @@ function openDonateModal() {
   modal.className = 'sponsor-signup-modal donate-modal';
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', 'Donate to East Forsyth Band');
+  modal.setAttribute('aria-label', 'Donate to East Forsyth Band Boosters');
   modal.innerHTML = `
     <button type="button" class="sponsor-signup-backdrop" data-donate-cancel aria-label="Cancel donation"></button>
     <div class="sponsor-signup-panel">
@@ -3486,7 +3486,7 @@ function mountHolidayTheme(key) {
   if (!t || !HT_CORNER_PIECE[key] || document.getElementById(id)) return;
   const style = document.createElement('style');
   style.textContent = `
-#${id}{position:fixed;inset:0;z-index:60;pointer-events:none;overflow:hidden;contain:strict}
+#${id}{position:fixed;inset:0;z-index:99;pointer-events:none;overflow:hidden;contain:strict}
 #${id} svg{position:absolute;display:block;overflow:visible}
 #${id} .ht-garland{left:0;top:0;width:100%;height:12px;opacity:.85}
 #${id} .ht-corner{top:0;width:var(--ht-corner,200px);height:var(--ht-corner,200px);opacity:.8}
@@ -3592,7 +3592,7 @@ function mountHalloweenOverlay() {
   const web = halloweenWebPath(160);
   const style = document.createElement('style');
   style.textContent = `
-#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:60;pointer-events:none}
+#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:99;pointer-events:none}
 #efhs-halloween svg{position:absolute;display:block;overflow:visible;background:none}
 #efhs-halloween .hw-web{top:0;width:var(--hw-web,160px);height:var(--hw-web,160px);opacity:.32}
 #efhs-halloween .hw-web path{fill:none;stroke:#dfe6ee;stroke-width:1;vector-effect:non-scaling-stroke}

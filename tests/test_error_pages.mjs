@@ -49,7 +49,7 @@ function createErrorEnv({
     }
     if (text.includes('FROM site_content WHERE key IN')) {
       const results = [
-        { key: 'title', value: 'East Forsyth Band' },
+        { key: 'title', value: 'East Forsyth Band Boosters' },
         { key: 'maintenance_mode', value: maintenanceOn ? '1' : '0' },
         { key: 'social_links', value: JSON.stringify([{ platform: 'instagram', href: instagram }]) },
       ];
@@ -306,7 +306,7 @@ test('error assets, CMS gate, and worker wiring are in source', () => {
   const workerSrc = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   const adminSrc = readFileSync(join(root, 'admin.js'), 'utf8');
   const syncSrc = readFileSync(join(root, 'worker/scripts/sync-public.mjs'), 'utf8');
-  assert.equal(ASSET_VERSION, 'cms-p2-20261025f');
+  assert.equal(ASSET_VERSION, 'cms-p2-20261025g');
   assert.match(workerSrc, /export async function renderErrorPage/);
   assert.match(workerSrc, /liteErrorResponse\(500/);
   assert.match(workerSrc, /Error pages/);

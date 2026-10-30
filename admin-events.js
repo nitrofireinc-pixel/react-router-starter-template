@@ -308,7 +308,7 @@ ${ev ? "" : `<fieldset class="ev-f ev-f-wide ev-repeat"><legend>Repeat</legend>
 <p class="ev-note ev-fund-note" data-fund-note${f.track === "fundraiser" ? "" : " hidden"}>💰 Category <b>Fundraising</b>${suggested ? " (suggested because the title looks like a fundraiser; it is saved only when you press Save)" : ""}. Fundraising never shows the red IMPORTANT banner; pick IMPORTANT if you need the banner.</p></fieldset>
 <fieldset class="ev-f ev-f-wide ev-fund-details" data-fund-details${f.track === "fundraiser" ? "" : " hidden"}><legend>Fundraiser details <small>optional · shown on the home fundraiser card when filled in</small></legend>
 <label class="ev-f ev-f-wide"><span>Location</span><input name="location" maxlength="200" value="${esc(f.location)}"></label>
-<label class="ev-f ev-f-wide"><span>Deal text</span><input name="deal_text" maxlength="200" placeholder="e.g. Save 30%–70% off retail" value="${esc(f.deal_text || "")}"></label>
+<label class="ev-f ev-f-wide"><span>Deal text</span><input name="deal_text" maxlength="200" placeholder="e.g. 20% off all orders" value="${esc(f.deal_text || "")}"></label>
 <label class="ev-allday"><input type="checkbox" name="must_attend"${f.must_attend ? " checked" : ""}> Must attend (shows the badge on the home card)</label></fieldset>
 <div class="ev-f ev-f-wide"><span id="ev-desc-l">Description</span>
   <div class="ev-rt-bar" role="toolbar" aria-label="Text style">

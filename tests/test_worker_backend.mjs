@@ -110,7 +110,7 @@ test('jsonResponse returns JSON with status and content-type', async () => {
 
 test('public site payload is an allowlist and never includes secrets', () => {
   const leaked = publicSitePayload({
-    title: 'East Forsyth Band',
+    title: 'East Forsyth Band Boosters',
     hero_title: 'Sound. Spirit. Eagle Pride.',
     square_settings: JSON.stringify({ access_token: 'EAABsecret-token', application_id: 'sq0idp-app' }),
     zernio_api_key: 'zn_live_secret',
@@ -132,7 +132,7 @@ test('public site payload is an allowlist and never includes secrets', () => {
     service_mode: '1',
   });
   assert.deepEqual(Object.keys(leaked).sort(), [...PUBLIC_SITE_KEYS].sort());
-  assert.equal(leaked.title, 'East Forsyth Band');
+  assert.equal(leaked.title, 'East Forsyth Band Boosters');
   assert.equal(leaked.hero_title, 'Sound. Spirit. Eagle Pride.');
   const serialized = JSON.stringify(leaked);
   for (const secret of [
@@ -1158,7 +1158,7 @@ test('in-kind form payload, page, and PDF use Value of In-kind donation', () => 
   assert.match(page, /data-cms-layout="in-kind"/);
   const pdf = buildInKindPdfBase64(ok.data);
   const bytes = Buffer.from(pdf, 'base64');
-  assert.ok(bytes.toString('latin1').includes('East Forsyth Band'));
+  assert.ok(bytes.toString('latin1').includes('East Forsyth Band Boosters'));
   assert.ok(bytes.toString('latin1').includes('Value of In-kind donation') || bytes.includes(Buffer.from('Value of In-kind donation')));
 });
 
@@ -1991,7 +1991,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.equal(canAccessTreasurerLedger({ role: 'editor', permissions: ['sponsors'] }), false);
 
   const documentHtml = renderMinutesDocumentHtml(
-    { title: 'East Forsyth Band' },
+    { title: 'East Forsyth Band Boosters' },
     {
       meeting_date: '2026-08-04',
       created_by_name: 'Secretary Sue',
@@ -2013,7 +2013,7 @@ test('meeting minutes dates and secretary edit window', () => {
   assert.match(docxBody, /class="draft"/);
   assert.match(docxBody, /class="kicker"/);
   const docxDocument = renderMinutesDocumentHtml(
-    { title: 'East Forsyth Band' },
+    { title: 'East Forsyth Band Boosters' },
     {
       meeting_date: '2026-08-04',
       created_by_name: 'Secretary Sue',
@@ -2075,13 +2075,13 @@ test('parseZernioFacebookConnection reads stored page connection', () => {
   const parsed = parseZernioFacebookConnection(JSON.stringify({
     accountId: 'acc_123',
     profileId: 'prof_456',
-    name: 'East Forsyth Band',
+    name: 'East Forsyth Band Boosters',
     username: 'efhsband',
     connectedAt: '2026-08-05T00:00:00.000Z',
   }));
   assert.equal(parsed.accountId, 'acc_123');
   assert.equal(parsed.profileId, 'prof_456');
-  assert.equal(parsed.name, 'East Forsyth Band');
+  assert.equal(parsed.name, 'East Forsyth Band Boosters');
   assert.equal(parsed.platform, 'facebook');
 });
 
@@ -2108,7 +2108,7 @@ test('formatFacebookCalendarDigest lists queued events for Facebook', () => {
     { id: 1, date_label: 'Aug', date_detail: '15', event_year: 2026, title: 'Band Camp', description: 'All day at the school.' },
     { id: 2, repeat_enabled: 1, repeat_days: [5], repeat_months: [8, 9], event_year: 2026, title: 'Football Friday', description: 'Pre-game.' },
   ], { calendarUrl: 'https://efhsband.org/calendar.html' });
-  assert.match(digest, /East Forsyth Band — calendar updates/);
+  assert.match(digest, /East Forsyth Band Boosters — calendar updates/);
   assert.match(digest, /Aug 15, 2026 — Band Camp/);
   assert.match(digest, /Football Friday/);
   assert.match(digest, /Full calendar: https:\/\/efhsband\.org\/calendar\.html/);
@@ -2144,7 +2144,7 @@ test('facebook calendar suggestion ignore state can clear legacy queue', async (
 });
 
 test('normalizeZernioPostPayload builds publish-now and scheduled Facebook posts', () => {
-  const account = { accountId: 'acc_123', name: 'East Forsyth Band' };
+  const account = { accountId: 'acc_123', name: 'East Forsyth Band Boosters' };
   assert.throws(() => normalizeZernioPostPayload({ content: '' }, account), /Post content is required/);
   assert.throws(() => normalizeZernioPostPayload({ content: 'Hello' }, null), /Connect a Facebook Page/);
   const now = normalizeZernioPostPayload({
@@ -2206,7 +2206,7 @@ test('normalizeZernioPostPayload builds Instagram gallery posts with required me
     /Connect Instagram before posting/,
   );
   const body = normalizeZernioPostPayload({
-    content: 'New photo from East Forsyth Band',
+    content: 'New photo from East Forsyth Band Boosters',
     media_url: 'https://efhsband.org/uploads/a.jpg',
     publish_now: true,
   }, account, 'instagram');
@@ -2218,7 +2218,7 @@ test('normalizeZernioPostPayload builds Instagram gallery posts with required me
 test('gallery Instagram helpers pick captions and skip unsupported images', () => {
   assert.equal(galleryInstagramCaption({ caption: '<b>Halftime</b>', alt_text: 'Alt' }), 'Halftime');
   assert.equal(galleryInstagramCaption({ alt_text: 'Field show' }), 'Field show');
-  assert.equal(galleryInstagramCaption({}), 'New photo from East Forsyth Band');
+  assert.equal(galleryInstagramCaption({}), 'New photo from East Forsyth Band Boosters');
   assert.equal(isInstagramPublishableImage({ filename: 'a.jpg' }), true);
   assert.equal(isInstagramPublishableImage({ filename: 'logo.svg' }), false);
   assert.equal(isInstagramGalleryAutopostEnabled(''), true);
@@ -2384,7 +2384,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(themeCss, /#page-preview \.hero/);
   assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=hero-kids-frame-20260918"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025f'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261025g'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -3683,7 +3683,7 @@ function createRcFixEnv({
     if (text.includes('FROM site_content WHERE key IN')) {
       return {
         results: [
-          { key: 'title', value: 'East Forsyth Band' },
+          { key: 'title', value: 'East Forsyth Band Boosters' },
           { key: 'maintenance_mode', value: maintenanceOn ? '1' : '0' },
         ],
       };

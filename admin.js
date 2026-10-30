@@ -3764,7 +3764,7 @@ async function buildGoldSponsorsPdfBlob(sponsors) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.setTextColor(16, 35, 60);
-  doc.text('East Forsyth Band — Gold Sponsors', margin, y);
+  doc.text('East Forsyth Band Boosters — Gold Sponsors', margin, y);
   y += 22;
 
   doc.setFont('helvetica', 'normal');
@@ -3905,7 +3905,7 @@ function printGoldSponsorsHtmlFallback(sponsors) {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Gold Sponsors | East Forsyth Band</title>
+  <title>Gold Sponsors | East Forsyth Band Boosters</title>
   <style>
     body{font-family:Georgia,"Times New Roman",serif;color:#111;margin:32px;line-height:1.35}
     h1{font-size:1.7rem;margin:0 0 .25rem}
@@ -3920,7 +3920,7 @@ function printGoldSponsorsHtmlFallback(sponsors) {
   </style>
 </head>
 <body>
-  <h1>East Forsyth Band — Gold Sponsors</h1>
+  <h1>East Forsyth Band Boosters — Gold Sponsors</h1>
   <p class="meta">For programs, flyers, and promotional materials · ${escapeHtml(new Date().toLocaleDateString())}</p>
   <ul>${rows}</ul>
 </body>
@@ -5600,7 +5600,7 @@ function renderFormBuilderCanvas() {
   const kicker = document.querySelector('#form-builder-kicker-preview');
   if (kicker) kicker.textContent = definition.kicker || 'Band Boosters';
   const heading = document.querySelector('#form-builder-heading-preview');
-  if (heading) heading.textContent = definition.heading || 'East Forsyth Band';
+  if (heading) heading.textContent = definition.heading || 'East Forsyth Band Boosters';
   const submit = document.querySelector('#form-builder-submit-preview');
   if (submit) submit.textContent = definition.submit_label || 'Submit';
   if (!canvas) return;
@@ -5689,7 +5689,7 @@ function openFormBuilder(record) {
     ...record,
     definition: {
       kicker: record?.definition?.kicker || 'Band Boosters',
-      heading: record?.definition?.heading || 'East Forsyth Band',
+      heading: record?.definition?.heading || 'East Forsyth Band Boosters',
       title: record?.definition?.title || record?.title || 'Untitled Form',
       intro: record?.definition?.intro || '',
       submit_label: record?.definition?.submit_label || 'Submit',
