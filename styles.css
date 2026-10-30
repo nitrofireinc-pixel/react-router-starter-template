@@ -6709,3 +6709,6 @@ body:not(.admin-body){padding-bottom:calc(var(--sponsor-ticker-h,0px) + env(safe
 @media (max-width:600px){
   html body:not(.admin-body) .sponsor-marquee-section{padding:3px 0 calc(3px + env(safe-area-inset-bottom))}
 }
+html body:not(.admin-body) .sponsor-marquee-section{transition:transform .28s ease;will-change:transform}
+html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:translateY(110%)}
+@media (prefers-reduced-motion:reduce){html body:not(.admin-body) .sponsor-marquee-section{transition:none}}

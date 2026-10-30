@@ -739,7 +739,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031d';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031e';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -837,7 +837,21 @@ function syncSponsorTickerSpace() {
     if (m) syncSponsorTickerSpace.ro.observe(m); else syncSponsorTickerSpace.ro = null;
     if (typeof MutationObserver === 'function' && m) new MutationObserver(set).observe(m, { attributes: true, attributeFilter: ['hidden'] });
   }
-  if (!syncSponsorTickerSpace.bound && typeof window !== 'undefined' && window.addEventListener) { syncSponsorTickerSpace.bound = true; window.addEventListener('resize', set, { passive: true }); }
+  if (!syncSponsorTickerSpace.bound && typeof window !== 'undefined' && window.addEventListener) { syncSponsorTickerSpace.bound = true; window.addEventListener('resize', set, { passive: true }); 
+    let lastY = window.scrollY || 0; let queued = false;
+    const tick = () => {
+      queued = false;
+      const m = document.querySelector('.sponsor-marquee-section');
+      if (!m) return;
+      const y = window.scrollY || 0; const dy = y - lastY;
+      const atBottom = y + window.innerHeight >= document.documentElement.scrollHeight - 24;
+      if (atBottom || y <= 8) { m.classList.remove('is-ticker-away'); lastY = y; return; }
+      if (Math.abs(dy) < 10) return;
+      m.classList.toggle('is-ticker-away', dy > 0);
+      lastY = y;
+    };
+    window.addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(tick); } }, { passive: true });
+  }
 }
 
 function hydrateMarqueeFromCache() {
@@ -1523,7 +1537,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031d';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031e';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
