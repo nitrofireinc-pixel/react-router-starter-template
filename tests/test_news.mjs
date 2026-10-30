@@ -163,3 +163,30 @@ test('News save/hide: toast replaces inline Saved/Hidden text, keeps home-card h
   assert.match(NEWS_ADMIN_JS, /st\.textContent = 'The home card updates within a minute\.'; window\.efhsSavedToast\?\.saved\('Saved\.'\)/);
   assert.doesNotMatch(NEWS_ADMIN_JS, /Hidden \(set to Draft\)/);
 });
+
+test('News photo library: Browse photos modal reuses admin-sponsor-form-toast, paged 12', async () => {
+  const { NEWS_ADMIN_JS, renderNewsAdminHtml } = await import('../worker/src/news.mjs');
+  const html = renderNewsAdminHtml('x', { head: '', top: '', sidebar: '', scripts: '' }, [], []);
+  assert.match(html, /id="nw-browse"/);
+  assert.match(html, /id="nw-lib-modal" class="admin-sponsor-form-toast nw-lib-modal" role="dialog" aria-modal="true"/);
+  assert.doesNotMatch(html, /Or pick from the site library/);
+  assert.match(NEWS_ADMIN_JS, /const LIB_PER = 12/);
+  assert.match(NEWS_ADMIN_JS, /'Page ' \+ \(libPage \+ 1\) \+ ' of ' \+ pages/);
+  assert.match(NEWS_ADMIN_JS, /e\.key === 'Escape'/);
+  assert.match(NEWS_ADMIN_JS, /setPhoto\(b\.dataset\.src\); closeLib\(\);/);
+});
+
+test('News photo library: search, newest first, non-Gallery default with Show all, phone load-more, empty state', async () => {
+  const { NEWS_ADMIN_JS, renderNewsAdminHtml } = await import('../worker/src/news.mjs');
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../worker/src/news.mjs', import.meta.url), 'utf8');
+  const html = renderNewsAdminHtml('x', { head: '', top: '', sidebar: '', scripts: '' }, [], []);
+  assert.match(html, /id="nw-lib-q"/);
+  assert.match(html, /id="nw-lib-all"/);
+  assert.match(NEWS_ADMIN_JS, /all \|\| i\.source !== 'gallery'/);
+  assert.match(NEWS_ADMIN_JS, /No photos match\./);
+  assert.match(NEWS_ADMIN_JS, /IntersectionObserver/);
+  assert.match(NEWS_ADMIN_JS, /max-width: 600px/);
+  assert.match(src, /items\.sort\(\(x, y\) => \(y\.at > x\.at/);
+  assert.match(src, /return deps\.json\(\{ photos: items\.map\(\(i\) => i\.url\), items \}\)/);
+});
