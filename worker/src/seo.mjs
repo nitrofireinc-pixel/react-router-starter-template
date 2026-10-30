@@ -61,55 +61,55 @@ export function keywordsForSlug(slug) {
 }
 export const SEO_PAGE_DEFAULTS = Object.freeze({
   "home": {
-    title: "East Forsyth Blue Regiment | East Forsyth High School Band",
+    title: "East Forsyth Band Boosters | East Forsyth High School Band",
     description: "East Forsyth Blue Regiment, the East Forsyth High School Band, is a Kernersville high school band. Support Forsyth County students: donate or join a fundraiser."
   },
   "ensembles": {
-    title: "Ensembles | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Ensembles | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment ensembles: marching, concert, jazz, percussion and color guard at the East Forsyth High School Band in Kernersville, NC."
   },
   "calendar": {
-    title: "Calendar & Events | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Calendar & Events | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment calendar: East Forsyth High School Band concerts, games, competitions and fundraisers in Kernersville and Forsyth County, NC."
   },
   "boosters": {
-    title: "Band Boosters | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Boosters | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment Band Boosters support the East Forsyth High School Band in Kernersville, NC with meetings, officers, dues and volunteer help."
   },
   "sponsors": {
-    title: "Our Sponsors | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Our Sponsors | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment sponsors: Kernersville and Forsyth County, NC businesses supporting the East Forsyth High School Band and its student musicians."
   },
   "become-a-sponsor": {
-    title: "Become a Sponsor | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Become a Sponsor | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment sponsorships: Bronze, Silver and Gold packages for Kernersville and Forsyth County firms backing the East Forsyth High School Band."
   },
   "fundraising": {
-    title: "Donate & Fundraisers | East Forsyth Blue Regiment, Kernersville",
+    title: "Donate & Fundraisers | East Forsyth Band Boosters",
     description: "Donate to the East Forsyth High School Band, Kernersville's high school band, or join our yearly Dewey's Bakery fundraiser to support the Blue Regiment."
   },
   "gallery": {
-    title: "Photo Gallery | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Photo Gallery | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment photos: the East Forsyth High School Band at games, parades, concerts and competitions in Kernersville and Forsyth County, NC."
   },
   "resources": {
-    title: "Student Resources | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Student Resources | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment student resources: forms, handbooks and schedules for East Forsyth High School Band families in Kernersville, Forsyth County, NC."
   },
   "contact": {
-    title: "Contact | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Contact | East Forsyth Band Boosters",
     description: "Contact the East Forsyth Blue Regiment, the East Forsyth High School Band in Kernersville, NC, about donations, sponsorships, events or joining the band."
   },
   "directors": {
-    title: "Directors & Staff | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Directors & Staff | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment directors and staff lead the East Forsyth High School Band program in Kernersville, NC, serving student musicians in Forsyth County."
   },
   "in-kind": {
-    title: "In-Kind Donations | East Forsyth Blue Regiment, Kernersville NC",
+    title: "In-Kind Donations | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment in-kind donations: offer goods or services to the East Forsyth High School Band. Kernersville and Forsyth County, NC donors welcome."
   },
   "letterman-jacket": {
-    title: "Letterman Jackets | East Forsyth Blue Regiment, Kernersville NC",
+    title: "Letterman Jackets | East Forsyth Band Boosters",
     description: "East Forsyth Blue Regiment letterman jacket order form for East Forsyth High School Band students and families in Kernersville and Forsyth County, NC."
   }
 });
@@ -155,7 +155,7 @@ export function resolvePageSeo(page, site = {}) {
   const name = String(page?.title || 'Page');
   return {
     slug,
-    title: custom.title || defaults.title || `${name} | ${SEO_BRAND}, Kernersville NC`,
+    title: custom.title || defaults.title || `${name} | East Forsyth Band Boosters`,
     description: custom.description || defaults.description || `${SEO_BRAND}: ${name} from the East Forsyth High School Band and Band Boosters in Kernersville, Forsyth County, NC.`,
   };
 }
