@@ -201,3 +201,9 @@ test('News photo library: plural count, placeholder, News-only empty state, alt 
   assert.match(NEWS_ADMIN_JS, /i\.caption \|\| i\.alt \|\|/);
   assert.match(NEWS_ADMIN_JS, /addEventListener\('orientationchange', libResize\)/);
 });
+
+test('News photo library: phone mode auto-fills until the popup can scroll', async () => {
+  const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
+  assert.match(NEWS_ADMIN_JS, /libShown < total && panel\.scrollHeight <= panel\.clientHeight \+ 8\) \{ libShown \+= LIB_PER; renderLib\(\); \}/);
+  assert.match(NEWS_ADMIN_JS, /libFillSoon\(\); \$\('#nw-lib-count'\)/);
+});
