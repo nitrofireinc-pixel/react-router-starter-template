@@ -1215,6 +1215,16 @@
       host.append(el('p', { class: 'st-note', text: info.app
         ? `The ${info.label} is a web app with its own fixed design, so nothing inside it can be edited here. You can move it, resize it, or hide and show it. Its content comes from the CMS.`
         : 'This part fills in by itself from its source and updates automatically, so its words cannot be typed over here. You can move it, resize it, hide it or change its settings.' }));
+      const siteKey = /^site:(hero_title|hero_subtitle)$/.exec(p.source || '')?.[1];
+      if (siteKey) {
+        const ta = el('textarea', { rows: 3, 'data-site-setting-input': siteKey, 'aria-label': info.label });
+        fetch('/api/site', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})).then((d) => { ta.value = String(d?.[siteKey] || '').replace(/<[^>]*>/g, ''); }).catch(() => {});
+        const save = el('button', { type: 'button', class: 'st-linkbtn', 'data-site-setting-save': siteKey, text: 'Save text' });
+        save.addEventListener('click', async () => {
+          try { await call('/api/admin/site', 'POST', { [siteKey]: ta.value }); document.querySelectorAll(`[data-site-field="${siteKey}"]`).forEach((n) => { n.textContent = ta.value; }); toast('Saved (visitors see it within ~1 min)'); } catch (e) { toast(e.message, true); }
+        });
+        host.append(el('label', { class: 'st-field' }, el('span', { text: 'Text' }), ta), el('p', {}, save));
+      }
       host.append(el('p', {}, el('a', { class: 'st-linkbtn', href: info.admin, target: '_blank', rel: 'noopener', 'data-live-source-link': '', text: `${info.manage || `Edit ${info.label}`} ↗` })));
       const lay = canLayout();
       const show = el('input', { type: 'checkbox', checked: !p.hidden, disabled: !lay, 'aria-label': 'Show on page' });
