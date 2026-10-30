@@ -22,6 +22,8 @@ test('expired, draft and not-on-home items are hidden; newest wins', () => {
   assert.match(html, /href="\/news\/5"/);
   assert.match(html, /&lt;b&gt;Hi/);
   assert.match(html, /All news <\/span>→/);
+  assert.match(html, /📰<\/span> NEWS/);
+  assert.match(html, /\.news-all{flex:none;width:34px;height:34px;border-radius:50%;background:#f2c200/);
   assert.match(html, /\.news-all-txt\{display:none\}/); // Q80 phone arrow
 });
 test('pinned first', () => {
