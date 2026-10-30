@@ -191,7 +191,7 @@ export function renderHomeEventArticle(event) {
   const tag = homeEventTag(event);
   const month = event.date_label || when.month || '';
   const day = event.date_detail || when.day || '';
-  return `<article class="ev${tag.className ? ` ${tag.className}` : ''}"><div class="db">${escapeHtml(month)}<b>${escapeHtml(day)}</b></div><div><h3>${escapeHtml(plainText(event.title))}</h3><p>${escapeHtml(plainText(event.description) || eventWhere(event))}</p></div><span class="ev-tag">${escapeHtml(tag.label)}</span></article>`;
+  return `<article class="ev${tag.className ? ` ${tag.className}` : ''}"><div class="db">${escapeHtml(month)}<b>${escapeHtml(day)}</b></div><div><h3>${wrapTitleHtml(event.title)}</h3><p>${escapeHtml(plainText(event.description) || eventWhere(event))}</p></div><span class="ev-tag">${escapeHtml(tag.label)}</span></article>`;
 }
 
 export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
@@ -203,7 +203,7 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
   const deal = isHardcodedRetailDeal(dealHtml) ? '' : String(dealHtml || '').trim();
   return `<div class="nf-flag">Save the date</div>
       <div class="nf-kicker">Next fundraiser</div>
-      <h2>${escapeHtml(plainText(event.title)).replace(/\//g, "/<wbr>")}</h2>
+      <h2>${wrapTitleHtml(event.title)}</h2>
       <div class="nf-date"><b>${escapeHtml(span || when.short)}</b>${time}</div>
       ${where ? `<p class="nf-where">${escapeHtml(where)}</p>` : ''}
       ${deal ? `<p class="nf-deal">${deal}</p>` : ''}
@@ -225,7 +225,7 @@ export function renderFeaturedFundraiser(event, { flyer = '', dealHtml = '' } = 
   return `${media}
       <div class="ff-body">
         <div class="pill-row"><span class="pill pill-gold">Featured fundraiser</span>${Number(event.must_attend) ? '<span class="pill pill-red">Band members must attend</span>' : ''}</div>
-        <h3>${escapeHtml(plainText(event.title))}</h3>
+        <h3>${wrapTitleHtml(event.title)}</h3>
         ${sub ? `<p class="ff-sub">${escapeHtml(sub)}</p>` : ''}
         <dl class="ff-facts">
           <div><dt>When</dt><dd>${escapeHtml(span || when.long || when.short)}${timeLine}</dd></div>
@@ -247,7 +247,7 @@ export function renderOtherFundraiserCard(event) {
   return `<article class="fund-card photo-card" style="--img:url('/assets/home/home2-13.jpg')">
         <div class="fc-top"><span class="pill pill-light">Fundraiser${span ? ` · ${escapeHtml(span)}` : ''}</span></div>
         <div class="fc-body">
-          <h3>${escapeHtml(plainText(event.title))}</h3>
+          <h3>${wrapTitleHtml(event.title)}</h3>
           <p>${escapeHtml(plainText(event.description) || 'See the calendar for details.')}</p>
           <a class="btn btn-gold btn-sm" href="/volunteer.html">I can help</a>
         </div>
@@ -1091,3 +1091,8 @@ export function buildHomeRedesignDocument({ heroCardHtml = DEFAULT_HERO_CARD } =
 </div>`;
 }
 
+
+// Escaped title with a soft break after each "/" so "Fundraiser/Silent Auction" wraps in narrow cards.
+function wrapTitleHtml(title) {
+  return escapeHtml(plainText(title)).replace(/\//g, "/<wbr>");
+}

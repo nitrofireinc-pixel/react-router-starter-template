@@ -330,3 +330,11 @@ test('home next-fundraiser heading wraps instead of clipping', () => {
   assert.match(css, /\.home-redesign \.next-fund h2\{white-space:normal;overflow-wrap:anywhere;/);
   assert.match(readFileSync(join(root, 'worker/src/home-redesign.mjs'), 'utf8'), /replace\(\/\\\/\/g, "\/<wbr>"\)/);
 });
+
+test('home fund-card titles wrap and grid children can shrink', () => {
+  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
+  assert.match(css, /\.home-redesign \.fund-card h3,[^{]*\{white-space:normal;overflow-wrap:anywhere;/);
+  assert.match(css, /\.home-redesign \.fc-body>\*/);
+  const src = readFileSync(join(root, 'worker/src/home-redesign.mjs'), 'utf8');
+  assert.doesNotMatch(src, /<h3>\$\{escapeHtml\(plainText\(event\.title\)\)\}<\/h3>/);
+});

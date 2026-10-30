@@ -1322,3 +1322,6 @@ body.efhs-theme .fundraising-hero-card,
 .home-redesign .btn.btn-block{white-space:normal;text-align:center;line-height:1.25;min-width:0;max-width:100%}
 /* Long fundraiser titles ("Fundraiser/Silent Auction") wrap instead of clipping at tablet widths. */
 .home-redesign .next-fund h2{white-space:normal;overflow-wrap:anywhere;word-break:normal;min-width:0;max-width:100%}
+/* Card titles in home card rows wrap instead of clipping (live 768 FAIL on fund-card h3). */
+.home-redesign .fund-card,.home-redesign .fund-card>*,.home-redesign .fc-body,.home-redesign .fc-body>*,.home-redesign [data-home-slot="other-funds"]>*{min-width:0;max-width:100%}
+.home-redesign .fund-card h3,.home-redesign .ev h3,.home-redesign .next-fund h2{white-space:normal;overflow-wrap:anywhere;word-break:normal;min-width:0;max-width:100%}
