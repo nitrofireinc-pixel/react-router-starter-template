@@ -1542,3 +1542,7 @@ body.efhs-theme .footer .footer-disclaimer{
   body.efhs-theme header.site-header .brand{position:relative;left:auto;transform:none}
   body.efhs-theme header.site-header .brand [data-site-field="title"]{align-items:center;text-align:center}
 }
+/* Title text optically centered: logo and mark sit in equal 1fr side tracks. */
+body.efhs-theme header.site-header .brand{display:inline-grid;grid-template-columns:1fr auto 1fr;align-items:center;justify-content:center}
+body.efhs-theme header.site-header .brand .brand-logo{justify-self:end}
+body.efhs-theme header.site-header .brand .brand-mark{justify-self:start}
