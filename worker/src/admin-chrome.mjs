@@ -115,6 +115,7 @@ export function buildAdminNavModel(options = {}) {
       label: 'Website',
       items: [
         item('pages', 'Pages', 'pages', tabHref('pages'), { hidden: !pagesAllowed && !pages.length, keywords: 'edit page website' }),
+        item('news', 'News', '', '/admin/news', { perm: 'news', attrs: 'data-nav-href="/admin/news"', keywords: 'news story announcement headline' }),
         item('themes', 'Themes', '', '/admin?tab=site#studio-theme', { perm: 'themes', admin: true, attrs: 'data-nav-href="/admin?tab=site#studio-theme"', keywords: 'colors fonts buttons' }),
       ],
     },
@@ -246,6 +247,7 @@ function resolveCurrentKey(current = {}, items) {
   const slug = String(current.slug || current.page || '').trim().toLowerCase();
   const tab = String(current.tab || '').trim().toLowerCase();
   if (route === 'fundraiser-cards' || tab === 'fundraiser-cards') return 'fundraiser-cards';
+  if (route === 'news') return 'news';
   if (route === 'events-manager') return 'events-manager';
   if (route === 'people') return 'people';
   if (route === 'forms-builder') return current.view === 'subs' ? 'forms-subs' : 'forms-builder';
@@ -263,7 +265,7 @@ function resolveCurrentKey(current = {}, items) {
 }
 
 const NAV_ITEM_ICONS = {
-  dashboard: '🏠', pages: '📄', themes: '🎨', 'events-manager': '📅', 'fundraiser-cards': '🎟️', ledger: '📒', checkout: '💳',
+  dashboard: '🏠', pages: '📄', themes: '🎨', 'events-manager': '📅', 'fundraiser-cards': '🎟️', news: '📰', ledger: '📒', checkout: '💳',
   sponsors: '🤝', 'sponsors-page': '📰', 'become-a-sponsor': '⭐', 'booster-members': '🏅', minutes: '📝', 'badge-creator': '🪪',
   staff: '🎓', ensembles: '🎺', photos: '🖼️', social: '📣', 'forms-builder': '🧩', 'forms-subs': '📥', forms: '🗂️', mail: '✉️',
   contact: '📞', people: '👥', users: '👤', site: '⚙️', 'security-log': '🔐',

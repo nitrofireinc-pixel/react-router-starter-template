@@ -162,6 +162,18 @@ import {
   updateFundraiserCard,
 } from './fundraiser-cards.mjs';
 import {
+  NEWS_ADMIN_JS,
+  NEWS_CACHE_KEYS,
+  listPublicNews,
+  loadHomeNewsCandidates,
+  pickHomeNews,
+  renderHomeNewsStripHtml,
+  renderNewsAdminHtml,
+  renderNewsItemBody,
+  renderNewsListBody,
+  routeNewsApi,
+} from './news.mjs';
+import {
   loadPageBlocksState,
   mergePublicPageBlocks,
   pageBlockFieldDiffs,
@@ -260,6 +272,7 @@ import {
   renderAdminChromeBar,
   renderAdminSidebarBackdrop,
   renderAdminSidebarHtml,
+  sidebarPageLabel,
   adminNavAssetVersion,
 } from './admin-chrome.mjs';
 import {
@@ -333,6 +346,7 @@ const SOCIAL_ICONS = {
 
 export const DEFAULT_SITE = {
   page_seo: '{}',
+  news_home_json: '[]',
   title: 'East Forsyth Band Boosters',
   hero_title: 'Sound. Spirit. Eagle Pride.',
   hero_subtitle: 'A polished home for the East Forsyth Band program — built for students, families, alumni, sponsors, and the Kernersville community.',
@@ -596,7 +610,7 @@ export const LOGIN_HINT_COOKIE = 'efhs_li';
 export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const TEXT = new TextEncoder();
 const READ_TEXT = new TextDecoder();
-const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising', 'director'];
+const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president', 'vice-president', 'staff', 'boosters', 'users', 'mail', 'events', 'events:manage', 'photos', 'contact', 'minutes:edit', 'badges', 'forms', 'fundraising', 'director', 'news'];
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
@@ -8318,6 +8332,8 @@ export function adminSidebarAllows(user, tab) {
       return hasPermission(user, 'pages');
     case 'fundraiser-cards':
       return canEditFundraiserCards(user, fundraiserPerms());
+    case 'news':
+      return canEditNews(user);
     case 'pages':
       return hasPermission(user, 'pages')
         || parsePermissions(user.permissions).some((item) => /^(page|layout):/.test(String(item)));
@@ -9834,8 +9850,88 @@ async function routeFundraiserCardsApi(request, env, url, ctx = null) {
   return jsonResponse({ detail: 'Method not allowed' }, 405);
 }
 
+function canEditNews(user) {
+  return hasPermission(user, 'news') || hasPermission(user, 'site');
+}
+
+function newsApiDeps(env, ctx) {
+  return {
+    json: jsonResponse,
+    sameOrigin: peopleSameOrigin,
+    sanitize: (html) => sanitizePageSectionHtml(html),
+    purge: async () => {
+      const rows = await loadHomeNewsCandidates(env);
+      await env.DB.prepare('INSERT INTO site_content (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .bind('news_home_json', JSON.stringify(rows)).run();
+      await invalidatePublicReadKeys([...NEWS_CACHE_KEYS, 'site']);
+    },
+    requireNews: async (request, e) => {
+      const auth = await requireLogin(request, e);
+      if (auth.response) return auth;
+      if (!canEditNews(auth.user)) return { response: jsonResponse({ detail: 'Permission required: news' }, 403) };
+      return auth;
+    },
+    audit: async (request, user, action, before, after) => {
+      const path = new URL(request.url).pathname;
+      const method = String(request.method || 'POST').toUpperCase();
+      await enqueueAdminAudit(env, ctx, {
+        request, action, category: 'news', method, path, status: 200,
+        actor_user_id: user?.id, actor_username: user?.username,
+        ip: requestClientIp(request), user_agent: request.headers.get('user-agent') || '',
+        summary: buildAuditSummary({ action, method, path, status: 200, actorUsername: user?.username, detail: String(after?.headline || before?.headline || '').slice(0, 80) }),
+        meta: { before: before || null, after: after || null },
+      });
+    },
+  };
+}
+
+async function handleNewsAdminPage(request, env) {
+  await initDb(env);
+  const session = await inspectSessionCookie(request, env);
+  if (session.d1Error) return d1UnavailableHtml('/admin/news');
+  const user = session.user;
+  if (!user) return redirect('/admin/login?next=/admin/news');
+  if (!canEditNews(user)) return renderErrorPage(403, { request, env, url: new URL(request.url), loggedIn: true, detail: 'Permission required: news' });
+  const nav = await loadAdminNavContext(env, user, { route: 'news' });
+  const v = ASSET_VERSION;
+  const navV = adminNavAssetVersion(v);
+  const pages = (nav.pages || []).filter((pg) => pg && pg.path && Number(pg.active) !== 0).map((pg) => ({ title: sidebarPageLabel(pg), path: pg.path }));
+  return attachLoginHintIfNeeded(request, htmlResponse(renderNewsAdminHtml(v, {
+    head: `<link rel="stylesheet" href="/styles.css?v=${v}"><link rel="stylesheet" href="/admin-nav.css?v=${navV}">`,
+    top: renderAdminChromeBar({ assetVersion: v, user }) + renderAdminSidebarBackdrop(),
+    sidebar: renderAdminSidebarHtml(v, { ...nav, user }),
+    scripts: `<script src="/admin-nav.js?v=${navV}"></script>`,
+  }, [{ title: 'News', path: '/news' }, ...pages])), user);
+}
+
+async function renderNewsPublicPage(request, env, url, ctx, itemId = 0) {
+  const today = easternTodayIso();
+  const chrome = await loadPublicChromeReads(env, today, ctx);
+  const site = chrome.site || {};
+  let items = [];
+  try { items = await cachedPublicRead('news:list', () => listPublicNews(env, today), { ctx }); } catch { items = []; }
+  const item = itemId ? items.find((i) => Number(i.id) === itemId) : null;
+  if (itemId && !item) return renderPublicNotFound(env, url, { ctx });
+  const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents || [], today);
+  return htmlResponse(renderCmsPage({
+    slug: 'news', path: url.pathname, title: item ? item.headline : 'News', is_home: 0, active: 1,
+    body_html: item ? renderNewsItemBody(item, (h) => sanitizePageSectionHtml(h)) : renderNewsListBody(items),
+  }, site, chrome.pages || [], [], [], [], chrome.sponsors || [], {
+    photos: [], showSponsorMarquee: true,
+    deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+    publicRead: { site, sponsors: chrome.sponsors || [], photos: [], deadlineBanners, square: null },
+  }));
+}
+
 async function routeApi(request, env, url, ctx = null) {
   if (url.pathname === '/health') return jsonResponse({ ok: true });
+  if (url.pathname === '/api/news/admin.js') {
+    return new Response(NEWS_ADMIN_JS, { headers: { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'private, max-age=60' } });
+  }
+  if (url.pathname.startsWith('/api/admin/news') || url.pathname.startsWith('/api/news/image/')) {
+    const newsResponse = await routeNewsApi(request, env, url, newsApiDeps(env, ctx));
+    if (newsResponse) return newsResponse;
+  }
   const fundraiserCardsResponse = await routeFundraiserCardsApi(request, env, url, ctx);
   if (fundraiserCardsResponse) return fundraiserCardsResponse;
   if (url.pathname.startsWith('/api/forms-v2/') || url.pathname.startsWith('/api/admin/forms-v2') || url.pathname.startsWith('/api/admin/link-reviews') || url.pathname.startsWith('/api/admin/studio-notices')) {
@@ -15108,7 +15204,7 @@ function mergePublicFundraiserEvents(primary = [], fallback = []) {
   return merged;
 }
 
-function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], fundraiserCards = [], fundraiserBlocks = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '' } = {}) {
+function renderCmsPage(page, site, pages, sponsors = [], staff = [], boosterMembers = [], marqueeSponsors = null, { maintenancePreview = false, loggedIn = false, deadlineBannersHtml = '', photos = [], calendarHighlights = null, home = null, publicRead = null, showSponsorMarquee = null, deadlineEvents = [], fundraiserEvents = [], fundraiserCards = [], fundraiserBlocks = [], extraStylesheets = [], extraBodyClasses = [], extraHead = '', newsStripHtml = '' } = {}) {
   const seoNoindex = page.slug === 'not-found' || String(page.slug || '').startsWith('error-') || Boolean(extraHead);
   const seo = renderSeoHead(page, site, { noindex: seoNoindex });
   const title = seo.title;
@@ -15195,6 +15291,7 @@ ${previewBanner}
 <header class="site-header"><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu"><span class="menu-button-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="sr-only">Menu</span></button><div class="header-inner"><a class="brand" href="/"><img class="brand-logo" width="71" height="44" src="${escapeAttr(site.logo_url || '/assets/efhs-logo.png')}" alt="${escapeAttr(site.title)} logo"><span data-site-field="title">${formatHeaderBrandTitle(site.title)}</span><img class="brand-mark" width="48" height="48" src="${escapeAttr(PUBLIC_BRAND_MARK)}" alt="East Forsyth Blue Regiment"></a></div><div class="mobile-nav-tray" data-mobile-nav-tray><div class="header-quick-actions" data-header-quick-actions></div></div><div class="nav-backdrop" data-nav-backdrop hidden></div><nav id="site-nav" aria-label="Main navigation">${renderNav(pages, { loggedIn, currentPath: page.path })}</nav><a class="btn gold header-donate" href="/fundraising.html" data-donate-open><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.1 5.4 3 1.8-1.9 3.3-3 5.4-3 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>Donate</a>${renderLettermanDeadlineBanner()}</header>
 ${marqueeHtml}
 ${deadlineHtml}
+${newsStripHtml}
 <main id="main">${bodyHtml}</main>
 <footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${pages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${pages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div><p class="footer-disclaimer">East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.</p></footer>
 ${isHomePage ? renderHomeStickySupport() : ''}
@@ -15611,6 +15708,11 @@ async function serveStaticOrCms(request, env, url, ctx) {
       const fundraiserBlocks = isFundraising
         ? mergePublicPageBlocks(pageBlockRows, fundraiserCards)
         : [];
+      let newsStripHtml = '';
+      if (isHome) {
+        // Home candidates ride in the site_content read (0 extra D1 queries); expiry is checked here.
+        try { newsStripHtml = renderHomeNewsStripHtml(pickHomeNews(JSON.parse(reads.site?.news_home_json || '[]'), today)); } catch { newsStripHtml = ''; }
+      }
       if (pageIsLive && page.slug === 'letterman-jacket' && !isCmsFormPage(livePage)) {
         livePage.letterman_copy = await getLettermanFormCopy(env);
       }
@@ -15619,6 +15721,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
         loggedIn,
         photos,
         deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+        newsStripHtml,
         calendarHighlights: null,
         home,
         deadlineEvents: reads.deadlineEvents,
@@ -15760,6 +15863,9 @@ async function dispatchWorker(request, env, ctx) {
     if (url.pathname === '/caldev' || url.pathname === '/caldev/' || url.pathname === '/caldev.html') {
       return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
     }
+    if ((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/news' || url.pathname === '/news/' || /^\/news\/\d+$/.test(url.pathname))) {
+      return renderNewsPublicPage(request, env, url, ctx, Number(url.pathname.split('/')[2] || 0));
+    }
     if (url.pathname === '/calendar' || url.pathname === '/calendar/') {
       return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
     }
@@ -15791,6 +15897,7 @@ async function dispatchWorker(request, env, ctx) {
       if (/^[a-z0-9-]+$/.test(slug) && !CLASSIC_EDITOR_SLUGS.has(slug)) return redirect(classicPageRedirectTarget(slug));
     }
     if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
+    if (url.pathname === '/admin/news' || url.pathname === '/admin/news/') return handleNewsAdminPage(request, env);
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
       return handleFundraiserCardsPage(request, env, ctx);
     }
