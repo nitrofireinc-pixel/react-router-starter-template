@@ -255,6 +255,7 @@ $('#nw-lib').onclick = (e) => { const b = e.target.closest('[data-src]'); if (b)
 loadLibrary();
 function linkMark() { const v = field('link_url').value; let label = 'No button'; document.querySelectorAll('#nw-link-menu [data-href]').forEach((b) => { const on = b.dataset.href === v; b.classList.toggle('on', on); if (on) label = b.textContent; }); $('#nw-link-btn').textContent = label + ' ▾'; }
 $('#nw-link-btn').onclick = () => { $('#nw-link-menu').hidden = !$('#nw-link-menu').hidden; };
+document.addEventListener('keydown', (e) => { if (e.key !== 'Escape' || $('#nw-link-menu').hidden) return; e.preventDefault(); e.stopImmediatePropagation(); $('#nw-link-menu').hidden = true; $('#nw-link-btn').focus(); }, true);
 $('#nw-link-menu').onclick = (e) => { const b = e.target.closest('[data-href]'); if (!b) return; field('link_url').value = b.dataset.href; linkMark(); $('#nw-link-menu').hidden = true; };
 function seg() { document.querySelectorAll('.nw-seg button').forEach((b) => b.classList.toggle('on', (b.dataset.pub === '1') === field('published').checked)); }
 document.querySelector('.nw-seg').onclick = (e) => { const b = e.target.closest('[data-pub]'); if (b) { field('published').checked = b.dataset.pub === '1'; seg(); } };

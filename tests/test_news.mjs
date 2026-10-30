@@ -69,3 +69,7 @@ test('library lists studio uploads and gallery photos as thumbnails', async () =
   const r = await routeNewsApi(new Request('https://x/api/admin/news/library'), env, new URL('https://x/api/admin/news/library'), deps);
   assert.deepEqual((await r.json()).photos, ['/api/news/image/11111111-1111-1111-1111-111111111111.jpg', '/uploads/123-abc.jpg']);
 });
+test('Escape closes the link list only and refocuses the trigger', async () => {
+  const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
+  assert.match(NEWS_ADMIN_JS, /e\.key !== 'Escape' \|\| \$\('#nw-link-menu'\)\.hidden\) return; e\.preventDefault\(\); e\.stopImmediatePropagation\(\); \$\('#nw-link-menu'\)\.hidden = true; \$\('#nw-link-btn'\)\.focus\(\);/);
+});
