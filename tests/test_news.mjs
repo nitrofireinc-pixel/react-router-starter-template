@@ -21,7 +21,8 @@ test('expired, draft and not-on-home items are hidden; newest wins', () => {
   const html = renderHomeNewsStripHtml({ id: 5, headline: '<b>Hi</b>', teaser: 't', news_date: '2026-10-25' });
   assert.match(html, /href="\/news\/5"/);
   assert.match(html, /&lt;b&gt;Hi/);
-  assert.match(html, /All news →/);
+  assert.match(html, /All news <\/span>→/);
+  assert.match(html, /\.news-all-txt\{display:none\}/); // Q80 phone arrow
 });
 test('pinned first', () => {
   const s = sortNews([{ id: 1, pinned: 0, news_date: '2026-10-30' }, { id: 2, pinned: 1, news_date: '2026-01-01' }]);
@@ -31,6 +32,7 @@ test('image validation: 10 MB max, image types only', () => {
   assert.equal(validateNewsImage(NEWS_IMAGE_MAX_BYTES, png).mime, 'image/png');
   assert.match(validateNewsImage(NEWS_IMAGE_MAX_BYTES + 1, png).error, /10 MB/);
   assert.match(validateNewsImage(100, new TextEncoder().encode('<svg onload=x>')).error, /Only JPG/);
+  assert.ok(validateNewsImage(100, new TextEncoder().encode('GIF89a')).error, 'GIF dropped for news');
 });
 test('payload rejects typed external links and photo URLs', () => {
   const n = normalizeNewsPayload({ headline: 'X', link_url: 'https://evil.example', photo_url: 'javascript:x', teaser: 'a'.repeat(300) });
@@ -47,7 +49,8 @@ test('upload requires admin auth', async () => {
 });
 test('upload rejects oversize and stores valid image in R2', async () => {
   const puts = [];
-  const env = { FILES: { put: async (k) => puts.push(k) } };
+  const rows = [];
+  const env = { FILES: { put: async (k) => puts.push(k) }, DB: { prepare: () => ({ bind: (...a) => ({ run: async () => rows.push(a) }) }) } };
   const deps = { requireNews: async () => ({ user: { id: 1 } }), sameOrigin: () => true, json: (b, s = 200) => Response.json(b, { status: s }), audit: async () => {}, purge: async () => {} };
   const big = new FormData(); big.append('file', new File([new Uint8Array(NEWS_IMAGE_MAX_BYTES + 1)], 'a.png'));
   const r1 = await routeNewsApi(new Request('https://x/api/admin/news/upload', { method: 'POST', body: big }), env, new URL('https://x/api/admin/news/upload'), deps);
@@ -56,4 +59,5 @@ test('upload rejects oversize and stores valid image in R2', async () => {
   const r2 = await routeNewsApi(new Request('https://x/api/admin/news/upload', { method: 'POST', body: ok }), env, new URL('https://x/api/admin/news/upload'), deps);
   assert.equal(r2.status, 201);
   assert.match(puts[0], /^news\/[a-f0-9-]{36}\.png$/);
+  assert.equal(rows[0][0], puts[0]); // joins the library
 });

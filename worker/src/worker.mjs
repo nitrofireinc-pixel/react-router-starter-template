@@ -9851,7 +9851,8 @@ async function routeFundraiserCardsApi(request, env, url, ctx = null) {
 }
 
 function canEditNews(user) {
-  return hasPermission(user, 'news') || hasPermission(user, 'site');
+  // Q78: Admin/Editor (site), President, Secretary (minutes:edit) by default; Super Admin always.
+  return hasPermission(user, 'news') || hasPermission(user, 'site') || hasPermission(user, 'president') || hasPermission(user, 'minutes:edit');
 }
 
 function newsApiDeps(env, ctx) {

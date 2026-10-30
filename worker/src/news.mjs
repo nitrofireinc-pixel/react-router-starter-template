@@ -1,6 +1,6 @@
 // Plan 2.26 News card + /news page (17a). Images go to R2 (env.FILES, key news/<uuid>.<ext>), 10 MB max.
 export const NEWS_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-export const NEWS_IMAGE_TYPES = Object.freeze({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' });
+export const NEWS_IMAGE_TYPES = Object.freeze({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' });
 export const NEWS_CACHE_KEYS = Object.freeze(['news:home', 'news:list']);
 const COLS = 'id, headline, teaser, body_html, photo_url, link_url, news_date, published, pinned, show_on_home, expires_at, sort_order, updated_at';
 
@@ -10,7 +10,6 @@ export function sniffNewsImage(bytes) {
   const b = bytes || new Uint8Array();
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
   if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
   return '';
 }
@@ -20,7 +19,7 @@ export function validateNewsImage(size, headBytes) {
   if (!size) return { error: 'The file is empty.' };
   if (size > NEWS_IMAGE_MAX_BYTES) return { error: `That photo is ${(size / 1048576).toFixed(1)} MB. Photos must be 10 MB or smaller.` };
   const mime = sniffNewsImage(headBytes);
-  if (!mime) return { error: 'Only JPG, PNG, WebP or GIF photos can be uploaded.' };
+  if (!mime) return { error: 'Only JPG, PNG or WebP photos can be uploaded.' };
   return { mime, ext: NEWS_IMAGE_TYPES[mime] };
 }
 
@@ -52,7 +51,7 @@ export function safeNewsLink(v) {
 }
 export function safeNewsPhoto(v) {
   const s = String(v || '').trim();
-  return /^\/api\/news\/image\/[a-f0-9-]{36}\.(jpg|png|webp|gif)$/.test(s) || /^\/uploads\/[\w\-.%]+$/.test(s) ? s : '';
+  return /^\/api\/news\/image\/[a-f0-9-]{36}\.(jpg|png|webp)$/.test(s) || /^\/uploads\/[\w\-.%/]+$/.test(s) ? s : '';
 }
 
 export function normalizeNewsPayload(p = {}) {
@@ -74,11 +73,11 @@ export function normalizeNewsPayload(p = {}) {
   };
 }
 
-const STRIP_CSS = '<style id="news-strip-css">.news-strip{background:#fff;border-bottom:3px solid #f2c200}.news-strip .wrap{display:flex;align-items:center;gap:16px;padding:10px 0}.news-strip .news-tag{background:#0b2a5b;color:#fff;font:700 12px/1 system-ui,sans-serif;letter-spacing:.08em;padding:6px 10px;border-radius:4px}.news-strip .news-main{flex:1;min-width:0}.news-strip .news-head{color:#0b2a5b;font-weight:700;text-decoration:none}.news-strip .news-meta{color:#555;font-size:13px;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.news-strip .news-all{color:#0b2a5b;font-weight:700;text-decoration:none;white-space:nowrap}@media(max-width:640px){.news-strip .wrap{flex-wrap:wrap;gap:6px 10px}.news-strip .news-meta{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}</style>';
+const STRIP_CSS = '<style id="news-strip-css">.news-strip{background:#fff;border-bottom:3px solid #f2c200}.news-strip .wrap{display:flex;align-items:center;gap:16px;padding:10px 0}.news-strip .news-tag{background:#0b2a5b;color:#fff;font:700 12px/1 system-ui,sans-serif;letter-spacing:.08em;padding:6px 10px;border-radius:4px}.news-strip .news-main{flex:1;min-width:0}.news-strip .news-head{color:#0b2a5b;font-weight:700;text-decoration:none}.news-strip .news-meta{color:#555;font-size:13px;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.news-strip .news-all{color:#0b2a5b;font-weight:700;text-decoration:none;white-space:nowrap}@media(max-width:640px){.news-strip .wrap{flex-wrap:nowrap;gap:6px 10px}.news-strip .news-all-txt{display:none}.news-strip .news-all{font-size:20px;padding:0 4px}.news-strip .news-head{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.news-strip .news-meta{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}</style>';
 
 export function renderHomeNewsStripHtml(item) {
   if (!item) return '';
-  return `${STRIP_CSS}<section class="news-strip" aria-label="Latest news"><div class="wrap"><span class="news-tag">NEWS</span><div class="news-main"><a class="news-head" href="/news/${Number(item.id)}">${esc(item.headline)}</a><p class="news-meta">${esc(fmtDate(item.news_date))}${item.teaser ? ` · ${esc(item.teaser)}` : ''}</p></div><a class="news-all" href="/news">All news →</a></div></section>`;
+  return `${STRIP_CSS}<section class="news-strip" aria-label="Latest news"><div class="wrap"><span class="news-tag">NEWS</span><div class="news-main"><a class="news-head" href="/news/${Number(item.id)}">${esc(item.headline)}</a><p class="news-meta">${esc(fmtDate(item.news_date))}${item.teaser ? ` · ${esc(item.teaser)}` : ''}</p></div><a class="news-all" href="/news" aria-label="All news"><span class="news-all-txt">All news </span>→</a></div></section>`;
 }
 
 const PAGE_CSS = '<style>.news-page{max-width:880px;margin:32px auto;padding:0 16px}.news-card{display:flex;gap:18px;background:#fff;border:1px solid #dde3ee;border-radius:12px;padding:16px;margin:0 0 16px}.news-card.pinned{border:2px solid #f2c200}.news-card img{width:200px;height:130px;object-fit:cover;border-radius:8px}.news-card h2{margin:0 0 4px;font-size:1.25rem}.news-card h2 a{color:#0b2a5b;text-decoration:none}.news-date{color:#666;font-size:.9rem}.news-article img{max-width:100%;border-radius:10px}@media(max-width:640px){.news-card{flex-direction:column}.news-card img{width:100%;height:180px}}</style>';
@@ -102,10 +101,15 @@ export async function loadHomeNewsCandidates(env) {
   return res?.results || [];
 }
 
+export function newsPhotoUrlForKey(key) {
+  const k = String(key || '');
+  return safeNewsPhoto(k.startsWith('news/') ? `/api/news/image/${k.slice(5)}` : `/uploads/${k}`);
+}
+
 /** /api/admin/news*, /api/news/image/*. deps: { requireNews, json, audit(request,user,action,before,after), purge(), sameOrigin } */
 export async function routeNewsApi(request, env, url, deps) {
   const p = url.pathname;
-  const img = p.match(/^\/api\/news\/image\/([a-f0-9-]{36}\.(?:jpg|png|webp|gif))$/);
+  const img = p.match(/^\/api\/news\/image\/([a-f0-9-]{36}\.(?:jpg|png|webp))$/);
   if (img && (request.method === 'GET' || request.method === 'HEAD')) {
     const obj = env.FILES ? await env.FILES.get(`news/${img[1]}`) : null;
     if (!obj) return new Response('Not found', { status: 404 });
@@ -116,6 +120,10 @@ export async function routeNewsApi(request, env, url, deps) {
   if (auth.response) return auth.response;
   const user = auth.user;
   if (request.method !== 'GET' && !deps.sameOrigin(request, url)) return deps.json({ detail: 'Cross-site request blocked' }, 403);
+  if (p === '/api/admin/news/library' && request.method === 'GET') {
+    const res = await env.DB.prepare("SELECT r2_key FROM studio_files WHERE kind = 'image' AND mime IN ('image/jpeg','image/png','image/webp') ORDER BY rowid DESC LIMIT 24").all();
+    return deps.json({ photos: (res?.results || []).map((row) => newsPhotoUrlForKey(row.r2_key)).filter(Boolean) });
+  }
   if (p === '/api/admin/news/upload' && request.method === 'POST') {
     if (!env.FILES) return deps.json({ detail: 'Photo storage is not set up' }, 503);
     const len = Number(request.headers.get('content-length') || 0);
@@ -128,7 +136,14 @@ export async function routeNewsApi(request, env, url, deps) {
     if (check.error) return deps.json({ detail: check.error }, 422);
     const name = `${crypto.randomUUID()}.${check.ext}`;
     await env.FILES.put(`news/${name}`, buf, { httpMetadata: { contentType: check.mime } });
-    await deps.audit(request, user, 'news.photo_upload', null, { key: `news/${name}`, bytes: buf.byteLength });
+    try {
+      await env.DB.prepare('INSERT INTO studio_files (r2_key, kind, mime, size, original_name, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(`news/${name}`, 'image', check.mime, buf.byteLength, String(file.name || '').slice(0, 200), user.id ?? null).run();
+    } catch {
+      await env.FILES.delete(`news/${name}`).catch(() => {});
+      return deps.json({ detail: 'Could not add the photo to the library. Please try again.' }, 500);
+    }
+    await deps.audit(request, user, 'news.photo_upload', null, { key: `news/${name}`, size: buf.byteLength, mime: check.mime });
     return deps.json({ url: `/api/news/image/${name}` }, 201);
   }
   if (p === '/api/admin/news' && request.method === 'GET') {
@@ -178,13 +193,13 @@ export function renderNewsAdminHtml(assetVersion, chrome = {}, pages = []) {
   const v = esc(assetVersion);
   const opts = pages.map((pg) => `<option value="${esc(pg.path)}">${esc(pg.title)}</option>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>News | EFHS Band CMS</title>${chrome.head || ''}
-<style>.nw-wrap{display:grid;grid-template-columns:260px 1fr 320px;gap:16px;padding:16px}.nw-card{background:#fff;border:1px solid #dde3ee;border-radius:12px;padding:14px;margin-bottom:14px}.nw-card h2{font-size:1rem;margin:0 0 8px}.nw-list button.nw-item{display:block;width:100%;text-align:left;border:1px solid transparent;background:none;padding:8px;border-radius:8px;cursor:grab}.nw-list button.nw-item.active{background:#fff6cc;border-color:#f2c200}.nw-item small{display:block;color:#2a7a2a}.nw-wrap label{display:block;font-weight:600;font-size:.85rem;margin:8px 0 4px}.nw-wrap input[type=text],.nw-wrap input[type=date],.nw-wrap select,.nw-wrap textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #c9d2e0;border-radius:8px}.nw-drop{border:2px dashed #9fb0cc;border-radius:10px;padding:14px;display:flex;gap:12px;align-items:center}.nw-drop.over{background:#eef4ff}.nw-photo img{max-width:100%;max-height:160px;border-radius:8px;margin-top:8px}.nw-err{color:#a00;background:#fde8e8;border-radius:8px;padding:8px;margin-top:8px}.nw-err:empty{display:none}.nw-check{display:flex!important;gap:8px;font-weight:400!important}@media(max-width:1000px){.nw-wrap{grid-template-columns:1fr}}</style></head>
+<style>.nw-wrap{display:grid;grid-template-columns:260px 1fr 320px;gap:16px;padding:16px}.nw-card{background:#fff;border:1px solid #dde3ee;border-radius:12px;padding:14px;margin-bottom:14px}.nw-card h2{font-size:1rem;margin:0 0 8px}.nw-list button.nw-item{display:block;width:100%;text-align:left;border:1px solid transparent;background:none;padding:8px;border-radius:8px;cursor:grab}.nw-list button.nw-item.active{background:#fff6cc;border-color:#f2c200}.nw-item small{display:block;color:#2a7a2a}.nw-wrap label{display:block;font-weight:600;font-size:.85rem;margin:8px 0 4px}.nw-wrap input[type=text],.nw-wrap input[type=date],.nw-wrap select,.nw-wrap textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #c9d2e0;border-radius:8px}.nw-drop{border:2px dashed #9fb0cc;border-radius:10px;padding:14px;display:flex;gap:12px;align-items:center}.nw-drop.over{background:#eef4ff}.nw-hint{margin:8px 0 4px;font-size:.85rem;color:#555}.nw-lib{display:flex;flex-wrap:wrap;gap:6px}.nw-lib button{border:2px solid transparent;border-radius:8px;padding:0;background:none;cursor:pointer}.nw-lib button:hover{border-color:#f2c200}.nw-lib img{width:72px;height:54px;object-fit:cover;border-radius:6px;display:block}.nw-photo img{max-width:100%;max-height:160px;border-radius:8px;margin-top:8px}.nw-err{color:#a00;background:#fde8e8;border-radius:8px;padding:8px;margin-top:8px}.nw-err:empty{display:none}.nw-check{display:flex!important;gap:8px;font-weight:400!important}@media(max-width:1000px){.nw-wrap{grid-template-columns:1fr}}</style></head>
 <body class="admin-body sn-body"><main class="admin-shell cms-shell">${chrome.top || ''}${chrome.sidebar || ''}<section class="admin-workspace">
 <div class="nw-wrap">
  <aside class="nw-card"><h2>📰 News</h2><button class="btn primary" type="button" id="nw-new">+ New item</button><div class="nw-list" id="nw-list"></div><p class="muted" style="font-size:.8rem">Drag to set order. Pinned stays on top.</p></aside>
  <form id="nw-form" autocomplete="off"><input type="hidden" name="id"><input type="hidden" name="photo_url">
   <div class="nw-card"><h2 id="nw-title">New news item</h2><label>Headline<input type="text" name="headline" maxlength="140" required></label><label>Teaser (shows on home card, 160 max)<textarea name="teaser" maxlength="160" rows="2"></textarea></label><label>Body</label><div id="nw-body" contenteditable="true" class="form-rich-editor" style="min-height:120px;border:1px solid #c9d2e0;border-radius:8px;padding:8px"></div></div>
-  <div class="nw-card"><h2>Photo</h2><div class="nw-drop" id="nw-drop"><button class="btn primary" type="button" id="nw-upload">⬆ Upload photo</button><span>or drag a photo here · <b>max 10 MB</b> · JPG, PNG, WebP, GIF</span><input type="file" id="nw-file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div><div class="nw-photo" id="nw-photo"></div><button class="btn outline" type="button" id="nw-photo-clear" hidden>Remove photo</button><div class="nw-err" id="nw-photo-err"></div></div>
+  <div class="nw-card"><h2>Photo</h2><div class="nw-drop" id="nw-drop"><button class="btn primary" type="button" id="nw-upload">⬆ Upload photo</button><span>or drag a photo here · <b>max 10 MB</b> · JPG, PNG, WebP</span><input type="file" id="nw-file" accept="image/jpeg,image/png,image/webp" hidden></div><p class="nw-hint">Or pick from the site library:</p><div class="nw-lib" id="nw-lib"></div><div class="nw-photo" id="nw-photo"></div><button class="btn outline" type="button" id="nw-photo-clear" hidden>Remove photo</button><div class="nw-err" id="nw-photo-err"></div></div>
   <div class="nw-card"><h2>Button link (optional)</h2><select name="link_url"><option value="">No button</option>${opts}</select><p class="muted" style="font-size:.8rem">Pick a page. No typing web addresses.</p></div>
  </form>
  <aside><div class="nw-card"><h2>Publish</h2><label class="nw-check"><input type="checkbox" name="published" form="nw-form"> Published (unticked = Draft)</label><label>News date<input type="date" name="news_date" form="nw-form"></label><label>Hide after (optional)<input type="date" name="expires_at" form="nw-form"></label></div>
@@ -195,7 +210,7 @@ export function renderNewsAdminHtml(assetVersion, chrome = {}, pages = []) {
 }
 
 export const NEWS_ADMIN_JS = `(() => {
-const MAX = ${NEWS_IMAGE_MAX_BYTES}, TYPES = ['image/jpeg','image/png','image/webp','image/gif'];
+const MAX = ${NEWS_IMAGE_MAX_BYTES}, TYPES = ['image/jpeg','image/png','image/webp'], EDGE = 2000;
 const $ = (s) => document.querySelector(s), f = $('#nw-form'), st = $('#nw-status');
 let items = [], cur = null;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -212,17 +227,30 @@ function load(i) { cur = i; f.reset(); field('id').value = i ? i.id : ''; $('#nw
   ['published','pinned','show_on_home'].forEach((k) => { field(k).checked = Boolean(i && Number(i[k])); });
   $('#nw-body').innerHTML = (i && i.body_html) || ''; setPhoto(i && i.photo_url); $('#nw-delete').hidden = !i; $('#nw-photo-err').textContent = ''; st.textContent = ''; renderList(); }
 async function refresh(selectId) { items = (await api('/api/admin/news')).items || []; load(items.find((i) => i.id === selectId) || null); }
+// In-browser resize: longest side ≤ 2000 px, re-encoded at 0.82 (WebP kept as WebP, others → JPEG).
+async function shrink(file) {
+  const bmp = await createImageBitmap(file); const scale = Math.min(1, EDGE / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height); bmp.close && bmp.close();
+  const type = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+  const blob = await new Promise((res) => c.toBlob(res, type, 0.82));
+  if (!blob) return file; return (scale === 1 && blob.size >= file.size) ? file : blob; }
+async function loadLibrary() { try { const j = await api('/api/admin/news/library'); $('#nw-lib').innerHTML = (j.photos || []).map((u) => '<button type="button" data-src="' + esc(u) + '"><img src="' + esc(u) + '" alt="" loading="lazy"></button>').join(''); } catch { /* library optional */ } }
 async function upload(file) { const err = $('#nw-photo-err'); err.textContent = '';
-  if (!file) return; if (!TYPES.includes(file.type)) { err.textContent = '"' + file.name + '" is not a JPG, PNG, WebP or GIF photo.'; return; }
+  if (!file) return; if (!TYPES.includes(file.type)) { err.textContent = '"' + file.name + '" is not a JPG, PNG or WebP photo.'; return; }
   if (file.size > MAX) { err.textContent = '"' + file.name + '" is ' + (file.size / 1048576).toFixed(1) + ' MB. Photos must be 10 MB or smaller.'; return; }
-  const fd = new FormData(); fd.append('file', file); st.textContent = 'Uploading photo…';
-  try { const j = await api('/api/admin/news/upload', { method: 'POST', body: fd }); setPhoto(j.url); st.textContent = 'Photo uploaded. Click Save to keep it.'; } catch (e) { err.textContent = e.message; st.textContent = ''; } }
+  st.textContent = 'Shrinking photo…'; let out = file; try { out = await shrink(file); } catch { out = file; }
+  if (out.size > MAX) { err.textContent = 'That photo is still over 10 MB. Try a smaller one.'; st.textContent = ''; return; }
+  const fd = new FormData(); fd.append('file', out, file.name); st.textContent = 'Uploading photo…';
+  try { const j = await api('/api/admin/news/upload', { method: 'POST', body: fd }); setPhoto(j.url); loadLibrary(); st.textContent = 'Photo uploaded. Click Save to keep it.'; } catch (e) { err.textContent = e.message; st.textContent = ''; } }
 $('#nw-upload').onclick = () => $('#nw-file').click();
 $('#nw-file').onchange = (e) => { upload(e.target.files[0]); e.target.value = ''; };
 const drop = $('#nw-drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); }; drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files[0]); };
 $('#nw-photo-clear').onclick = () => setPhoto('');
+$('#nw-lib').onclick = (e) => { const b = e.target.closest('[data-src]'); if (b) setPhoto(b.dataset.src); };
+loadLibrary();
 $('#nw-new').onclick = () => load(null);
 field('headline').oninput = preview;
 $('#nw-list').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) load(items.find((i) => i.id === Number(b.dataset.id))); };
