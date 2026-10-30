@@ -308,6 +308,6 @@ f.onsubmit = async (e) => { e.preventDefault(); const id = field('id').value;
   st.textContent = 'Saving…';
   try { const saved = await api('/api/admin/news' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); await refresh(saved.id); st.textContent = 'Saved. The home card updates within a minute.'; window.efhsSavedToast?.saved('Saved.'); } catch (err) { st.textContent = err.message; window.efhsSavedToast?.failed(err.message); } };
 $('#nw-delete').onclick = async () => { if (!cur || !confirm('Hide this news item from the site?')) return;
-  try { await api('/api/admin/news/' + cur.id, { method: 'DELETE' }); await refresh(cur.id); st.textContent = 'Hidden (set to Draft).'; } catch (err) { st.textContent = err.message; } };
+  try { await api('/api/admin/news/' + cur.id, { method: 'DELETE' }); await refresh(cur.id); st.textContent = 'Hidden (set to Draft).'; window.efhsSavedToast?.saved('Hidden.'); } catch (err) { st.textContent = err.message; window.efhsSavedToast?.failed(err.message); } };
 refresh().catch((e) => { st.textContent = e.message; });
 })();`;

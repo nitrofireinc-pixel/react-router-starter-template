@@ -144,3 +144,16 @@ test('shared Saved toast: moved out of admin.js and wired into News + Fundraiser
   assert.match(w, /admin-saved-toast\.js\?v=\$\{ADMIN_HOME_VERSION\}"><\/script><script src="\/admin\.js/);
   assert.match(w, /admin-saved-toast\.js\?v=\$\{v\}/);
 });
+
+test('shared Saved toast: People presets + News hide wired; CSS file shared', async () => {
+  const fs = await import('node:fs');
+  const r = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  assert.match(r('admin-saved-toast.css'), /\.admin-saved-toast\.is-visible \.admin-saved-toast-panel/);
+  assert.match(r('admin-people.js'), /efhsSavedToast\.saved\("Saved\."\)/);
+  assert.match(r('admin-people.js'), /efhsSavedToast\.failed\(er\.message\)/);
+  const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
+  assert.match(NEWS_ADMIN_JS, /efhsSavedToast\?\.saved\('Hidden\.'\)/);
+  const w = r('worker/src/worker.mjs');
+  assert.match(w, /admin-saved-toast\.css\?v=\$\{ADMIN_NAV_VERSION\}/);
+  assert.match(w, /admin-saved-toast\.js\?v=\$\{ADMIN_NAV_VERSION\}" defer><\/script><script src="\/admin-people\.js/);
+});

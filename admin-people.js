@@ -211,7 +211,7 @@
         var r = b.dataset.preset; out[r] = out[r] || { permissions: [], login_default: 0 };
         if (b.dataset.login) out[r].login_default = b.checked ? 1 : 0; else if (b.checked) out[r].permissions.push(b.dataset.perm);
       });
-      api("/api/admin/people/presets", { method: "PUT", body: out }).then(function (j) { state.data.presets = j.presets; var m = root.querySelector("[data-preset-msg]"); if (m) m.textContent = "Saved."; }).catch(function (er) { alert(er.message); });
+      api("/api/admin/people/presets", { method: "PUT", body: out }).then(function (j) { state.data.presets = j.presets; var m = root.querySelector("[data-preset-msg]"); if (m) m.textContent = "Saved."; if (window.efhsSavedToast) window.efhsSavedToast.saved("Saved."); }).catch(function (er) { if (window.efhsSavedToast) window.efhsSavedToast.failed(er.message); else alert(er.message); });
     }
   });
   root.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.matches("[data-id]")) e.target.click(); });

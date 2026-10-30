@@ -614,13 +614,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261030x';
+export const ASSET_VERSION = 'cms-p2-20261030y';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030x';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030y';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -745,7 +745,7 @@ export function normalizeStaticPath(pathname) {
 
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
-  'admin.js', 'admin-saved-toast.js', 'admin-caldev.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'admin-forms.js', 'admin-forms.css', 'form-studio.js', 'caldev.js', 'site-content.js',
+  'admin.js', 'admin-saved-toast.js', 'admin-saved-toast.css', 'admin-caldev.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'admin-forms.js', 'admin-forms.css', 'form-studio.js', 'caldev.js', 'site-content.js',
   'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
@@ -14771,14 +14771,14 @@ async function handlePeoplePage(request, env) {
   const nav = await loadAdminNavContext(env, user, { route: 'people' }, { skipQueries: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Site Studio · People &amp; Access</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
-<link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-people.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
+<link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-people.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-saved-toast.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app pp-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-site-admin="${isSiteAdminOrAbove(user) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · People &amp; Access</span></a>
 <div class="ev-top-right"><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
 ${renderAdminNavFragment(nav)}
 <div class="ev-body">
 <main class="ev-main pp-main" id="pp-root" aria-label="People and Access"><p class="ev-loading">Loading people…</p></main></div>
-<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-people.js?v=${ADMIN_NAV_VERSION}" defer></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-saved-toast.js?v=${ADMIN_NAV_VERSION}" defer></script><script src="/admin-people.js?v=${ADMIN_NAV_VERSION}" defer></script></body></html>`;
   return attachLoginHintIfNeeded(request, htmlResponse(html), user);
 }
 
