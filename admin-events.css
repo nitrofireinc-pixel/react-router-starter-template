@@ -26,7 +26,9 @@ body.ev-focus .ev-top,body.ev-focus .ev-rail{display:none}
 .ev-bar-l,.ev-bar-r,.ev-bar2-r,.ev-show{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ev-h1{margin:0 6px 0 0;font-size:16px;font-weight:800;color:var(--n)}
 .ev-btn{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--n);font-weight:700;font-size:13px;padding:0 11px;white-space:nowrap}
-.ev-btn:hover{background:#f1f5fc}
+@media (hover:hover){.ev-btn:hover{background:#f1f5fc}}
+.ev-btn:focus{outline:none}.ev-btn:focus-visible{outline:2px solid #2f7de1;outline-offset:1px}
+.ev-btn[aria-expanded="true"]{background:#dbe7fb}
 .ev-btn:disabled{opacity:.45;cursor:default}
 .ev-btn small{font-weight:500;color:var(--mut)}
 .ev-btn[aria-pressed="true"]{background:#dbe7fb}
