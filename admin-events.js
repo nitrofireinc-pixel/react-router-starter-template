@@ -230,7 +230,7 @@
     ${canNotify ? '<button type="button" class="ev-btn ev-finished" data-act="finished">✉ Finished: notify subscribers</button>' : ""}
   </div>
 </div>
-<div class="cms-caldev-deadline-banners ev-banners" data-banners hidden></div>
+<div class="ev-banners" data-banners hidden></div>
 <div class="ev-undated" data-undated hidden></div>
 <div class="ev-grid" data-grid role="grid" aria-label="Month"></div>
 <section class="ev-daylist" data-daylist aria-live="polite"></section>
@@ -859,7 +859,7 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
     if (!host.hidden) { host.hidden = true; btn.setAttribute("aria-expanded", "false"); return; }
     host.hidden = false; btn.setAttribute("aria-expanded", "true"); host.innerHTML = '<p class="ev-banners-note">Loading…</p>';
     const items = await fetch("/api/caldev/deadline-banners", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
-    host.innerHTML = (items.length ? items.map((i) => `<div class="caldev-deadline-banner" role="status">${esc(i.text)} <a href="${esc(i.href)}" target="_blank" rel="noopener noreferrer">${esc(i.cta)}</a></div>`).join("") : '<p class="ev-banners-note">No IMPORTANT banners are showing on the site today.</p>')
+    host.innerHTML = (items.length ? '<div class="site-deadline-banners">' + items.map((i) => `<div class="caldev-deadline-banner" role="status">${esc(i.text)} <a href="${esc(i.href)}" target="_blank" rel="noopener noreferrer">${esc(i.cta)}</a></div>`).join("") + "</div>" : '<p class="ev-banners-note">No IMPORTANT banners are showing on the site today.</p>')
       + '<p class="ev-banners-note">Deadline events show a red banner on the public site from 7 days before their due date. Changes can take a minute to appear.</p>';
   }
   function renderSkips() {
