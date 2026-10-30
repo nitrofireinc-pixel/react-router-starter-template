@@ -117,3 +117,30 @@ test('Events manager has Banner preview (reuses deadline-banners API) and no dea
   assert.match(ev, /data-act="banners"/); assert.match(ev, /\/api\/caldev\/deadline-banners/); assert.doesNotMatch(ev, /tab=caldev|banner preview\)/);
   assert.match(renderNewsAdminHtml('v'), /@media\(max-width:480px\)\{\.nw-drop\{flex-direction:column/);
 });
+
+test('news admin fits phones: grid track can shrink, inputs and toolbar wrap', async () => {
+  const { renderNewsAdminHtml } = await import('../worker/src/news.mjs');
+  const html = renderNewsAdminHtml('t', {}, [], []);
+  assert.match(html, /@media\(max-width:1000px\)\{\.nw-wrap\{grid-template-columns:minmax\(0,1fr\)\}\}/);
+  assert.match(html, /\.nw-wrap>\*,\.nw-wrap form,\.nw-card\{min-width:0;max-width:100%;box-sizing:border-box\}/);
+  assert.match(html, /\.nw-card textarea,\.nw-card select\{width:100%;max-width:100%;box-sizing:border-box\}/);
+  assert.match(html, /\.nw-card \.cms-caldev-desc-toolbar\{flex-wrap:wrap/);
+  assert.match(html, /overflow-wrap:anywhere/);
+});
+
+test('shared Saved toast: moved out of admin.js and wired into News + Fundraiser cards', async () => {
+  const fs = await import('node:fs');
+  const r = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  const toast = r('admin-saved-toast.js');
+  assert.match(toast, /function showSavedToast\(/);
+  assert.match(toast, /function showFailedToast\(/);
+  assert.match(toast, /window\.efhsSavedToast = \{ saved: showSavedToast, failed: showFailedToast \}/);
+  assert.doesNotMatch(r('admin.js'), /function showSavedToast\(/);
+  const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
+  assert.match(NEWS_ADMIN_JS, /efhsSavedToast\?\.saved\('Saved\.'\)/);
+  assert.match(NEWS_ADMIN_JS, /efhsSavedToast\?\.failed\(err\.message\)/);
+  assert.match(r('admin-fundraiser-cards.js'), /efhsSavedToast\?\.saved\('Saved\.'\)/);
+  const w = r('worker/src/worker.mjs');
+  assert.match(w, /admin-saved-toast\.js\?v=\$\{ADMIN_HOME_VERSION\}"><\/script><script src="\/admin\.js/);
+  assert.match(w, /admin-saved-toast\.js\?v=\$\{v\}/);
+});

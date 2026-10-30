@@ -1255,7 +1255,7 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
   </section>
 </main>
   <script src="/admin-nav.js?v=${adminNavAssetVersion(v)}"></script>
-  <script src="/admin-fundraiser-cards.js?v=${v}"></script>
+  <script src="/admin-saved-toast.js?v=${v}"></script><script src="/admin-fundraiser-cards.js?v=${v}"></script>
 </body>
 </html>`;
 }

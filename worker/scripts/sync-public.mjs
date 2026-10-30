@@ -51,6 +51,7 @@ for (const name of [
   'admin-forms.css',
   'form-studio.js',
   'admin-fundraiser-cards.js',
+  'admin-saved-toast.js',
   'admin-fundraiser-cards.css',
   'admin-forms.js',
   'admin-forms.css',

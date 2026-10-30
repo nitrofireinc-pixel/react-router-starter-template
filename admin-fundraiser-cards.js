@@ -267,6 +267,7 @@
       : await api('/api/admin/fundraiser-cards', { method: 'POST', body: payload });
     selectedId = saved.id;
     if (note) note.textContent = 'Saved.';
+    window.efhsSavedToast?.saved('Saved.');
     await load();
   }
 
@@ -330,7 +331,7 @@
     renderList();
   });
   editor?.addEventListener('submit', (event) => {
-    saveCard(event).catch((error) => { if (note) note.textContent = error.message; });
+    saveCard(event).catch((error) => { if (note) note.textContent = error.message; window.efhsSavedToast?.failed(error.message); });
   });
   editor?.addEventListener('input', schedulePreview);
   editor?.addEventListener('change', () => {

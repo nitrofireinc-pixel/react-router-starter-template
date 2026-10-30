@@ -1707,7 +1707,7 @@ test('verify batches walk the whole chain and list stays cheap', async () => {
 });
 
 test('admin.js verify walks batches and does not double-bind select filters', () => {
-  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8');
+  const adminJs = readFileSync(join(root, 'admin.js'), 'utf8') + readFileSync(join(root, 'admin-saved-toast.js'), 'utf8');
   assert.match(adminJs, /securityLogSelectFilters/);
   assert.match(adminJs, /securityLogTextFilters/);
   assert.match(adminJs, /Checking the whole log/);

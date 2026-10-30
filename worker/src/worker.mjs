@@ -614,13 +614,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261030w';
+export const ASSET_VERSION = 'cms-p2-20261030x';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030w';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030x';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -745,7 +745,7 @@ export function normalizeStaticPath(pathname) {
 
 const WORKER_STATIC_ASSET_EXT = /\.(css|js|mjs|cjs|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|mp3|mp4|wav|wasm)$/i;
 const NO_STORE_STATIC_ASSETS = new Set([
-  'admin.js', 'admin-caldev.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'admin-forms.js', 'admin-forms.css', 'form-studio.js', 'caldev.js', 'site-content.js',
+  'admin.js', 'admin-saved-toast.js', 'admin-caldev.js', 'admin-studio.js', 'admin-studio.css', 'admin-events.js', 'admin-events.css', 'admin-forms.js', 'admin-forms.css', 'form-studio.js', 'caldev.js', 'site-content.js',
   'script.js', 'styles.css', 'public-theme.css', 'home-redesign.css', 'error-page.css',
   'push-sw.js', 'manifest.webmanifest',
 ]);
@@ -9902,7 +9902,7 @@ async function handleNewsAdminPage(request, env) {
     head: `<link rel="stylesheet" href="/styles.css?v=${v}"><link rel="stylesheet" href="/admin-nav.css?v=${navV}">`,
     top: renderAdminChromeBar({ assetVersion: v, user }) + renderAdminSidebarBackdrop(),
     sidebar: renderAdminSidebarHtml(v, { ...nav, user }),
-    scripts: `<script src="/admin-nav.js?v=${navV}"></script>`,
+    scripts: `<script src="/admin-nav.js?v=${navV}"></script><script src="/admin-saved-toast.js?v=${v}"></script>`,
   }, [{ title: 'News', path: '/news' }, ...pages], forms)), user);
 }
 
@@ -16624,7 +16624,7 @@ __ADMIN_SIDEBAR__
     </div>
   </form>
 </dialog>
-<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}"></script><script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ADMIN_HOME_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin.js?v=${ADMIN_HOME_VERSION}"></script></body></html>`;
+<script src="/admin-nav.js?v=${ADMIN_NAV_VERSION}"></script><script src="/badge-creator.js?v=${ASSET_VERSION}"></script><script src="/badge-creator-admin.js?v=${ADMIN_HOME_VERSION}"></script><script src="/admin-caldev.js?v=${ASSET_VERSION}"></script><script src="/admin-saved-toast.js?v=${ADMIN_HOME_VERSION}"></script><script src="/admin.js?v=${ADMIN_HOME_VERSION}"></script></body></html>`;
 
 function withSeoRobotsHeader(response, url) {
   const path = url.pathname || '';
