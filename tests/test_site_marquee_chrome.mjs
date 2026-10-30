@@ -305,3 +305,8 @@ test('home sticky-support bar stacks above the bottom sponsor ticker', () => {
   assert.match(css, /left:0;right:0;bottom:var\(--sponsor-ticker-vis,0px\)/);
   assert.match(readFileSync(join(root, 'site-content.js'), 'utf8'), /--sponsor-ticker-vis/);
 });
+
+test('phone sticky-support hide fades in place (never slides over the ticker)', () => {
+  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
+  assert.match(css, /body\.home-page\.ss-reveal-armed \.sticky-support\{transform:none;opacity:0;/);
+});

@@ -1353,7 +1353,7 @@ body.efhs-theme .fundraising-hero-card,
 
 
 @media (max-width:760px){body.home-page .footer{padding-bottom:calc(187px + env(safe-area-inset-bottom))}}
-@media (max-width:760px){body.home-page.ss-reveal-armed .sticky-support{transform:translateY(100%);opacity:0;visibility:hidden;pointer-events:none;transition:transform .25s ease,opacity .25s ease,visibility 0s linear .25s,bottom .28s ease}body.home-page.ss-reveal-armed .sticky-support.is-revealed{transform:none;opacity:1;visibility:visible;pointer-events:auto;transition:transform .25s ease,opacity .25s ease,visibility 0s,bottom .28s ease}}
+@media (max-width:760px){body.home-page.ss-reveal-armed .sticky-support{transform:none;opacity:0;visibility:hidden;pointer-events:none;transition:transform .25s ease,opacity .25s ease,visibility 0s linear .25s,bottom .28s ease}body.home-page.ss-reveal-armed .sticky-support.is-revealed{transform:none;opacity:1;visibility:visible;pointer-events:auto;transition:transform .25s ease,opacity .25s ease,visibility 0s,bottom .28s ease}}
 @media (prefers-reduced-motion:reduce){body.home-page .sticky-support{transition:none!important}}
 @media (max-width:760px) and (prefers-reduced-motion:reduce){body.home-page.ss-reveal-armed .sticky-support{transition:none}}
 @media (max-width:380px){body.home-page .sticky-support a{gap:5px;padding-left:4px;padding-right:4px;letter-spacing:.06em}}
