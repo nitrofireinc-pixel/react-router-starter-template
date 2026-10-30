@@ -251,9 +251,11 @@ export function renderSeoHead(page, site = {}, { noindex = false } = {}) {
     `<meta name="geo.region" content="US-NC">`,
     `<meta name="geo.placename" content="Kernersville">`,
   );
-  // Reloads always paint from the top: browser scroll restoration otherwise
+  // Scroll restoration is handled here: reloads paint from the top (Chrome would
+  // re-apply a stale offset, e.g. 26px = utility bar, then reset it); Back/Forward
+  // restore the saved position per history entry (bfcache keeps its own). Was:
   // re-applies a stale offset (e.g. 26px = the utility bar) and then resets it.
-  tags.push(`<script>try{if('scrollRestoration' in history)history.scrollRestoration='manual';}catch(e){}</script>`);
+  tags.push(`<script>try{var h=history;if('scrollRestoration' in h){h.scrollRestoration='manual';var st=h.state&&typeof h.state==='object'?h.state:{},k=st.efhsScrollKey;if(!k){k='s'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);try{h.replaceState(Object.assign({},st,{efhsScrollKey:k}),'')}catch(e){}}var n=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0],t=n?n.type:(performance.navigation&&performance.navigation.type===2?'back_forward':'navigate'),K='efhs-scroll:'+k,y=t==='back_forward'?+sessionStorage.getItem(K):0;addEventListener('pagehide',function(){try{sessionStorage.setItem(K,String(Math.round(scrollY)))}catch(e){}});if(y>0){var go=function(){if(!location.hash)scrollTo(0,y)};document.addEventListener('DOMContentLoaded',go);addEventListener('load',go)}}}catch(e){}</script>`);
   if (!noindex && seo.slug === 'home') tags.push(ldScript(organizationJsonLd(site)));
   if (!noindex && seo.slug === 'fundraising') tags.push(ldScript(donateJsonLd()));
   return { title: seo.title, head: tags.join('\n  ') };

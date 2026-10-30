@@ -141,7 +141,7 @@ test('every Worker-rendered CSS/JS reference carries the asset version param', (
       assert.match(match[0], /[?&]v=/, `unversioned Worker HTML ref ${match[0]}`);
     }
   }
-  assert.equal(ASSET_VERSION, 'cms-p2-20261025k');
+  assert.equal(ASSET_VERSION, 'cms-p2-20261025l');
 });
 
 test('_headers keeps immutable for versioned CSS/JS and 1-day cache for images; push-sw detaches Cache-Control', () => {
