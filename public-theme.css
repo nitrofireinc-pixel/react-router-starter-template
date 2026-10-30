@@ -8,7 +8,7 @@
   --efhs-blue-bright:#3c8bff;
   --efhs-silver:#c9d4e4;
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
-  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025m");
+  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025n");
   /* Header wordmark row only — not the homepage hero. */
   --efhs-header-banner:url("/assets/header-banner-gen.jpg?v=home-redesign-20261002");
   --efhs-page-photo:none;
@@ -1683,3 +1683,7 @@ body.efhs-theme header.site-header{
     padding-top:20px;
   }
 }
+
+/* Mobile nav: lock scrolling on the root scroller so the page keeps its place (body overflow:hidden with html overflow-x:clip collapsed scroll to 0). */
+html.nav-scroll-lock{overflow:hidden}
+html.nav-scroll-lock body.nav-drawer-open{overflow:visible}
