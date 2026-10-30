@@ -343,10 +343,9 @@
   .sn-tiles .sn-item{min-height:84px}
 }
 
-/* "← CMS" sits at the same fixed spot on Studio and Form Builder: a fixed
-   offset from the header's right edge, just left of the fixed-width right group. */
+/* "← CMS" fixed spot, shared with admin-nav.css (Form Builder) - keep identical. */
 @media (min-width:768px){
-  .st-top,.ev-top{position:relative}
-  .st-top-right,.ev-top-right{width:340px;justify-content:flex-end;min-width:0;overflow:hidden}
-  .st-top a.st-exit,.ev-top a.st-exit{position:absolute!important;top:14px!important;right:370px!important;margin:0!important;padding:2px 0!important;border:0!important;font:400 13px/15px "Work Sans",system-ui,sans-serif!important;height:19px;box-sizing:border-box;white-space:nowrap}
+  header.st-top,header.ev-top{position:relative!important}
+  header .st-top-right,header .ev-top-right{width:340px;justify-content:flex-end;min-width:0;overflow:hidden}
+  header.st-top a.st-exit,header.ev-top a.st-exit{position:absolute!important;top:14px!important;right:370px!important;left:auto!important;margin:0!important;padding:2px 0!important;border:0!important;font-family:"Work Sans",system-ui,sans-serif!important;font-size:13px!important;font-weight:400!important;letter-spacing:0!important;line-height:15px!important;height:19px!important;box-sizing:border-box!important;white-space:nowrap!important}
 }
