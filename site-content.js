@@ -739,7 +739,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031c';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031d';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -825,6 +825,21 @@ function renderSponsorMarquee(sponsors = []) {
   mount.innerHTML = nextHtml;
 }
 
+function syncSponsorTickerSpace() {
+  const set = () => {
+    const m = document.querySelector('.sponsor-marquee-section:not([hidden])');
+    document.body?.style?.setProperty?.('--sponsor-ticker-h', `${m?.getBoundingClientRect ? Math.ceil(m.getBoundingClientRect().height) : 0}px`);
+  };
+  set();
+  if (typeof ResizeObserver === 'function' && !syncSponsorTickerSpace.ro) {
+    syncSponsorTickerSpace.ro = new ResizeObserver(set);
+    const m = document.querySelector('.sponsor-marquee-section');
+    if (m) syncSponsorTickerSpace.ro.observe(m); else syncSponsorTickerSpace.ro = null;
+    if (typeof MutationObserver === 'function' && m) new MutationObserver(set).observe(m, { attributes: true, attributeFilter: ['hidden'] });
+  }
+  if (!syncSponsorTickerSpace.bound && typeof window !== 'undefined' && window.addEventListener) { syncSponsorTickerSpace.bound = true; window.addEventListener('resize', set, { passive: true }); }
+}
+
 function hydrateMarqueeFromCache() {
   if (!sponsorMarqueeEnabled()) {
     removeSponsorMarquee();
@@ -837,6 +852,7 @@ function hydrateMarqueeFromCache() {
   }
   const cached = readMarqueeCache();
   if (cached?.length) renderSponsorMarquee(cached);
+  syncSponsorTickerSpace();
 }
 
 async function loadSponsorMarquee() {
@@ -852,6 +868,7 @@ async function loadSponsorMarquee() {
     const list = Array.isArray(sponsors) ? sponsors : [];
     writeMarqueeCache(list);
     renderSponsorMarquee(list);
+    syncSponsorTickerSpace();
   } catch {
     // Keep any already-visible SSR/cache marquee in place.
   }
@@ -1506,7 +1523,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031c';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031d';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();

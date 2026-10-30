@@ -292,3 +292,9 @@ test('hydrate on a marquee page wraps the real section, not body', () => {
   assert.equal(header.parentElement, marquee.parentElement);
   assert.notEqual(marquee, body);
 });
+
+test('sponsor ticker floats at the bottom of public pages with reserved body space', () => {
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(css, /html body:not\(\.admin-body\) \.sponsor-marquee-section\{\s*position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;/);
+  assert.match(css, /body:not\(\.admin-body\)\{padding-bottom:calc\(var\(--sponsor-ticker-h,0px\) \+ env\(safe-area-inset-bottom\)\)\}/);
+});

@@ -6697,3 +6697,15 @@ body.cms-caldev-editor-open .admin-workspace{
   .sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close{width:92px;height:92px;padding:24px}
   .sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close span{width:44px;height:44px}
 }
+
+/* Sponsor ticker floats at the bottom of every public page (below popups/theme layer). */
+html body:not(.admin-body) .sponsor-marquee-section{
+  position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;
+  padding:5px 0 calc(5px + env(safe-area-inset-bottom));
+  border-bottom:0;border-top:1px solid #dbe4ef;
+  box-shadow:0 -6px 18px rgba(0,33,66,.10);
+}
+body:not(.admin-body){padding-bottom:calc(var(--sponsor-ticker-h,0px) + env(safe-area-inset-bottom))}
+@media (max-width:600px){
+  html body:not(.admin-body) .sponsor-marquee-section{padding:3px 0 calc(3px + env(safe-area-inset-bottom))}
+}
