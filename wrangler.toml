@@ -48,5 +48,9 @@ binding = "DB"
 database_name = "efhsband-db"
 database_id = "73681cba-4863-4abb-86d4-b140694bcde2"
 
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "efhsband-files"
+
 [triggers]
 crons = ["20 11 * * *"]
