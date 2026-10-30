@@ -203,7 +203,7 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
   const deal = isHardcodedRetailDeal(dealHtml) ? '' : String(dealHtml || '').trim();
   return `<div class="nf-flag">Save the date</div>
       <div class="nf-kicker">Next fundraiser</div>
-      <h2>${escapeHtml(plainText(event.title))}</h2>
+      <h2>${escapeHtml(plainText(event.title)).replace(/\//g, "/<wbr>")}</h2>
       <div class="nf-date"><b>${escapeHtml(span || when.short)}</b>${time}</div>
       ${where ? `<p class="nf-where">${escapeHtml(where)}</p>` : ''}
       ${deal ? `<p class="nf-deal">${deal}</p>` : ''}

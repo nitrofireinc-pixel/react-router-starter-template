@@ -324,3 +324,9 @@ test('home block buttons wrap instead of clipping', () => {
   const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
   assert.match(css, /\.home-redesign \.btn\.btn-block\{white-space:normal;/);
 });
+
+test('home next-fundraiser heading wraps instead of clipping', () => {
+  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
+  assert.match(css, /\.home-redesign \.next-fund h2\{white-space:normal;overflow-wrap:anywhere;/);
+  assert.match(readFileSync(join(root, 'worker/src/home-redesign.mjs'), 'utf8'), /replace\(\/\\\/\/g, "\/<wbr>"\)/);
+});

@@ -1320,3 +1320,5 @@ body.efhs-theme .fundraising-hero-card,
 
 /* Block buttons in narrow cards wrap instead of clipping (e.g. "See sponsor packages" at 768). */
 .home-redesign .btn.btn-block{white-space:normal;text-align:center;line-height:1.25;min-width:0;max-width:100%}
+/* Long fundraiser titles ("Fundraiser/Silent Auction") wrap instead of clipping at tablet widths. */
+.home-redesign .next-fund h2{white-space:normal;overflow-wrap:anywhere;word-break:normal;min-width:0;max-width:100%}
