@@ -9,7 +9,7 @@ Never prints cookie values."""
 import argparse, asyncio, json, os, re, sys, urllib.parse
 from playwright.async_api import async_playwright
 
-PUBLIC = ['/', '/calendar', '/contact', '/boosters', '/directors', '/ensembles', '/gallery', '/sponsors',
+PUBLIC = ['/', '/calendar', '/contact', '/boosters', '/directors', '/gallery', '/sponsors',
           '/become-a-sponsor', '/fundraising', '/in-kind', '/letterman-jacket', '/qr.html']
 WIDTHS = [1280, 980, 734, 478, 390]
 

@@ -1276,7 +1276,6 @@ function renderUtilityLinksEditor() {
     ? state.utilityLinks
     : [
       { label: 'Upcoming Events', href: '/calendar.html', target: '_self' },
-      { label: 'Student Resources', href: '/resources.html', target: '_self' },
       { label: 'Contact', href: '/contact.html', target: '_self' },
     ];
   list.innerHTML = links.map((link, index) => {
