@@ -384,6 +384,23 @@ function sponsorPopupRecentlyClosed() {
   return Date.now() - sponsorPopupClosedAt < 600 || !!document.querySelector('.sponsor-flyin.is-leaving');
 }
 
+const SPONSOR_POPUP_DISMISSED_KEY = 'efhs-sponsor-popup-dismissed-v1';
+/** An explicit close (X or backdrop) silences sponsor popups for the rest of the browser session. */
+function sponsorPopupDismissedForSession() {
+  try { return sessionStorage.getItem(SPONSOR_POPUP_DISMISSED_KEY) === '1'; } catch { return false; }
+}
+function rememberSponsorPopupDismissed() {
+  try { sessionStorage.setItem(SPONSOR_POPUP_DISMISSED_KEY, '1'); } catch { /* storage unavailable */ }
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  // Back/forward cache restores: drop any popup that was frozen on screen.
+  window.addEventListener('pageshow', () => {
+    if (!sponsorPopupDismissedForSession()) return;
+    document.querySelectorAll('.sponsor-flyin[data-sponsor-ad]').forEach((el) => el.remove());
+    document.body?.classList.remove('sponsor-flyin-open');
+  });
+}
+
 function dismissSponsorAd(root) {
   markSponsorPopupClose();
   if (!root || root.dataset.flyinLeaving === '1') return;
@@ -416,7 +433,7 @@ function resolveSponsorTierKey(sponsor = {}) {
 }
 
 function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
-  if (!sponsor || document.querySelector('.sponsor-flyin')) return;
+  if (!sponsor || document.querySelector('.sponsor-flyin') || sponsorPopupDismissedForSession()) return;
 
   const tier = resolveSponsorTierKey(sponsor);
   const tierClass = tier ? ` tier-${tier}` : '';
@@ -426,13 +443,14 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
 
   const root = document.createElement('aside');
   root.className = `sponsor-flyin${tierClass}`;
+  root.dataset.sponsorAd = '1';
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Featured sponsor');
   root.innerHTML = `
     <button type="button" class="sponsor-flyin-backdrop" aria-label="Dismiss sponsor ad"></button>
     <div class="sponsor-flyin-panel">
-      <button type="button" class="sponsor-flyin-close" aria-label="Close sponsor ad">×</button>
+      <button type="button" class="sponsor-flyin-close" aria-label="Close sponsor ad"><span aria-hidden="true">×</span></button>
       <a class="sponsor-flyin-card" href="${escapeHtml(sponsor.flyin_href || '/sponsors.html')}">
         ${logo}
         <div class="sponsor-flyin-copy">
@@ -452,10 +470,13 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   const close = (event) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
+    rememberSponsorPopupDismissed();
     dismissSponsorAd(root);
   };
-  const closeBtn = root.querySelector('.sponsor-flyin-close');
-  closeBtn?.addEventListener('click', close);
+  // The X sits outside the card link with a wide hit zone, so a near-miss
+  // can't open /sponsors.html.
+  root.querySelectorAll('.sponsor-flyin-close').forEach((closeBtn) => {
+  closeBtn.addEventListener('click', close);
   // Cancel the press so no compatibility click is synthesized onto whatever
   // sits under the X; the close itself runs on touchend / click.
   ['pointerdown', 'touchstart', 'pointerup', 'mousedown', 'mouseup', 'touchend'].forEach((type) => {
@@ -463,8 +484,9 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
       if (event.cancelable) event.preventDefault();
       event.stopPropagation();
       markSponsorPopupClose();
-      if (type === 'touchend') dismissSponsorAd(root);
+      if (type === 'touchend') { rememberSponsorPopupDismissed(); dismissSponsorAd(root); }
     }, { passive: false });
+  });
   });
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
   // While the popup fades out, swallow taps so they never reach a donate
@@ -713,7 +735,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025n';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025s';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1480,7 +1502,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025n';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025s';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();

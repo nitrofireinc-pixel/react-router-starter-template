@@ -6683,3 +6683,17 @@ body.cms-caldev-editor-open .admin-workspace{
 @media(max-width:640px){
   .sponsor-flyin{place-items:start center;padding-top:calc(var(--efhs-sticky-header-height,140px) + 12px)}
 }
+
+/* Sponsor popup X: same visible 40px (44px phone) circle, but the button's
+   hit zone fills the card's top-right corner so near-misses never hit the link. */
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-panel{position:relative}
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close{top:0;right:0;width:72px;height:72px;padding:10px 10px 0 0;border-radius:0;background:transparent;display:grid;place-items:start end;z-index:4;-webkit-tap-highlight-color:transparent}
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close span{display:grid;place-items:center;width:40px;height:40px;border-radius:999px;background:rgba(255,255,255,.16);transition:background-color .15s ease;pointer-events:none}
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close:hover,
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close:focus-visible{background:transparent}
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close:hover span,
+.sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close:focus-visible span{background:rgba(255,255,255,.28)}
+@media(max-width:640px){
+  .sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close{width:80px;height:80px;padding:8px 8px 0 0}
+  .sponsor-flyin[data-sponsor-ad] .sponsor-flyin-close span{width:44px;height:44px}
+}

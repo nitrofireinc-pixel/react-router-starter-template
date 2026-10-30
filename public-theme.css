@@ -8,7 +8,7 @@
   --efhs-blue-bright:#3c8bff;
   --efhs-silver:#c9d4e4;
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
-  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025n");
+  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025s");
   /* Header wordmark row only — not the homepage hero. */
   --efhs-header-banner:url("/assets/header-banner-gen.jpg?v=home-redesign-20261002");
   --efhs-page-photo:none;
@@ -1652,7 +1652,7 @@ body.efhs-theme header.site-header .brand .brand-mark{justify-self:start}
 body.efhs-theme header.site-header .brand .brand-logo{aspect-ratio:1200/745;object-fit:contain;flex-shrink:0}
 body.efhs-theme header.site-header .brand .brand-mark{aspect-ratio:1/1;object-fit:contain;flex-shrink:0}
 @media (min-width:768px){
-  body.efhs-theme header.site-header .brand [data-site-field="title"]{width:172px;min-width:172px;max-width:172px;text-align:center}
+  body.efhs-theme header.site-header .brand [data-site-field="title"]{text-align:center}
 }
 /* Narrow phones: hero column may not grow past the viewport (kept CTA buttons inside). */
 @media (max-width:767px){
@@ -1662,26 +1662,32 @@ body.efhs-theme header.site-header .brand .brand-mark{aspect-ratio:1/1;object-fi
   .home-redesign .hero h1{overflow-wrap:break-word}
 }
 
-/* Room in the header for the Halloween bat, centered above the banner wordmark. */
-body.efhs-theme header.site-header{
-  min-height:120px;
-  padding-top:34px;
-}
+/* Header sits near the top at every width: only a slim band of banner above the brand row. */
+body.efhs-theme header.site-header{padding-top:6px}
 @media (max-width:767px){
   body.efhs-theme header.site-header{
     height:auto;
-    min-height:84px;
+    min-height:clamp(56px,14vw,64px);
     max-height:none;
-    padding-top:26px;
+    padding-top:4px;
+    padding-bottom:4px;
   }
+  /* Phone title a little larger; still one locked centered column. */
+  body.efhs-theme header.site-header .brand [data-site-field="title"],
+  body.efhs-theme header.site-header .brand [data-site-field="title"] small,
+  body.efhs-theme header.site-header .brand [data-site-field="title"] .brand-title-rest{font-size:clamp(.6rem,2.7vw,.78rem)!important}
 }
 @media (orientation:landscape) and (max-height:500px){
-  body.efhs-theme header.site-header{
-    height:auto;
-    min-height:72px;
-    max-height:none;
-    padding-top:20px;
-  }
+  body.efhs-theme header.site-header{height:auto;min-height:52px;max-height:none;padding-top:4px}
+}
+/* Tablet/desktop: banner name and logos scale with the viewport. The title box is
+   sized in em, so it scales with its own font and a font swap can't move the logos. */
+@media (min-width:768px){
+  body.efhs-theme header.site-header .brand [data-site-field="title"] small,
+  body.efhs-theme header.site-header .brand [data-site-field="title"] .brand-title-rest{font-size:clamp(1.12rem,.55rem + 1.2vw,1.6rem)!important;line-height:1.08}
+  body.efhs-theme header.site-header .brand [data-site-field="title"]{font-size:clamp(1.12rem,.55rem + 1.2vw,1.6rem)!important;width:9.6em!important;min-width:9.6em!important;max-width:9.6em!important}
+  body.efhs-theme header.site-header .brand .brand-logo{height:clamp(44px,1.6rem + 2.4vw,72px)!important;width:auto!important}
+  body.efhs-theme header.site-header .brand .brand-mark{height:clamp(44px,1.6rem + 2.4vw,72px)!important;width:clamp(44px,1.6rem + 2.4vw,72px)!important}
 }
 
 /* Mobile nav: lock scrolling on the root scroller so the page keeps its place (body overflow:hidden with html overflow-x:clip collapsed scroll to 0). */
