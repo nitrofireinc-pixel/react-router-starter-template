@@ -46,6 +46,21 @@ function looksLikeCssOrStyleDump(value) {
   return /\{[^}]*margin\s*:[^}]*\}/i.test(text) && text.length < 80;
 }
 
+function isHardcodedRetailDeal(html) {
+  const text = plainText(html);
+  return /^save 30%[–-]70% off retail pricing$/i.test(text);
+}
+
+function stripHardcodedHomeDeal(html) {
+  return String(html || '')
+    .replace(/<p\b[^>]*\bnf-deal\b[^>]*>[\s\S]*?<\/p>/gi, (paragraph) => (
+      isHardcodedRetailDeal(paragraph) ? '' : paragraph
+    ))
+    .replace(/<div\b[^>]*\bff-deal\b[^>]*>[\s\S]*?<\/div>/gi, (block) => (
+      isHardcodedRetailDeal(block) ? '' : block
+    ));
+}
+
 function plainText(value) {
   return stripStyleAndEditorChrome(value)
     .replace(/<br\s*\/?>/gi, ' ')
@@ -185,7 +200,7 @@ export function renderNextFundraiserCard(event, { dealHtml = '' } = {}) {
   const span = fundraiserSpanLabel(event);
   const time = when.time ? `<span>${escapeHtml(when.time)}</span>` : '';
   const where = eventWhere(event);
-  const deal = String(dealHtml || '').trim();
+  const deal = isHardcodedRetailDeal(dealHtml) ? '' : String(dealHtml || '').trim();
   return `<div class="nf-flag">Save the date</div>
       <div class="nf-kicker">Next fundraiser</div>
       <h2>${escapeHtml(plainText(event.title))}</h2>
@@ -201,7 +216,7 @@ export function renderFeaturedFundraiser(event, { flyer = '', dealHtml = '' } = 
   const span = fundraiserSpanLabel(event);
   const where = plainText(event.location);
   const directions = where ? mapsHref(where) : '';
-  const deal = escapeHtml(plainText(event.deal_text));
+  const deal = isHardcodedRetailDeal(event.deal_text) ? '' : escapeHtml(plainText(event.deal_text));
   const sub = plainText(event.description);
   const timeLine = when.time ? `<br>${escapeHtml(when.time)}` : '';
   const media = flyer
@@ -780,7 +795,7 @@ export function fillLiveSlots(html, data = {}) {
 }
 
 export function decorateHomeRedesign(html, data = {}) {
-  let next = stripHomeHeroLogoLockup(html);
+  let next = stripHardcodedHomeDeal(stripHomeHeroLogoLockup(html));
   if (!next.includes(HOME_REDESIGN_MARKER) && !next.includes('data-home-slot')) return next;
   next = fillLiveSlots(next, data);
   const instagram = String(data.instagramHref || '').trim();
