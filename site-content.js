@@ -739,7 +739,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031j';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031k';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -951,36 +951,34 @@ function renderSiteDeadlineBanners(items = []) {
 function syncNewsTuck(active) {
   const strip = document.querySelector('.news-strip');
   if (!strip || typeof document.createElement !== 'function') return;
-  let tab = document.querySelector('.news-tab');
+  const dock = strip.parentElement?.classList?.contains('news-dock') ? strip.parentElement : null;
   if (!active) {
-    tab?.remove();
-    syncNewsTuck.io?.disconnect(); syncNewsTuck.io = null;
+    if (dock) { dock.querySelector('.news-tab')?.remove(); dock.replaceWith(strip); }
     strip.classList.remove('is-tuckable', 'is-tucked');
+    strip.inert = false; strip.removeAttribute('aria-hidden');
     return;
   }
+  if (dock) return;
   if (!strip.id) strip.id = 'news-strip';
   strip.classList.add('is-tuckable');
-  if (!tab) {
-    tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = 'news-tab is-away';
-    tab.setAttribute('aria-controls', strip.id);
-    tab.innerHTML = '<span aria-hidden="true">📰</span>';
-    tab.addEventListener('click', () => setNewsTucked(!strip.classList.contains('is-tucked')));
-    tab.addEventListener('animationend', () => tab.classList.remove('is-bouncing'));
-    document.body.appendChild(tab);
-    setNewsTucked(true);
-    // Only offer the tab while the News area is on or near the screen.
-    const show = (near) => {
-      tab.classList.toggle('is-away', !near);
-      tab.inert = !near;
-      if (near && !tab.dataset.bounced) { tab.dataset.bounced = '1'; tab.classList.add('is-bouncing'); }
-    };
-    if (typeof IntersectionObserver === 'function') {
-      syncNewsTuck.io = new IntersectionObserver((entries) => show(entries[entries.length - 1].isIntersecting), { rootMargin: '160px 0px 160px 0px' });
-      syncNewsTuck.io.observe(strip);
-    } else show(true);
-  }
+  // Anchor the tab to the strip itself (in-page dock), not floating over the hero.
+  const wrap = document.createElement('div');
+  wrap.className = 'news-dock';
+  strip.before(wrap);
+  wrap.appendChild(strip);
+  const tab = document.createElement('button');
+  tab.type = 'button';
+  tab.className = 'news-tab';
+  tab.setAttribute('aria-controls', strip.id);
+  tab.innerHTML = '<span aria-hidden="true">📰</span><span class="news-tab-label">News</span>';
+  tab.addEventListener('click', () => setNewsTucked(!strip.classList.contains('is-tucked')));
+  tab.addEventListener('animationend', () => tab.classList.remove('is-bouncing'));
+  wrap.prepend(tab);
+  setNewsTucked(true);
+  // Bounce once per browser, not on every reload.
+  let seen = false;
+  try { seen = localStorage.getItem('efhsNewsTabBounced') === '1'; localStorage.setItem('efhsNewsTabBounced', '1'); } catch { seen = true; }
+  if (!seen) tab.classList.add('is-bouncing');
 }
 
 function setNewsTucked(tucked) {
@@ -988,6 +986,7 @@ function setNewsTucked(tucked) {
   const tab = document.querySelector('.news-tab');
   if (!strip || !tab) return;
   strip.classList.toggle('is-tucked', tucked);
+  strip.parentElement?.classList?.toggle('is-tucked', tucked);
   if (tucked) strip.setAttribute('aria-hidden', 'true'); else strip.removeAttribute('aria-hidden');
   strip.inert = tucked;
   tab.classList.toggle('is-open', !tucked);
@@ -1591,7 +1590,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031j';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031k';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();

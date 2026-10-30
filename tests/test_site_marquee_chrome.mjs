@@ -313,6 +313,8 @@ test('IMPORTANT banner tucks the News strip behind an accessible newspaper tab',
   assert.match(js, /tab\.setAttribute\('aria-expanded', tucked \? 'false' : 'true'\)/);
   assert.match(css, /\.news-tab\.is-bouncing\{animation:news-tab-bounce \.7s ease-in-out \.6s 2\}/);
   assert.match(css, /prefers-reduced-motion:reduce\)\{\.news-strip\.is-tuckable\{transition:none\}\.news-tab\.is-bouncing\{animation:none\}/);
-  assert.match(js, /new IntersectionObserver\(\(entries\) => show\(/);
-  assert.match(css, /\.news-tab\.is-away\{opacity:0;/);
+  assert.match(js, /wrap\.className = 'news-dock';/);
+  assert.match(js, /localStorage\.getItem\('efhsNewsTabBounced'\)/);
+  assert.match(css, /\.news-dock\{position:relative\}/);
+  assert.doesNotMatch(css, /\.news-tab\{position:fixed/);
 });
