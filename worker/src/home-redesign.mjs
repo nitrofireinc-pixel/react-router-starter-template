@@ -111,7 +111,8 @@ export function formatHomeEventWhen(event = {}) {
   };
 }
 
-export function fundraiserSpanLabel(event = {}) {
+export function fundraiserSpanLabel(event) {
+  if (!event) return '';
   const start = String(event.start_date || '');
   const end = String(event.end_date || event.span_end || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end <= start) return '';

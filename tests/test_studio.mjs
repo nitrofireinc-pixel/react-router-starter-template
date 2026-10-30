@@ -187,7 +187,7 @@ test('studio mobile: Add sheet (only) closes after adding and reveals the new bl
   const { readFileSync } = await import('node:fs');
   const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
   const fn = js.slice(js.indexOf('function addAfter('), js.indexOf('function addAfter(') + 1600);
-  assert.match(fn, /toast\(`\$\{name\} added`\);\n\s*\/\/ Add sheet only[^\n]*\n\s*closeSheet\(\); requestAnimationFrame/);
+  assert.match(fn, /(toast\(`\$\{name\} added`\);|finishAdd\(block, name\);)\n\s*\/\/ Add sheet only[^\n]*\n\s*closeSheet\(\); requestAnimationFrame/);
   assert.doesNotMatch(fn, /openSheet\('edit'\)/);
 });
 

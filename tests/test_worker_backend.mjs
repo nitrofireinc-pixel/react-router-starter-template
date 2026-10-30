@@ -4215,7 +4215,7 @@ test('ensureCaldevSchema only migrates once per isolate', async () => {
   };
   await ensureCaldevSchema(env);
   await ensureCaldevSchema(env);
-  assert.equal(runs, 10); // 1 CREATE TABLE + 3 ALTER + 1 start_date index + 3 event-manager ALTERs + 2 home-card ALTERs
+  assert.equal(runs, 11); // 1 CREATE TABLE + 3 ALTER + 1 start_date index + 3 event-manager ALTERs + 2 home-card ALTERs + 1 span-skip ALTER
 });
 
 test('worker source gates initDb behind schema_version', () => {
