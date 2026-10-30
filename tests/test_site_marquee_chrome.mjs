@@ -319,3 +319,8 @@ test('IMPORTANT banner tucks the News strip behind an accessible newspaper tab',
   assert.match(css, /\.news-dock \.news-strip \.news-tag\{display:none\}/);
   assert.doesNotMatch(css, /\.news-tab\{position:fixed/);
 });
+
+test('home block buttons wrap instead of clipping', () => {
+  const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
+  assert.match(css, /\.home-redesign \.btn\.btn-block\{white-space:normal;/);
+});

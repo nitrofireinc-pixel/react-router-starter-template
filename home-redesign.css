@@ -1317,3 +1317,6 @@ body.efhs-theme .fundraising-hero-card,
 
 
 
+
+/* Block buttons in narrow cards wrap instead of clipping (e.g. "See sponsor packages" at 768). */
+.home-redesign .btn.btn-block{white-space:normal;text-align:center;line-height:1.25;min-width:0;max-width:100%}
