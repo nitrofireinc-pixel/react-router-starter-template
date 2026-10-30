@@ -190,3 +190,14 @@ test('News photo library: search, newest first, non-Gallery default with Show al
   assert.match(src, /items\.sort\(\(x, y\) => \(y\.at > x\.at/);
   assert.match(src, /return deps\.json\(\{ photos: items\.map\(\(i\) => i\.url\), items \}\)/);
 });
+
+test('News photo library: plural count, placeholder, News-only empty state, alt fallback, resize recalc', async () => {
+  const { NEWS_ADMIN_JS, renderNewsAdminHtml } = await import('../worker/src/news.mjs');
+  const html = renderNewsAdminHtml('x', { head: '', top: '', sidebar: '', scripts: '' }, [], []);
+  assert.match(html, /placeholder="Search photos"/);
+  assert.match(NEWS_ADMIN_JS, /n === 1 \? ' photo' : ' photos'/);
+  assert.match(NEWS_ADMIN_JS, /No News photos yet\. <button type="button" class="nw-lib-showall" data-lib-showall>Show all<\/button> to include Gallery photos\./);
+  assert.match(NEWS_ADMIN_JS, /No photos match\./);
+  assert.match(NEWS_ADMIN_JS, /i\.caption \|\| i\.alt \|\|/);
+  assert.match(NEWS_ADMIN_JS, /addEventListener\('orientationchange', libResize\)/);
+});
