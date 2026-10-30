@@ -199,3 +199,25 @@ body.ev-focus .ev-top,body.ev-focus .ev-rail{display:none}
 }
 /* Phone: the open event sheet covers the bottom bar instead of sitting under it. */
 body.ev-modal .sn-bottom{display:none}
+
+/* Banner preview — rules copied from styles.css (old Schedule Board) */
+.caldev-deadline-banner,
+.cms-caldev-deadline-banners .caldev-deadline-banner{
+  width:100%;
+  margin:0;
+  padding:12px 16px;
+  background:var(--red,#c8102e);
+  color:#fff;
+  text-align:center;
+  font-weight:800;
+  font-size:clamp(.95rem,2.4vw,1.12rem);
+  line-height:1.4;
+  border:0;
+  border-radius:16px;
+  box-sizing:border-box;
+}
+.cms-caldev-deadline-banners{
+  display:grid;
+  gap:8px;
+}
+.ev-banners{margin:8px 0}.ev-banners[hidden]{display:none}.ev-banners-note{margin:0;font-size:.85rem;color:#4a5568}

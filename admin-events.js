@@ -225,10 +225,12 @@
   <div class="ev-show"><span class="ev-show-h">Show:</span><span data-chips></span><span class="ev-legend">↻ = repeating · <s>struck</s> = cancelled</span></div>
   <div class="ev-bar2-r">
     <button type="button" class="ev-link" data-act="settings">⚙ Overlap settings</button>
+    <button type="button" class="ev-link" data-act="banners" aria-expanded="false" title="The IMPORTANT banners the public site is showing now">Banner preview</button>
     <button type="button" class="ev-link" data-act="undated" aria-expanded="false">Needs a date (<span data-undated-n>0</span>)</button>
     ${canNotify ? '<button type="button" class="ev-btn ev-finished" data-act="finished">✉ Finished: notify subscribers</button>' : ""}
   </div>
 </div>
+<div class="cms-caldev-deadline-banners ev-banners" data-banners hidden></div>
 <div class="ev-undated" data-undated hidden></div>
 <div class="ev-grid" data-grid role="grid" aria-label="Month"></div>
 <section class="ev-daylist" data-daylist aria-live="polite"></section>
@@ -784,6 +786,7 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
       if (t.matches("[data-group]")) return openGroup(state.editing);
       const act = t.dataset.act;
       if (act === "settings") return openSettings();
+      if (act === "banners") return toggleBanners(t);
       if (act === "prev") return go(-1);
       if (act === "next") return go(1);
       if (act === "today") { const d = todayIso(); state.year = Number(d.slice(0, 4)); state.month = Number(d.slice(5, 7)) - 1; state.picked = isPhone() ? d : ""; return render(); }
@@ -849,6 +852,15 @@ ${order.map((t) => `<label class="ev-set-row"><span>${esc(FORM_LABEL[t])}</span>
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !inField) { e.preventDefault(); undo(); }
     });
     window.addEventListener("resize", () => { if (!isPhone()) state.picked = state.picked; });
+  }
+  // Banner preview (from the old Schedule Board): same server builder the public site uses (/api/caldev/deadline-banners → buildDeadlineBannerItems) and the board's banner markup.
+  async function toggleBanners(btn) {
+    const host = root.querySelector("[data-banners]");
+    if (!host.hidden) { host.hidden = true; btn.setAttribute("aria-expanded", "false"); return; }
+    host.hidden = false; btn.setAttribute("aria-expanded", "true"); host.innerHTML = '<p class="ev-banners-note">Loading…</p>';
+    const items = await fetch("/api/caldev/deadline-banners", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    host.innerHTML = (items.length ? items.map((i) => `<div class="caldev-deadline-banner" role="status">${esc(i.text)} <a href="${esc(i.href)}" target="_blank" rel="noopener noreferrer">${esc(i.cta)}</a></div>`).join("") : '<p class="ev-banners-note">No IMPORTANT banners are showing on the site today.</p>')
+      + '<p class="ev-banners-note">Deadline events show a red banner on the public site from 7 days before their due date. Changes can take a minute to appear.</p>';
   }
   function renderSkips() {
     root.querySelector("[data-skips]").innerHTML = state.exceptions.sort().map((d) => `<li>${esc(d)} <button type="button" data-unskip="${d}" aria-label="Remove ${d}">✕</button></li>`).join("");

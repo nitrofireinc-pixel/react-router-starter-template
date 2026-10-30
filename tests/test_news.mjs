@@ -111,3 +111,9 @@ test('old Schedule Board URL redirects to Events; News Link button matches B/I/U
   assert.doesNotMatch(readFileSync(new URL('../admin-events.js', import.meta.url), 'utf8'), /href="\/admin\?tab=caldev"/);
   assert.doesNotMatch(renderNewsAdminHtml('v'), /data-cms-caldev-desc-link/);
 });
+test('Events manager has Banner preview (reuses deadline-banners API) and no dead Schedule Board link; News drop zone stacks ≤480px', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ev = readFileSync(new URL('../admin-events.js', import.meta.url), 'utf8');
+  assert.match(ev, /data-act="banners"/); assert.match(ev, /\/api\/caldev\/deadline-banners/); assert.doesNotMatch(ev, /tab=caldev|banner preview\)/);
+  assert.match(renderNewsAdminHtml('v'), /@media\(max-width:480px\)\{\.nw-drop\{flex-direction:column/);
+});
