@@ -8,7 +8,7 @@
   --efhs-blue-bright:#3c8bff;
   --efhs-silver:#c9d4e4;
   /* Home Game Performance (4): CMS photo 86, 1468x788. Students sit ~20–68% from the top. */
-  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025i");
+  --efhs-hero-photo:url("/assets/efhs-home-hero.jpg?v=cms-p2-20261025j");
   /* Header wordmark row only — not the homepage hero. */
   --efhs-header-banner:url("/assets/header-banner-gen.jpg?v=home-redesign-20261002");
   --efhs-page-photo:none;
@@ -1549,3 +1549,18 @@ body.efhs-theme .footer .footer-disclaimer{
 body.efhs-theme header.site-header .brand{display:inline-grid;grid-template-columns:1fr auto 1fr;align-items:center;justify-content:center}
 body.efhs-theme header.site-header .brand .brand-logo{justify-self:end}
 body.efhs-theme header.site-header .brand .brand-mark{justify-self:start}
+
+/* Brand images reserve their box before they load (no x drift on reload),
+   and the title has a fixed width so the font swap can't move the logo. */
+body.efhs-theme header.site-header .brand .brand-logo{aspect-ratio:1200/745;object-fit:contain;flex-shrink:0}
+body.efhs-theme header.site-header .brand .brand-mark{aspect-ratio:1/1;object-fit:contain;flex-shrink:0}
+@media (min-width:768px){
+  body.efhs-theme header.site-header .brand [data-site-field="title"]{width:172px;min-width:172px;max-width:172px;text-align:center}
+}
+/* Narrow phones: hero column may not grow past the viewport (kept CTA buttons inside). */
+@media (max-width:767px){
+  .home-redesign .hero-inner{grid-template-columns:minmax(0,1fr)}
+  .home-redesign .hero-inner>*{min-width:0;max-width:100%}
+  .home-redesign .hero-ctas .btn{max-width:100%;box-sizing:border-box}
+  .home-redesign .hero h1{overflow-wrap:break-word}
+}

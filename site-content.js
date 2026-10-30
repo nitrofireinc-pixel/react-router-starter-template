@@ -377,7 +377,15 @@ if (typeof document !== 'undefined') {
   }, true);
 }
 
+let sponsorPopupClosedAt = 0;
+function markSponsorPopupClose() { sponsorPopupClosedAt = Date.now(); }
+/** Donate openers ignore input for 500ms after any sponsor popup close/press. */
+function sponsorPopupRecentlyClosed() {
+  return Date.now() - sponsorPopupClosedAt < 500 || !!document.querySelector('.sponsor-flyin.is-leaving');
+}
+
 function dismissSponsorAd(root) {
+  markSponsorPopupClose();
   if (!root || root.dataset.flyinLeaving === '1') return;
   root.dataset.flyinLeaving = '1';
   const panel = root.querySelector('.sponsor-flyin-panel') || root;
@@ -388,7 +396,7 @@ function dismissSponsorAd(root) {
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
   document.body.classList.remove('sponsor-flyin-open');
-  window.setTimeout(() => root.remove(), SPONSOR_FLYIN_FADE_MS);
+  window.setTimeout(() => { root.remove(); markSponsorPopupClose(); }, SPONSOR_FLYIN_FADE_MS);
 }
 
 function normalizeSponsorAdSeconds(value, fallback = 6) {
@@ -448,13 +456,14 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
   };
   const closeBtn = root.querySelector('.sponsor-flyin-close');
   closeBtn?.addEventListener('click', close);
-  // Close on press and cancel the touch so no compatibility click is
-  // synthesized onto whatever sits under the X once the popup is gone.
-  ['pointerdown', 'touchstart', 'touchend', 'pointerup', 'mousedown'].forEach((type) => {
+  // Cancel the press so no compatibility click is synthesized onto whatever
+  // sits under the X; the close itself runs on touchend / click.
+  ['pointerdown', 'touchstart', 'pointerup', 'mousedown', 'mouseup', 'touchend'].forEach((type) => {
     closeBtn?.addEventListener(type, (event) => {
       if (event.cancelable) event.preventDefault();
       event.stopPropagation();
-      if (type === 'pointerdown' || type === 'touchstart') dismissSponsorAd(root);
+      markSponsorPopupClose();
+      if (type === 'touchend') dismissSponsorAd(root);
     }, { passive: false });
   });
   root.querySelector('.sponsor-flyin-backdrop')?.addEventListener('click', close);
@@ -704,8 +713,10 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025i';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261025j';
     mark.alt = 'East Forsyth Blue Regiment';
+    mark.width = 48;
+    mark.height = 48;
     brand.appendChild(mark);
   });
 }
@@ -1469,7 +1480,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025i';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261025j';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
@@ -2915,6 +2926,7 @@ function bindDonateButtons(root = document) {
     button.dataset.donateBound = '1';
     button.addEventListener('click', (event) => {
       event.preventDefault();
+      if (sponsorPopupRecentlyClosed() || document.querySelector('.sponsor-flyin')) return;
       openDonateModal();
     });
   });
