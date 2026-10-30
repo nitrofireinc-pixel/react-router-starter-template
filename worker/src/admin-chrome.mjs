@@ -125,7 +125,7 @@ export function buildAdminNavModel(options = {}) {
       label: 'Calendar',
       items: [
         item('events-manager', 'Events', '', '/admin/events-manager', { perm: 'caldev', attrs: 'data-nav-href="/admin/events-manager"', keywords: 'calendar rehearsal game concert schedule board important deadline banner' }),
-        // Schedule Board (/admin?tab=caldev) stays reachable by URL and from a link inside Events.
+        // Schedule Board (/admin?tab=caldev) now redirects to Events (/admin/events-manager).
       ],
     },
     {

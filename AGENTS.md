@@ -26,7 +26,7 @@ Current staff home (from the live worker):
 - People & Access: `/admin/people` (`/admin-people.js`, not in git)
 - Forms: `/admin/forms-builder` (script is inside the worker)
 
-The older Schedule Board is still at `/admin?tab=caldev` and loads `/api/caldev/editor.js`. The public calendar loads `/api/caldev/calendar.js`.
+The older Schedule Board URL `/admin?tab=caldev` now redirects to `/admin/events-manager` (Trevor: the calendar opens Events). The public calendar loads `/api/caldev/calendar.js`.
 
 For a CMS change: download the current `efhsband-live` script, patch the handler or client that the live page actually requests, check bindings before sending traffic, then deploy that version. Static files under `/admin-*.js` are served directly and stay cached, so a worker upload does not replace them. Point worker HTML at an `/api/*` script when the client has to change before the asset bundle is updated.
 

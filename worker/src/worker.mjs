@@ -614,13 +614,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261030n';
+export const ASSET_VERSION = 'cms-p2-20261030p';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030n';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261030p';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -15898,6 +15898,8 @@ async function dispatchWorker(request, env, ctx) {
       const slug = String(url.searchParams.get('page') || '').trim().toLowerCase();
       if (/^[a-z0-9-]+$/.test(slug) && !CLASSIC_EDITOR_SLUGS.has(slug)) return redirect(classicPageRedirectTarget(slug));
     }
+    // Trevor: the calendar opens Events. The old Schedule Board tab URL now goes to the Events manager.
+    if (url.pathname === '/admin' && url.searchParams.get('tab') === 'caldev') return Response.redirect(new URL('/admin/events-manager', url).toString(), 302);
     if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
     if (url.pathname === '/admin/news' || url.pathname === '/admin/news/') return handleNewsAdminPage(request, env);
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
