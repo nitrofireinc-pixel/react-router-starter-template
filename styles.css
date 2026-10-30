@@ -6718,6 +6718,8 @@ html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:tra
 .news-strip.is-tuckable.is-tucked{transform:translateX(-100%);max-height:0;opacity:0;border-bottom-width:0}
 
 .news-dock{position:relative}
+.news-dock .news-strip .news-tag{display:none}
+.news-dock .news-strip .news-main{padding-left:14px}
 .news-tab{position:absolute;left:0;top:0;z-index:2;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px 0 8px;border:2px solid #f2c200;border-left:0;border-radius:0 0 14px 0;background:#0b2a5b;color:#fff;font:800 13px/1 inherit;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
 .news-dock.is-tucked{min-height:36px}
 .news-dock:not(.is-tucked) .news-tab{position:relative;display:flex;border-radius:0 0 14px 0}

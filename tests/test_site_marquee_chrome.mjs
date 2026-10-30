@@ -316,5 +316,6 @@ test('IMPORTANT banner tucks the News strip behind an accessible newspaper tab',
   assert.match(js, /wrap\.className = 'news-dock';/);
   assert.match(js, /localStorage\.getItem\('efhsNewsTabBounced'\)/);
   assert.match(css, /\.news-dock\{position:relative\}/);
+  assert.match(css, /\.news-dock \.news-strip \.news-tag\{display:none\}/);
   assert.doesNotMatch(css, /\.news-tab\{position:fixed/);
 });
