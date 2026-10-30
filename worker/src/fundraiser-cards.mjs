@@ -12,6 +12,8 @@ export const FUNDRAISER_ALERT_EMAILS_KEY = 'fundraiser_alert_emails';
 export const FUNDRAISER_CARD_STATUSES = Object.freeze(['draft', 'approved', 'hidden', 'rejected']);
 export const FUNDRAISER_PICTURE_MODES = Object.freeze(['image', 'date_tile']);
 export const FUNDRAISER_PRIMARY_BUTTONS = Object.freeze(['view_flyer', 'volunteer', 'details', 'link', 'none']);
+/** Fundraiser flyer uploads go into photos with this negative sort_order so they never show in the public Gallery. */
+export const FUNDRAISER_FLYER_SORT = -600;
 export const MATTRESS_FLYER_URL = '/uploads/1788873975701-e9fc8e46-8f24-48ac-b342-d375deda42d6.jpg';
 export const FUNDRAISER_SYNC_EVENT_LIMIT = 80;
 export const FUNDRAISER_SYNC_WRITE_CAP = 8;

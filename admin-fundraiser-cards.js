@@ -1,4 +1,6 @@
 (function () {
+  // Matches FUNDRAISER_FLYER_SORT in worker/src/fundraiser-cards.mjs: negative keeps flyers out of the public Gallery.
+  const FUNDRAISER_FLYER_SORT = -600;
   const PHONE_MAX = 767;
   if (window.matchMedia(`(max-width: ${PHONE_MAX}px)`).matches) {
     window.efhsAdminNav?.init?.();
@@ -286,6 +288,7 @@
     body.append('file', file);
     body.append('alt_text', field('title').value || 'Fundraiser flyer');
     body.append('caption', field('title').value || '');
+    body.append('sort_order', String(FUNDRAISER_FLYER_SORT));
     const response = await fetch('/api/admin/photos', { method: 'POST', body, credentials: 'same-origin' });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Upload failed');

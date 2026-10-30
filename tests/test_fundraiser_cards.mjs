@@ -15,6 +15,7 @@ import {
   fundraiserTitlesMatch,
   importLiveFundraiserCards,
   isPublicFundraiserCard,
+  FUNDRAISER_FLYER_SORT,
   MATTRESS_FLYER_URL,
   renderFundraiserCardsAdminHtml,
   renderFundraisingCardFromCms,
@@ -228,7 +229,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261030v'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261030w'/);
   const cardsAdmin = renderFundraiserCardsAdminHtml('test');
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
   assert.match(cardsAdmin, /class="admin-workspace"/);
@@ -741,4 +742,15 @@ test('fundraiser card radios and checks sit beside their labels', () => {
   assert.match(css, /\.fc-editor label\.fc-radio,\s*\.fc-editor label\.fc-check\{[^}]*display:flex/);
   assert.match(css, /\.fc-editor label\.fc-radio input,\s*\.fc-editor label\.fc-check input\{[^}]*width:1\.05rem/);
   assert.match(css, /padding:0/);
+});
+
+test('fundraiser flyer uploads stay out of the public Gallery', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  assert.equal(FUNDRAISER_FLYER_SORT, -600);
+  const client = readFileSync(join(root, 'admin-fundraiser-cards.js'), 'utf8');
+  assert.match(client, /const FUNDRAISER_FLYER_SORT = -600;/);
+  assert.match(client, /body\.append\('sort_order', String\(FUNDRAISER_FLYER_SORT\)\);\s*const response = await fetch\('\/api\/admin\/photos'/);
+  const worker = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
+  assert.match(worker, /requestedSort < 0\) \{\s*resolvedSort = requestedSort;/);
+  assert.match(worker, /FROM photos p LEFT JOIN[^"]*WHERE p\.sort_order >= 0/);
 });
