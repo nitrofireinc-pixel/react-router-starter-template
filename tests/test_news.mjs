@@ -61,3 +61,9 @@ test('upload rejects oversize and stores valid image in R2', async () => {
   assert.match(puts[0], /^news\/[a-f0-9-]{36}\.png$/);
   assert.equal(rows[0][0], puts[0]); // joins the library
 });
+test('library lists studio uploads and gallery photos as thumbnails', async () => {
+  const env = { DB: { prepare: (sql) => ({ all: async () => ({ results: /studio_files/.test(sql) ? [{ r2_key: 'news/11111111-1111-1111-1111-111111111111.jpg' }] : [{ filename: '123-abc.jpg' }] }) }) } };
+  const deps = { requireNews: async () => ({ user: { id: 1 } }), sameOrigin: () => true, json: (b, s = 200) => Response.json(b, { status: s }) };
+  const r = await routeNewsApi(new Request('https://x/api/admin/news/library'), env, new URL('https://x/api/admin/news/library'), deps);
+  assert.deepEqual((await r.json()).photos, ['/api/news/image/11111111-1111-1111-1111-111111111111.jpg', '/uploads/123-abc.jpg']);
+});
