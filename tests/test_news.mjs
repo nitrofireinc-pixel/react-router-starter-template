@@ -157,3 +157,9 @@ test('shared Saved toast: People presets + News hide wired; CSS file shared', as
   assert.match(w, /admin-saved-toast\.css\?v=\$\{ADMIN_NAV_VERSION\}/);
   assert.match(w, /admin-saved-toast\.js\?v=\$\{ADMIN_NAV_VERSION\}" defer><\/script><script src="\/admin-people\.js/);
 });
+
+test('News save/hide: toast replaces inline Saved/Hidden text, keeps home-card hint', async () => {
+  const { NEWS_ADMIN_JS } = await import('../worker/src/news.mjs');
+  assert.match(NEWS_ADMIN_JS, /st\.textContent = 'The home card updates within a minute\.'; window\.efhsSavedToast\?\.saved\('Saved\.'\)/);
+  assert.doesNotMatch(NEWS_ADMIN_JS, /Hidden \(set to Draft\)/);
+});
