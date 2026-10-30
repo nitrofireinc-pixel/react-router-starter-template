@@ -6712,3 +6712,13 @@ body:not(.admin-body){padding-bottom:calc(var(--sponsor-ticker-h,0px) + env(safe
 html body:not(.admin-body) .sponsor-marquee-section{transition:transform .28s ease;will-change:transform}
 html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:translateY(110%)}
 @media (prefers-reduced-motion:reduce){html body:not(.admin-body) .sponsor-marquee-section{transition:none}}
+
+/* IMPORTANT banner active: News strip tucks off to the side behind a newspaper tab. */
+.news-strip.is-tuckable{overflow:hidden;max-height:240px;transition:transform .35s ease,max-height .35s ease,opacity .35s ease}
+.news-strip.is-tuckable.is-tucked{transform:translateX(-100%);max-height:0;opacity:0;border-bottom-width:0}
+.news-tab{position:fixed;left:0;top:50%;z-index:45;width:44px;height:48px;margin-top:-24px;padding:0 0 0 4px;border:2px solid #f2c200;border-left:0;border-radius:0 14px 14px 0;background:#0b2a5b;color:#fff;font-size:22px;line-height:1;cursor:pointer;box-shadow:4px 6px 16px rgba(0,19,38,.28);display:grid;place-items:center}
+.news-tab:focus-visible{outline:3px solid #f2c200;outline-offset:2px}
+.news-tab.is-open{background:#f2c200;border-color:#0b2a5b}
+.news-tab.is-bouncing{animation:news-tab-bounce .7s ease-in-out .6s 2}
+@keyframes news-tab-bounce{0%,100%{transform:translateX(0)}40%{transform:translateX(10px)}70%{transform:translateX(-2px)}}
+@media (prefers-reduced-motion:reduce){.news-strip.is-tuckable{transition:none}.news-tab.is-bouncing{animation:none}}

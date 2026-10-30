@@ -310,3 +310,13 @@ test('phone sticky-support hide fades in place (never slides over the ticker)', 
   const css = readFileSync(join(root, 'home-redesign.css'), 'utf8');
   assert.match(css, /body\.home-page\.ss-reveal-armed \.sticky-support\{transform:none;opacity:0;/);
 });
+
+test('IMPORTANT banner tucks the News strip behind an accessible newspaper tab', () => {
+  const js = readFileSync(join(root, 'site-content.js'), 'utf8');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  assert.match(js, /mount\.innerHTML = banners\.join\(''\);\n  syncNewsTuck\(true\);/);
+  assert.match(js, /syncNewsTuck\(false\);\n    return;/);
+  assert.match(js, /tab\.setAttribute\('aria-expanded', tucked \? 'false' : 'true'\)/);
+  assert.match(css, /\.news-tab\.is-bouncing\{animation:news-tab-bounce \.7s ease-in-out \.6s 2\}/);
+  assert.match(css, /prefers-reduced-motion:reduce\)\{\.news-strip\.is-tuckable\{transition:none\}\.news-tab\.is-bouncing\{animation:none\}/);
+});

@@ -739,7 +739,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031g';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031h';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -938,10 +938,51 @@ function renderSiteDeadlineBanners(items = []) {
   if (!banners.length) {
     mount.hidden = true;
     mount.innerHTML = '';
+    syncNewsTuck(false);
     return;
   }
   mount.hidden = false;
   mount.innerHTML = banners.join('');
+  syncNewsTuck(true);
+}
+
+// When the red IMPORTANT banner is showing, tuck the News strip off to the side
+// behind a small rounded newspaper tab that slides it back out.
+function syncNewsTuck(active) {
+  const strip = document.querySelector('.news-strip');
+  if (!strip || typeof document.createElement !== 'function') return;
+  let tab = document.querySelector('.news-tab');
+  if (!active) {
+    tab?.remove();
+    strip.classList.remove('is-tuckable', 'is-tucked');
+    return;
+  }
+  if (!strip.id) strip.id = 'news-strip';
+  strip.classList.add('is-tuckable');
+  if (!tab) {
+    tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'news-tab is-bouncing';
+    tab.setAttribute('aria-controls', strip.id);
+    tab.innerHTML = '<span aria-hidden="true">📰</span>';
+    tab.addEventListener('click', () => setNewsTucked(!strip.classList.contains('is-tucked')));
+    tab.addEventListener('animationend', () => tab.classList.remove('is-bouncing'));
+    document.body.appendChild(tab);
+    setNewsTucked(true);
+  }
+}
+
+function setNewsTucked(tucked) {
+  const strip = document.querySelector('.news-strip');
+  const tab = document.querySelector('.news-tab');
+  if (!strip || !tab) return;
+  strip.classList.toggle('is-tucked', tucked);
+  if (tucked) strip.setAttribute('aria-hidden', 'true'); else strip.removeAttribute('aria-hidden');
+  strip.inert = tucked;
+  tab.classList.toggle('is-open', !tucked);
+  tab.setAttribute('aria-expanded', tucked ? 'false' : 'true');
+  tab.setAttribute('aria-label', tucked ? 'Show latest news' : 'Tuck away latest news');
+  tab.title = tucked ? 'Show latest news' : 'Tuck away news';
 }
 
 async function loadSiteDeadlineBanners() {
@@ -1539,7 +1580,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031g';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031h';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
