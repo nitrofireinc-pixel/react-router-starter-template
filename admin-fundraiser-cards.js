@@ -32,7 +32,6 @@
     if (card.status === 'rejected') return '<span class="fc-pill fc-pill-rej">Rejected</span>';
     if (card.status === 'draft') return '<span class="fc-pill fc-pill-draft">Draft – needs approval</span>';
     if (card.status === 'hidden') return '<span class="fc-pill fc-pill-hide">Hidden</span>';
-    if (card.calendar_changed) return '<span class="fc-pill fc-pill-changed">Calendar changed</span>';
     return '<span class="fc-pill fc-pill-show">Showing</span>';
   }
 
