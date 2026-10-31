@@ -15,7 +15,6 @@ for (const name of [
   'caldev.html',
   'contact.html',
   'boosters.html',
-  'dues-dev.html',
   'gallery.html',
   'resources.html',
   'fundraising.html',
